@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="file" path="library" />
+    <include domain="file" path="database" />
+    <include domain="sharedpref" path="folio_settings.xml" />
+    <exclude domain="file" path="library/books/*/cache" />
+</full-backup-content>

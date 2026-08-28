@@ -1,0 +1,110 @@
+import java.util.Properties
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.compose.compiler)
+}
+
+// Release signing credentials live in /keystore.properties (not committed to VCS).
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+android {
+    namespace = "com.folio.reader"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.folio.reader"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 2
+        versionName = "1.0.1"
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        if (keystoreProps.isNotEmpty()) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystoreProps.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
+    buildFeatures {
+        compose = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    packaging {
+        resources.excludes += "META-INF/*.kotlin_module"
+        jniLibs.excludes += setOf(
+            "org/sqlite/native/Linux/**",
+            "org/sqlite/native/Mac/**",
+            "org/sqlite/native/Windows/**",
+            "org/sqlite/native/FreeBSD/**",
+            "org/sqlite/native/OpenBSD/**"
+        )
+    }
+
+    lint {
+        abortOnError = false
+        warningsAsErrors = false
+    }
+}
+
+dependencies {
+    implementation(project(":shared"))
+
+    // JDBC bridge over android.database.sqlite — provides the SQLite JDBC driver on Android
+    // (xerial sqlite-jdbc only ships desktop natives).
+    implementation("org.sqldroid:sqldroid:1.1.0-rc1")
+
+    // kotlinx.datetime is used by SyncState (Instant) exposed from shared module
+    implementation(libs.kotlinx.datetime)
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime)
+    implementation(libs.androidx.lifecycle.viewmodel)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.datastore.preferences)
+    // Required when Android code constructs shared SyncState values containing Instant fields.
+    implementation(libs.kotlinx.datetime)
+
+    implementation(libs.compose.multiplatform.runtime)
+    implementation(libs.compose.multiplatform.ui)
+    implementation(libs.compose.multiplatform.foundation)
+    implementation(libs.compose.multiplatform.material3)
+
+    implementation(libs.coil.compose)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+
+    testImplementation(libs.kotlin.test.junit5)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+}
