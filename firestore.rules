@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user owns the document
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      // Users can only access their own data
+      allow read, write: if isOwner(uid);
+
+      // Books subcollection
+      match /books/{bookId} {
+        allow read, write: if isOwner(uid);
+
+        // Reading positions per device
+        match /positions/{deviceId} {
+          allow read, write: if isOwner(uid);
+        }
+
+        // Highlights
+        match /highlights/{highlightId} {
+          allow read, write: if isOwner(uid);
+        }
+
+        // Notes
+        match /notes/{noteId} {
+          allow read, write: if isOwner(uid);
+        }
+
+        // Bookmarks
+        match /bookmarks/{bookmarkId} {
+          allow read, write: if isOwner(uid);
+        }
+
+        // Reading cycles (rereads)
+        match /readingCycles/{cycleId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      // Reading sessions (global)
+      match /readingSessions/{sessionId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Settings
+      match /settings/{settingsId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Tags
+      match /tags/{tagId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Collections
+      match /collections/{collectionId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Series
+      match /series/{seriesId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Quotes
+      match /quotes/{quoteId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Revisit items
+      match /revisitItems/{itemId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Devices
+      match /devices/{deviceId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Sync state
+      match /syncState/{stateId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+  }
+}

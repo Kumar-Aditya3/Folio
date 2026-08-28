@@ -1,0 +1,97 @@
+# Gradle
+.gradle/
+build/
+*/build/
+*/build.gradle.kts.d/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Android
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jar
+*.aar
+*.so
+*.o
+*.obj
+*.orig
+*.pyc
+*.log
+
+# Kotlin
+*.kt.metadata
+
+# Firebase
+google-services.json
+**/google-services.json
+
+# Local config
+local.properties
+gradle.properties.local
+
+# Folio local data
+folio-data/
+library/
+database/
+thumbnails/
+/fonts/
+settings.json
+
+# Test reports
+**/reports/
+**/test-results/
+
+# Coverage
+coverage/
+*.ec
+*.exec
+
+# Build logs and temporary files
+build_*.txt
+*.log
+
+# Test books (large EPUB files for testing)
+testbooks/
+*.epub
+
+# Thorium reader (separate project, should not be in this repo)
+thorium-reader-develop/
+
+# Local credentials / signing material
+.env
+keystore.properties
+*.keystore
+*.db
+
+# One-off diagnostics and session artifacts
+.kotlin/
+graphify-out/
+bin/
+*.ps1
+screen_*.png
+current_phone.png
+crash_log*.txt
+logcat_output.txt
+desktop_run*
+*_dump.txt
+detail_*.txt
+current_*.txt
+current_*.png
+ui_*.txt
+ui_*.xml
+ui_after.txt
+after_import_fixed.txt

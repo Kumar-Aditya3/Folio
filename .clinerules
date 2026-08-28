@@ -1,0 +1,17 @@
+# Graphify Codebase Context Rules
+
+You have a structural knowledge graph of this entire codebase pre-compiled inside the `graphify-out/` folder. Use it to understand architecture, traces, dependencies, and file relationships.
+
+## Optimization Mandatory Guidelines
+- **NEVER** use generic text searches (`grep`, `find`, or raw file reading loops) to map how components interact or discover files. 
+- **ALWAYS** check `graphify-out/GRAPH_REPORT.md` first to understand the structural layout, boundaries, or "God Nodes" of this codebase before changing files.
+- **PREFER** targeted local command lookups over bulk context scanning to save tokens.
+
+## Available Graph Commands
+If you need to query structural paths dynamically, execute these terminal commands using your terminal tool:
+- Find paths between files: `graphify query "How does component X connect to component Y?"`
+- Locate file dependencies: `graphify explain <file_path>`
+- Rebuild graph after major changes: `graphify . --code-only`
+
+## File Search Exclusions
+Ignore `graphify-out/graph.json` and `graphify-out/graph.html` during standard text-edit passes. Treat them strictly as read-only structural databases.
