@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -791,6 +793,7 @@ private const val MIN_FONT_SIZE_SP = 12f
 /** Largest reader text size in sp — lowered from 36sp to keep sizes sane. */
 private const val MAX_FONT_SIZE_SP = 24f
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AdvancedSettingsPanel(
     settings: ReaderSettings,
@@ -800,59 +803,55 @@ fun AdvancedSettingsPanel(
     onImportBackup: () -> Unit,
     onExportAnnotations: (String) -> Unit
 ) {
-    // Plain Column — see note in GeneralSettingsPanel about nested scrollables.
+    // Both Settings hosts already wrap this panel in a FolioSectionCard, so the panel
+    // adds no card of its own — nesting one here produced a card inside a card.
     Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Advanced Settings", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+        Text("Advanced Settings", style = MaterialTheme.typography.titleLarge)
         Text(
             "Backup/restore and annotation export", style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         // Backup & restore
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Backup & Restore", style = MaterialTheme.typography.titleSmall)
+            // FlowRow, not LazyRow: the buttons must all stay visible. A LazyRow
+            // scrolled them out of sight and read as broken layout.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Backup & Restore", style = MaterialTheme.typography.titleMedium)
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item { Button(onClick = onExportBackup) { Text("Export backup") } }
-                    item { OutlinedButton(onClick = onImportBackup) { Text("Import backup") } }
-                }
-                Text(
-                    "Backups include your library metadata, reading progress, settings and annotations.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Button(onClick = onExportBackup) { Text("Export backup") }
+                OutlinedButton(onClick = onImportBackup) { Text("Import backup") }
             }
+            Text(
+                "Backups include your library metadata, reading progress, settings and annotations.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
         // Annotation export
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Export Annotations", style = MaterialTheme.typography.titleSmall)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Export Annotations", style = MaterialTheme.typography.titleMedium)
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item { OutlinedButton(onClick = { onExportAnnotations("md") }) { Text("Markdown") } }
-                    item { OutlinedButton(onClick = { onExportAnnotations("json") }) { Text("JSON") } }
-                    item { OutlinedButton(onClick = { onExportAnnotations("csv") }) { Text("CSV") } }
-                }
+                OutlinedButton(onClick = { onExportAnnotations("md") }) { Text("Markdown") }
+                OutlinedButton(onClick = { onExportAnnotations("json") }) { Text("JSON") }
+                OutlinedButton(onClick = { onExportAnnotations("csv") }) { Text("CSV") }
             }
+            Text(
+                "Exports highlights, notes and bookmarks across every book, with the passage text and reading location.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

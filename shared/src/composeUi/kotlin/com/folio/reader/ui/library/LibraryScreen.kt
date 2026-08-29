@@ -430,7 +430,14 @@ private fun LibraryContent(
 
             if (filter.hasFilters()) {
                 item {
-                    TextButton(onClick = { onFilterChange(LibraryViewModel.FilterState()) }) { Text("Clear") }
+                    // Must be a chip, not a TextButton: the button is taller, and being
+                    // the only conditional item it changed the row's measured height as it
+                    // scrolled in and out of composition, nudging every other chip.
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = false,
+                        onClick = { onFilterChange(LibraryViewModel.FilterState()) },
+                        label = "Clear"
+                    )
                 }
             }
         }
