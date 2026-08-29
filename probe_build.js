@@ -1,0 +1,11 @@
+const fs = require('fs');
+const kt = fs.readFileSync('D:/projects/Folio/shared/src/commonMain/kotlin/com/folio/reader/ui/render/PageEngine.kt', 'utf8');
+const start = kt.indexOf('(function(){');
+const end = kt.indexOf(')();', start);
+let js = kt.slice(start, end + 4);
+js = js.split('$cols').join('2').split('$fraction').join('0.3');
+const probe = 'setTimeout(function(){var b=document.body;document.title="PROBE2 sw:"+b.scrollWidth+" bw:"+b.clientWidth;},2000);';
+let h = fs.readFileSync('D:/projects/Folio/probe.html', 'utf8');
+h = h.replace('</body>', '<scr' + 'ipt>' + js + '</scr' + 'ipt><scr' + 'ipt>' + probe + '</scr' + 'ipt></body>');
+fs.writeFileSync('D:/projects/Folio/probe.html', h);
+console.log('built', js.length);
