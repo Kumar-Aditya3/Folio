@@ -334,12 +334,14 @@ class JdbcHighlightRepository(private val db: Database) : HighlightRepository {
     override suspend fun updateHighlight(highlight: Highlight, emitSyncEvent: Boolean) = insertHighlight(highlight, emitSyncEvent)
 
     override suspend fun deleteHighlight(highlightId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
         db.withConnection { conn ->
             conn.prepareStatement(
-                "UPDATE highlights SET is_deleted = 1, deleted_at = ? WHERE id = ?"
+                "UPDATE highlights SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?"
             ).use { stmt ->
-                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
-                stmt.setString(2, highlightId)
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, highlightId)
                 stmt.executeUpdate()
             }
         }
@@ -447,10 +449,12 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
     }
 
     override suspend fun deleteNote(noteId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE notes SET is_deleted = 1, deleted_at = ? WHERE id = ?").use { stmt ->
-                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
-                stmt.setString(2, noteId)
+            conn.prepareStatement("UPDATE notes SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, noteId)
                 stmt.executeUpdate()
             }
         }
@@ -556,10 +560,12 @@ class JdbcBookmarkRepository(private val db: Database) : BookmarkRepository {
     }
 
     override suspend fun deleteBookmark(bookmarkId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 1, deleted_at = ? WHERE id = ?").use { stmt ->
-                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
-                stmt.setString(2, bookmarkId)
+            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, bookmarkId)
                 stmt.executeUpdate()
             }
         }
