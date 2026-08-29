@@ -65,7 +65,8 @@ actual fun HtmlContentSurface(
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?
+    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
+    seekRequest: Pair<Float, Long>?
 ) {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val backgroundColor = Color(theme.background)
@@ -180,6 +181,13 @@ actual fun HtmlContentSurface(
     LaunchedEffect(overlayHtml, session, resolvedHtml, reloadTick) {
         val current = session ?: return@LaunchedEffect
         current.pushOverlay(overlayHtml ?: "")
+    }
+
+    // 6) Bottom-bar seeks: jump to the tapped fraction of the chapter.
+    LaunchedEffect(seekRequest, session) {
+        val current = session ?: return@LaunchedEffect
+        val req = seekRequest ?: return@LaunchedEffect
+        current.seek(req.first)
     }
 
     val error = fatalError
@@ -450,6 +458,12 @@ private class JcefSession private constructor(
                 "  }" +
                 "});})();"
 
+    /** Jumps to an absolute 0..1 fraction of the chapter via the page hook. */
+    fun seek(fraction: Float) {
+        val js = "window.__folioSeek&&window.__folioSeek(${fraction.coerceIn(0f, 1f)});"
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+    }
+
     private fun sameUrl(a: String?, b: String?): Boolean {
         if (a == null || b == null) return false
         return a.substringBefore('#').trimEnd('/') == b.substringBefore('#').trimEnd('/')
@@ -688,6 +702,7 @@ private fun readerBridgeJs(fraction: Float): String = """
   var scroller=document.scrollingElement||document.documentElement;
   scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
   document.body.style.opacity='1';
+  window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));userCrossed=true;restorePending=false;schedule();};
   ${PageEngine.selectionButtonJs}
   var scheduled=false,last=0,lastSig='',userCrossed=false;
   var restorePending=$fraction>0.001;

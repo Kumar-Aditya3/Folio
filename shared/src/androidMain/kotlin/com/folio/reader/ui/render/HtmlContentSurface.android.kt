@@ -40,10 +40,17 @@ actual fun HtmlContentSurface(
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?
+    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
+    seekRequest: Pair<Float, Long>?
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    LaunchedEffect(seekRequest, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        val req = seekRequest ?: return@LaunchedEffect
+        wv.evaluateJavascript("window.__folioSeek&&window.__folioSeek(${req.first.coerceIn(0f, 1f)});", null)
+    }
     val content = remember(html, settings, chapterHref, position, highlights) {
         injectReaderCss(html, settings)
     }
@@ -180,6 +187,7 @@ actual fun HtmlContentSurface(
                 addJavascriptInterface(progressBridge, "FolioReader")
                 webViewClient = client
                 webChromeClient = chromeClient
+                webViewRef = this
                 var downX = 0f
                 var downY = 0f
                 var downAt = 0L
@@ -223,6 +231,7 @@ actual fun HtmlContentSurface(
                     PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
                 } else """(function(){
                             var paginated=false,scheduled=false,last=0,userCrossed=false,nonce=0;
+                            window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));userCrossed=true;schedule();};
                             ${PageEngine.selectionButtonJs}
                             function report(){
                                 scheduled=false;
