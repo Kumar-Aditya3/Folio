@@ -52,7 +52,7 @@ compose.desktop {
             // JVM can report its missing dependency on Windows.
             includeAllModules = true
             packageName = "Folio"
-            packageVersion = "1.0.9"
+            packageVersion = "1.0.10"
             windows {
                 fileAssociation("application/epub+zip", "epub", "EPUB eBook")
             }
