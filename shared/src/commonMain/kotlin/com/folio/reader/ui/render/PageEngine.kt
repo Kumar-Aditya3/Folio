@@ -28,7 +28,7 @@ object PageEngine {
         return "html{height:100%;overflow:hidden;overflow-anchor:none;}" +
                 "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}" +
                 "#folio-stage{position:fixed;inset:0;perspective:1600px;pointer-events:none;z-index:2147483000;}" +
-                "body{height:100vh;overflow-x:auto;overflow-y:hidden;position:relative;" +
+                "body{height:100vh;overflow-x:auto;overflow-y:hidden;position:relative;opacity:0;transition:opacity .15s ease;" +
                 "padding:${marginTop.toInt()}px 0 ${marginBottom.toInt()}px 0 !important;}" +
                 "body img{max-width:100%;height:auto;}" +
                 ".folio-sheet{position:absolute;inset:0;pointer-events:none;will-change:transform;" +
@@ -181,6 +181,7 @@ function relayout(){
   if(dirty)layout();
   page=Math.round(posFrac*maxPage());
   setScroll();
+  body.style.opacity='1';
   report();
 }
 window.__folioRelayout=function(){dirty=true;relayout();};
@@ -237,6 +238,7 @@ layout();
 $selectionButtonJs
 page=Math.round(posFrac*maxPage());
 setScroll();
+body.style.opacity='1';
 setTimeout(function(){dirty=true;relayout();},250);
 setTimeout(function(){dirty=true;relayout();},700);
 setTimeout(function(){dirty=true;relayout();},1500);
