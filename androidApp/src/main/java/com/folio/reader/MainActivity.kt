@@ -365,6 +365,14 @@ class MainActivity : ComponentActivity() {
                             )
 
                             is Screen.Settings -> {
+                                // This screen edits the snapshot below and saves it back whole, so
+                                // it must be current: a value captured at startup would revert every
+                                // reading preference the reader changed since.
+                                LaunchedEffect(Unit) {
+                                    runCatching {
+                                        globalSettings = graph.settingsRepository.getGlobalSettings()
+                                    }
+                                }
                                 SettingsScreen(
                                     settings = globalSettings,
                                     onSettingsChange = { updated ->
