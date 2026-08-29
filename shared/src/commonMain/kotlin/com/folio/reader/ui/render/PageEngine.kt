@@ -185,6 +185,7 @@ function relayout(){
   report();
 }
 window.__folioRelayout=function(){dirty=true;relayout();};
+window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll();report();};
 window.addEventListener('resize',function(){dirty=true;relayout();});
 window.addEventListener('load',function(){dirty=true;relayout();});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});

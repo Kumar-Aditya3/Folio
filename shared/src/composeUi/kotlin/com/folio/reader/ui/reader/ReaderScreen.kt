@@ -175,6 +175,9 @@ fun ReaderScreen(
     }
 
     var showReaderPanel by remember { mutableStateOf(false) }
+    // Bottom progress bar taps request a seek to a chapter fraction.
+    var seekReq by remember { mutableStateOf<Pair<Float, Long>?>(null) }
+    var seekNonce by remember { mutableStateOf(0L) }
 
     // Chrome follows the reading theme (incl. per-book overrides) so bars and
     // panels never clash with the page on either platform.
@@ -329,6 +332,7 @@ fun ReaderScreen(
                 hasPrevChapter = currentChapterIndex > 0,
                 onResolveImage = onResolveImage,
                 onResolveResource = onResolveResource,
+                seekRequest = seekReq,
                 modifier = Modifier.fillMaxSize().padding(contentInsets)
                     .then(if (occludes) Modifier else Modifier.statusBarsPadding()),
                 position = position,
@@ -454,7 +458,11 @@ fun ReaderScreen(
             BottomProgressBar(
                 chapterTitle = currentChapter?.title ?: "",
                 currentPage = currentPage,
-                totalPages = totalPages
+                totalPages = totalPages,
+                onSeek = { f ->
+                    seekNonce += 1L
+                    seekReq = f to seekNonce
+                }
             )
         }
 
@@ -1024,6 +1032,7 @@ fun ChapterContent(
     highlights: List<Highlight> = emptyList(),
     modifier: Modifier = Modifier,
     position: ReadingPosition? = null,
+    seekRequest: Pair<Float, Long>? = null,
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
     onChapterEnd: () -> Unit = {}
 ) {
@@ -1269,7 +1278,8 @@ fun ChapterContent(
                     onTap = onTap,
                     onLinkClick = onLinkClick,
                     onResolveResource = onResolveResource,
-                    onHighlightParagraph = onLongPress?.let { cb -> { idx, text -> cb(idx, text) } }
+                    onHighlightParagraph = onLongPress?.let { cb -> { idx, text -> cb(idx, text) } },
+                    seekRequest = seekRequest
                 )
             }
         }
@@ -1569,7 +1579,8 @@ private fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: B
 fun BottomProgressBar(
     chapterTitle: String,
     currentPage: Int = 1,
-    totalPages: Int = 1
+    totalPages: Int = 1,
+    onSeek: ((Float) -> Unit)? = null
 ) {
     val fraction = if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
     Column(
@@ -1579,10 +1590,26 @@ fun BottomProgressBar(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        com.folio.reader.ui.components.FolioProgressBar(
-            progress = fraction,
-            color = FolioTheme.colors.primary
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(18.dp)
+                .then(
+                    if (onSeek != null) Modifier.pointerInput(fraction) {
+                        detectTapGestures(
+                            onPress = { off ->
+                                onSeek((off.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                            }
+                        )
+                    } else Modifier
+                ),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            com.folio.reader.ui.components.FolioProgressBar(
+                progress = fraction,
+                color = FolioTheme.colors.primary
+            )
+        }
         Text(
             text = "$currentPage / $totalPages",
             style = FolioTheme.typography.labelMedium,
