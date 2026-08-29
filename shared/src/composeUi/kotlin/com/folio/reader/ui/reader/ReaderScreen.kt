@@ -246,8 +246,9 @@ fun ReaderScreen(
 
             a.startsWith("toc:") -> {
                 val i = a.substringAfter(':').toIntOrNull() ?: return
+                // Stay open: the reader re-syncs the highlight in place and the
+                // TOC only closes when the user taps the backdrop or X.
                 onChapterChange(i)
-                if (showToc) onToggleToc()
             }
 
             a.startsWith("set:size:") -> onSettingsChange(
