@@ -147,6 +147,10 @@ fun ReaderScreen(
     // floating above the page (Android keeps the overlay layout).
     val occludes = com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()
 
+    // System bars follow the reader chrome (Android): visible with the overlay,
+    // immersive when it's hidden. No-op on desktop.
+    com.folio.reader.ui.components.ReaderSystemBars(showControls)
+
     // Panels sit in reserved space on occluding platforms; a horizontal slide
     // into that strip reads as janky, so fade there and slide elsewhere.
     val panelEnter = if (occludes) {
