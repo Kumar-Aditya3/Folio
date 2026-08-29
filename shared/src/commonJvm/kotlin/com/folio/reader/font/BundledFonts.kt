@@ -16,15 +16,18 @@ data class BundledFont(
     val displayName: String,
     val fileName: String,
     val familyName: String,
-    val weight: Int = 400
+    val weight: Int = 400,
+    /** Earlier bundled file names replaced by this entry; migrated out of settings. */
+    val replaces: List<String> = emptyList()
 )
 
 object BundledFonts {
     val ALL = listOf(
         BundledFont(
             displayName = "Calluna",
-            fileName = "calluna_regular.ttf",
-            familyName = "Shancalluna"
+            fileName = "calluna_regular.otf",
+            familyName = "Calluna",
+            replaces = listOf("calluna_regular.ttf")
         ),
         BundledFont(
             displayName = "Comfortaa",
@@ -49,14 +52,19 @@ object BundledFonts {
 
         for (bundled in ALL) {
             val dest = File(fontsDir, bundled.fileName)
-            if (dest.exists() && dest.length() > 0) continue
-            val bytes = readResource("fonts/${bundled.fileName}") ?: continue
-            runCatching { dest.writeBytes(bytes) }
+            if (!dest.exists() || dest.length() == 0L) {
+                val bytes = readResource("fonts/${bundled.fileName}") ?: continue
+                runCatching { dest.writeBytes(bytes) }
+            }
+            // Drop superseded bundled files (e.g. the Shancalluna stand-in).
+            bundled.replaces.forEach { old -> File(fontsDir, old).takeIf { it.exists() }?.delete() }
         }
 
         val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull() ?: return emptyList()
+        val replaced = ALL.flatMap { it.replaces }.toSet()
+        val kept = settings.customFonts.filterNot { it.fileName in replaced }
         val additions = ALL
-            .filter { bundled -> settings.customFonts.none { it.fileName == bundled.fileName } }
+            .filter { bundled -> kept.none { it.fileName == bundled.fileName } }
             .mapNotNull { bundled ->
                 if (!File(fontsDir, bundled.fileName).exists()) return@mapNotNull null
                 CustomFont(
@@ -67,9 +75,9 @@ object BundledFonts {
                     weight = bundled.weight
                 )
             }
-        if (additions.isNotEmpty()) {
+        if (additions.isNotEmpty() || kept != settings.customFonts) {
             runCatching {
-                settingsRepository.saveGlobalSettings(settings.copy(customFonts = settings.customFonts + additions))
+                settingsRepository.saveGlobalSettings(settings.copy(customFonts = kept + additions))
             }
         }
         return additions

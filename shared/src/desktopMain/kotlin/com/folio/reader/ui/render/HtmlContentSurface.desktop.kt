@@ -81,11 +81,24 @@ actual fun HtmlContentSurface(
 
     val resolver by rememberUpdatedState(onResolveResource)
     val positionState by rememberUpdatedState(position)
+    val settingsState by rememberUpdatedState(settings)
+
+    val overlayHtml = LocalOverlayHtml.current
+    callbacks.onOverlayAction = LocalOverlayAction.current
 
     var session by remember { mutableStateOf<JcefSession?>(null) }
     var fatalError by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(true) }
     var resolvedHtml by remember(html, chapterHref) { mutableStateOf<String?>(null) }
+    var reloadTick by remember { mutableStateOf(0) }
+    var appliedSettings by remember { mutableStateOf<ReaderSettings?>(null) }
+
+    // Only geometry changes (page columns, measure cap, gutter) need a document
+    // reload; theme/typography changes swap the stylesheet in place, so switching
+    // a theme no longer flashes through the other layouts.
+    fun structuralSig(s: ReaderSettings) = Triple(
+        s.layoutMode, s.textWidth, s.margins.left.toInt()
+    )
 
     // 1) Start Chromium: install (if needed) on a worker thread, then create the
     //    client/browser on the AWT EDT where Swing components must be built.
@@ -115,32 +128,54 @@ actual fun HtmlContentSurface(
             .onFailure { fatalError = it.message ?: "Unable to prepare chapter" }
     }
 
-    // 3) Apply reader styling, write the document and load it. Runs for every
-    //    settings change too so typography/theme updates apply live.
-    LaunchedEffect(resolvedHtml, settings, session) {
+    // 3) Write and load the styled document — on content changes and on geometry
+    //    changes only (layout mode / text width / gutter).
+    LaunchedEffect(resolvedHtml, session, reloadTick) {
         val current = session ?: return@LaunchedEffect
         val source = resolvedHtml ?: return@LaunchedEffect
         preparing = true
+        val s = settingsState
         val fraction = (positionState?.scrollOffset ?: 0.0).toFloat().coerceIn(0f, 1f)
-        val pagedCols = when (settings.layoutMode) {
+        val pagedCols = when (s.layoutMode) {
             com.folio.reader.settings.LayoutMode.PAGINATED -> 1
             com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
             else -> 0
         }
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val styled = injectReaderCss(source, settings)
+                val styled = injectReaderCss(source, s)
                 current.writeDocument(styled).toFileUrl()
             }
         }
         result.onSuccess { url ->
-            val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth)) else readerBridgeJs(fraction)
+            val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, s.margins.left, PageEngine.measurePx(s.textWidth)) else readerBridgeJs(fraction)
             current.load(url, js)
+            appliedSettings = s
             preparing = false
         }.onFailure {
             fatalError = it.message ?: "Unable to render chapter"
             preparing = false
         }
+    }
+
+    // 4) Style-only settings changes (theme, colors, typography) swap the sheet
+    //    in place — no navigation, no layout flash. Geometry changes reload.
+    LaunchedEffect(settings, session) {
+        val current = session ?: return@LaunchedEffect
+        val applied = appliedSettings ?: return@LaunchedEffect
+        if (applied == settings) return@LaunchedEffect
+        if (structuralSig(settings) != structuralSig(applied)) {
+            reloadTick++
+        } else {
+            current.applyStyle(fontFaceCss(settings), readerStyleCss(settings))
+            appliedSettings = settings
+        }
+    }
+
+    // 5) Push the glass overlay (contents/annotations/settings) into the page.
+    LaunchedEffect(overlayHtml, session, resolvedHtml, reloadTick) {
+        val current = session ?: return@LaunchedEffect
+        current.pushOverlay(overlayHtml ?: "")
     }
 
     val error = fatalError
@@ -168,7 +203,7 @@ actual fun HtmlContentSurface(
             ) {
                 CircularProgressIndicator(color = progressColor)
             }
-        } else if (!enabled) {
+        } else if (!enabled && overlayHtml == null) {
             // TOC/annotations overlays are open: swallow pointer input so the page
             // underneath stops scrolling or following clicks.
             Box(
@@ -192,6 +227,7 @@ private class SurfaceCallbacks {
     @Volatile var onChapterEnd: () -> Unit = {}
     @Volatile var onTap: () -> Unit = {}
     @Volatile var onLinkClick: ((String) -> Unit)? = null
+    @Volatile var onOverlayAction: ((String) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
 }
 
@@ -212,6 +248,7 @@ private class JcefSession private constructor(
     @Volatile private var pendingLoad: Runnable? = null
     @Volatile private var expectedUrl: String? = null
     @Volatile private var pendingJs: String? = null
+    @Volatile private var lastOverlay: String? = null
     @Volatile private var lastDocument: File? = null
     private var readyTimer: Timer? = null
 
@@ -259,6 +296,13 @@ private class JcefSession private constructor(
                     }
 
                     t.startsWith("folio-tap:") -> callbacks.onTap()
+
+                    t.startsWith("folio-ovl:") -> {
+                        val rest = t.removePrefix("folio-ovl:")
+                        val last = rest.substringAfterLast(':', "")
+                        val body = if (last.toIntOrNull() != null) rest.substringBeforeLast(':') else rest
+                        callbacks.onOverlayAction?.invoke(body)
+                    }
                 }
             }
         })
@@ -272,6 +316,8 @@ private class JcefSession private constructor(
                 if (expected != null && js != null && sameUrl(frame.getURL(), expected)) {
                     pendingJs = null
                     browser.executeJavaScript(js, expected, 0)
+                    val overlay = lastOverlay
+                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay), expected, 0)
                 }
             }
 
@@ -355,6 +401,34 @@ private class JcefSession private constructor(
         if (runNow) EventQueue.invokeLater(action)
     }
 
+    /** Swaps the reader stylesheet in place (theme/typography) without navigating. */
+    fun applyStyle(fontsCss: String, styleCss: String) {
+        val js = "(function(){var f=document.getElementById('folio-fonts');if(f){f.textContent=${fontsCss.toJsStringLiteral()};}" +
+                "var s=document.getElementById('folio-reader-style');if(s){s.textContent=${styleCss.toJsStringLiteral()};}" +
+                "if(window.__folioRelayout)window.__folioRelayout();})();"
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+    }
+
+    /** Renders (or clears) the glass overlay panel inside the page. */
+    fun pushOverlay(html: String) {
+        lastOverlay = html.ifEmpty { null }
+        val js = overlayJs(html)
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+    }
+
+    private fun overlayJs(html: String): String =
+        "(function(){var old=document.getElementById('folio-overlay-root');if(old&&old.parentNode)old.parentNode.removeChild(old);" +
+                "var h=${html.toJsStringLiteral()};if(!h)return;" +
+                "var d=document.createElement('div');d.id='folio-overlay-root';d.innerHTML=h;document.documentElement.appendChild(d);" +
+                "var n=0;" +
+                "d.querySelectorAll('[data-act]').forEach(function(el){" +
+                "  if(el.tagName==='INPUT'||el.tagName==='SELECT'){" +
+                "    el.addEventListener('change',function(e){e.stopPropagation();document.title='folio-ovl:'+el.getAttribute('data-act')+':'+encodeURIComponent(el.value)+':'+(++n);});" +
+                "  } else {" +
+                "    el.addEventListener('click',function(e){e.stopPropagation();document.title='folio-ovl:'+el.getAttribute('data-act')+':'+(++n);});" +
+                "  }" +
+                "});})();"
+
     private fun sameUrl(a: String?, b: String?): Boolean {
         if (a == null || b == null) return false
         return a.substringBefore('#').trimEnd('/') == b.substringBefore('#').trimEnd('/')
@@ -428,6 +502,21 @@ private fun File.toFileUrl(): String = toURI().toString().let {
     if (it.startsWith("file:/") && !it.startsWith("file:///")) it.replaceFirst("file:/", "file:///") else it
 }
 
+/** Embeds a string as a JS string literal (double-quoted, escaped). */
+private fun String.toJsStringLiteral(): String {
+    val sb = StringBuilder(this.length + 16)
+    sb.append('"')
+    for (ch in this) when (ch) {
+        '"' -> sb.append("\\\"")
+        '\\' -> sb.append("\\\\")
+        '\n' -> sb.append("\\n")
+        '\r' -> {}
+        else -> sb.append(ch)
+    }
+    sb.append('"')
+    return sb.toString()
+}
+
 private fun fontCandidates(fileName: String): List<File> {
     val home = File(System.getProperty("user.home"), ".folio/fonts/$fileName")
     val local = System.getenv("LOCALAPPDATA")?.let { File(it, "Folio/fonts/$fileName") }
@@ -441,7 +530,7 @@ private fun fontStackFor(requested: String): String {
         "merriweather" -> return "Merriweather, Georgia, serif"
         "eb garamond", "garamond" -> return "'EB Garamond', Georgia, serif"
         "lora" -> return "Lora, Georgia, serif"
-        "calluna", "shancalluna" -> return "'Shancalluna', Calluna, Georgia, serif"
+        "calluna", "shancalluna" -> return "Calluna, 'Shancalluna', Georgia, serif"
         "comfortaa" -> return "Comfortaa, 'Segoe UI', sans-serif"
         "georgia" -> return "Georgia, 'Times New Roman', serif"
         "inter" -> return "Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
@@ -470,7 +559,15 @@ private fun fontStackFor(requested: String): String {
  * two-column), a text-width cap, formatting-mode override strength, word spacing
  * and hyphenation.
  */
-private fun injectReaderCss(html: String, settings: ReaderSettings): String {
+private fun fontFaceCss(settings: ReaderSettings): String =
+    settings.customFonts.mapNotNull { font ->
+        val file = fontCandidates(font.fileName).firstOrNull { it.exists() } ?: return@mapNotNull null
+        val format = if (font.fileName.endsWith(".otf", true)) "opentype" else "truetype"
+        "@font-face{font-family:'${font.familyName}';src:url('${file.toFileUrl()}') format('$format');" +
+                "font-weight:${font.weight};font-style:normal;font-display:swap;}"
+    }.joinToString("")
+
+private fun readerStyleCss(settings: ReaderSettings): String {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
 
     fun Int.rgb(): String = toUInt().toString(16).padStart(8, '0').drop(2)
@@ -507,10 +604,6 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
     val original = settings.formattingMode == com.folio.reader.model.FormattingMode.ORIGINAL
     val normalized = settings.formattingMode == com.folio.reader.model.FormattingMode.NORMALIZED
 
-    // Publisher CSS frequently paints pages white through class selectors on body or
-    // wrapper divs, which outranks the element-level theme background and leaves
-    // light theme text invisible on dark themes. Outside ORIGINAL mode the chosen
-    // theme owns the page color.
     val themeBgCss = if (original) "" else
         "body,body div,body section,body article,body figure{background-color:transparent !important;}"
 
@@ -518,17 +611,6 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
         ?: settings.fontFamily
     val family = fontStackFor(requested)
 
-    val fontFaces = settings.customFonts.mapNotNull { font ->
-        val file = fontCandidates(font.fileName).firstOrNull { it.exists() } ?: return@mapNotNull null
-        val format = if (font.fileName.endsWith(".otf", true)) "opentype" else "truetype"
-        "@font-face{font-family:'${font.familyName}';src:url('${file.toFileUrl()}') format('$format');" +
-                "font-weight:${font.weight};font-style:normal;font-display:swap;}"
-    }.joinToString("")
-
-    // Publisher CSS often redeclares body typography through class selectors
-    // (body.calibre and friends), outranking element rules. Outside ORIGINAL the
-    // reader owns these properties on body; publisher rules on individual elements
-    // (centered headings, special paragraphs) still win over inheritance.
     val typographyCss = if (original) "" else
         "font-family:$family !important;font-size:${settings.fontSize}px !important;" +
                 "font-weight:${settings.fontWeight} !important;line-height:${settings.lineHeight} !important;" +
@@ -544,17 +626,11 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
         "body p,body div,body h1,body h2,body h3,body h4,body h5,body h6,body li,body blockquote" +
                 "{text-align:$align !important;font-family:$family !important;}"
     } else ""
-    // Publisher color/font rules declared on elements (e.g. .calibre p{color:#000})
-    // outrank an inherited body rule even with !important — force them on the
-    // elements themselves so the theme's text is always readable.
     val elementForceCss = if (original) "" else
         "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:$family !important;}" +
                 "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}"
 
-    val css = "<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
-            (if (fontFaces.isNotEmpty()) "<style>$fontFaces</style>" else "") +
-            "<style id=\"folio-reader-style\">" +
-            "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
+    return "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
             themeBgCss +
             // Paged modes need zero horizontal body padding: columns must be
             // exactly 100vw wide or the pager's per-page steps drift out of
@@ -567,8 +643,14 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
             elementForceCss +
             "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
             "img{max-width:100%;height:auto;break-inside:avoid;}" +
-            "a{color:#${theme.link.rgb()};}" +
-            "</style>"
+            "a{color:#${theme.link.rgb()};}"
+}
+
+private fun injectReaderCss(html: String, settings: ReaderSettings): String {
+    val fontFaces = fontFaceCss(settings)
+    val css = "<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
+            (if (fontFaces.isNotEmpty()) "<style id=\"folio-fonts\">$fontFaces</style>" else "") +
+            "<style id=\"folio-reader-style\">" + readerStyleCss(settings) + "</style>"
     return if (html.contains("</head>", true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }
 
@@ -609,7 +691,7 @@ private fun readerBridgeJs(fraction: Float): String = """
     if(sig!==lastSig){lastSig=sig;document.title='folio-progress:'+p.toFixed(4)+':'+current+':'+total+':'+crossed;}
   }
   function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(measure);}}
-  window.addEventListener('wheel',function(){userCrossed=true;restorePending=false;},{passive:true});
+  window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root'))return;userCrossed=true;restorePending=false;},{passive:true});
   window.addEventListener('scroll',schedule,{passive:true});
   window.addEventListener('resize',schedule);
   document.addEventListener('click',function(ev){
@@ -623,6 +705,7 @@ private fun readerBridgeJs(fraction: Float): String = """
   var downX=0,downY=0,downT=0;
   document.addEventListener('pointerdown',function(e){downX=e.clientX;downY=e.clientY;downT=Date.now();},true);
   document.addEventListener('pointerup',function(e){
+    if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root'))return;
     if(Date.now()-downT<350&&Math.hypot(e.clientX-downX,e.clientY-downY)<24){
       var w=Math.max(1,window.innerWidth),h=Math.max(1,window.innerHeight);
       if(e.clientX>w*0.3&&e.clientX<w*0.7&&e.clientY>h*0.25&&e.clientY<h*0.75){document.title='folio-tap:'+(++nonce);}

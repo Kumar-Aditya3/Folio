@@ -105,16 +105,13 @@ fun SettingsScreen(
     var showPreview by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-        TopAppBar(
-            title = { Text("Settings", fontWeight = FontWeight.Bold) },
+        com.folio.reader.ui.components.FolioTopBar(
+            title = "Settings",
             navigationIcon = {
                 IconButton(onClick = onBackPress) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = FolioTheme.colors.surface
-            )
+            }
         )
 
         // Responsive: phones get a horizontal category chip bar + full-width
@@ -127,16 +124,15 @@ fun SettingsScreen(
                     androidx.compose.foundation.lazy.LazyRow(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(FolioTheme.colors.surfaceContainerHighest)
                             .padding(vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp)
                     ) {
                         items(SettingsCategory.entries) { category ->
-                            FilterChip(
+                            com.folio.reader.ui.components.FolioChip(
                                 selected = selectedCategory == category,
                                 onClick = { selectedCategory = category },
-                                label = { Text(category.displayName) }
+                                label = category.displayName
                             )
                         }
                     }
@@ -149,19 +145,20 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         item(key = selectedCategory.name) {
-                            when (selectedCategory) {
-                                SettingsCategory.GENERAL -> GeneralSettingsPanel(
-                                    settings,
-                                    onSettingsChange,
-                                    onImportFont
-                                )
+                            com.folio.reader.ui.components.FolioSectionCard {
+                                when (selectedCategory) {
+                                    SettingsCategory.GENERAL -> GeneralSettingsPanel(
+                                        settings,
+                                        onSettingsChange,
+                                        onImportFont
+                                    )
 
-                                SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
+                                    SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
                                     settings,
                                     syncState,
                                     onSettingsChange,
@@ -172,6 +169,7 @@ fun SettingsScreen(
                                     settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
                                     onExportAnnotations
                                 )
+                            }
                             }
                         }
                         if (showPreview) {
@@ -221,29 +219,31 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         item(key = selectedCategory.name) {
-                            when (selectedCategory) {
-                                SettingsCategory.GENERAL -> GeneralSettingsPanel(
-                                    settings,
-                                    onSettingsChange,
-                                    onImportFont
-                                )
+                            com.folio.reader.ui.components.FolioSectionCard {
+                                when (selectedCategory) {
+                                    SettingsCategory.GENERAL -> GeneralSettingsPanel(
+                                        settings,
+                                        onSettingsChange,
+                                        onImportFont
+                                    )
 
-                                SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
-                                SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
-                                    settings,
-                                    syncState,
-                                    onSettingsChange,
-                                    onSyncNow
-                                )
+                                    SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
+                                        settings,
+                                        syncState,
+                                        onSettingsChange,
+                                        onSyncNow
+                                    )
 
-                                SettingsCategory.ADVANCED -> AdvancedSettingsPanel(
-                                    settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
-                                    onExportAnnotations
-                                )
+                                    SettingsCategory.ADVANCED -> AdvancedSettingsPanel(
+                                        settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
+                                        onExportAnnotations
+                                    )
+                                }
                             }
                         }
                         if (showPreview) {
