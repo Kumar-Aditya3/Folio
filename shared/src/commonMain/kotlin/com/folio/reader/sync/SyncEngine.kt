@@ -131,6 +131,7 @@ class SyncEngine(
             // that already exist on another device under a different local id.
             fetchRemoteChanges()
             enqueueBooksMissingRemotely()
+            backfillAnnotationsOnce()
 
             // 3. Push local changes
             pushLocalChanges()
@@ -409,6 +410,45 @@ class SyncEngine(
                 )
             }
         }
+    }
+
+    /**
+     * One-time pass: annotations created before sync existed (or before this
+     * device ever had credentials) never entered the outbox. Queue every local
+     * highlight, note and bookmark once; the flag in the settings key/value
+     * store prevents repeats. Queue ids are entity-keyed, so this is idempotent
+     * even if it races with live edits.
+     */
+    private suspend fun backfillAnnotationsOnce() {
+        val done = runCatching { settingsRepository.getRaw("annotations_backfilled_at") }.getOrNull()
+        if (!done.isNullOrBlank()) return
+        var enqueued = 0
+        runCatching {
+            for (book in bookRepository.getAllBooks().first()) {
+                highlightRepository.getHighlightsForBook(book.id).first().forEach { h ->
+                    syncRepository.enqueueSync(
+                        "highlight", h.id, SyncOperation.UPSERT,
+                        Json.Default.encodeToString(Highlight.serializer(), h)
+                    ); enqueued++
+                }
+                noteRepository.getNotesForBook(book.id).first().forEach { n ->
+                    syncRepository.enqueueSync(
+                        "note", n.id, SyncOperation.UPSERT,
+                        Json.Default.encodeToString(Note.serializer(), n)
+                    ); enqueued++
+                }
+                bookmarkRepository.getBookmarksForBook(book.id).first().forEach { b ->
+                    syncRepository.enqueueSync(
+                        "bookmark", b.id, SyncOperation.UPSERT,
+                        Json.Default.encodeToString(Bookmark.serializer(), b)
+                    ); enqueued++
+                }
+            }
+        }
+        runCatching {
+            settingsRepository.setRaw("annotations_backfilled_at", Clock.System.now().toString())
+        }
+        if (enqueued > 0) println("☁️ Annotation backfill queued $enqueued item(s) for cloud sync")
     }
 
     private suspend fun resolveConflicts() {
