@@ -272,7 +272,7 @@ fun DropdownMenuButton(
             onDismissRequest = { expanded = false },
             containerColor = com.folio.reader.ui.theme.FolioTheme.colors.surface.copy(alpha = 0.97f),
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(min = 180.dp, max = 360.dp)
                 .glassPanel(RoundedCornerShape(12.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
         ) {
