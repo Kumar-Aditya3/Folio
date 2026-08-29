@@ -1,5 +1,7 @@
 package com.folio.reader.ui.reader
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -504,11 +506,16 @@ fun ReaderScreen(
 
         // Floating sync indicator pill - manages its own visibility (hides when idle)
         if (syncState != null) {
+            val pillTop by animateDpAsState(
+                targetValue = if (showControls) 60.dp else 0.dp,
+                animationSpec = tween(220),
+                label = "sync-pill-top"
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(top = if (showControls) 60.dp else 0.dp)
+                    .padding(top = pillTop)
             ) {
                 com.folio.reader.ui.components.SyncIndicator(syncState = syncState)
             }

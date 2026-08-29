@@ -27,54 +27,62 @@ import com.folio.reader.sync.SyncState
 import com.folio.reader.ui.theme.FolioTheme
 import kotlinx.coroutines.delay
 
+private enum class SyncPillPhase { HIDDEN, SYNCING, SUCCESS, ERROR }
+
 /**
- * Glassy floating sync status pill that shows real-time sync state.
- * Slides in from top, auto-hides 2 seconds after a successful sync.
+ * Floating sync status pill. Only materialises when a sync visibly takes time —
+ * the periodic loop's quick no-op cycles stay silent — then flashes a short
+ * confirmation after a real sync. Errors stay up for a few seconds.
  */
 @Composable
 fun SyncIndicator(
     syncState: SyncState,
     modifier: Modifier = Modifier
 ) {
-    var showSuccess by remember { mutableStateOf(false) }
-    var showError by remember { mutableStateOf(false) }
-    var wasSyncing by remember { mutableStateOf(false) }
+    var phase by remember { mutableStateOf(SyncPillPhase.HIDDEN) }
 
     LaunchedEffect(syncState.isSyncing, syncState.lastError) {
-        if (syncState.isSyncing) {
-            wasSyncing = true
-            showError = false
-        } else if (wasSyncing && syncState.lastError == null) {
-            wasSyncing = false
-            showSuccess = true
-            delay(2000)
-            showSuccess = false
-        } else if (syncState.lastError != null) {
-            wasSyncing = false
-            showError = true
-            delay(4000)
-            showError = false
-        } else {
-            wasSyncing = false
-            showError = false
+        when {
+            syncState.isSyncing -> {
+                // No-op syncs finish well before this elapses, so they never
+                // surface; the pill only appears for syncs that genuinely work.
+                delay(400)
+                phase = SyncPillPhase.SYNCING
+            }
+
+            syncState.lastError != null -> {
+                phase = SyncPillPhase.ERROR
+                delay(4000)
+                if (phase == SyncPillPhase.ERROR) phase = SyncPillPhase.HIDDEN
+            }
+
+            else -> {
+                if (phase == SyncPillPhase.SYNCING) {
+                    phase = SyncPillPhase.SUCCESS
+                    delay(1600)
+                    if (phase == SyncPillPhase.SUCCESS) phase = SyncPillPhase.HIDDEN
+                } else {
+                    phase = SyncPillPhase.HIDDEN
+                }
+            }
         }
     }
 
-    val isVisible = (syncState.isSyncing || showError || showSuccess) && syncState.isConfigured
-
     AnimatedVisibility(
-        visible = isVisible,
-        enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
-        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+        visible = phase != SyncPillPhase.HIDDEN && syncState.isConfigured,
+        enter = fadeIn(tween(220)) + slideInVertically(animationSpec = tween(260), initialOffsetY = { -it / 2 }),
+        exit = fadeOut(tween(200)) + slideOutVertically(animationSpec = tween(240), targetOffsetY = { -it / 2 }),
         modifier = modifier
     ) {
         Surface(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp)
+                .animateContentSize(),
             shape = RoundedCornerShape(24.dp),
-            color = when {
-                syncState.lastError != null -> MaterialTheme.colorScheme.errorContainer
-                showSuccess -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+            color = when (phase) {
+                SyncPillPhase.ERROR -> MaterialTheme.colorScheme.errorContainer
+                SyncPillPhase.SUCCESS -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.primaryContainer
             },
             tonalElevation = 6.dp,
             shadowElevation = 4.dp
@@ -84,8 +92,8 @@ fun SyncIndicator(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SyncPillIcon(syncState, showSuccess)
-                SyncPillText(syncState, showSuccess)
+                SyncPillIcon(phase)
+                SyncPillText(phase)
                 SyncPillUploadProgress(syncState)
             }
         }
@@ -93,21 +101,23 @@ fun SyncIndicator(
 }
 
 @Composable
-private fun SyncPillIcon(syncState: SyncState, showSuccess: Boolean) {
-    when {
-        syncState.lastError != null -> Icon(
+private fun SyncPillIcon(phase: SyncPillPhase) {
+    when (phase) {
+        SyncPillPhase.ERROR -> Icon(
             imageVector = Icons.Filled.Warning,
             contentDescription = "Sync error",
             tint = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.size(20.dp)
         )
-        showSuccess -> Icon(
+
+        SyncPillPhase.SUCCESS -> Icon(
             imageVector = Icons.Filled.CheckCircle,
             contentDescription = "Sync complete",
             tint = MaterialTheme.colorScheme.onTertiaryContainer,
             modifier = Modifier.size(20.dp)
         )
-        syncState.isSyncing -> {
+
+        SyncPillPhase.SYNCING -> {
             val pulse = rememberInfiniteTransition(label = "sync-pulse")
             val alpha by pulse.animateFloat(
                 initialValue = 0.35f,
@@ -125,25 +135,24 @@ private fun SyncPillIcon(syncState: SyncState, showSuccess: Boolean) {
                 modifier = Modifier.size(20.dp).graphicsLayer { this.alpha = alpha }
             )
         }
+
+        SyncPillPhase.HIDDEN -> Unit
     }
 }
 
 @Composable
-private fun SyncPillText(syncState: SyncState, showSuccess: Boolean) {
+private fun SyncPillText(phase: SyncPillPhase) {
     Text(
-        text = when {
-            syncState.lastError != null -> "Sync failed"
-            showSuccess -> "Synced"
-            syncState.isSyncing -> {
-                val pending = syncState.pendingUploadCount + syncState.pendingDownloadCount
-                if (pending > 0) "Syncing $pending items..." else "Syncing..."
-            }
-            else -> ""
+        text = when (phase) {
+            SyncPillPhase.ERROR -> "Sync failed"
+            SyncPillPhase.SUCCESS -> "Synced"
+            SyncPillPhase.SYNCING -> "Syncing…"
+            SyncPillPhase.HIDDEN -> ""
         },
         style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
-        color = when {
-            syncState.lastError != null -> MaterialTheme.colorScheme.onErrorContainer
-            showSuccess -> MaterialTheme.colorScheme.onTertiaryContainer
+        color = when (phase) {
+            SyncPillPhase.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+            SyncPillPhase.SUCCESS -> MaterialTheme.colorScheme.onTertiaryContainer
             else -> MaterialTheme.colorScheme.onPrimaryContainer
         }
     )
@@ -227,8 +236,8 @@ fun SyncStatusCard(
                     )
                 }
             }
-            if (isConnected && !syncState.isSyncing) {
-                Button(onClick = onSyncNow) {
+            if (isConnected) {
+                Button(onClick = onSyncNow, enabled = !syncState.isSyncing) {
                     Text("Sync Now", style = MaterialTheme.typography.labelMedium)
                 }
             }
