@@ -133,7 +133,10 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         database.onEntityChanged = { type, id, op, payload ->
             appScope.launch {
                 syncQueueRepository.enqueueSync(type, id, com.folio.reader.sync.SyncOperation.fromString(op), payload)
-                syncEngine?.triggerSync(immediate = false)
+                // Reading positions update on every scroll tick; a prompt sync per
+                // write hammers Firestore. They still enqueue and ride along on the
+                // next crucial sync. Only discrete edits schedule a prompt sync.
+                if (type != "position") syncEngine?.triggerSync(immediate = false)
             }
         }
     }
