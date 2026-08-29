@@ -428,7 +428,10 @@ fun ReaderScreen(
         com.folio.reader.ui.render.LocalOverlayHtml provides overlayHtml,
         com.folio.reader.ui.render.LocalOverlayAction provides { handleOverlayAction(it) }
     ) {
-        Box(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+        // The paper behind the page belongs to the reading theme; only the bars,
+        // panels and overlays are app chrome. Painting this with the app palette made
+        // any uncovered strip of paper change colour with the app theme.
+        Box(modifier = Modifier.fillMaxSize().background(Color(readerThemePreset.background))) {
         // Main content - fills entire screen, overlays positioned absolutely
         if (currentChapter != null) {
             val reservedEnd = if (occludes) 0.dp else when {
