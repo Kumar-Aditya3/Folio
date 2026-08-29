@@ -409,6 +409,12 @@ private suspend fun resolveResources(
         .filter {
             !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") && !it.startsWith("file:")
         }
+        .filterNot {
+            // Keep chapter/TOC links relative: the click bridge resolves them to
+            // spine targets. Rewriting them to extracted file:// paths makes the
+            // links dead.
+            Regex("""\.x?html?(#.*)?$""", RegexOption.IGNORE_CASE).containsMatchIn(it)
+        }
         .distinct()
     var result = html
     for (src in sources) {
