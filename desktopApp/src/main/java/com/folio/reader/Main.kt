@@ -1030,6 +1030,7 @@ private fun ReaderRoute(
         },
         onRetryChapter = { viewModel.reloadChapter() },
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
+        onChapterEnd = { viewModel.onChapterEnd() },
         onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
         onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
         syncState = syncState
