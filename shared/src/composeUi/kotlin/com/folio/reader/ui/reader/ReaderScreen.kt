@@ -339,7 +339,7 @@ fun ReaderScreen(
                 onResolveResource = onResolveResource,
                 seekRequest = seekReq,
                 modifier = Modifier.fillMaxSize().padding(contentInsets)
-                    .then(if (occludes) Modifier else Modifier.statusBarsPadding()),
+                    .then(if (occludes) Modifier else Modifier.padding(top = com.folio.reader.ui.components.statusBarTopPadding())),
                 position = position,
                 onPageChange = { page, total ->
                     currentPage = page

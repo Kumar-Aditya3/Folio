@@ -61,6 +61,7 @@ kotlin {
             dependencies {
                 implementation(libs.androidx.lifecycle.runtime)
                 implementation(libs.androidx.datastore.preferences)
+                implementation(libs.androidx.core.ktx)
                 implementation(libs.coil.compose)
             }
         }
