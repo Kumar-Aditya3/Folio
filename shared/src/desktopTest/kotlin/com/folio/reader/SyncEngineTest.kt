@@ -149,40 +149,27 @@ class SyncEngineTest {
             revisitItems.add(item)
         }
 
-        override fun fetchBooks(excludeDeviceId: String): List<FsBook> =
-            books.filter { it.deviceId != excludeDeviceId }
+        override fun fetchBooks(): List<FsBook> = books.toList()
 
-        override fun fetchPositions(excludeDeviceId: String): List<FsReadingPosition> =
-            positions.filter { it.deviceId != excludeDeviceId }
+        override fun fetchPositions(): List<FsReadingPosition> = positions.toList()
 
-        override fun fetchHighlights(excludeDeviceId: String): List<FsHighlight> =
-            highlights.filter { it.deviceId != excludeDeviceId }
+        override fun fetchHighlights(): List<FsHighlight> = highlights.toList()
 
-        override fun fetchNotes(excludeDeviceId: String): List<FsNote> =
-            notes.filter { it.deviceId != excludeDeviceId }
+        override fun fetchNotes(): List<FsNote> = notes.toList()
 
-        override fun fetchBookmarks(excludeDeviceId: String): List<FsBookmark> =
-            bookmarks.filter { it.deviceId != excludeDeviceId }
+        override fun fetchBookmarks(): List<FsBookmark> = bookmarks.toList()
 
-        override fun fetchSessions(excludeDeviceId: String): List<FsReadingSession> =
-            sessions.filter { it.deviceId != excludeDeviceId }
+        override fun fetchSessions(): List<FsReadingSession> = sessions.toList()
 
-        override fun fetchSettings(excludeDeviceId: String): FsSettings? = null
+        override fun fetchCollections(): List<FsCollection> = collections.toList()
 
-        override fun fetchCollections(excludeDeviceId: String): List<FsCollection> =
-            collections.filter { it.deviceId != excludeDeviceId }
+        override fun fetchSeries(): List<FsSeries> = series.toList()
 
-        override fun fetchSeries(excludeDeviceId: String): List<FsSeries> =
-            series.filter { it.deviceId != excludeDeviceId }
+        override fun fetchTags(): List<FsTag> = tags.toList()
 
-        override fun fetchTags(excludeDeviceId: String): List<FsTag> =
-            tags.filter { it.deviceId != excludeDeviceId }
+        override fun fetchQuotes(): List<FsQuote> = quotes.toList()
 
-        override fun fetchQuotes(excludeDeviceId: String): List<FsQuote> =
-            quotes.filter { it.deviceId != excludeDeviceId }
-
-        override fun fetchRevisitItems(excludeDeviceId: String): List<FsRevisitItem> =
-            revisitItems.filter { it.deviceId != excludeDeviceId }
+        override fun fetchRevisitItems(): List<FsRevisitItem> = revisitItems.toList()
     }
 
     private lateinit var tempRoot: File
@@ -436,6 +423,73 @@ class SyncEngineTest {
             highlightRepo.getDeletedHighlights(book.id).singleOrNull()?.id,
             "remote delete must surface as local soft delete"
         )
+        // The one-time backfill queued this device's stale LIVE copy of the same id.
+        // A blind push would have uploaded it over the fresher tombstone, resurrecting
+        // the annotation in the cloud; the push must yield to the newer remote state.
+        assertTrue(
+            fake.highlights.single().isDeleted,
+            "stale backfilled copy must not clobber the remote tombstone"
+        )
+    }
+
+    @Test
+    fun `delete made elsewhere reaches the device that created the annotation`() = runBlocking {
+        // Regression for the user-visible bug. deviceId is the permanent creator, so a
+        // delete applied on another device arrives as a tombstone still naming THIS
+        // device. The old transport filtered out documents whose deviceId equalled this
+        // device's, so the tombstone was discarded and the delete never propagated. This
+        // device must fetch it, soft-delete its own copy, and not re-push the stale copy.
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val book = seedBook()
+        bookRepo.insertBook(book)
+
+        val local = Highlight(
+            id = "hl-cross",
+            bookId = book.id,
+            chapterId = "c1",
+            spineIndex = 1,
+            startLocator = "/1/1:0",
+            endLocator = "/1/1:9",
+            selectedText = "created here, deleted elsewhere",
+            color = HighlightColor.GREEN,
+            deviceId = selfDeviceId,
+            updatedAt = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds() - 7_200_000L)
+        )
+        highlightRepo.insertHighlight(local)
+
+        fake.highlights.add(
+            FsHighlight(
+                id = local.id,
+                bookId = local.bookId,
+                chapterId = local.chapterId,
+                spineIndex = local.spineIndex,
+                startLocator = local.startLocator,
+                endLocator = local.endLocator,
+                selectedText = local.selectedText,
+                createdAt = local.createdAt.toEpochMilliseconds(),
+                updatedAt = Clock.System.now().toEpochMilliseconds(),
+                deviceId = selfDeviceId,
+                isDeleted = true
+            )
+        )
+
+        engine.syncOnce()
+
+        assertTrue(
+            highlightRepo.getHighlightsForBook(book.id).first().isEmpty(),
+            "creating device must drop an annotation deleted elsewhere"
+        )
+        assertEquals(
+            local.id,
+            highlightRepo.getDeletedHighlights(book.id).singleOrNull()?.id,
+            "creating device must record the delete as a soft delete"
+        )
+        assertTrue(
+            fake.highlights.single().isDeleted,
+            "creating device must not resurrect the tombstone with its stale copy"
+        )
     }
 
     @Test
@@ -466,7 +520,12 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `own device entries are not re-downloaded`() = runBlocking {
+    fun `own device entries converge with the cloud like any other`() = runBlocking {
+        // The old transport filtered out documents created by this device, so a
+        // tombstone for one of this device's own annotations could never arrive —
+        // deletions and edits made elsewhere never propagated. Documents are now
+        // fetched regardless of creator; convergence is decided by updatedAt, and a
+        // locally-missing copy of our own document is restored from the cloud.
         val fake = FakeFirestoreSync(selfDeviceId)
         val engine = makeEngine(fake)
 
@@ -489,7 +548,9 @@ class SyncEngineTest {
         )
 
         engine.syncOnce()
-        assertTrue(highlightRepo.getHighlightsForBook(book.id).first().isEmpty())
+        val restored = highlightRepo.getHighlightsForBook(book.id).first()
+        assertEquals("hl-mine", restored.singleOrNull()?.id, "own cloud document must be restored, not filtered out")
+        assertTrue(syncQueueRepo.getPendingSync(10).isEmpty(), "restoring a remote document must not re-enqueue it")
     }
 
     @Test
