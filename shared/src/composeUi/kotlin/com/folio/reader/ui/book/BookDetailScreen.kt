@@ -154,7 +154,7 @@ fun BookDetailScreen(
         containerColor = FolioTheme.colors.background,
         topBar = {
             com.folio.reader.ui.components.FolioTopBar(
-                title = book?.title ?: "Book Details",
+                title = "",
                 navigationIcon = {
                     IconButton(onClick = onBackPress) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

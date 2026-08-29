@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -174,14 +176,19 @@ fun FolioTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
 ) {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
             .background(colors.surface.copy(alpha = 0.88f))
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .statusBarsPadding()
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         if (navigationIcon != null) navigationIcon()
         Text(
             text = title,
@@ -195,6 +202,7 @@ fun FolioTopBar(
                 .padding(horizontal = 8.dp)
         )
         actions()
+        }
     }
 }
 
@@ -247,7 +255,7 @@ fun DropdownMenuButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Box(modifier = modifier.fillMaxWidth()) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -270,9 +278,10 @@ fun DropdownMenuButton(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            offset = DpOffset(maxWidth - 240.dp, 0.dp),
             containerColor = com.folio.reader.ui.theme.FolioTheme.colors.surface.copy(alpha = 0.97f),
             modifier = Modifier
-                .widthIn(min = 180.dp, max = 360.dp)
+                .width(240.dp)
                 .glassPanel(RoundedCornerShape(12.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
         ) {

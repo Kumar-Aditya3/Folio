@@ -742,7 +742,7 @@ private fun readerBridgeJs(fraction: Float): String = """
     if(sig!==lastSig){lastSig=sig;document.title='folio-progress:'+p.toFixed(4)+':'+current+':'+total+':'+crossed;}
   }
   function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(measure);}}
-  window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root'))return;userCrossed=true;restorePending=false;},{passive:true});
+  window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;userCrossed=true;restorePending=false;},{passive:true});
   window.addEventListener('scroll',schedule,{passive:true});
   window.addEventListener('resize',schedule);
   document.addEventListener('click',function(ev){
@@ -756,7 +756,7 @@ private fun readerBridgeJs(fraction: Float): String = """
   var downX=0,downY=0,downT=0;
   document.addEventListener('pointerdown',function(e){downX=e.clientX;downY=e.clientY;downT=Date.now();},true);
   document.addEventListener('pointerup',function(e){
-    if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root'))return;
+    if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
     if(Date.now()-downT<350&&Math.hypot(e.clientX-downX,e.clientY-downY)<24){
       var w=Math.max(1,window.innerWidth),h=Math.max(1,window.innerHeight);
       if(e.clientX>w*0.3&&e.clientX<w*0.7&&e.clientY>h*0.25&&e.clientY<h*0.75){document.title='folio-tap:'+(++nonce);}
