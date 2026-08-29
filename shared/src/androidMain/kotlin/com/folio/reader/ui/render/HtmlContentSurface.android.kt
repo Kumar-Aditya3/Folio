@@ -55,15 +55,21 @@ actual fun HtmlContentSurface(
     // Paragraph seeks have to wait for the chapter they were requested for: running
     // one against the page still on screen would move the previous chapter.
     val pageState = remember { PageLoadState() }
+    // A chapter change does not put a new document on screen immediately — the
+    // resource pass defers loadDataWithBaseURL — so mark the page unseekable up
+    // front. Declared before the seek effects so it runs first in composition order;
+    // without it a jump's seek moved the previous chapter and the new one then
+    // opened at its saved fraction, i.e. the top of the chapter.
+    LaunchedEffect(chapterHref) { pageState.loading(chapterHref) }
     LaunchedEffect(seekRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
-        wv.evaluateJavascript("window.__folioSeek&&window.__folioSeek(${req.first.coerceIn(0f, 1f)});", null)
+        pageState.seekFraction(req.first.coerceIn(0f, 1f), wv, chapterHref)
     }
     LaunchedEffect(seekTargetRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekTargetRequest ?: return@LaunchedEffect
-        pageState.seekTo(req.first, wv)
+        pageState.seekTo(req.first, wv, chapterHref)
     }
     LaunchedEffect(clearSelectionRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
@@ -120,7 +126,6 @@ actual fun HtmlContentSurface(
     // Hold pending JS so onPageFinished can inject after layout. This fixes the 1/1
     // measurement that happened immediately after loadDataWithBaseURL before layout.
     var pendingJs by remember { mutableStateOf<String?>(null) }
-    var pendingFraction by remember { mutableStateOf(0.0) }
     // Page bridging must post to main thread — @JavascriptInterface and title
     // callbacks arrive on WebView background threads.
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
@@ -140,26 +145,34 @@ actual fun HtmlContentSurface(
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 view.getSettings().javaScriptEnabled = true
-                pageState.loading()
+                pageState.loadStarted()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
-                // Inject measurement JS only after page is laid out. Fallback if pendingJs already set.
+                // Inject measurement JS only after the page is laid out, and consume it:
+                // the delayed fallback must not run a second time.
                 pendingJs?.let { js ->
+                    pendingJs = null
                     view.evaluateJavascript(js, null)
                 }
                 pageState.markReady(view)
             }
         }
     }
-    val progressBridge = remember(onProgress, onPageChange) {
+    // The bridge instance is registered with addJavascriptInterface exactly once, in
+    // the factory, and can never be swapped. Calling the onProgress/onPageChange
+    // lambdas captured here would pin the first composition's copies forever — and
+    // since ReaderScreen recreates its currentPage/totalPages state on every chapter
+    // change, the reports would land on orphaned state and the counter would stick at
+    // 1/1 for the rest of the session. Read through rememberUpdatedState instead.
+    val progressBridge = remember {
         object {
             @JavascriptInterface
             fun report(fraction: Float, current: Int, total: Int) {
                 mainHandler.post {
-                    onProgress(fraction.coerceIn(0f, 1f))
-                    onPageChange(current.coerceAtLeast(1), total.coerceAtLeast(1))
+                    latestProgress(fraction.coerceIn(0f, 1f))
+                    latestPage(current.coerceAtLeast(1), total.coerceAtLeast(1))
                 }
             }
         }
@@ -271,7 +284,7 @@ actual fun HtmlContentSurface(
                             function atBottom(){var s=document.scrollingElement||document.documentElement;return s.scrollTop+s.clientHeight>=s.scrollHeight-2;}
                             window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));schedule();};
                             window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
-                            window.__folioSeekTo=function(t){var parts=String(t).split(':'),el=null;if(parts[0]==='h'&&parts[1]){el=document.querySelector('[data-folio-hl="'+parts[1]+'"]');}if(!el){var pi=parts[0]==='h'?parts[2]:parts[1];var ps=document.querySelectorAll('p');if(!ps.length)return;var n=parseInt(pi,10);if(isNaN(n))n=0;el=ps[Math.min(Math.max(0,n),ps.length-1)];}if(!el)return;el.scrollIntoView({block:'start'});schedule();};
+                            window.__folioSeekTo=function(t){var parts=String(t).split(':'),isH=parts[0]==='h';var id=isH?(parts[1]||''):'',para=isH?parts[2]:parts[1],frac=isH?parts[3]:parts[2];function byMark(){if(!id)return null;try{return document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){return null;}}function land(el){el.scrollIntoView({block:'start'});schedule();}function byPara(){if(para===undefined||para==='')return false;var n=parseInt(para,10);if(isNaN(n))return false;var ps=document.querySelectorAll('p');if(!ps.length)return false;land(ps[Math.min(Math.max(0,n),ps.length-1)]);return true;}function byFrac(){if(frac===undefined||frac==='')return false;var f=parseFloat(frac);if(isNaN(f))return false;if(window.__folioSeek)window.__folioSeek(f);return true;}var m=byMark();if(m){land(m);return;}if(!byPara())byFrac();};
                             ${PageEngine.selectionWatchJs}
                             function report(){
                                 scheduled=false;
@@ -318,12 +331,15 @@ actual fun HtmlContentSurface(
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
                 val js = baseJs + HighlightPaint.js(highlights, theme)
                 pendingJs = js
-                pendingFraction = fraction
+                pageState.loading(chapterHref)
                 webView.loadDataWithBaseURL("file:///folio/$chapterHref", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
-                // Do not evaluate immediately — onPageFinished will inject. Keep a post fallback for WebView that doesn't trigger onPageFinished.
+                // Only for a WebView that never fires onPageFinished: re-running the
+                // bridge is not idempotent, it restores scrollTop from the saved
+                // fraction and re-registers listeners.
                 webView.postDelayed({
-                    if (webView.tag == contentKey) {
+                    if (pendingJs != null && webView.tag == contentKey) {
                         webView.evaluateJavascript(js, null)
+                        pageState.markReady(webView)
                     }
                 }, 400)
             } else if (resourcesReady) {
@@ -344,34 +360,66 @@ private class ReaderWebView(context: android.content.Context) : WebView(context)
 }
 
 /**
- * Tracks whether a laid-out page is on screen, holding a paragraph jump until the
- * chapter it was requested against is the one being shown.
+ * Tracks which chapter is laid out, holding a seek until the chapter it was requested
+ * against is the one on screen.
+ *
+ * The request has to carry its chapter: a jump issued while a new document is still
+ * being prepared must survive that load rather than run against the outgoing page,
+ * but a request for a chapter the reader has already moved past is worthless and is
+ * dropped.
  */
 private class PageLoadState {
     private var pageReady = false
+    private var loadingHref: String? = null
+    private var readyHref: String? = null
     private var pending: String? = null
+    private var pendingHref: String? = null
 
-    fun loading() {
+    /** [href] is the chapter about to be handed to the WebView. */
+    fun loading(href: String) {
+        pageReady = false
+        loadingHref = href
+        if (pendingHref != null && pendingHref != href) {
+            pending = null
+            pendingHref = null
+        }
+    }
+
+    /** A load began for a chapter we already know about; only readiness is unknown. */
+    fun loadStarted() {
         pageReady = false
     }
 
     fun markReady(view: WebView) {
         pageReady = true
-        pending?.let {
+        readyHref = loadingHref
+        val href = readyHref
+        if (href != null && pendingHref == href) {
+            val js = pending
             pending = null
-            evaluate(it, view)
+            pendingHref = null
+            js?.let { view.evaluateJavascript(it, null) }
         }
     }
 
-    fun seekTo(target: String, view: WebView) {
-        if (pageReady) evaluate(target, view) else pending = target
+    private fun run(js: String, view: WebView, href: String) {
+        if (pageReady && readyHref == href) {
+            view.evaluateJavascript(js, null)
+        } else {
+            pending = js
+            pendingHref = href
+        }
     }
 
-    private fun evaluate(target: String, view: WebView) {
+    fun seekTo(target: String, view: WebView, href: String) {
         val literal = kotlinx.serialization.json.Json.encodeToString(
             String.serializer(), target
         )
-        view.evaluateJavascript("window.__folioSeekTo&&window.__folioSeekTo($literal);", null)
+        run("window.__folioSeekTo&&window.__folioSeekTo($literal);", view, href)
+    }
+
+    fun seekFraction(fraction: Float, view: WebView, href: String) {
+        run("window.__folioSeek&&window.__folioSeek($fraction);", view, href)
     }
 }
 

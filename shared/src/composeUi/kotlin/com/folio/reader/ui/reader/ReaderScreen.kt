@@ -33,17 +33,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Toc
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,6 +74,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
@@ -150,7 +153,6 @@ fun ReaderScreen(
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
     var totalPages by remember(currentChapterIndex) { mutableStateOf(1) }
-    var currentTime by remember { mutableStateOf("") }
 
     // Desktop's embedded browser is a heavyweight native window that paints over
     // Compose overlays, so the chrome reserves its own space there instead of
@@ -178,14 +180,6 @@ fun ReaderScreen(
             targetOffsetX = { it },
             animationSpec = androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
         ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(300))
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            val time = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).time
-            currentTime = "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
-            kotlinx.coroutines.delay(30_000)
-        }
     }
 
     var showReaderPanel by remember { mutableStateOf(false) }
@@ -218,17 +212,23 @@ fun ReaderScreen(
         }
     }
 
-    // Chrome follows the reading theme (incl. per-book overrides) so bars and
-    // panels never clash with the page on either platform.
+    // The reading theme paints the page and nothing else. Chrome and overlays are app
+    // surfaces, so they take the app palette — this is what kept the two from bleeding
+    // into each other in opposite directions.
     val readerThemePreset = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
 
     fun Int.argbHex(): String = "#" + toUInt().toString(16).padStart(8, '0').drop(2)
+    fun Color.hex(): String = "#" + toArgb().toString(16).padStart(8, '0').drop(2)
+    val appColors = FolioTheme.colors
+    val appIsDark = appColors.background.red * 0.2126f +
+            appColors.background.green * 0.7152f +
+            appColors.background.blue * 0.0722f < 0.45f
     val overlayColors = com.folio.reader.ui.render.OverlayColors(
-        bg = readerThemePreset.background.argbHex(),
-        fg = readerThemePreset.primaryText.argbHex(),
-        accent = readerThemePreset.progress.argbHex(),
-        surface = readerThemePreset.surface.argbHex(),
-        isDark = readerThemePreset.isDark
+        bg = appColors.surface.hex(),
+        fg = appColors.onSurface.hex(),
+        accent = appColors.primary.hex(),
+        surface = appColors.surfaceVariant.hex(),
+        isDark = appIsDark
     )
     val quickFontNames = remember(settings.customFonts) {
         (listOf(
@@ -306,13 +306,16 @@ fun ReaderScreen(
             ?: chapters.indexOfFirst { chapterId != null && it.id == chapterId }.takeIf { it >= 0 }
             ?: return
         val para = locator?.paragraphFromLocator()
+        val frac = locator?.locatorFraction()
+        // Carried all the way to the page so a jump degrades mark -> paragraph ->
+        // fraction, never to the top of the chapter.
+        val tail = "${para ?: ""}:${frac ?: ""}"
         val target = when {
-            markId != null && markId.matches(Regex("[A-Za-z0-9_-]+")) ->
-                if (para != null) "h:$markId:$para" else "h:$markId"
+            markId != null && markId.matches(Regex("[A-Za-z0-9_-]+")) -> "h:$markId:$tail"
             para != null -> "p:$para"
             else -> null
         }
-        val fraction = if (target == null) locator?.locatorFraction() else null
+        val fraction = if (target == null) frac else null
         if (index == currentChapterIndex) {
             seekNonce++
             when {
@@ -417,14 +420,10 @@ fun ReaderScreen(
         }
     }
 
-    FolioTheme.MaterialTheme(
-        darkTheme = readerThemePreset.isDark,
-        colors = FolioTheme.fromReaderTheme(
-            readerThemePreset.background, readerThemePreset.surface, readerThemePreset.primaryText,
-            readerThemePreset.secondaryText, readerThemePreset.link, readerThemePreset.progress,
-            readerThemePreset.divider, readerThemePreset.isDark
-        )
-    ) {
+    // Reader chrome is app-themed: the reading theme paints the page only. The
+    // inherited palette is passed through untouched so the user's chosen app theme
+    // survives into the bars, panels and in-page overlays.
+    FolioTheme.MaterialTheme(darkTheme = appIsDark, colors = appColors) {
     androidx.compose.runtime.CompositionLocalProvider(
         com.folio.reader.ui.render.LocalOverlayHtml provides overlayHtml,
         com.folio.reader.ui.render.LocalOverlayAction provides { handleOverlayAction(it) }
@@ -477,8 +476,7 @@ fun ReaderScreen(
                 onResolveResource = onResolveResource,
                 seekRequest = seekReq,
                 seekTargetRequest = seekTargetReq,
-                modifier = Modifier.fillMaxSize().padding(contentInsets)
-                    .then(if (occludes) Modifier else Modifier.padding(top = com.folio.reader.ui.components.statusBarTopPadding())),
+                modifier = Modifier.fillMaxSize().padding(contentInsets),
                 position = position,
                 onPageChange = { page, total ->
                     currentPage = page
@@ -525,7 +523,7 @@ fun ReaderScreen(
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .height(56.dp),
-                color = FolioTheme.colors.surface.copy(alpha = 0.95f),
+                color = FolioTheme.colors.surface.copy(alpha = 0.92f),
                 shadowElevation = 4.dp
             ) {
                 Row(
@@ -556,6 +554,14 @@ fun ReaderScreen(
 
                     // Right-side action icons
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (settings.showClock) {
+                            Text(
+                                text = com.folio.reader.ui.components.rememberClockTime(),
+                                style = FolioTheme.typography.labelMedium,
+                                color = FolioTheme.colors.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            )
+                        }
                         if (occludes) {
                             // The rail is not drawn on occluding platforms, so the
                             // highlight action lives here: dull until the page has a
@@ -572,17 +578,17 @@ fun ReaderScreen(
                                 }
                             ) {
                                 Icon(
-                                    Icons.Filled.AddCircle,
+                                    Icons.Filled.Highlight,
                                     contentDescription = if (selected != null) "Highlight selection" else "Select text to highlight",
                                     tint = if (selected != null) FolioTheme.colors.onSurface
                                     else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
                                 )
                             }
                             IconButton(onClick = onToggleToc) {
-                                Icon(Icons.Filled.List, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
+                                Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                             }
                             IconButton(onClick = onToggleAnnotations) {
-                                Icon(Icons.Filled.Menu, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                                Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                             }
                         }
                         IconButton(onClick = onSearchClick) {
@@ -597,7 +603,7 @@ fun ReaderScreen(
                                 position?.let { pos -> bm.chapterId == pos.chapterId && locatorsMatch(bm.locator, pos.spotLocator()) } == true
                             }
                             Icon(
-                                imageVector = Icons.Filled.Star,
+                                imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                                 contentDescription = "Bookmark",
                                 tint = if (isBookmarked) FolioTheme.colors.primary else FolioTheme.colors.onSurface
                             )
@@ -687,7 +693,7 @@ fun ReaderScreen(
                         }
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.AddCircle,
+                            imageVector = Icons.Filled.Highlight,
                             contentDescription = if (selected != null) "Highlight selection" else "Select text to highlight",
                             tint = if (selected != null) FolioTheme.colors.onSurface
                             else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
@@ -695,14 +701,14 @@ fun ReaderScreen(
                     }
                     HorizontalDivider(modifier = Modifier.width(32.dp), color = FolioTheme.colors.onSurface.copy(alpha = 0.2f))
                     IconButton(onClick = onToggleToc) {
-                        Icon(Icons.Filled.List, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onToggleAnnotations) {
-                        Icon(Icons.Filled.Menu, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onBookmarkClick) {
                         Icon(
-                            imageVector = Icons.Filled.Star,
+                            imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                             contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark this spot",
                             tint = if (isBookmarked) Color(0xFFFBC02D) else FolioTheme.colors.onSurface
                         )
@@ -1810,7 +1816,7 @@ fun BottomProgressBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(FolioTheme.colors.surface.copy(alpha = 0.95f))
+            .background(FolioTheme.colors.surface.copy(alpha = 0.92f))
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -1959,18 +1965,19 @@ fun AnnotationsSidebar(
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (bookmarks.isNotEmpty()) {
-                item { SectionHeader("Bookmarks (${bookmarks.size})") }
+                item { SectionHeader("Bookmarks (${bookmarks.size})", Icons.Filled.Bookmark) }
                 items(bookmarks, key = { "bm:${it.id}" }) { bookmark ->
                     AnnotationRow(
                         title = bookmark.label ?: "Page ${bookmark.spineIndex + 1}",
                         subtitle = chapterLabel(bookmark.spineIndex, bookmark.chapterId),
+                        leadingIcon = Icons.Filled.Bookmark,
                         onClick = { onJump("bm", bookmark.id) },
                         onDelete = { onRemoveBookmark(bookmark.id) }
                     )
                 }
             }
             if (highlights.isNotEmpty()) {
-                item { SectionHeader("Highlights (${highlights.size})") }
+                item { SectionHeader("Highlights (${highlights.size})", Icons.Filled.Highlight) }
                 items(highlights.filter { !it.isDeleted }, key = { "hl:${it.id}" }) { highlight ->
                     val linked = highlight.noteId?.let { noteById[it] }
                     AnnotationRow(
@@ -1988,11 +1995,12 @@ fun AnnotationsSidebar(
                 }
             }
             if (orphanNotes.isNotEmpty()) {
-                item { SectionHeader("Notes (${orphanNotes.size})") }
+                item { SectionHeader("Notes (${orphanNotes.size})", Icons.Filled.Notes) }
                 items(orphanNotes, key = { "nt:${it.id}" }) { note ->
                     AnnotationRow(
                         title = note.content.take(80).ifBlank { "(empty)" },
                         subtitle = chapterLabel(note.spineIndex, note.chapterId),
+                        leadingIcon = Icons.Filled.Notes,
                         onClick = { onJump("nt", note.id) },
                         onDelete = { onRemoveNote(note.id) }
                     )
@@ -2054,13 +2062,26 @@ fun AnnotationsSidebar(
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = FolioTheme.typography.titleSmall,
-        color = FolioTheme.colors.secondary,
+private fun SectionHeader(text: String, icon: ImageVector? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-    )
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = FolioTheme.colors.secondary
+            )
+        }
+        Text(
+            text = text,
+            style = FolioTheme.typography.titleSmall,
+            color = FolioTheme.colors.secondary
+        )
+    }
 }
 
 @Composable
@@ -2068,6 +2089,7 @@ private fun AnnotationRow(
     title: String,
     subtitle: String,
     accentColor: Color? = null,
+    leadingIcon: ImageVector? = null,
     note: String? = null,
     onNote: (() -> Unit)? = null,
     onClick: () -> Unit = {},
@@ -2087,8 +2109,8 @@ private fun AnnotationRow(
     ) {
         if (accentColor != null) {
             Box(Modifier.width(3.dp).height(32.dp).background(accentColor, RoundedCornerShape(2.dp)))
-        } else {
-            Icon(Icons.Filled.Star, contentDescription = null, tint = FolioTheme.colors.primary, modifier = Modifier.size(18.dp))
+        } else if (leadingIcon != null) {
+            Icon(leadingIcon, contentDescription = null, tint = FolioTheme.colors.primary, modifier = Modifier.size(18.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = FolioTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

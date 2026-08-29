@@ -201,7 +201,18 @@ actual fun HtmlContentSurface(
         current.seek(req.first)
     }
 
-    // 7) Annotation jumps: scroll to a highlight mark or paragraph. Waits for this
+    // 7) Paint the chapter's highlights. Waits for this chapter's document so the
+    //    marks are never drawn into the previous chapter, and re-runs when the
+    //    selection set or the theme's palette changes. Declared before the jump
+    //    effect below: effects run in declaration order, and a jump has to be able
+    //    to find the mark the painter creates.
+    LaunchedEffect(highlights, settings.themeId, settings.customTheme, session, loadedChapter) {
+        val current = session ?: return@LaunchedEffect
+        if (loadedChapter != chapterHref) return@LaunchedEffect
+        current.applyHighlights(HighlightPaint.js(highlights, theme))
+    }
+
+    // 8) Annotation jumps: scroll to a highlight mark or paragraph. Waits for this
     //    chapter's document to be handed over, so it never moves an older document
     //    that happens to still be on screen.
     var appliedSeek by remember { mutableStateOf<Long?>(null) }
@@ -212,15 +223,6 @@ actual fun HtmlContentSurface(
         if (appliedSeek == req.second) return@LaunchedEffect
         appliedSeek = req.second
         current.seekTo(req.first)
-    }
-
-    // 8) Paint the chapter's highlights. Waits for this chapter's document so the
-    //    marks are never drawn into the previous chapter, and re-runs when the
-    //    selection set or the theme's palette changes.
-    LaunchedEffect(highlights, settings.themeId, settings.customTheme, session, loadedChapter) {
-        val current = session ?: return@LaunchedEffect
-        if (loadedChapter != chapterHref) return@LaunchedEffect
-        current.applyHighlights(HighlightPaint.js(highlights, theme))
     }
 
     // 9) The chrome committed a selection; drop it so the control dims again.

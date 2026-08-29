@@ -80,25 +80,25 @@ fun Modifier.glassPanel(shape: Shape): Modifier {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
     val luminance = colors.background.red * 0.2126f + colors.background.green * 0.7152f + colors.background.blue * 0.0722f
     val dark = luminance < 0.45f
-    val fill = if (dark) colors.surface.copy(alpha = 0.90f) else colors.surface.copy(alpha = 0.93f)
+    val fill = if (dark) colors.surface.copy(alpha = 0.86f) else colors.surface.copy(alpha = 0.89f)
     return this
         .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
         .background(fill, shape)
         .background(
             brush = Brush.verticalGradient(
                 colors = if (dark) listOf(
-                    Color.White.copy(alpha = 0.10f),
-                    Color.White.copy(alpha = 0.03f),
-                    Color.White.copy(alpha = 0.06f)
+                    Color.White.copy(alpha = 0.14f),
+                    Color.White.copy(alpha = 0.04f),
+                    Color.White.copy(alpha = 0.08f)
                 ) else listOf(
-                    Color.White.copy(alpha = 0.22f),
-                    Color.White.copy(alpha = 0.07f),
-                    Color.White.copy(alpha = 0.14f)
+                    Color.White.copy(alpha = 0.26f),
+                    Color.White.copy(alpha = 0.08f),
+                    Color.White.copy(alpha = 0.17f)
                 )
             ),
             shape = shape
         )
-        .border(1.dp, if (dark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.12f), shape)
+        .border(1.dp, if (dark) Color.White.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.14f), shape)
         .clip(shape)
 }
 
@@ -178,7 +178,7 @@ fun FolioTopBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(colors.surface.copy(alpha = 0.88f))
+            .background(colors.surface.copy(alpha = 0.85f))
             .statusBarsPadding()
     ) {
         Row(

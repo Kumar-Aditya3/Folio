@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlin.time.TimeSource
 import kotlinx.coroutines.launch
 import com.folio.reader.ui.render.LinkClickResult
 import com.folio.reader.model.locatorsMatch
@@ -117,8 +118,21 @@ class ReaderViewModel(
 
     private var currentBookId: String? = null
     private var deviceId: String = ""
-    /** Session words read, accumulated as progress advances. */
-    private var sessionWordsBaseProgress: Double = 0.0
+
+    /**
+     * Engagement clock. [activeSpanMs] grows only in the intervals between reading
+     * events that are close enough together to be plausible, so a book left open while
+     * the reader walks away stops counting. [bankedSpanMs] carries time already
+     * measured for a session reopened from an earlier run.
+     */
+    private var activeSpanMs = 0L
+    private var bankedSpanMs = 0L
+    private var lastActivityAt: TimeSource.Monotonic.ValueTimeMark? = null
+
+    /** Words credited to this session, advanced a readable pace at a time. */
+    private var creditedWords = 0L
+    private var wordsBaseProgress = 0.0
+    private var wordsBaseActiveMs = 0L
     private val chapterEndGuard = ChapterEndGuard()
     private val chapterStartGuard = ChapterEndGuard()
 
@@ -156,7 +170,6 @@ class ReaderViewModel(
                 }
                 ?: 0
             _currentChapterIndex.value = startIndex.coerceIn(0, (chapters.size - 1).coerceAtLeast(0))
-            sessionWordsBaseProgress = saved?.normalizedProgress ?: 0.0
 
             // Initialize position for this device using saved position data. The
             // saved scroll offset only applies when the saved position is actually
@@ -183,11 +196,32 @@ class ReaderViewModel(
                 _book.value = loadedBook
             }
 
-            // Load or create session
+            // Load or create session. The engagement clock measures one open span, so
+            // it starts from zero every time a book is opened.
+            activeSpanMs = 0L
+            bankedSpanMs = 0L
+            lastActivityAt = null
             val activeSession = runCatching { sessionRepository.getActiveSession(bookId) }.getOrNull()
-            if (activeSession != null && activeSession.isActive) {
-                _session.value = activeSession
+            val resumable = activeSession?.takeIf {
+                it.isActive &&
+                    Clock.System.now().toEpochMilliseconds() - it.startedAt.toEpochMilliseconds() < STALE_SESSION_MS
+            }
+            if (resumable != null) {
+                _session.value = resumable
+                bankedSpanMs = resumable.durationMs
+                creditedWords = resumable.wordsRead
+                wordsBaseProgress = resumable.endProgress.takeIf { it > 0.0 } ?: resumable.startProgress
             } else {
+                // An orphan left active by a crash or a killed process must not be
+                // adopted: its stored total was frozen at the last flush and is already
+                // correct, it only needs closing.
+                activeSession?.let { orphan ->
+                    runCatching {
+                        sessionRepository.updateSession(
+                            orphan.copy(isActive = false, endedAt = Clock.System.now())
+                        )
+                    }
+                }
                 val startPosition = _position.value ?: ReadingPosition(
                     bookId = bookId,
                     deviceId = deviceId,
@@ -206,8 +240,10 @@ class ReaderViewModel(
                 )
                 runCatching { sessionRepository.insertSession(newSession) }
                 _session.value = newSession
-                sessionWordsBaseProgress = startPosition.normalizedProgress
+                creditedWords = 0L
+                wordsBaseProgress = startPosition.normalizedProgress
             }
+            wordsBaseActiveMs = activeMs()
 
             // Mark opened
             loadedBook?.let { runCatching { bookRepository.markOpened(it.id) } }
@@ -275,6 +311,7 @@ class ReaderViewModel(
 
     fun updateScrollProgress(scrollFraction: Float, characterOffsetEstimate: Int = 0) {
         val current = _position.value ?: return
+        markReadingActivity()
         val chapters = _chapters.value
         val chapter = chapters.getOrNull(_currentChapterIndex.value)
         val totalWords = _book.value?.totalWords ?: 0L
@@ -334,12 +371,13 @@ class ReaderViewModel(
 
     /** Writes the reader's place on disk; flushed on chapter changes and when closing. */
     private fun persistProgress(position: ReadingPosition, normalized: Double) {
-        val deltaProgress = (normalized - sessionWordsBaseProgress).coerceAtLeast(0.0)
-        val totalWords = _book.value?.totalWords ?: 0L
+        val totalMs = activeMs()
+        val words = creditedWordsFor(normalized, totalMs)
         _session.value = _session.value?.copy(
             endPosition = position,
             endProgress = normalized,
-            wordsRead = (deltaProgress * totalWords).toLong()
+            durationMs = totalMs,
+            wordsRead = words
         )
         viewModelScope.launch {
             runCatching {
@@ -358,6 +396,43 @@ class ReaderViewModel(
         progressPersistJob = null
         val position = _position.value ?: return
         persistProgress(position, position.normalizedProgress)
+    }
+
+    /** Reading time measured for the open session so far, in milliseconds. */
+    private fun activeMs(): Long = bankedSpanMs + activeSpanMs
+
+    /**
+     * Called by everything that proves the reader is in the book: a scroll tick, a page
+     * turn, a chapter change. The interval since the previous event counts as reading
+     * only while it stays under [IDLE_GRACE_MS]; a longer gap was the app sitting
+     * idle, and banking it is what turned reading time into elapsed time.
+     */
+    private fun markReadingActivity() {
+        val now = TimeSource.Monotonic.markNow()
+        val previous = lastActivityAt
+        lastActivityAt = now
+        if (previous == null) return
+        val gapMs = (now - previous).inWholeMilliseconds
+        if (gapMs in 1 until IDLE_GRACE_MS) activeSpanMs += gapMs
+    }
+
+    /**
+     * Advances the session's word count by whatever could plausibly have been read
+     * since the last measurement. Progress also moves on scrubs, search hits and
+     * chapter skips, and travelling through a book is not reading it, so the credit is
+     * clamped to [MAX_CREDIBLE_WPM] over the active time elapsed.
+     */
+    private fun creditedWordsFor(normalized: Double, totalActiveMs: Long): Long {
+        val totalWords = _book.value?.totalWords ?: 0L
+        val advance = (normalized - wordsBaseProgress).coerceAtLeast(0.0)
+        wordsBaseProgress = normalized
+        if (advance <= 0.0 || totalWords <= 0L) return creditedWords
+        val elapsedMinutes = ((totalActiveMs - wordsBaseActiveMs).coerceAtLeast(0L)) / 60_000.0
+        wordsBaseActiveMs = totalActiveMs
+        val candidate = advance * totalWords
+        val ceiling = elapsedMinutes * MAX_CREDIBLE_WPM
+        creditedWords += minOf(candidate, ceiling).toLong()
+        return creditedWords
     }
 
     fun updatePosition(newPosition: ReadingPosition) {
@@ -379,6 +454,9 @@ class ReaderViewModel(
      * the previous chapter instead of the end the reader came from.
      */
     private fun setChapter(index: Int, resumeFraction: Double) {
+        // The interval up to a chapter turn is reading time; bank it before the
+        // position is repointed and flushed.
+        markReadingActivity()
         // Save where the reader really was before the position is repointed.
         flushProgress()
         chapterEndGuard.reset()
@@ -565,7 +643,7 @@ class ReaderViewModel(
         _notes.value = _notes.value.filterNot { it.id == noteId }
     }
 
-    /** Ends the active session, persisting duration + estimated words read, and triggers cloud sync for reading position on book close. */
+    /** Ends the active session with its measured reading time, then syncs the position. */
     fun closeBook(onDone: () -> Unit = {}) {
         val session = _session.value
         val position = _position.value
@@ -574,10 +652,15 @@ class ReaderViewModel(
         viewModelScope.launch {
             runCatching {
                 if (session != null && session.isActive) {
+                    markReadingActivity()
+                    val totalMs = activeMs()
                     val ended = session.end(
                         endPos = position ?: session.startPosition,
                         endProgress = position?.normalizedProgress ?: session.startProgress,
-                        wordsRead = session.wordsRead
+                        wordsRead = creditedWordsFor(
+                            position?.normalizedProgress ?: session.endProgress, totalMs
+                        ),
+                        totalActiveMs = totalMs
                     )
                     sessionRepository.updateSession(ended)
                     _session.value = ended
@@ -659,6 +742,19 @@ class ReaderViewModel(
 
         /** Coalesces scroll-driven progress writes into one save per pause. */
         const val PROGRESS_PERSIST_DELAY_MS = 1200L
+
+        /**
+         * A longer silence between reading events means the reader stopped: a page
+         * takes well under this to get through, and anything past it was the app
+         * sitting unattended.
+         */
+        const val IDLE_GRACE_MS = 120_000L
+
+        /** An active session older than this was abandoned, not paused. */
+        const val STALE_SESSION_MS = 6L * 60L * 60L * 1000L
+
+        /** Above this, progress is movement through the book rather than reading it. */
+        const val MAX_CREDIBLE_WPM = 800.0
     }
 }
 

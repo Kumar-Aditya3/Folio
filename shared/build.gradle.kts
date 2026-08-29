@@ -51,6 +51,7 @@ kotlin {
                 api(libs.compose.multiplatform.ui)
                 api(libs.compose.multiplatform.foundation)
                 api(libs.compose.multiplatform.material3)
+                api(libs.compose.multiplatform.material.icons.extended)
                 api(libs.androidx.lifecycle.viewmodel)
             }
         }
