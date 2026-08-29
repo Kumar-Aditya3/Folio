@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 data class FolioColors(
@@ -183,6 +184,20 @@ data class FolioTypography(
 )
 
 val LocalFolioColors = staticCompositionLocalOf { LightFolioColors }
+
+/** Shared design vocabulary: one radius/spacing scale for the whole app. */
+object FolioTokens {
+    val radiusCard = 20.dp
+    val radiusControl = 14.dp
+    val radiusChip = 10.dp
+
+    val space1 = 8.dp
+    val space2 = 12.dp
+    val space3 = 16.dp
+    val space4 = 24.dp
+
+    val barHeight = 56.dp
+}
 
 object FolioTheme {
     val colors: FolioColors

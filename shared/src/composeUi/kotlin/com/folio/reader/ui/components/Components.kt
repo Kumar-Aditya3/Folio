@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -99,6 +100,123 @@ fun Modifier.glassPanel(shape: Shape): Modifier {
             )
             .border(1.dp, Color.Black.copy(alpha = 0.08f), shape)
             .clip(shape)
+    }
+}
+
+/** Glass card with an optional section header — the shared container for grouped content. */
+@Composable
+fun FolioSectionCard(
+    title: String? = null,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .glassPanel(RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusCard))
+            .padding(com.folio.reader.ui.theme.FolioTokens.space3),
+        verticalArrangement = Arrangement.spacedBy(com.folio.reader.ui.theme.FolioTokens.space2)
+    ) {
+        if (title != null) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        content()
+    }
+}
+
+/** Pill chip used for filters and segmented controls; glassy, theme-cohesive. */
+@Composable
+fun FolioChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusChip)
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(
+                if (selected) colors.primary.copy(alpha = 0.90f) else colors.surface.copy(alpha = 0.55f),
+                shape
+            )
+            .border(
+                1.dp,
+                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
+                shape
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) colors.onPrimary else colors.onSurface
+        )
+    }
+}
+
+/** Glass top bar shared by all screens: optional back button, title, actions. */
+@Composable
+fun FolioTopBar(
+    title: String,
+    modifier: Modifier = Modifier,
+    navigationIcon: (@Composable () -> Unit)? = null,
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+) {
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
+            .background(colors.surface.copy(alpha = 0.88f))
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (navigationIcon != null) navigationIcon()
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = colors.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp)
+        )
+        actions()
+    }
+}
+
+/** Thin rounded progress bar in the theme accent. */
+@Composable
+fun FolioProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .background(color.copy(alpha = 0.18f), RoundedCornerShape(2.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .height(4.dp)
+                .background(color, RoundedCornerShape(2.dp))
+        )
     }
 }
 
