@@ -136,13 +136,10 @@ class SyncEngine(
             // 3. Push local changes
             pushLocalChanges()
 
-            // 4. Resolve conflicts
-            resolveConflicts()
-
-            // 5. Apply remote changes locally
+            // 4. Apply remote changes locally (last-writer-wins per entity)
             applyRemoteChanges()
 
-            // 6. Update sync state from the complete eligible outbox, not a work batch.
+            // 5. Update sync state from the complete eligible outbox, not a work batch.
             val remainingPending = runCatching { syncRepository.getPendingSyncCount() }.getOrDefault(0)
             _syncState.update {
                 it.copy(
@@ -451,10 +448,6 @@ class SyncEngine(
         if (enqueued > 0) println("☁️ Annotation backfill queued $enqueued item(s) for cloud sync")
     }
 
-    private suspend fun resolveConflicts() {
-        // LWW resolution happens during apply; nothing to pre-compute.
-    }
-
     private suspend fun applyRemoteChanges() {
         applyRemoteBooks()
         applyRemotePositions()
@@ -657,8 +650,13 @@ class SyncEngine(
     }
 
     private suspend fun applyRemoteAnnotations() {
+        // Deliberately no `remote.deviceId == deviceId` skip: an annotation carries the
+        // id of the device that created it, so an edit or delete made elsewhere lands on
+        // a document naming this device and would be discarded. updatedAt alone gives
+        // last-writer-wins, and re-applying this device's own unchanged document is a
+        // no-op.
         for (remote in fetchedHighlights) {
-            if (remote.deviceId == deviceId || bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
+            if (bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
             val local = highlightRepository.getHighlight(remote.id)
             when {
                 remote.isDeleted -> if (local != null && !local.isDeleted) highlightRepository.deleteHighlight(
@@ -672,7 +670,7 @@ class SyncEngine(
         }
 
         for (remote in fetchedNotes) {
-            if (remote.deviceId == deviceId || bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
+            if (bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
             val local = noteRepository.getNote(remote.id)
             when {
                 remote.isDeleted -> if (local != null && !local.isDeleted) noteRepository.deleteNote(
@@ -686,7 +684,7 @@ class SyncEngine(
         }
 
         for (remote in fetchedBookmarks) {
-            if (remote.deviceId == deviceId || bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
+            if (bookRepository.getBook(resolveLocalBookId(remote.bookId)) == null) continue
             val local = bookmarkRepository.getBookmark(remote.id)
             when {
                 remote.isDeleted -> if (local != null && !local.isDeleted) bookmarkRepository.deleteBookmark(
