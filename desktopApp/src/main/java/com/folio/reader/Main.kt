@@ -695,7 +695,8 @@ fun main(args: Array<String>) {
                                     initialSettings = globalSettings,
                                     onBackPress = { popScreen() },
                                     onSearchClick = { pushScreen(Screen.Search) },
-                                    onSettingsClick = { pushScreen(Screen.Settings) }
+                                    onSettingsClick = { pushScreen(Screen.Settings) },
+                                    onSettingsChanged = { globalSettings = it }
                                 )
 
                                 is Screen.Settings -> {
@@ -905,7 +906,8 @@ private fun ReaderRoute(
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {}
 ) {
     val viewModel = remember {
         ReaderViewModel(
@@ -1010,7 +1012,7 @@ private fun ReaderRoute(
         onSettingsClick = {
             viewModel.closeBook { onSettingsClick() }
         },
-        onSettingsChange = { updated -> viewModel.updateSettings(updated) },
+        onSettingsChange = { updated -> onSettingsChanged(updated); viewModel.updateSettings(updated) },
         onToggleControls = { viewModel.toggleControls() },
         onToggleToc = { viewModel.toggleToc() },
         onToggleAnnotations = { viewModel.toggleAnnotations() },

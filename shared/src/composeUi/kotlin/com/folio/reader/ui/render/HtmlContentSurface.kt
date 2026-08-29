@@ -25,7 +25,8 @@ expect fun HtmlContentSurface(
     onChapterEnd: () -> Unit = {},
     onTap: () -> Unit = {},
     onLinkClick: ((String) -> Unit)?,
-    onResolveResource: suspend (chapterHref: String, src: String) -> String?
+    onResolveResource: suspend (chapterHref: String, src: String) -> String?,
+    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null
 )
 
 /**

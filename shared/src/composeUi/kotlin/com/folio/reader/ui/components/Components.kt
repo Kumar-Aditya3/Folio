@@ -72,33 +72,33 @@ fun Modifier.glassPanel(shape: Shape): Modifier {
     val luminance = colors.background.red * 0.2126f + colors.background.green * 0.7152f + colors.background.blue * 0.0722f
     return if (luminance < 0.45f) {
         this
-            .background(colors.surface.copy(alpha = 0.78f), shape)
+            .background(colors.surface.copy(alpha = 0.72f), shape)
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.10f),
-                        Color.Transparent,
+                        Color.White.copy(alpha = 0.06f),
+                        Color.White.copy(alpha = 0.02f),
                         Color.White.copy(alpha = 0.04f)
                     )
                 ),
                 shape = shape
             )
-            .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
             .clip(shape)
     } else {
         this
-            .background(Color.White.copy(alpha = 0.58f), shape)
+            .background(Color.White.copy(alpha = 0.66f), shape)
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.72f),
-                        Color.White.copy(alpha = 0.28f),
-                        Color.White.copy(alpha = 0.42f)
+                        Color.White.copy(alpha = 0.20f),
+                        Color.White.copy(alpha = 0.06f),
+                        Color.White.copy(alpha = 0.12f)
                     )
                 ),
                 shape = shape
             )
-            .border(1.dp, Color.Black.copy(alpha = 0.08f), shape)
+            .border(1.dp, Color.Black.copy(alpha = 0.10f), shape)
             .clip(shape)
     }
 }
