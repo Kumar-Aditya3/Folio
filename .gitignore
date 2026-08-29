@@ -43,11 +43,13 @@ google-services.json
 local.properties
 gradle.properties.local
 
-# Folio local data
-folio-data/
-library/
-database/
-thumbnails/
+# Folio local data generated at the repository root. The app's actual store is
+# ~/.folio, outside the repo; these must stay root-anchored or they swallow the
+# com.folio.reader.database and ui.library source packages.
+/folio-data/
+/library/
+/database/
+/thumbnails/
 /fonts/
 settings.json
 

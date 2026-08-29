@@ -701,8 +701,11 @@ class SyncEngine(
     }
 
     private suspend fun applyRemoteSessions() {
+        val measuredFrom = ReadingSession.FIRST_MEASURED_SESSION.toEpochMilliseconds()
         for (remote in fetchedSessions) {
             if (remote.deviceId == deviceId || remote.isActive) continue
+            // Another device's pre-fix history is just as unmeasured as this one's was.
+            if (remote.startedAt < measuredFrom) continue
             val targetBookId = resolveLocalBookId(remote.bookId)
             if (bookRepository.getBook(targetBookId) == null) continue
             val known = sessionRepository.getSessionsForBook(targetBookId).first().firstOrNull { it.id == remote.id }

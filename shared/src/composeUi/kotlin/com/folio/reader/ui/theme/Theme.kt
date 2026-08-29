@@ -82,6 +82,72 @@ val DarkFolioColors = FolioColors(
 )
 
 /**
+ * Chrome-only neutrals. Each app palette overrides background/surface/outline and
+ * leaves the accent alone, so switching the app theme changes the room the app is in
+ * without changing its identity — and never touches the page, which has its own
+ * theme entirely.
+ */
+private val WarmFolioColors = LightFolioColors.copy(
+    background = Color(0xFFFAF7F2),
+    onBackground = Color(0xFF2B2622),
+    surface = Color(0xFFFFFDFA),
+    onSurface = Color(0xFF2B2622),
+    surfaceVariant = Color(0xFFF1EAE1),
+    onSurfaceVariant = Color(0xFF6B6157),
+    surfaceContainerHighest = Color(0xFFE7DED3),
+    outline = Color(0xFFD8CEC2),
+    outlineVariant = Color(0xFFE7DED3),
+    inverseSurface = Color(0xFF2B2622),
+    inverseOnSurface = Color(0xFFFAF7F2)
+)
+
+private val MidnightFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF0B1220),
+    onBackground = Color(0xFFDCE3EF),
+    surface = Color(0xFF131C2E),
+    onSurface = Color(0xFFDCE3EF),
+    surfaceVariant = Color(0xFF1B263C),
+    onSurfaceVariant = Color(0xFF93A1B8),
+    surfaceContainerHighest = Color(0xFF24334D),
+    primaryContainer = Color(0xFF1E2A40),
+    secondaryContainer = Color(0xFF1B263C),
+    outline = Color(0xFF33425C),
+    outlineVariant = Color(0xFF24334D),
+    inverseSurface = Color(0xFFDCE3EF),
+    inverseOnSurface = Color(0xFF131C2E)
+)
+
+private val OledFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF000000),
+    surface = Color(0xFF0C0C0C),
+    surfaceVariant = Color(0xFF161616),
+    surfaceContainerHighest = Color(0xFF1E1E1E),
+    primaryContainer = Color(0xFF1A1D24),
+    secondaryContainer = Color(0xFF17181B),
+    tertiaryContainer = Color(0xFF121A18),
+    outline = Color(0xFF2A2A2A),
+    outlineVariant = Color(0xFF1A1A1A)
+)
+
+/** The app's own selectable chrome themes, entirely separate from [Theme]. */
+enum class AppPalette(
+    val id: String,
+    val label: String,
+    val isDark: Boolean,
+    val colors: FolioColors
+) {
+    LIGHT("light", "Light", false, LightFolioColors),
+    WARM("warm", "Warm", false, WarmFolioColors),
+    DARK("dark", "Dark", true, DarkFolioColors),
+    MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
+    OLED("oled", "Black", true, OledFolioColors);
+
+    companion object {
+        fun byId(id: String): AppPalette = entries.firstOrNull { it.id == id } ?: LIGHT
+    }
+}
+
+/**
  * The type scale. Two faces only: Fraunces for the display voice (wordmark, book
  * titles, screen headers, stat numbers, quotations) and Manrope for everything
  * functional. Sizes and line heights are unchanged from the previous scale, so this
@@ -251,34 +317,17 @@ object FolioTheme {
         }
     }
 
-    /** Build FolioColors from a reader Theme (ARGB ints). */
-    fun fromReaderTheme(
-        background: Int,
-        surface: Int,
-        primaryText: Int,
-        secondaryText: Int,
-        link: Int,
-        accent: Int,
-        divider: Int,
-        isDark: Boolean
-    ): FolioColors {
-        fun c(argb: Int) = Color(argb)
-        val base = if (isDark) DarkFolioColors else LightFolioColors
-        return base.copy(
-            primary = c(accent),
-            onPrimary = c(background),
-            background = c(background),
-            onBackground = c(primaryText),
-            surface = c(surface),
-            onSurface = c(primaryText),
-            surfaceVariant = c(divider),
-            onSurfaceVariant = c(secondaryText),
-            outline = c(divider),
-            outlineVariant = c(divider),
-            inverseSurface = c(primaryText),
-            inverseOnSurface = c(background),
-            inversePrimary = c(accent)
-        )
+    /**
+     * The app's own chrome theme, chosen by [AppPalette].
+     *
+     * A reading theme describes the page: paper colour, text colour, typeface. It is
+     * a per-book reading decision and must not leak into the app, and equally the app
+     * must not repaint the page. Every surface that is not book text — library,
+     * settings, reader bars, panels and the in-page overlays — comes from here.
+     */
+    @Composable
+    fun AppTheme(palette: AppPalette, content: @Composable () -> Unit) {
+        MaterialTheme(darkTheme = palette.isDark, colors = palette.colors, content = content)
     }
 }
 

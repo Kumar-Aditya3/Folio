@@ -115,37 +115,38 @@ data class ReadingSession(
             return wordsRead / durationMinutes
         }
 
+    companion object {
+        /**
+         * Sessions started before this instant recorded the gap between opening and
+         * closing a book rather than reading time, so their durations are unusable —
+         * the desktop database held single "sessions" of 45 hours. Anything older is
+         * discarded locally and refused on sync. 2026-08-29T11:45:00Z.
+         */
+        val FIRST_MEASURED_SESSION: Instant = Instant.fromEpochMilliseconds(1_788_003_900_000L)
+    }
+
+    /**
+     * Closes the session with [totalActiveMs] — milliseconds of demonstrable reading,
+     * measured by the reader — as its final length.
+     *
+     * Wall-clock is deliberately not consulted. The span between opening a book and
+     * closing it contains every phone call, every backgrounded hour and every night
+     * the app was simply left on, and counting that as reading is what made the
+     * statistic worthless.
+     */
     fun end(
         endPos: ReadingPosition,
         endProgress: Double,
-        wordsRead: Long
+        wordsRead: Long,
+        totalActiveMs: Long
     ): ReadingSession {
-        val now = Clock.System.now()
         return copy(
-            endedAt = now,
-            durationMs = (now.toEpochMilliseconds() - startedAt.toEpochMilliseconds()),
+            endedAt = Clock.System.now(),
+            durationMs = totalActiveMs,
             endPosition = endPos,
             endProgress = endProgress,
             wordsRead = wordsRead,
             isActive = false
-        )
-    }
-
-    fun pause(): ReadingSession {
-        val now = Clock.System.now()
-        return copy(
-            endedAt = now,
-            durationMs = (now.toEpochMilliseconds() - startedAt.toEpochMilliseconds()),
-            isActive = false
-        )
-    }
-
-    fun resume(newStartPosition: ReadingPosition): ReadingSession {
-        return copy(
-            endedAt = null,
-            startPosition = newStartPosition,
-            startProgress = newStartPosition.normalizedProgress,
-            isActive = true
         )
     }
 }

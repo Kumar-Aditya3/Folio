@@ -291,17 +291,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val appPalette = com.folio.reader.settings.Theme.PRESETS[globalSettings.themeId]
-                ?: if (globalSettings.appDarkTheme) com.folio.reader.settings.Theme.PRESETS.getValue("dark")
-                else com.folio.reader.settings.Theme.PRESETS.getValue("paper")
-            FolioTheme.MaterialTheme(
-                darkTheme = appPalette.isDark,
-                colors = FolioTheme.fromReaderTheme(
-                    appPalette.background, appPalette.surface, appPalette.primaryText,
-                    appPalette.secondaryText, appPalette.link, appPalette.progress,
-                    appPalette.divider, appPalette.isDark
-                )
-            ) {
+            // The app chrome follows the app's own light/dark choice. A reading theme
+            // describes the page and nothing else — feeding themeId in here is what
+            // made the two bleed into each other.
+            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
@@ -423,11 +416,9 @@ class MainActivity : ComponentActivity() {
                                 viewModel = remember {
                                     StatisticsViewModel(
                                         bookRepository = graph.bookRepository,
-                                        sessionRepository = graph.sessionRepository,
-                                        statisticsRepository = graph.statisticsRepository
+                                        sessionRepository = graph.sessionRepository
                                     )
                                 },
-                                deviceId = graph.deviceId,
                                 onBackPress = { popScreen() },
                                 onBookClick = { bookId ->
                                     appScope.launch(Dispatchers.IO) {

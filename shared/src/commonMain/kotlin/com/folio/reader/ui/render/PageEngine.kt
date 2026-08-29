@@ -197,28 +197,36 @@ function relayout(){
 }
 window.__folioRelayout=function(){dirty=true;relayout();};
 window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll();body.style.opacity='1';report();};
-// Target grammar: "h:<markId>[:<paragraph>]" lands on a painted highlight,
-// "p:<paragraph>" on the Nth paragraph.
+// Target grammar: "h:<markId>[:<paragraph>[:<fraction>]]" lands on a painted
+// highlight, "p:<paragraph>" on the Nth paragraph. A missing mark must never
+// degrade to paragraph 0 — that reads as "the jump took me to the chapter top".
 function folioTargetEl(t){
-  var parts=String(t).split(':'),el=null;
-  if(parts[0]==='h'&&parts[1]){el=document.querySelector('[data-folio-hl=\"'+parts[1]+'\"]');}
+  var parts=String(t).split(':'),isH=parts[0]==='h',el=null;
+  var id=isH?(parts[1]||''):'';
+  if(id){try{el=document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){el=null;}}
   if(!el){
-    var pi=parts[0]==='h'?parts[2]:parts[1];
+    var pi=isH?parts[2]:parts[1];
+    if(pi===undefined||pi==='')return null;
+    var i=parseInt(pi,10);if(isNaN(i))return null;
     var ps=document.querySelectorAll('p');if(!ps.length)return null;
-    var i=parseInt(pi,10);if(isNaN(i))i=0;
     el=ps[Math.min(Math.max(0,i),ps.length-1)];
   }
   return el;
 }
-window.__folioSeekTo=function(t){
+function folioLandEl(el){
   if(dirty)layout();
-  var el=folioTargetEl(t);if(!el)return;
   var x=el.getBoundingClientRect().left+(body.scrollLeft||0);
   var col=Math.floor((x+8)/colW());
   var y=el.getBoundingClientRect().top;
   if(y<0||y>pageH())col+=Math.floor(Math.abs(y)/pageH())*(y<0?-1:1);
   var tt=Math.min(maxPage(),Math.floor(col/COLS));
   posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll();body.style.opacity='1';report();
+}
+window.__folioSeekTo=function(t){
+  var parts=String(t).split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
+  var el=folioTargetEl(t);
+  if(el){folioLandEl(el);return;}
+  if(!isNaN(f))window.__folioSeek(f);
 };
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 

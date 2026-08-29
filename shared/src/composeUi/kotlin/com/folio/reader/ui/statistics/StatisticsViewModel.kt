@@ -2,212 +2,183 @@ package com.folio.reader.ui.statistics
 
 import com.folio.reader.database.BookRepository
 import com.folio.reader.database.ReadingSessionRepository
-import com.folio.reader.database.StatisticsRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.ReadingSession
-import com.folio.reader.statistics.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
-import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.todayIn
 
+/** A single day of reading, used by both the week chart and the activity heatmap. */
+data class StatDay(val date: LocalDate, val minutes: Long)
+
+/** A book still being read, reduced to what the list needs to show. */
+data class ReadingInProgress(
+    val id: String,
+    val title: String,
+    val author: String,
+    val progress: Float
+)
+
+/**
+ * Every number the statistics screen renders, computed in one pass.
+ *
+ * The window is deliberately bounded by [StatisticsViewModel.historyDays]: streaks,
+ * heatmaps and averages all need a fixed span to be comparable, and an unbounded
+ * "all time" query grows with the library for no visible benefit.
+ */
+data class StatisticsUiState(
+    val hasData: Boolean = false,
+    val timeThisWeekMs: Long = 0,
+    val timeThisYearMs: Long = 0,
+    val streakDays: Int = 0,
+    val longestStreakDays: Int = 0,
+    val activeDaysThisWeek: Int = 0,
+    val sessionsThisWeek: Int = 0,
+    val wordsReadThisYear: Long = 0,
+    val averageSessionMinutes: Double = 0.0,
+    val averageSpeedWpm: Double = 0.0,
+    val mostReadDay: String = "",
+    val mostReadHour: String = "",
+    val booksFinished: Int = 0,
+    val booksInProgress: Int = 0,
+    val sourceDevices: Int = 0,
+    val week: List<StatDay> = emptyList(),
+    val heatmap: List<StatDay> = emptyList(),
+    val currentlyReading: List<ReadingInProgress> = emptyList()
+)
+
 class StatisticsViewModel(
     private val bookRepository: BookRepository,
-    private val sessionRepository: ReadingSessionRepository,
-    private val statisticsRepository: StatisticsRepository
+    private val sessionRepository: ReadingSessionRepository
 ) {
-    private fun today(): LocalDate = Clock.System.todayIn(TimeZone.currentSystemDefault())
-    fun getDashboardData(deviceId: String): Flow<DashboardData> {
-        return combine(
-            bookRepository.getCurrentlyReading(),
-            bookRepository.getFinishedBooks(),
-            statisticsRepository.getDailyStats(deviceId, today().minus(DatePeriod(days = 7)))
-        ) { currentlyReading, finished, dailyStats ->
-            val totalReadingTime = dailyStats.sumOf { it.readingTimeMs }
-            val totalBooksFinished = finished.size
-            val currentStreak = calculateStreak(dailyStats)
-
-            DashboardData(
-                continueReading = currentlyReading.firstOrNull(),
-                currentlyReading = currentlyReading,
-                recentlyFinished = finished.take(5),
-                thisWeekStats = WeeklyStatistics(
-                    weekStart = today().minus(DatePeriod(days = 7)),
-                    readingTimeMs = totalReadingTime,
-                    wordsRead = dailyStats.sumOf { it.wordsRead },
-                    sessionsCount = dailyStats.sumOf { it.sessionCount },
-                    booksFinished = dailyStats.sumOf { it.booksRead },
-                    dailyStats = dailyStats
-                ),
-                totalReadingTimeMs = totalReadingTime,
-                totalBooksFinished = totalBooksFinished,
-                currentStreak = currentStreak
-            )
-        }
+    companion object {
+        /** Days of history pulled into every calculation. */
+        const val historyDays = 365
+        /** Weeks of activity drawn in the heatmap. */
+        const val heatmapWeeks = 18
+        private val dayNames = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     }
 
-    fun getBookStatistics(bookId: String): Flow<BookStatistics?> {
-        // Custom flow from repository
-        return kotlinx.coroutines.flow.flow { }
-    }
+    private val timeZone: TimeZone get() = TimeZone.currentSystemDefault()
+    private fun today(): LocalDate = Clock.System.todayIn(timeZone)
 
-    fun getHeatmapData(deviceId: String, year: Int): Flow<List<HeatmapDay>> {
-        return statisticsRepository.getHeatmapData(deviceId, year)
-    }
+    /**
+     * Reading sessions are synced across devices, so the history here is the whole
+     * account's, not this handset's — which is the point of showing it.
+     */
+    val state: Flow<StatisticsUiState> = combine(
+        sessionRepository.observeSessionsSince(
+            today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
+        ),
+        bookRepository.getCurrentlyReading(),
+        bookRepository.getFinishedBooks()
+    ) { sessions, inProgress, finished -> buildState(sessions, inProgress, finished) }
 
-    fun getReadingPatterns(deviceId: String): Flow<ReadingPatterns> {
-        return statisticsRepository.getDailyStats(deviceId, today().minus(DatePeriod(days = 365))).map { dailyStats ->
-            val allSessions = dailyStats.flatMap { it.sessions }
-            val sessionDurations = allSessions.map { it.durationMs }.sorted()
-            val readingSpeeds = allSessions.mapNotNull { it.wordsPerMinute }
+    private fun buildState(
+        sessions: List<ReadingSession>,
+        inProgress: List<Book>,
+        finished: List<Book>
+    ): StatisticsUiState {
+        val today = today()
+        val weekStart = today.minus(DatePeriod(days = 6))
+        val yearStart = today.minus(DatePeriod(days = historyDays - 1))
 
-            ReadingPatterns(
-                averageSessionMinutes = if (sessionDurations.isNotEmpty()) sessionDurations.average() / 60000.0 else 0.0,
-                medianSessionMinutes = if (sessionDurations.isNotEmpty()) sessionDurations[sessionDurations.size / 2] / 60000.0 else 0.0,
-                averageReadingSpeedWpm = if (readingSpeeds.isNotEmpty()) readingSpeeds.average() else 0.0,
-                longestStreakDays = calculateLongestStreak(dailyStats),
-                currentStreakDays = calculateStreak(dailyStats),
-                mostReadDayOfWeek = calculateMostReadDay(dailyStats),
-                mostReadHour = calculateMostReadHour(allSessions),
-                averageCompletionDays = 0.0,
-                averageTimePer100Pages = 0.0,
-                totalBooksRead = dailyStats.sumOf { it.booksRead },
-                totalReadingHours = dailyStats.sumOf { it.readingTimeMs } / 3_600_000.0
-            )
-        }
-    }
+        val minutesByDay = sessions
+            .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
+            .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
-    fun getReadingHistory(deviceId: String, days: Int = 30): Flow<List<ReadingHistoryEntry>> {
-        return statisticsRepository.getDailyStats(deviceId, today().minus(DatePeriod(days = days))).map { dailyStats ->
-            dailyStats.map { day ->
-                ReadingHistoryEntry(
-                    date = day.date,
-                    sessions = day.sessions.map { session ->
-                        session.toSessionSummary()
-                    }
-                )
+        // A day counts as read if it holds a session at all. Measured durations can
+        // legitimately round to zero on a short sitting, and treating that as "did not
+        // read" breaks a streak the reader actually earned.
+        val readDays = sessions.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }
+
+        val thisWeek = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= weekStart }
+        val thisYear = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= yearStart }
+        val timed = sessions.filter { it.durationMs > 0 }
+
+        return StatisticsUiState(
+            hasData = sessions.isNotEmpty(),
+            timeThisWeekMs = thisWeek.sumOf { it.durationMs },
+            timeThisYearMs = thisYear.sumOf { it.durationMs },
+            streakDays = currentStreak(readDays, today),
+            longestStreakDays = longestStreak(readDays),
+            activeDaysThisWeek = thisWeek.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }.size,
+            sessionsThisWeek = thisWeek.size,
+            wordsReadThisYear = thisYear.sumOf { it.wordsRead },
+            averageSessionMinutes = if (timed.isEmpty()) 0.0 else timed.sumOf { it.durationMs } / 60_000.0 / timed.size,
+            averageSpeedWpm = timed.mapNotNull { it.wordsPerMinute }.takeIf { it.isNotEmpty() }?.average() ?: 0.0,
+            mostReadDay = mostReadDay(minutesByDay),
+            mostReadHour = mostReadHour(sessions),
+            booksFinished = finished.size,
+            booksInProgress = inProgress.size,
+            sourceDevices = sessions.map { it.deviceId }.distinct().size,
+            week = (0..6).map { offset ->
+                val day = weekStart.plus(DatePeriod(days = offset))
+                StatDay(day, minutesByDay[day] ?: 0L)
+            },
+            heatmap = heatmapDays(minutesByDay, today),
+            currentlyReading = inProgress.map {
+                ReadingInProgress(it.id, it.displayTitle, it.displayAuthor, it.normalizedProgress.toFloat())
             }
-        }
+        )
     }
 
-    fun getYearlyStats(deviceId: String, year: Int): Flow<YearlyStatistics> {
-        val startDate = LocalDate(year, 1, 1)
-        return statisticsRepository.getDailyStats(deviceId, startDate).map { dailyStats ->
-            val monthly = mutableListOf<MonthlyStatistics>()
-            for (month in 1..12) {
-                val monthStart = LocalDate(year, month, 1)
-                val monthEnd = monthStart.plus(DatePeriod(months = 1))
-                val monthStats = dailyStats.filter { it.date >= monthStart && it.date < monthEnd }
-                val weekly = mutableListOf<WeeklyStatistics>()
-                var weekStart = monthStart
-                while (weekStart < monthEnd) {
-                    val weekEnd = weekStart.plus(DatePeriod(days = 7))
-                    val weekStats = monthStats.filter { it.date >= weekStart && it.date < weekEnd }
-                    weekly.add(WeeklyStatistics(
-                        weekStart = weekStart,
-                        readingTimeMs = weekStats.sumOf { it.readingTimeMs },
-                        wordsRead = weekStats.sumOf { it.wordsRead },
-                        sessionsCount = weekStats.sumOf { it.sessionCount },
-                        booksFinished = weekStats.sumOf { it.booksRead },
-                        dailyStats = weekStats
-                    ))
-                    weekStart = weekEnd
-                }
-                monthly.add(MonthlyStatistics(
-                    year = year,
-                    month = month,
-                    readingTimeMs = monthStats.sumOf { it.readingTimeMs },
-                    wordsRead = monthStats.sumOf { it.wordsRead },
-                    sessionsCount = monthStats.sumOf { it.sessionCount },
-                    booksFinished = monthStats.sumOf { it.booksRead },
-                    weeklyStats = weekly
-                ))
-            }
-            YearlyStatistics(
-                year = year,
-                readingTimeMs = dailyStats.sumOf { it.readingTimeMs },
-                wordsRead = dailyStats.sumOf { it.wordsRead },
-                sessionsCount = dailyStats.sumOf { it.sessionCount },
-                booksFinished = dailyStats.sumOf { it.booksRead },
-                monthlyStats = monthly
-            )
-        }
-    }
-
-    private fun calculateStreak(dailyStats: List<DailyStatistics>): Int {
+    /** Consecutive reading days ending today — or yesterday, if today hasn't started yet. */
+    private fun currentStreak(readDays: Set<LocalDate>, today: LocalDate): Int {
+        var day = if (today in readDays) today else today.minus(DatePeriod(days = 1))
         var streak = 0
-        var currentDate = today()
-        val statsMap = dailyStats.associateBy { it.date }
-
-        while (true) {
-            val stats = statsMap[currentDate]
-            if (stats != null && stats.readingTimeMs > 0) {
-                streak++
-                currentDate = currentDate.minus(DatePeriod(days = 1))
-            } else {
-                break
-            }
+        while (day in readDays) {
+            streak++
+            day = day.minus(DatePeriod(days = 1))
         }
         return streak
     }
 
-    private fun calculateLongestStreak(dailyStats: List<DailyStatistics>): Int {
+    private fun longestStreak(readDays: Set<LocalDate>): Int {
+        val days = readDays.sorted()
         var longest = 0
-        var current = 0
-        val statsMap = dailyStats.associateBy { it.date }
-        var currentDate = dailyStats.minByOrNull { it.date }?.date ?: today()
-        val endDate = today()
-
-        while (currentDate <= endDate) {
-            val stats = statsMap[currentDate]
-            if (stats != null && stats.readingTimeMs > 0) {
-                current++
-                longest = maxOf(longest, current)
-            } else {
-                current = 0
-            }
-            currentDate = currentDate.plus(DatePeriod(days = 1))
+        var run = 0
+        var previous: LocalDate? = null
+        for (day in days) {
+            run = if (previous != null && day == previous.plus(DatePeriod(days = 1))) run + 1 else 1
+            longest = maxOf(longest, run)
+            previous = day
         }
         return longest
     }
 
-    private fun calculateMostReadDay(dailyStats: List<DailyStatistics>): Int {
-        val dayTotals = mutableMapOf<Int, Long>()
-        for (day in dailyStats) {
-            val dow = day.date.dayOfWeek.ordinal + 1
-            dayTotals[dow] = dayTotals.getOrDefault(dow, 0L) + day.readingTimeMs
-        }
-        return dayTotals.maxByOrNull { it.value }?.key ?: -1
+    private fun mostReadDay(minutesByDay: Map<LocalDate, Long>): String {
+        if (minutesByDay.isEmpty()) return ""
+        val totals = LongArray(7)
+        minutesByDay.forEach { (day, minutes) -> totals[day.dayOfWeek.ordinal % 7] += minutes }
+        val best = totals.indices.maxByOrNull { totals[it] } ?: return ""
+        return if (totals[best] == 0L) "" else dayNames[best]
     }
 
-    private fun calculateMostReadHour(sessions: List<ReadingSession>): Int {
-        val hourTotals = mutableMapOf<Int, Long>()
-        for (session in sessions) {
-            val hour = session.startedAt.toLocalDateTime(TimeZone.currentSystemDefault()).hour
-            hourTotals[hour] = hourTotals.getOrDefault(hour, 0L) + session.durationMs
-        }
-        return hourTotals.maxByOrNull { it.value }?.key ?: -1
+    private fun mostReadHour(sessions: List<ReadingSession>): String {
+        val totals = LongArray(24)
+        sessions.forEach { totals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs }
+        val best = totals.indices.maxByOrNull { totals[it] } ?: return ""
+        return if (totals[best] == 0L) "" else "%02d:00".format(best)
     }
-}
 
-fun ReadingSession.toSessionSummary(): com.folio.reader.statistics.SessionSummary {
-    return com.folio.reader.statistics.SessionSummary(
-        bookId = bookId,
-        bookTitle = "",
-        startTime = startedAt,
-        endTime = endedAt ?: Clock.System.now(),
-        durationMs = durationMs,
-        startProgress = startProgress,
-        endProgress = endProgress,
-        wordsRead = wordsRead,
-        position = startPosition
-    )
+    /** Monday-aligned weeks so the heatmap's columns read as calendar weeks. */
+    private fun heatmapDays(minutesByDay: Map<LocalDate, Long>, today: LocalDate): List<StatDay> {
+        val thisMonday = today.minus(DatePeriod(days = today.dayOfWeek.ordinal % 7))
+        var day = thisMonday.minus(DatePeriod(days = 7 * (heatmapWeeks - 1)))
+        val out = ArrayList<StatDay>(heatmapWeeks * 7)
+        while (day <= today) {
+            out.add(StatDay(day, minutesByDay[day] ?: 0L))
+            day = day.plus(DatePeriod(days = 1))
+        }
+        return out
+    }
 }

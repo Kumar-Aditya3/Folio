@@ -29,13 +29,13 @@ object OverlayUi {
         .replace('\r', ' ')
 
     private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300, kind: String = ""): String {
-        val tint = if (c.isDark) "rgba(16,16,22,0.55)" else "rgba(250,248,242,0.52)"
-        val hairline = if (c.isDark) "rgba(255,255,255,0.22)" else "rgba(0,0,0,0.14)"
-        val hi = if (c.isDark) "rgba(255,255,255,0.10)" else "rgba(255,255,255,0.55)"
+        val tint = if (c.isDark) "rgba(16,16,22,0.48)" else "rgba(250,248,242,0.45)"
+        val hairline = if (c.isDark) "rgba(255,255,255,0.26)" else "rgba(0,0,0,0.16)"
+        val hi = if (c.isDark) "rgba(255,255,255,0.13)" else "rgba(255,255,255,0.60)"
         return """
 <div data-act="close" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483500;"></div>
 <div data-kind="$kind" style="position:fixed;top:0;right:0;bottom:0;width:${width}px;max-width:88vw;z-index:2147483501;
- background:$tint;backdrop-filter:blur(26px) saturate(1.8);-webkit-backdrop-filter:blur(26px) saturate(1.8);
+ background:$tint;backdrop-filter:blur(32px) saturate(2.0);-webkit-backdrop-filter:blur(32px) saturate(2.0);
  border-left:1px solid $hairline;color:${c.fg};font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;
  box-shadow:-18px 0 60px rgba(0,0,0,0.45), inset 1px 1px 0 $hi;
  display:flex;flex-direction:column;">

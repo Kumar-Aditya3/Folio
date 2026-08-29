@@ -84,6 +84,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.TextAlignment
 import com.folio.reader.settings.TextWidth
 import com.folio.reader.ui.components.DropdownMenuButton
+import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.components.systemFontFamily
 import com.folio.reader.ui.theme.FolioTheme
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -295,35 +296,29 @@ fun GeneralSettingsPanel(
     ) {
         Text("General Settings", style = MaterialTheme.typography.titleLarge)
 
-        // App theme toggle
-        Row(
+        // App theme — the chrome's own palette, deliberately unrelated to the page.
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Dark theme", style = MaterialTheme.typography.bodyLarge)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("App theme", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Apply dark theme to app UI (reader themes configured separately)",
+                    "Colours the app's screens, bars and panels — including the reader's " +
+                        "contents, annotations and settings popups. The page itself is " +
+                        "themed separately under Themes.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
-                checked = settings.appDarkTheme,
-                onCheckedChange = { onSettingsChange(settings.copy(appDarkTheme = it)) }
-            )
-        }
-
-        Text("App color palette", style = MaterialTheme.typography.bodyLarge)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(listOf("paper", "sepia", "nord_light", "dark", "oled_black", "solarized_dark")) { id ->
-                val theme = Theme.PRESETS.getValue(id)
-                FilterChip(
-                    selected = settings.themeId == id,
-                    onClick = { onSettingsChange(settings.copy(themeId = id, appDarkTheme = theme.isDark)) },
-                    label = { Text(theme.name) }
-                )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(AppPalette.entries.toList()) { palette ->
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = settings.appThemeId == palette.id,
+                        onClick = { onSettingsChange(settings.copy(appThemeId = palette.id)) },
+                        label = palette.label
+                    )
+                }
             }
         }
 
@@ -1083,26 +1078,57 @@ private fun SyncToggleRow(
 
 @Composable
 fun SettingsLivePreview(settings: ReaderSettings) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    val theme = settings.customTheme ?: Theme.getPreset(settings.themeId)
+    val fontFamily = systemFontFamily(settings.fontFamily)
+    val align = when (settings.alignment) {
+        TextAlignment.CENTER -> TextAlign.Center
+        TextAlignment.JUSTIFIED -> TextAlign.Justify
+        else -> TextAlign.Start
+    }
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(shape)
+            .background(Color(theme.background))
+            .border(1.dp, Color(theme.divider), shape)
+            .padding(
+                horizontal = settings.margins.left.coerceIn(0f, 28f).dp,
+                vertical = 18.dp
+            )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                "Live Preview",
-                style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+        Text(
+            text = "Chapter One",
+            style = TextStyle(
+                fontFamily = fontFamily,
+                fontSize = (settings.fontSize * 1.3f).sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = settings.letterSpacing.sp,
+                color = Color(theme.headingText),
+                textAlign = align
             )
-            Text(
-                "This is how your text will look with current settings.",
-                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "The reading room was quiet but for the rain, and the lamplight had " +
+                "made a small country of its own on the table, where the pages waited " +
+                "for someone to turn them.",
+            style = TextStyle(
+                fontFamily = fontFamily,
+                fontSize = settings.fontSize.sp,
+                lineHeight = (settings.fontSize * settings.lineHeight).sp,
+                fontWeight = FontWeight(settings.fontWeight),
+                letterSpacing = settings.letterSpacing.sp,
+                color = Color(theme.primaryText),
+                textAlign = align
             )
-            Text(
-                "Font: ${settings.fontFamily} • Size: ${settings.fontSize.toInt()}sp • Line Height: ${settings.lineHeight}",
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
-            )
-        }
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "${settings.fontFamily} · ${settings.fontSize.toInt()}sp · " +
+                "${"%.1f".format(settings.lineHeight)} line · ${theme.name}",
+            style = TextStyle(fontSize = 11.sp, color = Color(theme.secondaryText))
+        )
     }
 }
