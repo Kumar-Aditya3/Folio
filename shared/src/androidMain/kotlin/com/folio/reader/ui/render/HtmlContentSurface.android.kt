@@ -20,6 +20,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
+import kotlinx.serialization.builtins.serializer
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -37,19 +38,47 @@ actual fun HtmlContentSurface(
     onProgress: (Float) -> Unit,
     onPageChange: (Int, Int) -> Unit,
     onChapterEnd: () -> Unit,
+    onChapterStart: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
-    seekRequest: Pair<Float, Long>?
+    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)?,
+    clearSelectionRequest: Long?,
+    seekRequest: Pair<Float, Long>?,
+    seekTargetRequest: Pair<String, Long>?
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
+    val latestSelection by rememberUpdatedState(onSelectionChanged)
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // Paragraph seeks have to wait for the chapter they were requested for: running
+    // one against the page still on screen would move the previous chapter.
+    val pageState = remember { PageLoadState() }
     LaunchedEffect(seekRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
         wv.evaluateJavascript("window.__folioSeek&&window.__folioSeek(${req.first.coerceIn(0f, 1f)});", null)
+    }
+    LaunchedEffect(seekTargetRequest, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        val req = seekTargetRequest ?: return@LaunchedEffect
+        pageState.seekTo(req.first, wv)
+    }
+    LaunchedEffect(clearSelectionRequest, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (clearSelectionRequest == null || clearSelectionRequest == 0L) return@LaunchedEffect
+        wv.evaluateJavascript("window.__folioClearSel&&window.__folioClearSel();", null)
+    }
+    // Adding or removing a highlight re-runs the painter on the page that is
+    // already up — reloading the chapter here would flash the whole screen.
+    LaunchedEffect(highlights, settings.themeId, settings.customTheme, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        val theme = settings.customTheme
+            ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        wv.evaluateJavascript(
+            HighlightPaint.applyJs(highlights, theme), null
+        )
     }
     val content = remember(html, settings, chapterHref, position, highlights) {
         injectReaderCss(html, settings)
@@ -98,6 +127,7 @@ actual fun HtmlContentSurface(
     val latestProgress by rememberUpdatedState(onProgress)
     val latestPage by rememberUpdatedState(onPageChange)
     val latestEnd by rememberUpdatedState(onChapterEnd)
+    val latestStart by rememberUpdatedState(onChapterStart)
     val latestLink by rememberUpdatedState(onLinkClick)
     val client = remember(chapterHref, onResolveResource, resourceCache) {
         object : WebViewClient() {
@@ -110,6 +140,7 @@ actual fun HtmlContentSurface(
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 view.getSettings().javaScriptEnabled = true
+                pageState.loading()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
@@ -118,17 +149,17 @@ actual fun HtmlContentSurface(
                 pendingJs?.let { js ->
                     view.evaluateJavascript(js, null)
                 }
+                pageState.markReady(view)
             }
         }
     }
-    val progressBridge = remember(onProgress, onPageChange, onChapterEnd) {
+    val progressBridge = remember(onProgress, onPageChange) {
         object {
             @JavascriptInterface
-            fun report(fraction: Float, current: Int, total: Int, userCrossed: Boolean) {
+            fun report(fraction: Float, current: Int, total: Int) {
                 mainHandler.post {
                     onProgress(fraction.coerceIn(0f, 1f))
                     onPageChange(current.coerceAtLeast(1), total.coerceAtLeast(1))
-                    if (userCrossed && fraction >= 0.995f) onChapterEnd()
                 }
             }
         }
@@ -163,21 +194,27 @@ actual fun HtmlContentSurface(
 
                     t.startsWith("folio-tap:") -> mainHandler.post { currentTapHandler.value() }
 
+                    t.startsWith("folio-edge:end:") -> mainHandler.post { latestEnd() }
+
+                    t.startsWith("folio-edge:start:") -> mainHandler.post { latestStart() }
+
+                    t.startsWith("folio-selclear:") -> mainHandler.post { latestSelection?.invoke(0, null) }
+
                     t.startsWith("folio-sel:") -> {
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')
                         val text = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
-                        if (!text.isNullOrBlank()) mainHandler.post { latestHighlight?.invoke(idx, text) }
+                        mainHandler.post { latestSelection?.invoke(idx, text?.takeIf { it.isNotBlank() }) }
                     }
                 }
             }
         }
     }
-    AndroidView(
+    AndroidView<ReaderWebView>(
         modifier = modifier,
         factory = { context ->
-            WebView(context).apply {
+            ReaderWebView(context).apply {
                 getSettings().javaScriptEnabled = true
                 getSettings().domStorageEnabled = true
                 getSettings().allowFileAccess = true
@@ -227,12 +264,15 @@ actual fun HtmlContentSurface(
                 // Paged modes run the shared book engine (discrete pages + leaf
                 // flip, progress via the title protocol); continuous keeps the
                 // layout-aware scrolling measurement below.
-                val js = if (pagedCols > 0) {
+                val baseJs = if (pagedCols > 0) {
                     PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
                 } else """(function(){
-                            var paginated=false,scheduled=false,last=0,userCrossed=false,nonce=0;
-                            window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));userCrossed=true;schedule();};
-                            ${PageEngine.selectionButtonJs}
+                            var paginated=false,scheduled=false,last=0,nonce=0,maxTotal=1;
+                            function atBottom(){var s=document.scrollingElement||document.documentElement;return s.scrollTop+s.clientHeight>=s.scrollHeight-2;}
+                            window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));schedule();};
+                            window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+                            window.__folioSeekTo=function(t){var parts=String(t).split(':'),el=null;if(parts[0]==='h'&&parts[1]){el=document.querySelector('[data-folio-hl="'+parts[1]+'"]');}if(!el){var pi=parts[0]==='h'?parts[2]:parts[1];var ps=document.querySelectorAll('p');if(!ps.length)return;var n=parseInt(pi,10);if(isNaN(n))n=0;el=ps[Math.min(Math.max(0,n),ps.length-1)];}if(!el)return;el.scrollIntoView({block:'start'});schedule();};
+                            ${PageEngine.selectionWatchJs}
                             function report(){
                                 scheduled=false;
                                 var now=Date.now();
@@ -246,13 +286,24 @@ actual fun HtmlContentSurface(
                                 var range=paginated?Math.max(0,docWidth-vw):Math.max(0,docHeight-vh);
                                 var offset=paginated? (scroller.scrollLeft || window.scrollX) : (scroller.scrollTop || window.scrollY);
                                 var total=paginated?Math.max(1,Math.ceil(docWidth/vw)):Math.max(1,Math.ceil(docHeight/vh));
+                                if(total>maxTotal)maxTotal=total;else total=maxTotal;
                                 var current=paginated?Math.min(total,Math.floor(offset/vw)+1):Math.min(total,Math.floor(offset/vh)+1);
-                                FolioReader.report(range>0?Math.min(1,offset/range):0,current,total,userCrossed);
+                                FolioReader.report(range>0?Math.min(1,offset/range):0,current,total);
                             }
                             function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(report);}}
-                            window.addEventListener('touchmove',function(){userCrossed=true},{passive:true});
-                            window.addEventListener('wheel',function(){userCrossed=true},{passive:true});
-                            window.addEventListener('scroll',schedule,{passive:true});
+                            var lastEdgeHop=0;
+                            function edge(which){
+                              var now=Date.now();
+                              if(now-lastEdgeHop<600)return;
+                              lastEdgeHop=now;
+                              document.title='folio-edge:'+which+':'+(++nonce);
+                            }
+                            function atTop(){return ((document.scrollingElement||document.documentElement).scrollTop||0)<=1;}
+                            var lastY=0;
+                            window.addEventListener('touchstart',function(e){var t=e.touches&&e.touches[0];lastY=t?t.clientY:0;},{passive:true});
+                            window.addEventListener('touchmove',function(e){var t=e.touches&&e.touches[0];if(!t)return;var dy=t.clientY-lastY;lastY=t.clientY;if(dy>16&&atTop())edge('start');if(dy<-16&&atBottom())edge('end');},{passive:true});
+                            window.addEventListener('wheel',function(e){var d=e.deltaY||0;if(d<0&&atTop())edge('start');if(d>0&&atBottom())edge('end');},{passive:true});
+                            window.addEventListener('scroll',function(){schedule();clearTimeout(window.__folioSettleT);window.__folioSettleT=setTimeout(schedule,180);},{passive:true});
                             window.addEventListener('resize',schedule);
                             window.addEventListener('load',schedule);
                             if(window.ResizeObserver){new ResizeObserver(schedule).observe(document.documentElement); if(document.body) new ResizeObserver(schedule).observe(document.body);}
@@ -263,6 +314,9 @@ actual fun HtmlContentSurface(
                             document.querySelectorAll('img').forEach(function(img){img.addEventListener('load',schedule);img.addEventListener('error',schedule);});
                             schedule();setTimeout(schedule,250);setTimeout(schedule,600);setTimeout(schedule,1000);setTimeout(schedule,1800);
                         })();"""
+                val theme = settings.customTheme
+                    ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+                val js = baseJs + HighlightPaint.js(highlights, theme)
                 pendingJs = js
                 pendingFraction = fraction
                 webView.loadDataWithBaseURL("file:///folio/$chapterHref", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
@@ -278,6 +332,47 @@ actual fun HtmlContentSurface(
             }
         }
     )
+}
+
+/**
+ * WebView that never opens the floating text-selection toolbar. Folio shows its own
+ * Highlight button for a selection; Android's Copy/Share bar landing on top of it
+ * (and on top of the page) read as clutter. Selection and handles still work.
+ */
+private class ReaderWebView(context: android.content.Context) : WebView(context) {
+    override fun startActionMode(callback: android.view.ActionMode.Callback?): android.view.ActionMode? = null
+}
+
+/**
+ * Tracks whether a laid-out page is on screen, holding a paragraph jump until the
+ * chapter it was requested against is the one being shown.
+ */
+private class PageLoadState {
+    private var pageReady = false
+    private var pending: String? = null
+
+    fun loading() {
+        pageReady = false
+    }
+
+    fun markReady(view: WebView) {
+        pageReady = true
+        pending?.let {
+            pending = null
+            evaluate(it, view)
+        }
+    }
+
+    fun seekTo(target: String, view: WebView) {
+        if (pageReady) evaluate(target, view) else pending = target
+    }
+
+    private fun evaluate(target: String, view: WebView) {
+        val literal = kotlinx.serialization.json.Json.encodeToString(
+            String.serializer(), target
+        )
+        view.evaluateJavascript("window.__folioSeekTo&&window.__folioSeekTo($literal);", null)
+    }
 }
 
 private fun resourceResponse(
@@ -358,13 +453,15 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
     // elements themselves so the theme's text is always readable.
     val elementForceCss = if (original) "" else
         "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:'$fontFamily',serif !important;}" +
-                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:'$fontFamily',serif !important;}"
+                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:'$fontFamily',serif !important;}" +
+                "body,body p,body div,body li,body blockquote{text-indent:0 !important;}"
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
             "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
             themeBgCss +
             "body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px$imp;" +
             "$typographyCss$alignCss$colorCss$hyphenCss}" +
             elementForceCss +
+            HighlightPaint.css +
             "$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()};}</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }

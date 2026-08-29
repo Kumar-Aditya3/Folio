@@ -3,6 +3,7 @@ package com.folio.reader.model
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Serializable
@@ -62,6 +63,31 @@ data class ReadingPosition(
 
     val chapterProgressPercent: Int
         get() = (chapterProgress * 100).roundToInt()
+}
+
+fun ReadingPosition.spotLocator(): String =
+    contentLocator.ifBlank { "/$spineIndex/f${(chapterProgress * 1000).roundToInt()}" }
+
+/** The per-mille chapter fraction of a locator step ("f423"), if it has one. */
+private fun String.fractionStep(): Float? {
+    val step = substringAfterLast('/').substringBefore(':').trimEnd(')')
+    if (!step.startsWith("f")) return null
+    return step.substring(1).toIntOrNull()?.div(1000f)
+}
+
+/** Fraction a locator without a paragraph step points at, as 0..1 of the chapter. */
+fun String.locatorFraction(): Float? = fractionStep()?.takeIf { it in 0f..1f }
+
+/**
+ * Whether two locators describe the same place. Fractions are rounded and the
+ * reader keeps moving between taps, so near-equal fractions count as a match.
+ */
+fun locatorsMatch(a: String?, b: String?): Boolean {
+    if (a == null || b == null) return a == b
+    if (a == b) return true
+    val fa = a.fractionStep() ?: return false
+    val fb = b.fractionStep() ?: return false
+    return abs(fa - fb) <= 0.005f
 }
 
 @Serializable

@@ -38,35 +38,34 @@ object PageEngine {
     }
 
     /**
-     * Floating "Highlight" button shown after the user selects text; reports
-     * folio-sel:<paragraphIndex>:<encodedText>:<nonce>. Assumes a `nonce` var in
-     * the surrounding IIFE. Embedded by all three page bridges (paged engine,
-     * desktop continuous bridge, Android continuous bridge).
+     * Selection watcher. The Highlight action used to float beside the selection,
+     * which is exactly where the OS selection toolbar lands — covered and untappable
+     * on phones — and it read as a foreign element on the page. The reader's own
+     * chrome owns the action now, so the page only reports the selection:
+     * folio-sel:<paragraphIndex>:<encodedText>:<nonce>, or folio-selclear:<nonce>.
+     * Assumes a `nonce` var in the surrounding IIFE; embedded by all three bridges
+     * (paged engine, desktop continuous, Android continuous).
      */
-    val selectionButtonJs: String = """
-function folioSelBtn(){
-  setTimeout(function(){
-    var old=document.getElementById('folio-selbtn');if(old&&old.parentNode)old.parentNode.removeChild(old);
-    var sel=window.getSelection();
-    if(!sel||sel.isCollapsed)return;
-    var text=(sel.toString()||'').trim();if(text.length<3)return;
-    var rg;try{rg=sel.getRangeAt(0).getBoundingClientRect();}catch(e){return;}
-    if(!rg||rg.width<=0)return;
-    var b=document.createElement('div');b.id='folio-selbtn';b.textContent='Highlight';
-    b.style.cssText='position:fixed;z-index:2147483400;left:'+Math.max(6,Math.min(window.innerWidth-104,rg.left+(rg.width-92)/2))+'px;top:'+Math.max(6,rg.top-42)+'px;padding:9px 16px;border-radius:12px;background:rgba(20,20,26,0.92);border:1px solid rgba(255,255,255,0.25);color:#fff;font:600 13px system-ui,sans-serif;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.5);';
-    b.onclick=function(e){e.stopPropagation();
-      var anchor=sel.anchorNode;var anchorEl=anchor&&(anchor.nodeType===1?anchor:anchor.parentElement);
-      var ps=document.querySelectorAll('p');var idx=0;
-      for(var i=0;i<ps.length;i++){if(ps[i]===anchorEl||ps[i].contains(anchorEl)){idx=i;break;}}
-      document.title='folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
-      if(b.parentNode)b.parentNode.removeChild(b);
-    };
-    document.documentElement.appendChild(b);
-    var hide=function(ev){var el=document.getElementById('folio-selbtn');if(!el)return;if(el.contains(ev.target))return;if(el.parentNode)el.parentNode.removeChild(el);document.removeEventListener('mousedown',hide,true);};
-    setTimeout(function(){document.addEventListener('mousedown',hide,true);},10);
-  },200);
+    val selectionWatchJs: String = """
+function folioReportSel(){
+  var sel=window.getSelection();
+  var text=sel?(sel.toString()||'').trim():'';
+  if(!sel||sel.isCollapsed||text.length<3){document.title='folio-selclear:'+(++nonce);return;}
+  // Read the paragraph now: a later tap collapses the selection and the anchor is gone.
+  var sc0=null;try{sc0=sel.getRangeAt(0).startContainer;}catch(e){return;}
+  var node=sc0?(sc0.nodeType===1?sc0:sc0.parentElement):null;
+  var idx=0,ps=document.querySelectorAll('p'),i;
+  if(node){
+    var p=null;for(var q=node;q;q=q.parentElement){if(q.tagName==='P'){p=q;break;}}
+    if(p){for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
+    else{var kids=document.body?document.body.children:[],blk=node;
+      while(blk&&blk.parentElement&&blk.parentElement!==document.body)blk=blk.parentElement;
+      for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}
+  }
+  document.title='folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
 }
-document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioSelBtn,600);});
+window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}catch(e){}};
+document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioReportSel,220);});
 """
 
     /** Pager + block layout + flip + input JS. [fraction] = saved 0..1 position, [cols] = pages per screen, [measure] = readable line width cap (0 = none). */
@@ -144,11 +143,23 @@ function layout(){
 function report(){
   var total=maxPage()+1;
   var p=maxPage()>0?page/maxPage():0;
-  var crossed=userActed&&page>=maxPage();
-  document.title='folio-progress:'+p.toFixed(4)+':'+(page+1)+':'+total+':'+crossed;
+  document.title='folio-progress:'+p.toFixed(4)+':'+(page+1)+':'+total+':false';
 }
 function setScroll(){body.scrollLeft=page*vw();}
+// Both edges work identically: pushing past the page you are on emits a token from
+// the gesture itself. The forward hop used to ride on the progress report, which only
+// reached the host if a scroll event happened to follow — and scrolling past the last
+// page produces none, so it silently never registered.
+var lastEdgeHop=0;
+function edge(which){
+  var now=Date.now();
+  if(now-lastEdgeHop<600)return;
+  lastEdgeHop=now;
+  document.title='folio-edge:'+which+':'+(++nonce);
+}
 function goTo(p,instant){
+  if(p<0&&page<=0){edge('start');return;}
+  if(p>maxPage()&&page>=maxPage()){edge('end');return;}
   p=Math.max(0,Math.min(maxPage(),p));
   if(p===page){setScroll();report();return;}
   if(animating)return;
@@ -185,7 +196,32 @@ function relayout(){
   report();
 }
 window.__folioRelayout=function(){dirty=true;relayout();};
-window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll();report();};
+window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll();body.style.opacity='1';report();};
+// Target grammar: "h:<markId>[:<paragraph>]" lands on a painted highlight,
+// "p:<paragraph>" on the Nth paragraph.
+function folioTargetEl(t){
+  var parts=String(t).split(':'),el=null;
+  if(parts[0]==='h'&&parts[1]){el=document.querySelector('[data-folio-hl=\"'+parts[1]+'\"]');}
+  if(!el){
+    var pi=parts[0]==='h'?parts[2]:parts[1];
+    var ps=document.querySelectorAll('p');if(!ps.length)return null;
+    var i=parseInt(pi,10);if(isNaN(i))i=0;
+    el=ps[Math.min(Math.max(0,i),ps.length-1)];
+  }
+  return el;
+}
+window.__folioSeekTo=function(t){
+  if(dirty)layout();
+  var el=folioTargetEl(t);if(!el)return;
+  var x=el.getBoundingClientRect().left+(body.scrollLeft||0);
+  var col=Math.floor((x+8)/colW());
+  var y=el.getBoundingClientRect().top;
+  if(y<0||y>pageH())col+=Math.floor(Math.abs(y)/pageH())*(y<0?-1:1);
+  var tt=Math.min(maxPage(),Math.floor(col/COLS));
+  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll();body.style.opacity='1';report();
+};
+window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+
 window.addEventListener('resize',function(){dirty=true;relayout();});
 window.addEventListener('load',function(){dirty=true;relayout();});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});
@@ -236,7 +272,7 @@ document.addEventListener('mouseup',function(e){
   handleTap(e.clientX,e.clientY,0,0);
 });
 layout();
-$selectionButtonJs
+$selectionWatchJs
 page=Math.round(posFrac*maxPage());
 setScroll();
 body.style.opacity='1';

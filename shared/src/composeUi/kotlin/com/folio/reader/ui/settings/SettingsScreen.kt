@@ -172,7 +172,13 @@ fun SettingsScreen(
                             }
                             }
                         }
-                        if (showPreview) {
+                        if (showPreview && selectedCategory in setOf(
+                                SettingsCategory.TYPOGRAPHY,
+                                SettingsCategory.LAYOUT,
+                                SettingsCategory.THEMES,
+                                SettingsCategory.FORMATTING
+                            )
+                        ) {
                             item { SettingsLivePreview(settings) }
                         }
                     }
@@ -246,7 +252,13 @@ fun SettingsScreen(
                                 }
                             }
                         }
-                        if (showPreview) {
+                        if (showPreview && selectedCategory in setOf(
+                                SettingsCategory.TYPOGRAPHY,
+                                SettingsCategory.LAYOUT,
+                                SettingsCategory.THEMES,
+                                SettingsCategory.FORMATTING
+                            )
+                        ) {
                             item { SettingsLivePreview(settings) }
                         }
                     }
@@ -814,9 +826,11 @@ fun AdvancedSettingsPanel(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Backup & Restore", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onExportBackup) { Text("Export backup") }
-                    OutlinedButton(onClick = onImportBackup) { Text("Import backup") }
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item { Button(onClick = onExportBackup) { Text("Export backup") } }
+                    item { OutlinedButton(onClick = onImportBackup) { Text("Import backup") } }
                 }
                 Text(
                     "Backups include your library metadata, reading progress, settings and annotations.",
@@ -836,10 +850,12 @@ fun AdvancedSettingsPanel(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Export Annotations", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onExportAnnotations("md") }) { Text("Markdown") }
-                    OutlinedButton(onClick = { onExportAnnotations("json") }) { Text("JSON") }
-                    OutlinedButton(onClick = { onExportAnnotations("csv") }) { Text("CSV") }
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item { OutlinedButton(onClick = { onExportAnnotations("md") }) { Text("Markdown") } }
+                    item { OutlinedButton(onClick = { onExportAnnotations("json") }) { Text("JSON") } }
+                    item { OutlinedButton(onClick = { onExportAnnotations("csv") }) { Text("CSV") } }
                 }
             }
         }

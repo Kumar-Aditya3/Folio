@@ -37,6 +37,18 @@ object BundledFonts {
     )
 
     /**
+     * The interface faces. Extracted next to the reader fonts so [UiFonts] can load
+     * them from a file, but deliberately kept out of [ALL]: they are app chrome
+     * (Fraunces for display, Manrope for everything functional), not typefaces to
+     * read a book in.
+     */
+    val UI_ONLY = listOf(
+        "fraunces_variable.ttf",
+        "fraunces_italic_variable.ttf",
+        "manrope_variable.ttf"
+    )
+
+    /**
      * Extracts any missing bundled font file and makes sure a [CustomFont] entry
      * exists for each one. Returns the entries that were newly added so callers can
      * refresh their in-memory settings. [readResource] resolves "fonts/<file>" to
@@ -58,6 +70,12 @@ object BundledFonts {
             }
             // Drop superseded bundled files (e.g. the Shancalluna stand-in).
             bundled.replaces.forEach { old -> File(fontsDir, old).takeIf { it.exists() }?.delete() }
+        }
+        UI_ONLY.forEach { name ->
+            val dest = File(fontsDir, name)
+            if (!dest.exists() || dest.length() == 0L) {
+                readResource("fonts/$name")?.let { bytes -> runCatching { dest.writeBytes(bytes) } }
+            }
         }
 
         val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull() ?: return emptyList()

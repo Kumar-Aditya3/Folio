@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.folio.reader.model.Book
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
@@ -404,8 +405,7 @@ private fun QuoteCard(
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "\u201C${item.quote.text}\u201D",
-                style = FolioTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
+                style = FolioTheme.typography.quote,
                 maxLines = 6,
                 overflow = TextOverflow.Ellipsis
             )
@@ -414,8 +414,7 @@ private fun QuoteCard(
 
             Text(
                 text = item.book.title,
-                style = FolioTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = FolioTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -496,8 +495,7 @@ private fun QuoteListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "\u201C${item.quote.text}\u201D",
-                    style = FolioTheme.typography.bodyMedium,
-                    fontStyle = FontStyle.Italic,
+                    style = FolioTheme.typography.quote.copy(fontSize = 15.sp, lineHeight = 21.sp),
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )

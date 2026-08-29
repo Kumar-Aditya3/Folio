@@ -390,6 +390,9 @@ fun main(args: Array<String>) {
             }
         }
     }.onFailure { it.printStackTrace() }
+    // Same directory holds the interface faces (Fraunces/Manrope); installed before
+    // the first frame so no screen opens in the system font.
+    com.folio.reader.ui.theme.UiFonts.install(deps.platform.fileSystem.getFontsDir())
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     application {
@@ -1014,12 +1017,14 @@ private fun ReaderRoute(
         },
         onSettingsChange = { updated -> onSettingsChanged(updated); viewModel.updateSettings(updated) },
         onToggleControls = { viewModel.toggleControls() },
+        onShowControls = { viewModel.showControlsFn() },
         onToggleToc = { viewModel.toggleToc() },
         onToggleAnnotations = { viewModel.toggleAnnotations() },
         onRemoveBookmark = { viewModel.removeBookmark(it) },
         onRemoveHighlight = { viewModel.removeHighlight(it) },
         onRemoveNote = { viewModel.removeNote(it) },
         onAddNote = { viewModel.addNote(it) },
+        onSetHighlightNote = { id, text -> viewModel.setHighlightNote(id, text) },
         onScrollProgress = { fraction -> viewModel.updateScrollProgress(fraction) },
         onHighlightParagraph = { paragraphIndex, snippet ->
             val pos = position
@@ -1033,6 +1038,7 @@ private fun ReaderRoute(
         onRetryChapter = { viewModel.reloadChapter() },
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
         onChapterEnd = { viewModel.onChapterEnd() },
+        onChapterStart = { viewModel.onChapterStart() },
         onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
         onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
         syncState = syncState

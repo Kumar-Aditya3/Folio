@@ -61,48 +61,45 @@ import androidx.compose.ui.text.input.KeyboardType
 
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.border
 
 /**
  * Frosted-glass surface that follows the active theme: dark frosted glass on dark
  * themes, light frosted glass on light ones, so panels never read as a foreign
  * smudge over the page or app background.
+ *
+ * The fill stays near-opaque on purpose. A panel cannot blur what is behind it on
+ * Android — the page is a separate native surface, so there is nothing to sample —
+ * and a see-through fill let book text bleed through at full contrast, which read as
+ * labels dissolving into the theme. Glass is carried by the rim, the sheen and the
+ * elevation instead.
  */
 @Composable
 fun Modifier.glassPanel(shape: Shape): Modifier {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
     val luminance = colors.background.red * 0.2126f + colors.background.green * 0.7152f + colors.background.blue * 0.0722f
-    return if (luminance < 0.45f) {
-        this
-            .background(colors.surface.copy(alpha = 0.72f), shape)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.06f),
-                        Color.White.copy(alpha = 0.02f),
-                        Color.White.copy(alpha = 0.04f)
-                    )
-                ),
-                shape = shape
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
-            .clip(shape)
-    } else {
-        this
-            .background(Color.White.copy(alpha = 0.66f), shape)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.20f),
-                        Color.White.copy(alpha = 0.06f),
-                        Color.White.copy(alpha = 0.12f)
-                    )
-                ),
-                shape = shape
-            )
-            .border(1.dp, Color.Black.copy(alpha = 0.10f), shape)
-            .clip(shape)
-    }
+    val dark = luminance < 0.45f
+    val fill = if (dark) colors.surface.copy(alpha = 0.90f) else colors.surface.copy(alpha = 0.93f)
+    return this
+        .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+        .background(fill, shape)
+        .background(
+            brush = Brush.verticalGradient(
+                colors = if (dark) listOf(
+                    Color.White.copy(alpha = 0.10f),
+                    Color.White.copy(alpha = 0.03f),
+                    Color.White.copy(alpha = 0.06f)
+                ) else listOf(
+                    Color.White.copy(alpha = 0.22f),
+                    Color.White.copy(alpha = 0.07f),
+                    Color.White.copy(alpha = 0.14f)
+                )
+            ),
+            shape = shape
+        )
+        .border(1.dp, if (dark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.12f), shape)
+        .clip(shape)
 }
 
 /** Glass card with an optional section header — the shared container for grouped content. */
@@ -161,7 +158,9 @@ fun FolioChip(
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            // Weight must not change with selection: a heavier weight widens the
+            // chip, reflows the row and nudges the grid below it downward.
+            fontWeight = FontWeight.Medium,
             color = if (selected) colors.onPrimary else colors.onSurface
         )
     }
@@ -193,7 +192,6 @@ fun FolioTopBar(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
             color = colors.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

@@ -82,6 +82,17 @@ class MainActivity : ComponentActivity() {
         (application as? FolioApplication)?.graph?.shutdown()
     }
 
+    /**
+     * The reader WebView already declines ActionMode, but OEM skins can raise the
+     * selection toolbar (Copy / Share / Select all) at the window level, where it
+     * lands on top of Folio's own Highlight button. Stripping the menu leaves the
+     * selection and its handles working with no competing toolbar.
+     */
+    override fun onActionModeStarted(mode: android.view.ActionMode) {
+        super.onActionModeStarted(mode)
+        runCatching { mode.menu?.clear() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -746,14 +757,17 @@ class MainActivity : ComponentActivity() {
             onSettingsClick = { viewModel.closeBook { onSettingsClick() } },
             onSettingsChange = { updated -> viewModel.updateSettings(updated) },
             onToggleControls = { viewModel.toggleControls() },
+            onShowControls = { viewModel.showControlsFn() },
             onToggleToc = { viewModel.toggleToc() },
             onToggleAnnotations = { viewModel.toggleAnnotations() },
             onRemoveBookmark = { viewModel.removeBookmark(it) },
             onRemoveHighlight = { viewModel.removeHighlight(it) },
             onRemoveNote = { viewModel.removeNote(it) },
             onAddNote = { viewModel.addNote(it) },
+            onSetHighlightNote = { id, text -> viewModel.setHighlightNote(id, text) },
             onScrollProgress = { fraction -> viewModel.updateScrollProgress(fraction) },
             onChapterEnd = { viewModel.onChapterEnd() },
+            onChapterStart = { viewModel.onChapterStart() },
             onHighlightParagraph = { paragraphIndex, snippet ->
                 val pos = position
                 viewModel.addHighlight(

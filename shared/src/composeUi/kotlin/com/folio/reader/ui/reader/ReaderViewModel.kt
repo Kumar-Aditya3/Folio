@@ -17,6 +17,7 @@ import com.folio.reader.model.ReadingSession
 import com.folio.reader.settings.BookReaderSettings
 import com.folio.reader.settings.ReaderSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +28,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.folio.reader.ui.render.LinkClickResult
+import com.folio.reader.model.locatorsMatch
+import com.folio.reader.model.spotLocator
 import kotlinx.datetime.Clock
 
 enum class LayoutMode {
@@ -117,6 +120,12 @@ class ReaderViewModel(
     /** Session words read, accumulated as progress advances. */
     private var sessionWordsBaseProgress: Double = 0.0
     private val chapterEndGuard = ChapterEndGuard()
+    private val chapterStartGuard = ChapterEndGuard()
+
+    /** Words preceding each chapter, keyed on the chapter list instance. */
+    private var wordPrefixSource: List<Chapter>? = null
+    private var wordPrefixStarts = LongArray(0)
+    private var progressPersistJob: Job? = null
 
     /** Access-order LRU of loaded chapter HTML keyed "bookId:chapterHref"; bounded to [MAX_HTML_CACHE] entries. */
     private val htmlCache = LinkedHashMap<String, String>(16, 0.75f, true)
@@ -275,50 +284,80 @@ class ReaderViewModel(
 
         // Normalized book progress via cumulative word counts across chapters
         val normalized = if (chapters.isNotEmpty() && totalWords > 0) {
-            val beforeWords = chapters.take(_currentChapterIndex.value).sumOf { it.wordCount }
             val chapterWords = chapter?.wordCount ?: 0L
-            ((beforeWords + chapterWords * chapterProgress).toDouble() / totalWords).coerceIn(0.0, 1.0)
+            ((wordsBefore(_currentChapterIndex.value) + chapterWords * chapterProgress).toDouble() / totalWords)
+                .coerceIn(0.0, 1.0)
         } else {
             current.normalizedProgress
         }
-
-        println("📊 Progress Update: scroll=$scrollFraction, chapter=${(chapterProgress * 100).toInt()}%, book=${(normalized * 100).toInt()}%, totalWords=$totalWords, chapterIdx=${_currentChapterIndex.value}")
 
         val updated = current.withProgress(
             newNormalizedProgress = normalized,
             newChapterProgress = chapterProgress,
             newScrollOffset = scrollFraction.toDouble()
         )
+        // In-memory only: this is what the progress bar reads, and it has to stay
+        // live. Everything expensive below is coalesced.
         _position.value = updated
 
-        // Track session words read
-        val deltaProgress = (normalized - sessionWordsBaseProgress).coerceAtLeast(0.0)
-        val wordsSoFar = (deltaProgress * totalWords).toLong()
-        _session.value = _session.value?.copy(
-            endPosition = updated,
-            endProgress = normalized,
-            wordsRead = wordsSoFar
-        )
+        scheduleProgressPersist(updated, normalized)
+    }
 
-        // Persist to database immediately and update book progress
+    /**
+     * Cumulative words before each chapter, computed once whenever the chapter list
+     * changes. Summing per report was re-walking hundreds of chapters on every scroll
+     * tick, which is what made scrolling feel jumpy.
+     */
+    private fun wordsBefore(index: Int): Long {
+        val chapters = _chapters.value
+        if (wordPrefixSource !== chapters || wordPrefixStarts.size != chapters.size) {
+            val starts = LongArray(chapters.size)
+            var acc = 0L
+            for (i in chapters.indices) {
+                starts[i] = acc
+                acc += chapters[i].wordCount
+            }
+            wordPrefixStarts = starts
+            wordPrefixSource = chapters
+        }
+        return wordPrefixStarts.getOrElse(index) { 0L }
+    }
+
+    /** Debounced so a fast scroll costs one write, not one per frame. */
+    private fun scheduleProgressPersist(position: ReadingPosition, normalized: Double) {
+        progressPersistJob?.cancel()
+        progressPersistJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(PROGRESS_PERSIST_DELAY_MS)
+            persistProgress(position, normalized)
+        }
+    }
+
+    /** Writes the reader's place on disk; flushed on chapter changes and when closing. */
+    private fun persistProgress(position: ReadingPosition, normalized: Double) {
+        val deltaProgress = (normalized - sessionWordsBaseProgress).coerceAtLeast(0.0)
+        val totalWords = _book.value?.totalWords ?: 0L
+        _session.value = _session.value?.copy(
+            endPosition = position,
+            endProgress = normalized,
+            wordsRead = (deltaProgress * totalWords).toLong()
+        )
         viewModelScope.launch {
             runCatching {
-                positionRepository.upsertPosition(updated)
-                println("💾 Progress saved locally: chapter=${(chapterProgress * 100).toInt()}%, book=${(normalized * 100).toInt()}%")
-
-                // Update the book's normalized progress
-                val bookId = currentBookId
-                if (bookId != null) {
+                positionRepository.upsertPosition(position)
+                currentBookId?.let { bookId ->
                     bookRepository.updateNormalizedProgress(bookId, normalized)
-                    // Update local book object to reflect new progress
-                    _book.value?.let { book ->
-                        book.updateProgress(normalized)
-                    }
+                    _book.value?.updateProgress(normalized)
                 }
-            }.onFailure {
-                println("❌ Failed to save progress: ${it.message}")
             }
         }
+    }
+
+    /** Persists the current place now, e.g. before leaving a chapter. */
+    fun flushProgress() {
+        progressPersistJob?.cancel()
+        progressPersistJob = null
+        val position = _position.value ?: return
+        persistProgress(position, position.normalizedProgress)
     }
 
     fun updatePosition(newPosition: ReadingPosition) {
@@ -332,55 +371,49 @@ class ReaderViewModel(
         if (forward) nextChapter() else previousChapter()
     }
 
-    fun nextChapter() {
-        _currentChapterIndex.update { (it + 1).coerceAtMost(_chapters.value.size - 1) }
-        viewModelScope.launch {
-            loadChapterHtml()
-            // Update position's chapterId when changing chapters so restoration works.
-            // The new chapter starts at its top — never inherit the old scroll offset.
-            val newChapter = _chapters.value.getOrNull(_currentChapterIndex.value)
-            _position.value = _position.value?.copy(
-                chapterId = newChapter?.id ?: "",
-                spineIndex = newChapter?.spineIndex ?: 0,
-                chapterProgress = 0.0,
-                scrollOffset = 0.0
-            )
-        }
-    }
-
-    fun previousChapter() {
+    /**
+     * Moves to [index] and sets the fraction the new chapter should open at, both
+     * synchronously. The browser surface reads [position]'s offset the moment the new
+     * chapter's HTML arrives, so writing it after the load starts races it and can
+     * render the chapter at the wrong place — hopping back then landed at the top of
+     * the previous chapter instead of the end the reader came from.
+     */
+    private fun setChapter(index: Int, resumeFraction: Double) {
+        // Save where the reader really was before the position is repointed.
+        flushProgress()
         chapterEndGuard.reset()
-        _currentChapterIndex.update { (it - 1).coerceAtLeast(0) }
-        viewModelScope.launch {
-            loadChapterHtml()
-            // Update position's chapterId when changing chapters so restoration works.
-            // The new chapter starts at its top — never inherit the old scroll offset.
-            val newChapter = _chapters.value.getOrNull(_currentChapterIndex.value)
-            _position.value = _position.value?.copy(
-                chapterId = newChapter?.id ?: "",
-                spineIndex = newChapter?.spineIndex ?: 0,
-                chapterProgress = 0.0,
-                scrollOffset = 0.0
-            )
-        }
-    }
-
-    fun goToChapter(index: Int) {
-        chapterEndGuard.reset()
+        chapterStartGuard.reset()
         _currentChapterIndex.value = index.coerceIn(0, (_chapters.value.size - 1).coerceAtLeast(0))
-        viewModelScope.launch {
-            loadChapterHtml()
-            // Update position's chapterId when changing chapters so restoration works.
-            // The new chapter starts at its top — never inherit the old scroll offset.
-            val newChapter = _chapters.value.getOrNull(_currentChapterIndex.value)
-            _position.value = _position.value?.copy(
-                chapterId = newChapter?.id ?: "",
-                spineIndex = newChapter?.spineIndex ?: 0,
-                chapterProgress = 0.0,
-                scrollOffset = 0.0
-            )
-        }
+        val chapter = _chapters.value.getOrNull(_currentChapterIndex.value)
+        _position.value = _position.value?.copy(
+            chapterId = chapter?.id ?: "",
+            spineIndex = chapter?.spineIndex ?: 0,
+            chapterProgress = resumeFraction,
+            scrollOffset = resumeFraction
+        )
+        viewModelScope.launch { loadChapterHtml() }
+    }
 
+    fun nextChapter() = setChapter(_currentChapterIndex.value + 1, 0.0)
+
+    /**
+     * A normal chapter change opens at the top; pushing back past the top resumes at
+     * the end, which is where the reader came from.
+     */
+    fun previousChapter(openAtEnd: Boolean = false) =
+        setChapter(_currentChapterIndex.value - 1, if (openAtEnd) 1.0 else 0.0)
+
+    fun goToChapter(index: Int) = setChapter(index, 0.0)
+
+    /**
+     * Backwards counterpart of [onChapterEnd]: the reader kept pushing up at the top
+     * of a chapter, so continue into the previous one. At most once per chapter.
+     */
+    fun onChapterStart() {
+        val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
+        if (_currentChapterIndex.value <= 0) return
+        if (!chapterStartGuard.accept(chapter.id)) return
+        previousChapter(openAtEnd = true)
     }
 
     /** Advances at most once for a chapter, despite repeated browser scroll events. */
@@ -418,7 +451,7 @@ class ReaderViewModel(
             bookId = bookId,
             chapterId = position.chapterId,
             spineIndex = position.spineIndex,
-            locator = position.contentLocator,
+            locator = position.spotLocator(),
             label = label,
             deviceId = deviceId
         )
@@ -428,8 +461,9 @@ class ReaderViewModel(
 
     fun toggleBookmark() {
         val position = _position.value ?: return
+        val locator = position.spotLocator()
         val existing = _bookmarks.value.firstOrNull {
-            it.chapterId == position.chapterId && it.locator == position.contentLocator
+            it.chapterId == position.chapterId && locatorsMatch(it.locator, locator)
         }
         if (existing != null) {
             removeBookmark(existing.id)
@@ -447,7 +481,8 @@ class ReaderViewModel(
         startLocator: String,
         endLocator: String,
         selectedText: String,
-        color: com.folio.reader.model.HighlightColor = com.folio.reader.model.HighlightColor.YELLOW
+        color: com.folio.reader.model.HighlightColor = com.folio.reader.model.HighlightColor.YELLOW,
+        customColor: Int? = themeHighlightColor()
     ) {
         val position = _position.value ?: return
         val bookId = currentBookId ?: return
@@ -460,10 +495,19 @@ class ReaderViewModel(
             endLocator = endLocator,
             selectedText = selectedText,
             color = color,
+            customColor = customColor,
             deviceId = deviceId
         )
         viewModelScope.launch { runCatching { highlightRepository.insertHighlight(highlight) } }
         _highlights.value = _highlights.value + highlight
+    }
+
+    /** The reader's chosen slot in the active theme's highlight palette. */
+    private fun themeHighlightColor(): Int? {
+        val settings = _settings.value
+        val theme = settings.customTheme
+            ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        return theme.highlightColors.getOrElse(settings.highlightColorIndex) { theme.highlightColors.firstOrNull() }
     }
 
     fun removeHighlight(highlightId: String) {
@@ -471,21 +515,49 @@ class ReaderViewModel(
         _highlights.value = _highlights.value.filterNot { it.id == highlightId }
     }
 
-    fun addNote(content: String, type: com.folio.reader.model.NoteType = com.folio.reader.model.NoteType.GENERAL) {
+    fun addNote(content: String, type: com.folio.reader.model.NoteType = com.folio.reader.model.NoteType.GENERAL, highlightId: String? = null) {
         val position = _position.value
         val bookId = currentBookId ?: return
+        val highlight = highlightId?.let { id -> _highlights.value.firstOrNull { it.id == id } }
         val note = Note(
             id = java.util.UUID.randomUUID().toString(),
             bookId = bookId,
-            chapterId = position?.chapterId,
-            spineIndex = position?.spineIndex,
-            locator = position?.contentLocator,
+            // A note on a highlight belongs where the highlight does.
+            chapterId = highlight?.chapterId ?: position?.chapterId,
+            spineIndex = highlight?.spineIndex ?: position?.spineIndex,
+            locator = highlight?.startLocator ?: position?.spotLocator(),
             content = content,
-            type = type,
+            type = if (highlight != null) com.folio.reader.model.NoteType.HIGHLIGHT_NOTE else type,
             deviceId = deviceId
         )
         viewModelScope.launch { runCatching { noteRepository.insertNote(note) } }
         _notes.value = _notes.value + note
+        if (highlight != null) linkNoteToHighlight(highlight.id, note.id)
+    }
+
+    /** Points a highlight at its note; the reverse link is what the lists render on. */
+    private fun linkNoteToHighlight(highlightId: String, noteId: String) {
+        val existing = _highlights.value.firstOrNull { it.id == highlightId } ?: return
+        val updated = existing.withNote(noteId)
+        _highlights.value = _highlights.value.map { if (it.id == highlightId) updated else it }
+        viewModelScope.launch { runCatching { highlightRepository.updateHighlight(updated) } }
+    }
+
+    /** The note attached to a highlight, if it has one. */
+    fun noteFor(highlight: Highlight): Note? =
+        highlight.noteId?.let { id -> _notes.value.firstOrNull { it.id == id && !it.isDeleted } }
+
+    /** Adds or replaces the note on a highlight. */
+    fun setHighlightNote(highlightId: String, content: String) {
+        val existing = noteFor(_highlights.value.firstOrNull { it.id == highlightId } ?: return)
+        if (existing != null) {
+            if (content.isBlank()) return
+            val updated = existing.copy(content = content, updatedAt = kotlinx.datetime.Clock.System.now())
+            _notes.value = _notes.value.map { if (it.id == updated.id) updated else it }
+            viewModelScope.launch { runCatching { noteRepository.updateNote(updated) } }
+        } else {
+            addNote(content, highlightId = highlightId)
+        }
     }
 
     fun removeNote(noteId: String) {
@@ -584,6 +656,9 @@ class ReaderViewModel(
 
     private companion object {
         const val MAX_HTML_CACHE = 12
+
+        /** Coalesces scroll-driven progress writes into one save per pause. */
+        const val PROGRESS_PERSIST_DELAY_MS = 1200L
     }
 }
 
