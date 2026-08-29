@@ -122,7 +122,11 @@ actual fun HtmlContentSurface(
         val source = resolvedHtml ?: return@LaunchedEffect
         preparing = true
         val fraction = (positionState?.scrollOffset ?: 0.0).toFloat().coerceIn(0f, 1f)
-        val paginated = settings.layoutMode == com.folio.reader.settings.LayoutMode.PAGINATED
+        val pagedCols = when (settings.layoutMode) {
+            com.folio.reader.settings.LayoutMode.PAGINATED -> 1
+            com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
+            else -> 0
+        }
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val styled = injectReaderCss(source, settings)
@@ -130,7 +134,8 @@ actual fun HtmlContentSurface(
             }
         }
         result.onSuccess { url ->
-            current.load(url, readerBridgeJs(fraction, paginated))
+            val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth)) else readerBridgeJs(fraction)
+            current.load(url, js)
             preparing = false
         }.onFailure {
             fatalError = it.message ?: "Unable to render chapter"
@@ -470,21 +475,20 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
         else -> "left"
     }
     val paginated = settings.layoutMode == com.folio.reader.settings.LayoutMode.PAGINATED
-
-    val layoutCss = when (settings.layoutMode) {
-        com.folio.reader.settings.LayoutMode.PAGINATED ->
-            "html{height:100vh;overflow:hidden;}" +
-                    "body{height:100vh;overflow-x:auto;overflow-y:hidden;" +
-                    "column-width:100vw;column-gap:0;column-fill:auto;}"
-
-        com.folio.reader.settings.LayoutMode.TWO_COLUMN ->
-            "body{columns:2;column-gap:${(settings.fontSize * 2).toInt()}px;}"
-
-        else -> "" // CONTINUOUS and FOCUS scroll vertically
+    val pagedCols = when (settings.layoutMode) {
+        com.folio.reader.settings.LayoutMode.PAGINATED -> 1
+        com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
+        else -> 0
     }
 
+    // Paged modes use the shared book engine: discrete viewport pages (or a
+    // two-page spread) turned with a leaf flip, never free scrolling.
+    val layoutCss = if (pagedCols > 0) {
+        PageEngine.css(pagedCols, settings.margins.top, settings.margins.bottom, "#${theme.background.rgb()}")
+    } else ""
+
     // Line-length cap for scrolling modes, mirroring the phone reader's readerWidth.
-    val widthCss = if (!paginated) {
+    val widthCss = if (pagedCols == 0) {
         when (settings.textWidth) {
             com.folio.reader.settings.TextWidth.NARROW -> "body{max-width:560px;margin-left:auto;margin-right:auto;}"
             com.folio.reader.settings.TextWidth.MEDIUM -> "body{max-width:720px;margin-left:auto;margin-right:auto;}"
@@ -534,17 +538,27 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
         "body p,body div,body h1,body h2,body h3,body h4,body h5,body h6,body li,body blockquote" +
                 "{text-align:$align !important;font-family:$family !important;}"
     } else ""
+    // Publisher color/font rules declared on elements (e.g. .calibre p{color:#000})
+    // outrank an inherited body rule even with !important — force them on the
+    // elements themselves so the theme's text is always readable.
+    val elementForceCss = if (original) "" else
+        "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:$family !important;}" +
+                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}"
 
     val css = "<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
             (if (fontFaces.isNotEmpty()) "<style>$fontFaces</style>" else "") +
             "<style id=\"folio-reader-style\">" +
             "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
             themeBgCss +
-            "body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px !important;" +
+            // Paged modes need zero horizontal body padding: columns must be
+            // exactly 100vw wide or the pager's per-page steps drift out of
+            // alignment. Gutters come from the engine's per-block margins.
+            "body{padding:${if (pagedCols > 0) "${settings.margins.top}px 0 ${settings.margins.bottom}px 0" else "${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px"} !important;" +
             "$typographyCss$alignCss$colorCss$hyphenCss}" +
             layoutCss +
             widthCss.replace("margin-left:auto;margin-right:auto;", "margin-left:auto !important;margin-right:auto !important;") +
             normalizedExtra +
+            elementForceCss +
             "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
             "img{max-width:100%;height:auto;break-inside:avoid;}" +
             "a{color:#${theme.link.rgb()};}" +
@@ -557,18 +571,13 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
  * counts (only when they change), forwards link clicks and center taps back to
  * the app via document.title.
  */
-private fun readerBridgeJs(fraction: Float, paginated: Boolean): String = """
+private fun readerBridgeJs(fraction: Float): String = """
 (function(){
   if(window.__folioBridgeInstalled)return;
   window.__folioBridgeInstalled=true;
-  var paginated=$paginated;
   var nonce=0;
-  // Paginated mode scrolls the body horizontally (it owns the columns);
-  // continuous mode scrolls the document vertically.
-  function pickScroller(){return paginated?document.body:(document.scrollingElement||document.documentElement);}
-  var scroller=pickScroller();
-  if(paginated){scroller.scrollLeft=Math.max(0,scroller.scrollWidth-scroller.clientWidth)*$fraction;}
-  else{scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;}
+  var scroller=document.scrollingElement||document.documentElement;
+  scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
   var scheduled=false,last=0,lastSig='',userCrossed=false;
   var restorePending=$fraction>0.001;
   function measure(){
@@ -577,52 +586,24 @@ private fun readerBridgeJs(fraction: Float, paginated: Boolean): String = """
     if(now-last<100){schedule();return;}
     last=now;
     var d=document.documentElement,b=document.body||d;
-    var s=pickScroller();
-    var vw=Math.max(1,s.clientWidth||window.innerWidth||1);
+    var s=document.scrollingElement||d;
     var vh=Math.max(1,s.clientHeight||window.innerHeight||1);
-    var docW=Math.max(s.scrollWidth,d.scrollWidth,b.scrollWidth||0);
     var docH=Math.max(s.scrollHeight,d.scrollHeight,b.scrollHeight||0);
-    var range=paginated?Math.max(0,docW-vw):Math.max(0,docH-vh);
+    var range=Math.max(0,docH-vh);
     if(restorePending&&range>4){
-      if(paginated){s.scrollLeft=range*$fraction;}else{s.scrollTop=range*$fraction;}
-      if((paginated?(s.scrollLeft||0):(s.scrollTop||0))>0)restorePending=false;
+      s.scrollTop=range*$fraction;
+      if((s.scrollTop||0)>0)restorePending=false;
     }
-    var offset=paginated?(s.scrollLeft||window.scrollX):(s.scrollTop||window.scrollY);
-    var total=paginated?Math.max(1,Math.ceil(docW/vw)):Math.max(1,Math.ceil(docH/vh));
-    var current=paginated?Math.min(total,Math.floor(offset/vw)+1):Math.min(total,Math.floor(offset/vh)+1);
+    var offset=s.scrollTop||window.scrollY;
+    var total=Math.max(1,Math.ceil(docH/vh));
+    var current=Math.min(total,Math.floor(offset/vh)+1);
     var p=range>0?Math.min(1,offset/range):0;
     var crossed=userCrossed&&p>=0.995;
     var sig=p.toFixed(3)+':'+current+':'+total+':'+crossed;
     if(sig!==lastSig){lastSig=sig;document.title='folio-progress:'+p.toFixed(4)+':'+current+':'+total+':'+crossed;}
   }
   function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(measure);}}
-  function flipPage(dir){
-    var s=document.body;
-    var vw=Math.max(1,s.clientWidth);
-    var max=Math.max(0,s.scrollWidth-vw);
-    var cur=Math.round(s.scrollLeft/vw);
-    var next=Math.min(Math.max(0,cur+dir),Math.ceil(max/vw));
-    s.scrollTo({left:next*vw,behavior:'smooth'});
-    schedule();
-  }
-  var wheelAcc=0;
-  window.addEventListener('wheel',function(e){
-    userCrossed=true;restorePending=false;
-    if(!paginated)return;
-    // Discrete pages instead of Chromium's native horizontal slide.
-    e.preventDefault();
-    var delta=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY;
-    wheelAcc+=delta;
-    if(wheelAcc>60){flipPage(1);wheelAcc=0;}
-    else if(wheelAcc<-60){flipPage(-1);wheelAcc=0;}
-  },{passive:false});
-  if(paginated){
-    document.addEventListener('keydown',function(e){
-      var k=e.key;
-      if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='ArrowDown'){e.preventDefault();flipPage(1);}
-      else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();flipPage(-1);}
-    },true);
-  }
+  window.addEventListener('wheel',function(){userCrossed=true;restorePending=false;},{passive:true});
   window.addEventListener('scroll',schedule,{passive:true});
   window.addEventListener('resize',schedule);
   document.addEventListener('click',function(ev){

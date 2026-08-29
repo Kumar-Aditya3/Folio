@@ -3,6 +3,7 @@ package com.folio.reader.ui.render
 import android.graphics.Bitmap
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.JavascriptInterface
@@ -82,6 +83,13 @@ actual fun HtmlContentSurface(
     // measurement that happened immediately after loadDataWithBaseURL before layout.
     var pendingJs by remember { mutableStateOf<String?>(null) }
     var pendingFraction by remember { mutableStateOf(0.0) }
+    // Page bridging must post to main thread — @JavascriptInterface and title
+    // callbacks arrive on WebView background threads.
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val latestProgress by rememberUpdatedState(onProgress)
+    val latestPage by rememberUpdatedState(onPageChange)
+    val latestEnd by rememberUpdatedState(onChapterEnd)
+    val latestLink by rememberUpdatedState(onLinkClick)
     val client = remember(chapterHref, onResolveResource, resourceCache) {
         object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
@@ -94,6 +102,7 @@ actual fun HtmlContentSurface(
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 view.getSettings().javaScriptEnabled = true
             }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 // Inject measurement JS only after page is laid out. Fallback if pendingJs already set.
@@ -103,8 +112,6 @@ actual fun HtmlContentSurface(
             }
         }
     }
-    // Page bridging must post to main thread — @JavascriptInterface is called on WebView background thread.
-    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val progressBridge = remember(onProgress, onPageChange, onChapterEnd) {
         object {
             @JavascriptInterface
@@ -113,6 +120,39 @@ actual fun HtmlContentSurface(
                     onProgress(fraction.coerceIn(0f, 1f))
                     onPageChange(current.coerceAtLeast(1), total.coerceAtLeast(1))
                     if (userCrossed && fraction >= 0.995f) onChapterEnd()
+                }
+            }
+        }
+    }
+    // The paged engine talks through document.title (same protocol as the
+    // desktop surface): progress/pages, link clicks, center taps.
+    val chromeClient = remember {
+        object : WebChromeClient() {
+            override fun onReceivedTitle(view: WebView?, title: String?) {
+                super.onReceivedTitle(view, title)
+                val t = title ?: return
+                when {
+                    t.startsWith("folio-progress:") -> {
+                        val parts = t.split(':')
+                        if (parts.size != 5) return
+                        val f = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return
+                        mainHandler.post {
+                            latestProgress(f)
+                            latestPage(
+                                parts[2].toIntOrNull()?.coerceAtLeast(1) ?: 1,
+                                parts[3].toIntOrNull()?.coerceAtLeast(1) ?: 1
+                            )
+                            if (parts[4] == "true") latestEnd()
+                        }
+                    }
+
+                    t.startsWith("folio-link:") -> {
+                        val encoded = t.removePrefix("folio-link:").substringAfter(':', "")
+                        val href = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull() ?: return
+                        mainHandler.post { latestLink?.invoke(href) }
+                    }
+
+                    t.startsWith("folio-tap:") -> mainHandler.post { currentTapHandler.value() }
                 }
             }
         }
@@ -129,6 +169,7 @@ actual fun HtmlContentSurface(
                 getSettings().loadWithOverviewMode = true
                 addJavascriptInterface(progressBridge, "FolioReader")
                 webViewClient = client
+                webChromeClient = chromeClient
                 var downX = 0f
                 var downY = 0f
                 var downAt = 0L
@@ -162,11 +203,16 @@ actual fun HtmlContentSurface(
                     "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:${font.weight};font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
-                val paginated = settings.layoutMode == com.folio.reader.settings.LayoutMode.PAGINATED
-                // Build JS that uses scrollingElement and forces layout-aware measurement.
-                // Do NOT evaluate here — defer to onPageFinished + post to ensure layout.
-                val js = """(function(){
-                            var paginated=$paginated,scheduled=false,last=0,userCrossed=false;
+                // Engine gated off on phone (see injectReaderCss): WebView paints
+                // paged modes blank; keep the continuous measurement script.
+                val pagedCols = 0
+                // Paged modes run the shared book engine (discrete pages + leaf
+                // flip, progress via the title protocol); continuous keeps the
+                // layout-aware scrolling measurement below.
+                val js = if (pagedCols > 0) {
+                    PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
+                } else """(function(){
+                            var paginated=false,scheduled=false,last=0,userCrossed=false;
                             function report(){
                                 scheduled=false;
                                 var now=Date.now();
@@ -260,11 +306,45 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
         com.folio.reader.settings.TextAlignment.JUSTIFIED -> "justify"
         else -> "left"
     }
-    val columns = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.PAGINATED)
-        "column-width: 100vw; column-gap: 0; column-fill: auto; height: 100vh; overflow-x: auto; overflow-y: hidden;"
-    else
+    // The JS page engine currently paints blank inside Android WebView; keep the
+    // proven continuous scroll on phone (paged modes degrade to scrolling) while
+    // desktop uses the full book engine. Follow-up: debug the engine on WebView.
+    val pagedCols = 0
+    val columns = if (pagedCols > 0) {
+        PageEngine.css(
+            pagedCols, settings.margins.top, settings.margins.bottom,
+            "#${theme.background.toUInt().toString(16).padStart(8, '0').drop(2)}"
+        )
+    } else {
         "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;} html{overflow-y:auto !important;}"
+    }
     val fontFamily = settings.customFonts.firstOrNull { it.name == settings.fontFamily }?.familyName ?: settings.fontFamily
-    val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">html,body{margin:0;padding:0;background:#${theme.background.toUInt().toString(16).padStart(8,'0').drop(2)};color:#${theme.primaryText.toUInt().toString(16).padStart(8,'0').drop(2)};font-family:'$fontFamily',serif;font-size:${settings.fontSize}px;font-weight:${settings.fontWeight};line-height:${settings.lineHeight};letter-spacing:${settings.letterSpacing}px;text-align:$align;}body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px;}$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:#${theme.link.toUInt().toString(16).padStart(8,'0').drop(2)};}</style>"
+    fun Int.rgb(): String = toUInt().toString(16).padStart(8, '0').drop(2)
+    val original = settings.formattingMode == com.folio.reader.model.FormattingMode.ORIGINAL
+    // Publisher CSS can otherwise leave black text on dark themes or wipe the
+    // reader typography; outside ORIGINAL the reader owns these properties.
+    val themeBgCss = if (original) "" else
+        "body,body div,body section,body article,body figure{background-color:transparent !important;}"
+    val imp = if (original) "" else " !important"
+    val typographyCss = if (original) "" else
+        "font-family:'$fontFamily',serif$imp;font-size:${settings.fontSize}px$imp;" +
+                "font-weight:${settings.fontWeight}$imp;line-height:${settings.lineHeight}$imp;" +
+                "letter-spacing:${settings.letterSpacing}px$imp;"
+    val alignCss = if (original) "" else "text-align:$align$imp;"
+    val colorCss = if (original) "" else "color:#${theme.primaryText.rgb()}$imp;"
+    val hyphenCss = if (!original && settings.hyphenation) "-webkit-hyphens:auto;hyphens:auto;" else ""
+    // Publisher color/font rules declared on elements (e.g. .calibre p{color:#000})
+    // outrank an inherited body rule even with !important — force them on the
+    // elements themselves so the theme's text is always readable.
+    val elementForceCss = if (original) "" else
+        "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:'$fontFamily',serif !important;}" +
+                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:'$fontFamily',serif !important;}"
+    val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
+            "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
+            themeBgCss +
+            "body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px$imp;" +
+            "$typographyCss$alignCss$colorCss$hyphenCss}" +
+            elementForceCss +
+            "$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:#${theme.link.rgb()};}</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }
