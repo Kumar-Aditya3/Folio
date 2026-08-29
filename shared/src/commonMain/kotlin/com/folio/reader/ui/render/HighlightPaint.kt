@@ -61,11 +61,15 @@ object HighlightPaint {
         "(function(){\n" +
                 "var ITEMS=$payload;\n" +
                 "function isWs(c){return c===' '||c==='\\t'||c==='\\n'||c==='\\r'||c==='\\f'||c==='\\u00a0';}\n" +
-                "function norm(s){return s.replace(/\\s+/g,' ').trim();}\n" +
+                // Whitespace is dropped from both the document map and the needle: a
+                // selection taken across a paragraph, list item or line break carries a
+                // newline that the document itself never contains, so any space-aware
+                // comparison silently fails on exactly the highlights readers make most.
+                "function norm(s){return s.replace(/\\s+/g,'');}\n" +
                 // One walk per match: wrapping splits text nodes, so the offset map
                 // must always describe the document as it currently is.
                 "function collect(){\n" +
-                "  var n=[],o=[],txt=[],prevWs=true;\n" +
+                "  var n=[],o=[],txt=[];\n" +
                 "  if(!document.body)return{full:'',n:n,o:o};\n" +
                 "  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);\n" +
                 "  while(w.nextNode()){\n" +
@@ -76,7 +80,8 @@ object HighlightPaint {
                 "    if(p.closest&&p.closest('#folio-overlay-root,#folio-selbtn'))continue;\n" +
                 "    for(var j=0;j<v.length;j++){\n" +
                 "      var c=v.charAt(j);\n" +
-                "      if(isWs(c)){if(prevWs)continue;txt.push(' ');prevWs=true;}else{txt.push(c);prevWs=false;}\n" +
+                "      if(isWs(c))continue;\n" +
+                "      txt.push(c);\n" +
                 "      n.push(node);o.push(j);\n" +
                 "    }\n" +
                 "  }\n" +
@@ -89,15 +94,15 @@ object HighlightPaint {
                 "    while(m.firstChild)par.insertBefore(m.firstChild,m);par.removeChild(m);}\n" +
                 "  if(document.body&&document.body.normalize)document.body.normalize();\n" +
                 "}\n" +
-                // Whitespace collapsed to one char spans the gap in the source; keep it
-                // inside the same mark instead of splitting it in two.
+                // Map offsets skip whitespace, so a run inside one node is contiguous
+                // even when its raw indexes are not: the gap between them is all
+                // whitespace, and it stays inside the same mark.
                 "function gapIsWs(node,a,b){var s=node.nodeValue||'';for(var i=a;i<b;i++){if(!isWs(s.charAt(i)))return false;}return true;}\n" +
                 "function wrap(c,h,len,bg,sh,mid){\n" +
                 "  var end=h+len,i=h,segs=[],seg=null,done=false;\n" +
                 "  while(i<end){\n" +
                 "    var node=c.n[i];\n" +
-                "    if(seg&&seg.node===node&&c.o[i]===seg.last+1){seg.last=c.o[i];}\n" +
-                "    else if(seg&&seg.node===node&&gapIsWs(node,seg.last+1,c.o[i])){seg.last=c.o[i];}\n" +
+                "    if(seg&&seg.node===node&&(c.o[i]===seg.last+1||gapIsWs(node,seg.last+1,c.o[i]))){seg.last=c.o[i];}\n" +
                 "    else{if(seg)segs.push(seg);seg={node:node,first:c.o[i],last:c.o[i]};}\n" +
                 "    i++;\n" +
                 "  }\n" +
