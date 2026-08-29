@@ -609,7 +609,7 @@ private fun readerStyleCss(settings: ReaderSettings): String {
     // two-page spread) turned with a leaf flip, never free scrolling.
     val layoutCss = if (pagedCols > 0) {
         PageEngine.css(pagedCols, settings.margins.top, settings.margins.bottom, "#${theme.background.rgb()}")
-    } else ""
+    } else "body{opacity:0;transition:opacity .15s ease;}"
 
     // Line-length cap for scrolling modes, mirroring the phone reader's readerWidth.
     val widthCss = if (pagedCols == 0) {
@@ -687,6 +687,7 @@ private fun readerBridgeJs(fraction: Float): String = """
   var nonce=0;
   var scroller=document.scrollingElement||document.documentElement;
   scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
+  document.body.style.opacity='1';
   ${PageEngine.selectionButtonJs}
   var scheduled=false,last=0,lastSig='',userCrossed=false;
   var restorePending=$fraction>0.001;
