@@ -647,7 +647,7 @@ private fun StatsRow(
                 title = "Words",
                 value = formatCount(wordsRead),
                 modifier = Modifier.weight(1f),
-                color = FolioTheme.colors.secondary
+                color = FolioTheme.colors.primary
             )
         }
         Row(
@@ -658,19 +658,19 @@ private fun StatsRow(
                 title = "Highlights",
                 value = "$highlightsCount",
                 modifier = Modifier.weight(1f),
-                color = FolioTheme.colors.tertiary
+                color = FolioTheme.colors.primary
             )
             StatCard(
                 title = "Bookmarks",
                 value = "$bookmarksCount",
                 modifier = Modifier.weight(1f),
-                color = Color(0xFF7D5260)
+                color = FolioTheme.colors.primary
             )
             StatCard(
                 title = "Notes",
                 value = "$notesCount",
                 modifier = Modifier.weight(1f),
-                color = Color(0xFF625B71)
+                color = FolioTheme.colors.primary
             )
         }
     }

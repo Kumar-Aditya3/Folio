@@ -329,7 +329,8 @@ fun ReaderScreen(
                 hasPrevChapter = currentChapterIndex > 0,
                 onResolveImage = onResolveImage,
                 onResolveResource = onResolveResource,
-                modifier = Modifier.fillMaxSize().padding(contentInsets),
+                modifier = Modifier.fillMaxSize().padding(contentInsets)
+                    .then(if (occludes) Modifier else Modifier.statusBarsPadding()),
                 position = position,
                 onPageChange = { page, total ->
                     currentPage = page
@@ -1267,7 +1268,8 @@ fun ChapterContent(
                     onChapterEnd = onChapterEnd,
                     onTap = onTap,
                     onLinkClick = onLinkClick,
-                    onResolveResource = onResolveResource
+                    onResolveResource = onResolveResource,
+                    onHighlightParagraph = onLongPress?.let { cb -> { idx, text -> cb(idx, text) } }
                 )
             }
         }
@@ -1569,28 +1571,24 @@ fun BottomProgressBar(
     currentPage: Int = 1,
     totalPages: Int = 1
 ) {
-    Row(
+    val fraction = if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(FolioTheme.colors.surface.copy(alpha = 0.95f))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = chapterTitle,
-            style = FolioTheme.typography.labelMedium,
-            color = FolioTheme.colors.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.Center
+        com.folio.reader.ui.components.FolioProgressBar(
+            progress = fraction,
+            color = FolioTheme.colors.primary
         )
         Text(
-            text = "$currentPage/$totalPages",
+            text = "$currentPage / $totalPages",
             style = FolioTheme.typography.labelMedium,
             color = FolioTheme.colors.primary,
-            maxLines = 1,
-            modifier = Modifier.padding(start = 12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.End
         )
     }
 }

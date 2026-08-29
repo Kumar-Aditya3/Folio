@@ -39,9 +39,11 @@ actual fun HtmlContentSurface(
     onChapterEnd: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
-    onResolveResource: suspend (chapterHref: String, src: String) -> String?
+    onResolveResource: suspend (chapterHref: String, src: String) -> String?,
+    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
+    val latestHighlight by rememberUpdatedState(onHighlightParagraph)
     val content = remember(html, settings, chapterHref, position, highlights) {
         injectReaderCss(html, settings)
     }
@@ -153,6 +155,14 @@ actual fun HtmlContentSurface(
                     }
 
                     t.startsWith("folio-tap:") -> mainHandler.post { currentTapHandler.value() }
+
+                    t.startsWith("folio-sel:") -> {
+                        val rest = t.removePrefix("folio-sel:")
+                        val idx = rest.substringBefore(':').toIntOrNull() ?: 0
+                        val encoded = rest.substringAfter(':').substringBeforeLast(':')
+                        val text = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
+                        if (!text.isNullOrBlank()) mainHandler.post { latestHighlight?.invoke(idx, text) }
+                    }
                 }
             }
         }
@@ -212,7 +222,8 @@ actual fun HtmlContentSurface(
                 val js = if (pagedCols > 0) {
                     PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
                 } else """(function(){
-                            var paginated=false,scheduled=false,last=0,userCrossed=false;
+                            var paginated=false,scheduled=false,last=0,userCrossed=false,nonce=0;
+                            ${PageEngine.selectionButtonJs}
                             function report(){
                                 scheduled=false;
                                 var now=Date.now();
@@ -345,6 +356,6 @@ private fun injectReaderCss(html: String, settings: ReaderSettings): String {
             "body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px$imp;" +
             "$typographyCss$alignCss$colorCss$hyphenCss}" +
             elementForceCss +
-            "$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:#${theme.link.rgb()};}</style>"
+            "$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()};}</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }

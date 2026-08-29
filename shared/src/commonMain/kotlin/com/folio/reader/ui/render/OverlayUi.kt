@@ -24,13 +24,13 @@ object OverlayUi {
     private fun esc(s: String): String = Json.encodeToString(String.serializer(), s)
         .removeSurrounding("\"")
 
-    private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300): String {
+    private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300, kind: String = ""): String {
         val tint = if (c.isDark) "rgba(16,16,22,0.55)" else "rgba(250,248,242,0.52)"
         val hairline = if (c.isDark) "rgba(255,255,255,0.22)" else "rgba(0,0,0,0.14)"
         val hi = if (c.isDark) "rgba(255,255,255,0.10)" else "rgba(255,255,255,0.55)"
         return """
 <div data-act="close" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483500;"></div>
-<div style="position:fixed;top:0;right:0;bottom:0;width:${width}px;max-width:88vw;z-index:2147483501;
+<div data-kind="$kind" style="position:fixed;top:0;right:0;bottom:0;width:${width}px;max-width:88vw;z-index:2147483501;
  background:$tint;backdrop-filter:blur(26px) saturate(1.8);-webkit-backdrop-filter:blur(26px) saturate(1.8);
  border-left:1px solid $hairline;color:${c.fg};font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;
  box-shadow:-18px 0 60px rgba(0,0,0,0.45), inset 1px 1px 0 $hi;
@@ -39,7 +39,7 @@ object OverlayUi {
     <div style="font-size:17px;font-weight:600;">$title</div>
     <button data-act="close" style="all:unset;cursor:pointer;font-size:18px;opacity:0.7;padding:4px 8px;">&#10005;</button>
   </div>
-  <div style="overflow-y:auto;padding:6px 18px 20px;display:flex;flex-direction:column;gap:10px;">
+  <div data-scroll style="overflow-y:auto;padding:6px 18px 20px;display:flex;flex-direction:column;gap:10px;">
    $bodyHtml
   </div>
 </div>"""
@@ -55,7 +55,7 @@ object OverlayUi {
                 "$itemCss color:${c.fg};"
             "<button data-act=\"toc:$i\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(title)}</button>"
         }.joinToString("")
-        return shell("Contents", rows, c, width = 280)
+        return shell("Contents", rows, c, width = 280, kind = "toc")
     }
 
     data class AnnotationRow(val kind: String, val id: String, val title: String, val sub: String)
@@ -73,7 +73,7 @@ object OverlayUi {
         val body = section("Bookmarks", bookmarks) + section("Highlights", highlights) + section("Notes", notes) +
                 (if (bookmarks.isEmpty() && highlights.isEmpty() && notes.isEmpty())
                     "<div style='opacity:0.65'>Nothing here yet. Bookmark spots, add highlights and notes while reading.</div>" else "")
-        return shell("Annotations", body, c)
+        return shell("Annotations", body, c, kind = "annotations")
     }
 
     fun settings(
@@ -102,6 +102,6 @@ object OverlayUi {
                     slider("Margins", "mg", 0.0, 64.0, 1.0, margin.toDouble(), "${margin.toInt()} px") +
                     fontSel + themeRow +
                     "<button data-act='allsettings' style='$itemCss text-align:center;background:${c.accent};color:#fff;font-weight:600;margin-top:8px;border-radius:12px;padding:12px;'>All settings</button>"
-        return shell("Reading settings", body, c)
+        return shell("Reading settings", body, c, kind = "settings")
     }
 }

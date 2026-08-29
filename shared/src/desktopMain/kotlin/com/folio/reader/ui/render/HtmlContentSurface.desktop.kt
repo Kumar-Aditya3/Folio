@@ -64,7 +64,8 @@ actual fun HtmlContentSurface(
     onChapterEnd: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
-    onResolveResource: suspend (chapterHref: String, src: String) -> String?
+    onResolveResource: suspend (chapterHref: String, src: String) -> String?,
+    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?
 ) {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val backgroundColor = Color(theme.background)
@@ -78,6 +79,7 @@ actual fun HtmlContentSurface(
     callbacks.onChapterEnd = onChapterEnd
     callbacks.onTap = onTap
     callbacks.onLinkClick = onLinkClick
+    callbacks.onHighlightParagraph = onHighlightParagraph
 
     val resolver by rememberUpdatedState(onResolveResource)
     val positionState by rememberUpdatedState(position)
@@ -92,6 +94,7 @@ actual fun HtmlContentSurface(
     var resolvedHtml by remember(html, chapterHref) { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
     var appliedSettings by remember { mutableStateOf<ReaderSettings?>(null) }
+    var hasLoadedOnce by remember { mutableStateOf(false) }
 
     // Only geometry changes (page columns, measure cap, gutter) need a document
     // reload; theme/typography changes swap the stylesheet in place, so switching
@@ -119,7 +122,7 @@ actual fun HtmlContentSurface(
     LaunchedEffect(html, chapterHref, session) {
         val current = session ?: return@LaunchedEffect
         resolvedHtml = null
-        preparing = true
+        if (!hasLoadedOnce) preparing = true
         val result = withContext(Dispatchers.IO) {
             runCatching { resolveResources(html, chapterHref) { href, src -> resolver(href, src) } }
         }
@@ -133,7 +136,7 @@ actual fun HtmlContentSurface(
     LaunchedEffect(resolvedHtml, session, reloadTick) {
         val current = session ?: return@LaunchedEffect
         val source = resolvedHtml ?: return@LaunchedEffect
-        preparing = true
+        if (!hasLoadedOnce) preparing = true
         val s = settingsState
         val fraction = (positionState?.scrollOffset ?: 0.0).toFloat().coerceIn(0f, 1f)
         val pagedCols = when (s.layoutMode) {
@@ -151,6 +154,7 @@ actual fun HtmlContentSurface(
             val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, s.margins.left, PageEngine.measurePx(s.textWidth)) else readerBridgeJs(fraction)
             current.load(url, js)
             appliedSettings = s
+            hasLoadedOnce = true
             preparing = false
         }.onFailure {
             fatalError = it.message ?: "Unable to render chapter"
@@ -228,6 +232,7 @@ private class SurfaceCallbacks {
     @Volatile var onTap: () -> Unit = {}
     @Volatile var onLinkClick: ((String) -> Unit)? = null
     @Volatile var onOverlayAction: ((String) -> Unit)? = null
+    @Volatile var onHighlightParagraph: ((Int, String) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
 }
 
@@ -296,6 +301,14 @@ private class JcefSession private constructor(
                     }
 
                     t.startsWith("folio-tap:") -> callbacks.onTap()
+
+                    t.startsWith("folio-sel:") -> {
+                        val rest = t.removePrefix("folio-sel:")
+                        val idx = rest.substringBefore(':').toIntOrNull() ?: 0
+                        val encoded = rest.substringAfter(':').substringBeforeLast(':')
+                        val text = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
+                        if (!text.isNullOrBlank()) callbacks.onHighlightParagraph?.invoke(idx, text)
+                    }
 
                     t.startsWith("folio-ovl:") -> {
                         val rest = t.removePrefix("folio-ovl:")
@@ -417,11 +430,19 @@ private class JcefSession private constructor(
     }
 
     private fun overlayJs(html: String): String =
-        "(function(){var old=document.getElementById('folio-overlay-root');if(old&&old.parentNode)old.parentNode.removeChild(old);" +
-                "var h=${html.toJsStringLiteral()};if(!h)return;" +
-                "var d=document.createElement('div');d.id='folio-overlay-root';d.innerHTML=h;document.documentElement.appendChild(d);" +
+        "(function(){var h=${html.toJsStringLiteral()};var old=document.getElementById('folio-overlay-root');var kind='';" +
+                "var m=h.match(/data-kind=\"([^\"]+)/);if(m)kind=m[1];" +
+                "var keep=old&&kind&&old.getAttribute('data-kind')===kind;" +
+                "var list=keep?old.querySelector('[data-scroll]'):null;var sc=list?list.scrollTop:0;" +
+                "if(!keep){if(old&&old.parentNode)old.parentNode.removeChild(old);" +
+                "var d=document.createElement('div');d.id='folio-overlay-root';document.documentElement.appendChild(d);d.innerHTML=h;" +
+                "} else {old.innerHTML=h;}" +
+                "var root=document.getElementById('folio-overlay-root');" +
+                "var r2=root.querySelector('[data-kind]');if(r2)r2.setAttribute('data-kind',kind);" +
+                "if(kind)root.setAttribute('data-kind',kind);" +
+                "var list2=root.querySelector('[data-scroll]');if(list2)list2.scrollTop=sc;" +
                 "var n=0;" +
-                "d.querySelectorAll('[data-act]').forEach(function(el){" +
+                "root.querySelectorAll('[data-act]').forEach(function(el){" +
                 "  if(el.tagName==='INPUT'||el.tagName==='SELECT'){" +
                 "    el.addEventListener('change',function(e){e.stopPropagation();document.title='folio-ovl:'+el.getAttribute('data-act')+':'+encodeURIComponent(el.value)+':'+(++n);});" +
                 "  } else {" +
@@ -643,7 +664,7 @@ private fun readerStyleCss(settings: ReaderSettings): String {
             elementForceCss +
             "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
             "img{max-width:100%;height:auto;break-inside:avoid;}" +
-            "a{color:#${theme.link.rgb()};}"
+            "a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
 }
 
 private fun injectReaderCss(html: String, settings: ReaderSettings): String {
@@ -666,6 +687,7 @@ private fun readerBridgeJs(fraction: Float): String = """
   var nonce=0;
   var scroller=document.scrollingElement||document.documentElement;
   scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
+  ${PageEngine.selectionButtonJs}
   var scheduled=false,last=0,lastSig='',userCrossed=false;
   var restorePending=$fraction>0.001;
   function measure(){

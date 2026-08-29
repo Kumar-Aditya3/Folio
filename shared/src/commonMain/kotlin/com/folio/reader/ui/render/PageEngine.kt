@@ -37,6 +37,38 @@ object PageEngine {
                 "background-color:$themeBg;}"
     }
 
+    /**
+     * Floating "Highlight" button shown after the user selects text; reports
+     * folio-sel:<paragraphIndex>:<encodedText>:<nonce>. Assumes a `nonce` var in
+     * the surrounding IIFE. Embedded by all three page bridges (paged engine,
+     * desktop continuous bridge, Android continuous bridge).
+     */
+    val selectionButtonJs: String = """
+function folioSelBtn(){
+  setTimeout(function(){
+    var old=document.getElementById('folio-selbtn');if(old&&old.parentNode)old.parentNode.removeChild(old);
+    var sel=window.getSelection();
+    if(!sel||sel.isCollapsed)return;
+    var text=(sel.toString()||'').trim();if(text.length<3)return;
+    var rg;try{rg=sel.getRangeAt(0).getBoundingClientRect();}catch(e){return;}
+    if(!rg||rg.width<=0)return;
+    var b=document.createElement('div');b.id='folio-selbtn';b.textContent='Highlight';
+    b.style.cssText='position:fixed;z-index:2147483400;left:'+Math.max(6,Math.min(window.innerWidth-104,rg.left+(rg.width-92)/2))+'px;top:'+Math.max(6,rg.top-42)+'px;padding:9px 16px;border-radius:12px;background:rgba(20,20,26,0.92);border:1px solid rgba(255,255,255,0.25);color:#fff;font:600 13px system-ui,sans-serif;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.5);';
+    b.onclick=function(e){e.stopPropagation();
+      var anchor=sel.anchorNode;var anchorEl=anchor&&(anchor.nodeType===1?anchor:anchor.parentElement);
+      var ps=document.querySelectorAll('p');var idx=0;
+      for(var i=0;i<ps.length;i++){if(ps[i]===anchorEl||ps[i].contains(anchorEl)){idx=i;break;}}
+      document.title='folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
+      if(b.parentNode)b.parentNode.removeChild(b);
+    };
+    document.documentElement.appendChild(b);
+    var hide=function(ev){var el=document.getElementById('folio-selbtn');if(!el)return;if(el.contains(ev.target))return;if(el.parentNode)el.parentNode.removeChild(el);document.removeEventListener('mousedown',hide,true);};
+    setTimeout(function(){document.addEventListener('mousedown',hide,true);},10);
+  },200);
+}
+document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioSelBtn,600);});
+"""
+
     /** Pager + block layout + flip + input JS. [fraction] = saved 0..1 position, [cols] = pages per screen, [measure] = readable line width cap (0 = none). */
     fun js(fraction: Float, cols: Int, gutter: Float, measure: Int): String = """
 (function(){
@@ -202,6 +234,7 @@ document.addEventListener('mouseup',function(e){
   handleTap(e.clientX,e.clientY,0,0);
 });
 layout();
+$selectionButtonJs
 page=Math.round(posFrac*maxPage());
 setScroll();
 setTimeout(function(){dirty=true;relayout();},250);
