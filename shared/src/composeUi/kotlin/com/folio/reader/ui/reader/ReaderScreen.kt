@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -37,7 +38,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -91,10 +94,14 @@ import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.ReadingPosition
+import com.folio.reader.model.locatorFraction
+import com.folio.reader.model.locatorsMatch
+import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.render.rememberHtmlRenderer
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,12 +127,14 @@ fun ReaderScreen(
     onBookmarkClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onToggleControls: () -> Unit,
+    onShowControls: () -> Unit = {},
     onToggleToc: () -> Unit,
     onToggleAnnotations: () -> Unit,
     onRemoveBookmark: (String) -> Unit,
     onRemoveHighlight: (String) -> Unit,
     onRemoveNote: (String) -> Unit,
     onAddNote: (String) -> Unit,
+    onSetHighlightNote: (highlightId: String, content: String) -> Unit = { _, _ -> },
     onScrollProgress: (Float) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit = {},
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
@@ -135,7 +144,8 @@ fun ReaderScreen(
     onResolveResource: suspend (chapterHref: String, src: String) -> String? = onResolveImage,
     syncState: com.folio.reader.sync.SyncState? = null,
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
-    onChapterEnd: () -> Unit = {}
+    onChapterEnd: () -> Unit = {},
+    onChapterStart: () -> Unit = {}
 ) {
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
@@ -182,6 +192,31 @@ fun ReaderScreen(
     // Bottom progress bar taps request a seek to a chapter fraction.
     var seekReq by remember { mutableStateOf<Pair<Float, Long>?>(null) }
     var seekNonce by remember { mutableStateOf(0L) }
+    // The page's live text selection. Highlighting is a chrome action because the
+    // OS selection toolbar covers anything drawn near the text on phones.
+    var pageSelection by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var clearSelTick by remember { mutableStateOf(0L) }
+    // Highlight whose note is being written in the glass composer.
+    var noteDraftFor by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentChapterIndex) { pageSelection = null }
+    // Annotation jumps: (target chapter index, seek target, chapter fraction). Released
+    // only once that chapter is on screen, else the seek would move the old chapter.
+    var pendingJump by remember { mutableStateOf<Triple<Int, String?, Float?>?>(null) }
+    var seekTargetReq by remember { mutableStateOf<Pair<String, Long>?>(null) }
+
+    LaunchedEffect(pendingJump, currentChapterIndex, chapterHtml, isLoadingContent) {
+        val jump = pendingJump ?: return@LaunchedEffect
+        if (currentChapterIndex != jump.first) return@LaunchedEffect
+        if (isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
+        pendingJump = null
+        seekNonce++
+        val target = jump.second
+        val fraction = jump.third
+        when {
+            target != null -> seekTargetReq = target to seekNonce
+            fraction != null -> seekReq = fraction to seekNonce
+        }
+    }
 
     // Chrome follows the reading theme (incl. per-book overrides) so bars and
     // panels never clash with the page on either platform.
@@ -201,6 +236,10 @@ fun ReaderScreen(
             "Open Sans", "Inter", "Noto Serif", "Serif", "Sans Serif", "Monospace"
         ) + settings.customFonts.map { it.name }).distinct()
     }
+    fun chapterLabel(spineIndex: Int?, chapterId: String?): String =
+        chapters.firstOrNull { spineIndex != null && it.spineIndex == spineIndex }?.title
+            ?: chapters.firstOrNull { chapterId != null && it.id == chapterId }?.title
+            ?: if (spineIndex == null && chapterId == null) "Whole book" else "Spine ${(spineIndex ?: 0) + 1}"
     val overlayHtml = when {
         !occludes -> null
         showReaderPanel -> com.folio.reader.ui.render.OverlayUi.settings(
@@ -214,6 +253,8 @@ fun ReaderScreen(
                 val t = com.folio.reader.settings.Theme.getPreset(id)
                 Triple(id, t.name, t.background.argbHex())
             },
+            highlightColors = readerThemePreset.highlightColors.map { it.argbHex() },
+            highlightIndex = settings.highlightColorIndex,
             c = overlayColors
         )
         showToc -> com.folio.reader.ui.render.OverlayUi.toc(
@@ -221,24 +262,86 @@ fun ReaderScreen(
             current = currentChapterIndex,
             c = overlayColors
         )
+        noteDraftFor != null -> {
+            val hl = highlights.firstOrNull { it.id == noteDraftFor }
+            com.folio.reader.ui.render.OverlayUi.noteComposer(
+                highlightId = noteDraftFor ?: "",
+                quote = hl?.selectedText?.take(280) ?: "",
+                existing = hl?.noteId?.let { nid -> notes.firstOrNull { it.id == nid }?.content } ?: "",
+                c = overlayColors
+            )
+        }
+
         showAnnotations -> com.folio.reader.ui.render.OverlayUi.annotations(
             bookmarks = bookmarks.map {
-                com.folio.reader.ui.render.OverlayUi.AnnotationRow("bm", it.id, it.label ?: "Spine ${it.spineIndex + 1}", "Bookmark")
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow("bm", it.id, it.label?.takeIf { l -> l.isNotBlank() } ?: "Bookmark", chapterLabel(it.spineIndex, it.chapterId))
             },
-            highlights = highlights.filter { !it.isDeleted }.map {
-                com.folio.reader.ui.render.OverlayUi.AnnotationRow("hl", it.id, it.selectedText.take(80).ifBlank { "(highlight)" }, "Highlight")
+            highlights = highlights.filter { !it.isDeleted }.map { h ->
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow(
+                    kind = "hl", id = h.id,
+                    title = h.selectedText.take(80).ifBlank { "(highlight)" },
+                    sub = chapterLabel(h.spineIndex, h.chapterId),
+                    note = h.noteId?.let { nid -> notes.firstOrNull { it.id == nid && !it.isDeleted }?.content },
+                    canNote = true
+                )
             },
-            notes = notes.map {
-                com.folio.reader.ui.render.OverlayUi.AnnotationRow("nt", it.id, it.content.take(80).ifBlank { "(note)" }, "Note")
+            // Only notes no highlight owns; linked ones render under their highlight.
+            notes = notes.filter { n -> highlights.none { it.noteId == n.id } }.map {
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow("nt", it.id, it.content.take(80).ifBlank { "(note)" }, chapterLabel(it.spineIndex, it.chapterId))
             },
             c = overlayColors
         )
         else -> null
     }
+    /**
+     * Opens the spot a bookmark/highlight/note was taken at: switches chapters when
+     * needed, then lands on the target. [markId] points at a painted highlight so the
+     * jump is exact (older rows only stored paragraph 0 because the selection index
+     * was read after the click collapsed it); otherwise the paragraph or a chapter
+     * fraction is used.
+     */
+    fun jumpToLocation(spineIndex: Int?, chapterId: String?, locator: String?, markId: String? = null) {
+        val index = chapters.indexOfFirst { spineIndex != null && it.spineIndex == spineIndex }
+            .takeIf { it >= 0 }
+            ?: chapters.indexOfFirst { chapterId != null && it.id == chapterId }.takeIf { it >= 0 }
+            ?: return
+        val para = locator?.paragraphFromLocator()
+        val target = when {
+            markId != null && markId.matches(Regex("[A-Za-z0-9_-]+")) ->
+                if (para != null) "h:$markId:$para" else "h:$markId"
+            para != null -> "p:$para"
+            else -> null
+        }
+        val fraction = if (target == null) locator?.locatorFraction() else null
+        if (index == currentChapterIndex) {
+            seekNonce++
+            when {
+                target != null -> seekTargetReq = target to seekNonce
+                fraction != null -> seekReq = fraction to seekNonce
+            }
+        } else {
+            pendingJump = Triple(index, target, fraction)
+            onChapterChange(index)
+        }
+    }
+
+    fun jumpToAnnotation(kind: String, id: String) {
+        when (kind) {
+            "bm" -> bookmarks.firstOrNull { it.id == id }
+                ?.let { jumpToLocation(it.spineIndex, it.chapterId, it.locator) }
+            "hl" -> highlights.firstOrNull { it.id == id }
+                ?.let { jumpToLocation(it.spineIndex, it.chapterId, it.startLocator, markId = it.id) }
+            "nt" -> notes.firstOrNull { it.id == id }
+                ?.let { jumpToLocation(it.spineIndex, it.chapterId, it.locator) }
+        }
+        if (showAnnotations) onToggleAnnotations()
+    }
+
     fun handleOverlayAction(a: String) {
         when {
             a == "close" -> {
                 showReaderPanel = false
+                noteDraftFor = null
                 if (showToc) onToggleToc()
                 if (showAnnotations) onToggleAnnotations()
             }
@@ -279,6 +382,33 @@ fun ReaderScreen(
                 if (com.folio.reader.settings.Theme.PRESETS.containsKey(id)) {
                     onSettingsChange(settings.copy(themeId = id, customTheme = null))
                 }
+            }
+
+            a.startsWith("set:hlcolor:") -> {
+                val idx = a.substringAfterLast(':').toIntOrNull() ?: return
+                onSettingsChange(settings.copy(highlightColorIndex = idx))
+            }
+
+            a.startsWith("note:") -> {
+                val id = a.substringAfterLast(':')
+                if (highlights.any { it.id == id }) noteDraftFor = id
+            }
+
+            a.startsWith("savenote:") -> {
+                val rest = a.substringAfter(':')
+                val id = rest.substringBefore(':')
+                val encoded = rest.substringAfter(':', "")
+                val text = runCatching {
+                    java.net.URLDecoder.decode(encoded, "UTF-8")
+                }.getOrNull().orEmpty().trim()
+                if (text.isNotBlank()) onSetHighlightNote(id, text)
+                noteDraftFor = null
+            }
+
+            a.startsWith("ann:") -> {
+                val kind = a.substringAfter(':').substringBefore(':')
+                val id = a.substringAfterLast(':')
+                jumpToAnnotation(kind, id)
             }
 
             a.startsWith("del:bm:") -> onRemoveBookmark(a.substringAfterLast(':'))
@@ -328,6 +458,14 @@ fun ReaderScreen(
                 onTap = onToggleControls,
                 onScrollFraction = onScrollProgress,
                 onLongPress = onHighlightParagraph,
+                onSelectionChanged = { idx, text ->
+                    pageSelection = text?.let { idx to it }
+                    // Reveal the chrome so Highlight is within reach the moment the
+                    // reader selects a passage. A cleared selection leaves the chrome
+                    // as the reader left it; a centre tap still hides it.
+                    if (text != null) onShowControls()
+                },
+                clearSelectionRequest = clearSelTick,
                 highlights = highlights,
                 onRetry = onRetryChapter,
                 onLinkClick = onLinkClick,
@@ -338,6 +476,7 @@ fun ReaderScreen(
                 onResolveImage = onResolveImage,
                 onResolveResource = onResolveResource,
                 seekRequest = seekReq,
+                seekTargetRequest = seekTargetReq,
                 modifier = Modifier.fillMaxSize().padding(contentInsets)
                     .then(if (occludes) Modifier else Modifier.padding(top = com.folio.reader.ui.components.statusBarTopPadding())),
                 position = position,
@@ -346,7 +485,8 @@ fun ReaderScreen(
                     totalPages = total
                     onPageChange(page, total)
                 },
-                onChapterEnd = onChapterEnd
+                onChapterEnd = onChapterEnd,
+                onChapterStart = onChapterStart
             )
         } else {
             Box(
@@ -417,11 +557,32 @@ fun ReaderScreen(
                     // Right-side action icons
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (occludes) {
+                            // The rail is not drawn on occluding platforms, so the
+                            // highlight action lives here: dull until the page has a
+                            // live selection.
+                            val selected = pageSelection
+                            IconButton(
+                                enabled = selected != null,
+                                onClick = {
+                                    if (selected != null) {
+                                        onHighlightParagraph?.invoke(selected.first, selected.second)
+                                        pageSelection = null
+                                        clearSelTick++
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.AddCircle,
+                                    contentDescription = if (selected != null) "Highlight selection" else "Select text to highlight",
+                                    tint = if (selected != null) FolioTheme.colors.onSurface
+                                    else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                                )
+                            }
                             IconButton(onClick = onToggleToc) {
-                                Icon(Icons.Filled.Menu, contentDescription = "TOC", tint = FolioTheme.colors.onSurface)
+                                Icon(Icons.Filled.List, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                             }
                             IconButton(onClick = onToggleAnnotations) {
-                                Icon(Icons.Filled.Create, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                                Icon(Icons.Filled.Menu, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                             }
                         }
                         IconButton(onClick = onSearchClick) {
@@ -433,7 +594,7 @@ fun ReaderScreen(
                         }
                         IconButton(onClick = onBookmarkClick) {
                             val isBookmarked = bookmarks.any { bm ->
-                                position?.let { pos -> bm.chapterId == pos.chapterId && bm.locator == pos.contentLocator } == true
+                                position?.let { pos -> bm.chapterId == pos.chapterId && locatorsMatch(bm.locator, pos.spotLocator()) } == true
                             }
                             Icon(
                                 imageVector = Icons.Filled.Star,
@@ -495,7 +656,7 @@ fun ReaderScreen(
         ) {
             val isBookmarked = remember(position, bookmarks) {
                 position?.let { pos ->
-                    bookmarks.any { it.chapterId == pos.chapterId && it.locator == pos.contentLocator }
+                    bookmarks.any { it.chapterId == pos.chapterId && locatorsMatch(it.locator, pos.spotLocator()) }
                 } ?: false
             }
 
@@ -511,15 +672,33 @@ fun ReaderScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    IconButton(onClick = onBackPress) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = FolioTheme.colors.onSurface)
+                    // Highlight lives here rather than floating by the selection: the
+                    // OS selection toolbar covers anything drawn near the text. Dull
+                    // until there is a selection, then it brightens to invite the tap.
+                    val selected = pageSelection
+                    IconButton(
+                        enabled = selected != null,
+                        onClick = {
+                            if (selected != null) {
+                                onHighlightParagraph?.invoke(selected.first, selected.second)
+                                pageSelection = null
+                                clearSelTick++
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AddCircle,
+                            contentDescription = if (selected != null) "Highlight selection" else "Select text to highlight",
+                            tint = if (selected != null) FolioTheme.colors.onSurface
+                            else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                        )
                     }
                     HorizontalDivider(modifier = Modifier.width(32.dp), color = FolioTheme.colors.onSurface.copy(alpha = 0.2f))
                     IconButton(onClick = onToggleToc) {
-                        Icon(Icons.Filled.Menu, contentDescription = "TOC", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.Filled.List, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onToggleAnnotations) {
-                        Icon(Icons.Filled.Create, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.Filled.Menu, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onBookmarkClick) {
                         Icon(
@@ -527,9 +706,6 @@ fun ReaderScreen(
                             contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark this spot",
                             tint = if (isBookmarked) Color(0xFFFBC02D) else FolioTheme.colors.onSurface
                         )
-                    }
-                    IconButton(onClick = onSearchClick) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = { showReaderPanel = !showReaderPanel }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Reading settings", tint = FolioTheme.colors.onSurface)
@@ -568,7 +744,7 @@ fun ReaderScreen(
             // TOC sidebar: slide in from the end edge
             androidx.compose.animation.AnimatedVisibility(
                 visible = showToc,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
                 enter = panelEnter,
                 exit = panelExit
             ) {
@@ -585,7 +761,7 @@ fun ReaderScreen(
             // Annotations sidebar: slide in from the end edge
             androidx.compose.animation.AnimatedVisibility(
                 visible = showAnnotations,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
                 enter = panelEnter,
                 exit = panelExit
             ) {
@@ -597,14 +773,16 @@ fun ReaderScreen(
                     onRemoveBookmark = onRemoveBookmark,
                     onRemoveHighlight = onRemoveHighlight,
                     onRemoveNote = onRemoveNote,
-                    onAddNote = onAddNote
+                    onSetHighlightNote = onSetHighlightNote,
+                    chapterLabel = { spine, chapterId -> chapterLabel(spine, chapterId) },
+                    onJump = { kind, id -> jumpToAnnotation(kind, id) }
                 )
             }
 
             // Thorium-style reading settings panel: slides in from the right edge
             androidx.compose.animation.AnimatedVisibility(
                 visible = showReaderPanel,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
                 enter = panelEnter,
                 exit = panelExit
             ) {
@@ -1027,6 +1205,8 @@ fun ChapterContent(
     onScrollFraction: (Float) -> Unit,
     onLinkClick: ((String) -> Unit)? = null,
     onLongPress: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
+    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)? = null,
+    clearSelectionRequest: Long? = null,
     onRetry: (() -> Unit)? = null,
     onNextChapter: (() -> Unit)? = null,
     onPrevChapter: (() -> Unit)? = null,
@@ -1038,8 +1218,10 @@ fun ChapterContent(
     modifier: Modifier = Modifier,
     position: ReadingPosition? = null,
     seekRequest: Pair<Float, Long>? = null,
+    seekTargetRequest: Pair<String, Long>? = null,
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
-    onChapterEnd: () -> Unit = {}
+    onChapterEnd: () -> Unit = {},
+    onChapterStart: () -> Unit = {}
 ) {
     val renderer = rememberHtmlRenderer(settings, onLinkClick)
     val scrollState = rememberScrollState()
@@ -1280,17 +1462,28 @@ fun ChapterContent(
                     onProgress = onScrollFraction,
                     onPageChange = onPageChange,
                     onChapterEnd = onChapterEnd,
+                    onChapterStart = onChapterStart,
                     onTap = onTap,
                     onLinkClick = onLinkClick,
                     onResolveResource = onResolveResource,
                     onHighlightParagraph = onLongPress?.let { cb -> { idx, text -> cb(idx, text) } },
-                    seekRequest = seekRequest
+                    onSelectionChanged = onSelectionChanged,
+                    clearSelectionRequest = clearSelectionRequest,
+                    seekRequest = seekRequest,
+                    seekTargetRequest = seekTargetRequest
                 )
             }
         }
     }
 }
 
+
+/**
+ * Folio writes content locators as "/{spineIndex}/{paragraphIndex}:{offset}"
+ * (see addHighlight / addBookmark), so the paragraph step is the last segment.
+ */
+private fun String.paragraphFromLocator(): Int? =
+    substringAfterLast('/').substringBefore(':').trimEnd(')').toIntOrNull()
 
 /** Smallest reader text size in sp — unchanged; users liked the low end. */
 private const val MIN_FONT_SIZE_SP = 12f
@@ -1468,6 +1661,32 @@ fun ReaderSettingsPanel(
                             }
                         }
                     }
+                }
+            }
+
+            // Highlight colour: picked from the active theme's own palette, so the
+            // wash always stays inside the theme's contrast budget.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Highlight", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId))
+                        .highlightColors.forEachIndexed { index, argb ->
+                            val selected = index == settings.highlightColorIndex
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(Color(argb))
+                                    .border(
+                                        width = if (selected) 2.dp else 1.dp,
+                                        color = if (selected) FolioTheme.colors.primary else FolioTheme.colors.outline,
+                                        shape = RoundedCornerShape(7.dp)
+                                    )
+                                    .clickable {
+                                        onSettingsChange(settings.copy(highlightColorIndex = index))
+                                    }
+                            )
+                        }
                 }
             }
 
@@ -1663,13 +1882,9 @@ fun TOCSidebar(
             HorizontalDivider(color = FolioTheme.colors.outline.copy(alpha = 0.5f))
 
             val initialScrollIndex = (currentIndex - 1).coerceAtLeast(0)
+            // Positioned on open only. While the panel stays open the list belongs
+            // to the user — re-scrolling on chapter changes is what made it jump.
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
-
-            LaunchedEffect(currentIndex) {
-                if (currentIndex in chapters.indices) {
-                    listState.scrollToItem((currentIndex - 1).coerceAtLeast(0))
-                }
-            }
 
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                 items(chapters, key = { "${it.bookId}:${it.id}" }) { chapter ->
@@ -1716,10 +1931,15 @@ fun AnnotationsSidebar(
     onRemoveBookmark: (String) -> Unit,
     onRemoveHighlight: (String) -> Unit,
     onRemoveNote: (String) -> Unit,
-    onAddNote: (String) -> Unit
+    onSetHighlightNote: (highlightId: String, content: String) -> Unit = { _, _ -> },
+    chapterLabel: (spineIndex: Int?, chapterId: String?) -> String = { spine, _ -> "Spine ${(spine ?: 0) + 1}" },
+    onJump: (kind: String, id: String) -> Unit = { _, _ -> }
 ) {
-    var showAddNoteDialog by remember { mutableStateOf(false) }
+    var noteDraftFor by remember { mutableStateOf<String?>(null) }
     var noteContent by remember { mutableStateOf("") }
+    val noteById = notes.filter { !it.isDeleted }.associateBy { it.id }
+    // Notes no highlight owns — everything made before notes lived on highlights.
+    val orphanNotes = notes.filter { n -> !n.isDeleted && highlights.none { it.noteId == n.id } }
 
     Column(
         modifier = Modifier
@@ -1737,49 +1957,51 @@ fun AnnotationsSidebar(
                 Icon(Icons.Filled.Close, contentDescription = "Close annotations")
             }
         }
-        TextButton(
-            onClick = { showAddNoteDialog = true },
-            modifier = Modifier.padding(horizontal = 8.dp)
-        ) {
-            Text("Add note")
-        }
-
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (bookmarks.isNotEmpty()) {
                 item { SectionHeader("Bookmarks (${bookmarks.size})") }
                 items(bookmarks, key = { "bm:${it.id}" }) { bookmark ->
                     AnnotationRow(
                         title = bookmark.label ?: "Page ${bookmark.spineIndex + 1}",
-                        subtitle = "Spine ${bookmark.spineIndex}",
+                        subtitle = chapterLabel(bookmark.spineIndex, bookmark.chapterId),
+                        onClick = { onJump("bm", bookmark.id) },
                         onDelete = { onRemoveBookmark(bookmark.id) }
                     )
                 }
             }
             if (highlights.isNotEmpty()) {
                 item { SectionHeader("Highlights (${highlights.size})") }
-                items(highlights, key = { "hl:${it.id}" }) { highlight ->
+                items(highlights.filter { !it.isDeleted }, key = { "hl:${it.id}" }) { highlight ->
+                    val linked = highlight.noteId?.let { noteById[it] }
                     AnnotationRow(
                         title = highlight.selectedText.take(80).ifBlank { "(empty)" },
-                        subtitle = "Spine ${highlight.spineIndex}",
-                        accentColor = Color(highlight.color.argb),
+                        subtitle = chapterLabel(highlight.spineIndex, highlight.chapterId),
+                        accentColor = Color(highlight.effectiveColor),
+                        note = linked?.content,
+                        onNote = {
+                            noteContent = linked?.content ?: ""
+                            noteDraftFor = highlight.id
+                        },
+                        onClick = { onJump("hl", highlight.id) },
                         onDelete = { onRemoveHighlight(highlight.id) }
                     )
                 }
             }
-            if (notes.isNotEmpty()) {
-                item { SectionHeader("Notes (${notes.size})") }
-                items(notes, key = { "nt:${it.id}" }) { note ->
+            if (orphanNotes.isNotEmpty()) {
+                item { SectionHeader("Notes (${orphanNotes.size})") }
+                items(orphanNotes, key = { "nt:${it.id}" }) { note ->
                     AnnotationRow(
                         title = note.content.take(80).ifBlank { "(empty)" },
-                        subtitle = "Note",
+                        subtitle = chapterLabel(note.spineIndex, note.chapterId),
+                        onClick = { onJump("nt", note.id) },
                         onDelete = { onRemoveNote(note.id) }
                     )
                 }
             }
-            if (bookmarks.isEmpty() && highlights.isEmpty() && notes.isEmpty()) {
+            if (bookmarks.isEmpty() && highlights.none { !it.isDeleted } && orphanNotes.isEmpty()) {
                 item {
                     Text(
-                        "Nothing here yet. Bookmark spots, add highlights and notes while reading.",
+                        "Nothing here yet. Bookmark spots, then select text to highlight and write a note on it.",
                         style = FolioTheme.typography.bodyMedium,
                         color = FolioTheme.colors.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp)
@@ -1789,31 +2011,43 @@ fun AnnotationsSidebar(
         }
     }
 
-    if (showAddNoteDialog) {
+    noteDraftFor?.let { highlightId ->
+        val passage = highlights.firstOrNull { it.id == highlightId }?.selectedText.orEmpty()
         AlertDialog(
-            onDismissRequest = { showAddNoteDialog = false },
-            title = { Text("Add note") },
+            onDismissRequest = { noteDraftFor = null },
+            title = { Text("Note") },
             text = {
-                OutlinedTextField(
-                    value = noteContent,
-                    onValueChange = { noteContent = it },
-                    label = { Text("Note") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (passage.isNotBlank()) {
+                        Text(
+                            text = "“${passage.take(200)}”",
+                            style = FolioTheme.typography.quote.copy(fontSize = 14.sp, lineHeight = 20.sp),
+                            color = FolioTheme.colors.onSurfaceVariant,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    OutlinedTextField(
+                        value = noteContent,
+                        onValueChange = { noteContent = it },
+                        label = { Text("Your note") },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onAddNote(noteContent.trim())
+                        onSetHighlightNote(highlightId, noteContent.trim())
                         noteContent = ""
-                        showAddNoteDialog = false
+                        noteDraftFor = null
                     },
                     enabled = noteContent.isNotBlank()
                 ) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { showAddNoteDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { noteDraftFor = null }) { Text("Cancel") }
             }
         )
     }
@@ -1834,12 +2068,20 @@ private fun AnnotationRow(
     title: String,
     subtitle: String,
     accentColor: Color? = null,
+    note: String? = null,
+    onNote: (() -> Unit)? = null,
+    onClick: () -> Unit = {},
     onDelete: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            .clip(RoundedCornerShape(FolioTokens.radiusControl))
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+    ) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1852,6 +2094,19 @@ private fun AnnotationRow(
             Text(title, style = FolioTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant)
         }
+        onNote?.let { action ->
+            TextButton(
+                onClick = action,
+                modifier = Modifier.size(width = 56.dp, height = 32.dp),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    text = if (note.isNullOrBlank()) "Note" else "Edit",
+                    style = FolioTheme.typography.labelSmall,
+                    color = FolioTheme.colors.primary
+                )
+            }
+        }
         IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.Delete,
@@ -1859,6 +2114,28 @@ private fun AnnotationRow(
                 tint = FolioTheme.colors.onSurfaceVariant,
                 modifier = Modifier.size(16.dp)
             )
+        }
+    }
+        if (!note.isNullOrBlank()) {
+            Row(
+                modifier = Modifier.padding(start = 13.dp, end = 12.dp, top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    Modifier
+                        .width(2.dp)
+                        .height(IntrinsicSize.Min)
+                        .background(FolioTheme.colors.primary, RoundedCornerShape(1.dp))
+                )
+                Text(
+                    text = note,
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurface,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }

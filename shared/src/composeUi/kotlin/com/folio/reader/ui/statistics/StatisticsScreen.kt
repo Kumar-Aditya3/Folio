@@ -156,7 +156,9 @@ fun StatisticsScreen(
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = FolioTheme.colors.surface)) {
         Column(Modifier.padding(16.dp)) {
-            Text(value, style = FolioTheme.typography.headlineSmall, color = FolioTheme.colors.primary, fontWeight = FontWeight.Bold)
+            // Display serif: the numbers carry the page, so they get the widest
+            // optical cut rather than a faked-bold weight.
+            Text(value, style = FolioTheme.typography.displaySmall, color = FolioTheme.colors.primary)
             Text(label, style = FolioTheme.typography.labelMedium, color = FolioTheme.colors.onSurfaceVariant)
         }
     }
@@ -169,7 +171,7 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = FolioTheme.colors.surface)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(title, style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface, fontWeight = FontWeight.Bold)
+            Text(title, style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface)
             Spacer(Modifier.height(8.dp))
             content()
         }

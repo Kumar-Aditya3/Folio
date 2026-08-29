@@ -29,6 +29,8 @@ data class ReaderSettings(
     val useEmbeddedFonts: Boolean = true,
     val appDarkTheme: Boolean = false,
     val customFonts: List<CustomFont> = emptyList(),
+    // Index into the active theme's highlightColors palette used for new highlights.
+    val highlightColorIndex: Int = 0,
     val firebaseApiKey: String = "",
     val firebaseProjectId: String = "",
     // Cloud sync settings — default true so existing installs with credentials already stored continue syncing

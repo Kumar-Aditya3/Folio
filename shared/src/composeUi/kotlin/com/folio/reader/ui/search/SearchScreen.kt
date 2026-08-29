@@ -1,5 +1,6 @@
 package com.folio.reader.ui.search
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,8 +9,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,8 +32,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.folio.reader.database.BookmarkRepository
 import com.folio.reader.database.HighlightRepository
@@ -54,8 +60,7 @@ enum class SearchScope(val label: String) {
     CONTENT("Content"),
     HIGHLIGHTS("Highlights"),
     NOTES("Notes"),
-    BOOKMARKS("Bookmarks"),
-    QUOTES("Quotes")
+    BOOKMARKS("Bookmarks")
 }
 
 data class AnnotationHit(
@@ -80,10 +85,34 @@ fun SearchScreen(
 ) {
     var query by remember { mutableStateOf("") }
     var scope by remember { mutableStateOf(SearchScope.TITLES) }
+    var contentBookId by remember { mutableStateOf<String?>(null) }
     var results by remember { mutableStateOf<List<BookHit>>(emptyList()) }
     var annotationResults by remember { mutableStateOf<List<AnnotationHit>>(emptyList()) }
     var titleMatches by remember { mutableStateOf<List<Book>>(emptyList()) }
     val coroutineScope = rememberCoroutineScope()
+
+    /** Renders FTS5 snippets: <<term>> becomes bold + accent instead of raw markers. */
+    @Composable
+    fun SnippetText(text: String, maxLines: Int) {
+        val primary = FolioTheme.colors.primary
+        val annotated = remember(text) {
+            androidx.compose.ui.text.buildAnnotatedString {
+                var i = 0
+                while (i < text.length) {
+                    val open = text.indexOf("<<", i)
+                    if (open < 0) { append(text.substring(i)); break }
+                    append(text.substring(i, open))
+                    val close = text.indexOf(">>", open + 2)
+                    if (close < 0) { append(text.substring(open)); break }
+                    withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = primary)) {
+                        append(text.substring(open + 2, close))
+                    }
+                    i = close + 2
+                }
+            }
+        }
+        Text(annotated, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+    }
 
     fun runSearch(q: String, activeScope: SearchScope) {
         query = q
@@ -106,7 +135,8 @@ fun SearchScreen(
                     titleMatches = emptyList()
                     annotationResults = emptyList()
                     val hits = mutableListOf<BookHit>()
-                    for (book in books) {
+                    val scopeBooks = contentBookId?.let { id -> books.filter { it.id == id } } ?: books
+                    for (book in scopeBooks) {
                         val chapterHits = searchRepository.searchInBook(book.id, q).first()
                         for (hit in chapterHits.take(5)) {
                             hits.add(BookHit(book, hit.spineIndex, hit.title, hit.context))
@@ -144,14 +174,6 @@ fun SearchScreen(
                                         hits.add(AnnotationHit(activeScope, book, b.label ?: "Bookmark", "Spine ${b.spineIndex}", b.spineIndex))
                                     }
                             }
-                            SearchScope.QUOTES -> {
-                                quoteRepository.getAllQuotes().first()
-                                    .filter { it.bookId == book.id && (it.text.contains(q, true) || (it.note?.contains(q, true) == true)) }
-                                    .take(5)
-                                    .forEach { quote ->
-                                        hits.add(AnnotationHit(activeScope, book, quote.text.take(80), quote.note ?: quote.text.take(140), null))
-                                    }
-                            }
                             else -> Unit
                         }
                     }
@@ -162,42 +184,70 @@ fun SearchScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { runSearch(it, scope) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusControl),
-                    placeholder = { Text("Search library, content, annotations…") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
-                )
-            },
-            navigationIcon = {
+        // Header: reserved status bar, a field with room for its own text, and chips
+        // that scroll instead of being crushed into the remaining width.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(FolioTheme.colors.surface)
+                .statusBarsPadding()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 IconButton(onClick = onBackPress) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = FolioTheme.colors.surface)
-        )
-
-        // Scope chips
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
-        ) {
-            SearchScope.entries.forEach { s ->
-                FilterChip(
-                    selected = scope == s,
-                    onClick = {
-                        scope = s
-                        runSearch(query, s)
-                    },
-                    label = { Text(s.label) }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { runSearch(it, scope) },
+                    modifier = Modifier.weight(1f),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusControl),
+                    placeholder = { Text("Search") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
                 )
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                items(SearchScope.entries, key = { "scope:${it.name}" }) { s ->
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = scope == s,
+                        onClick = {
+                            scope = s
+                            runSearch(query, s)
+                        },
+                        label = s.label
+                    )
+                }
+            }
+        }
+
+        // Content scope: optionally narrow the search to one book.
+        if (scope == SearchScope.CONTENT && books.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                item {
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = contentBookId == null,
+                        onClick = { contentBookId = null; runSearch(query, scope) },
+                        label = "All books"
+                    )
+                }
+                items(books, key = { "f:${it.id}" }) { book ->
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = contentBookId == book.id,
+                        onClick = { contentBookId = book.id; runSearch(query, scope) },
+                        label = book.title.substringBefore(" -").take(24)
+                    )
+                }
             }
         }
 
@@ -233,7 +283,7 @@ fun SearchScreen(
                 items(results, key = { "hit:${it.book.id}:${it.spineIndex}:${it.context.hashCode()}" }) { hit ->
                     ListItem(
                         headlineContent = { Text("${hit.book.title} - ${hit.chapterTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text(hit.context, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { SnippetText(hit.context, maxLines = 2) },
                         modifier = Modifier.fillMaxWidth().clickable { onResultClick(hit) }
                     )
                 }

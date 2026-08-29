@@ -62,11 +62,15 @@ actual fun HtmlContentSurface(
     onProgress: (Float) -> Unit,
     onPageChange: (Int, Int) -> Unit,
     onChapterEnd: () -> Unit,
+    onChapterStart: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
-    seekRequest: Pair<Float, Long>?
+    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)?,
+    clearSelectionRequest: Long?,
+    seekRequest: Pair<Float, Long>?,
+    seekTargetRequest: Pair<String, Long>?
 ) {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val backgroundColor = Color(theme.background)
@@ -78,9 +82,11 @@ actual fun HtmlContentSurface(
     callbacks.onProgress = onProgress
     callbacks.onPageChange = onPageChange
     callbacks.onChapterEnd = onChapterEnd
+    callbacks.onChapterStart = onChapterStart
     callbacks.onTap = onTap
     callbacks.onLinkClick = onLinkClick
     callbacks.onHighlightParagraph = onHighlightParagraph
+    callbacks.onSelectionChanged = onSelectionChanged
 
     val resolver by rememberUpdatedState(onResolveResource)
     val positionState by rememberUpdatedState(position)
@@ -96,8 +102,8 @@ actual fun HtmlContentSurface(
     var reloadTick by remember { mutableStateOf(0) }
     var appliedSettings by remember { mutableStateOf<ReaderSettings?>(null) }
     var hasLoadedOnce by remember { mutableStateOf(false) }
-    var lastOverlayScroll by remember { mutableStateOf(0) }
-    callbacks.onOverlayScroll = { lastOverlayScroll = it }
+    // Chapter whose document has been handed to the browser; null again on change.
+    var loadedChapter by remember(chapterHref) { mutableStateOf<String?>(null) }
 
     // Only geometry changes (page columns, measure cap, gutter) need a document
     // reload; theme/typography changes swap the stylesheet in place, so switching
@@ -156,6 +162,7 @@ actual fun HtmlContentSurface(
         result.onSuccess { url ->
             val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, s.margins.left, PageEngine.measurePx(s.textWidth)) else readerBridgeJs(fraction)
             current.load(url, js)
+            loadedChapter = chapterHref
             appliedSettings = s
             hasLoadedOnce = true
             preparing = false
@@ -180,10 +187,11 @@ actual fun HtmlContentSurface(
     }
 
     // 5) Push the glass overlay (contents/annotations/settings) into the page.
+    //    The session keeps the panel's own scroll position, so re-pushing (for
+    //    example after picking a chapter) never moves the list.
     LaunchedEffect(overlayHtml, session, resolvedHtml, reloadTick) {
         val current = session ?: return@LaunchedEffect
-        if (overlayHtml == null) lastOverlayScroll = 0
-        current.pushOverlay(overlayHtml ?: "", lastOverlayScroll)
+        current.pushOverlay(overlayHtml ?: "")
     }
 
     // 6) Bottom-bar seeks: jump to the tapped fraction of the chapter.
@@ -191,6 +199,35 @@ actual fun HtmlContentSurface(
         val current = session ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
         current.seek(req.first)
+    }
+
+    // 7) Annotation jumps: scroll to a highlight mark or paragraph. Waits for this
+    //    chapter's document to be handed over, so it never moves an older document
+    //    that happens to still be on screen.
+    var appliedSeek by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(seekTargetRequest, session, loadedChapter) {
+        val current = session ?: return@LaunchedEffect
+        val req = seekTargetRequest ?: return@LaunchedEffect
+        if (loadedChapter != chapterHref) return@LaunchedEffect
+        if (appliedSeek == req.second) return@LaunchedEffect
+        appliedSeek = req.second
+        current.seekTo(req.first)
+    }
+
+    // 8) Paint the chapter's highlights. Waits for this chapter's document so the
+    //    marks are never drawn into the previous chapter, and re-runs when the
+    //    selection set or the theme's palette changes.
+    LaunchedEffect(highlights, settings.themeId, settings.customTheme, session, loadedChapter) {
+        val current = session ?: return@LaunchedEffect
+        if (loadedChapter != chapterHref) return@LaunchedEffect
+        current.applyHighlights(HighlightPaint.js(highlights, theme))
+    }
+
+    // 9) The chrome committed a selection; drop it so the control dims again.
+    LaunchedEffect(clearSelectionRequest, session) {
+        val current = session ?: return@LaunchedEffect
+        if (clearSelectionRequest == null || clearSelectionRequest == 0L) return@LaunchedEffect
+        current.clearSelection()
     }
 
     val error = fatalError
@@ -240,11 +277,12 @@ private class SurfaceCallbacks {
     @Volatile var onProgress: (Float) -> Unit = {}
     @Volatile var onPageChange: (Int, Int) -> Unit = { _, _ -> }
     @Volatile var onChapterEnd: () -> Unit = {}
+    @Volatile var onChapterStart: () -> Unit = {}
     @Volatile var onTap: () -> Unit = {}
     @Volatile var onLinkClick: ((String) -> Unit)? = null
     @Volatile var onOverlayAction: ((String) -> Unit)? = null
-    @Volatile var onOverlayScroll: ((Int) -> Unit)? = null
     @Volatile var onHighlightParagraph: ((Int, String) -> Unit)? = null
+    @Volatile var onSelectionChanged: ((Int, String?) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
 }
 
@@ -266,6 +304,12 @@ private class JcefSession private constructor(
     @Volatile private var expectedUrl: String? = null
     @Volatile private var pendingJs: String? = null
     @Volatile private var lastOverlay: String? = null
+    @Volatile private var lastOverlayKind: String = ""
+    @Volatile private var lastOverlayScrollVal: Int = 0
+    @Volatile private var overlayCentered: Boolean = false
+    @Volatile private var pendingSeekTarget: String? = null
+    @Volatile private var pendingSeekFraction: Float? = null
+    @Volatile private var lastHighlightJs: String? = null
     @Volatile private var lastDocument: File? = null
     private var readyTimer: Timer? = null
 
@@ -303,7 +347,6 @@ private class JcefSession private constructor(
                             parts[2].toIntOrNull()?.coerceAtLeast(1) ?: 1,
                             parts[3].toIntOrNull()?.coerceAtLeast(1) ?: 1
                         )
-                        if (parts[4] == "true") callbacks.onChapterEnd()
                     }
 
                     t.startsWith("folio-link:") -> {
@@ -314,12 +357,19 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-tap:") -> callbacks.onTap()
 
+                    t.startsWith("folio-edge:end:") -> callbacks.onChapterEnd()
+
+                    t.startsWith("folio-edge:start:") -> callbacks.onChapterStart()
+
+                    t.startsWith("folio-selclear:") -> callbacks.onSelectionChanged?.invoke(0, null)
+
                     t.startsWith("folio-sel:") -> {
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')
                         val text = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
-                        if (!text.isNullOrBlank()) callbacks.onHighlightParagraph?.invoke(idx, text)
+                        if (text.isNullOrBlank()) callbacks.onSelectionChanged?.invoke(idx, null)
+                        else callbacks.onSelectionChanged?.invoke(idx, text)
                     }
 
                     t.startsWith("folio-ovl:") -> {
@@ -331,9 +381,22 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-ovlscroll:") -> {
                         val v = t.removePrefix("folio-ovlscroll:").substringBefore(':').toIntOrNull()
-                        if (v != null) callbacks.onOverlayScroll?.invoke(v)
+                        if (v != null) lastOverlayScrollVal = v
                     }
                 }
+            }
+        })
+        // Chromium's right-click menu (Copy, View source, Print…) has no place in a
+        // book page: it breaks the reading surface and can leave the app. An empty
+        // model means CEF shows no menu at all.
+        client.addContextMenuHandler(object : org.cef.handler.CefContextMenuHandlerAdapter() {
+            override fun onBeforeContextMenu(
+                browser: CefBrowser,
+                frame: CefFrame?,
+                params: org.cef.callback.CefContextMenuParams?,
+                model: org.cef.callback.CefMenuModel?
+            ) {
+                model?.clear()
             }
         })
         client.addLoadHandler(object : CefLoadHandlerAdapter() {
@@ -347,7 +410,10 @@ private class JcefSession private constructor(
                     pendingJs = null
                     browser.executeJavaScript(js, expected, 0)
                     val overlay = lastOverlay
-                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay, lastOverlayScrollVal), expected, 0)
+                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay, lastOverlayScrollVal, false), expected, 0)
+                    lastHighlightJs?.let { browser.executeJavaScript(it, expected, 0) }
+                    flushPendingSeek()
+                    flushPendingSeekFraction()
                 }
             }
 
@@ -440,16 +506,26 @@ private class JcefSession private constructor(
     }
 
     /** Renders (or clears) the glass overlay panel inside the page. */
-    fun pushOverlay(html: String, scroll: Int = 0) {
+    fun pushOverlay(html: String) {
+        val kind = overlayKind(html)
+        if (kind != lastOverlayKind) {
+            lastOverlayKind = kind
+            lastOverlayScrollVal = 0
+            overlayCentered = false
+        }
         lastOverlay = html.ifEmpty { null }
-        lastOverlayScrollVal = scroll
-        val js = overlayJs(html, scroll)
+        // Centering is a one-shot on open: re-pushing the same panel (picking a
+        // chapter keeps it open) must leave the list exactly where the user left it.
+        val centerActive = kind.isNotEmpty() && !overlayCentered
+        overlayCentered = overlayCentered || centerActive
+        val js = overlayJs(html, lastOverlayScrollVal, centerActive)
         EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
     }
 
-    private var lastOverlayScrollVal: Int = 0
+    private fun overlayKind(html: String): String =
+        Regex("data-kind=\"([^\"]+)\"").find(html)?.groupValues?.get(1) ?: ""
 
-    private fun overlayJs(html: String, initScroll: Int = 0): String =
+    private fun overlayJs(html: String, initScroll: Int, centerActive: Boolean): String =
         "(function(){var h=${html.toJsStringLiteral()};var old=document.getElementById('folio-overlay-root');var kind='';" +
                 "var m=h.match(/data-kind=\"([^\"]+)/);if(m)kind=m[1];" +
                 "var keep=old&&kind&&old.getAttribute('data-kind')===kind;" +
@@ -460,21 +536,70 @@ private class JcefSession private constructor(
                 "var root=document.getElementById('folio-overlay-root');" +
                 "var r2=root.querySelector('[data-kind]');if(r2)r2.setAttribute('data-kind',kind);" +
                 "if(kind)root.setAttribute('data-kind',kind);" +
-                "var list2=root.querySelector('[data-scroll]');if(list2)list2.scrollTop=sc;" +
-                "if(list2)list2.addEventListener('scroll',function(){clearTimeout(window.__folioOvlSdT);window.__folioOvlSdT=setTimeout(function(){document.title='folio-ovlscroll:'+Math.round(list2.scrollTop)+':'+Math.random().toString(36).slice(2);},250);},{passive:true});" +
+                "var list2=root.querySelector('[data-scroll]');if(list2){" +
+                " if(sc>0){list2.scrollTop=sc;}" +
+                " else if($centerActive){var act=root.querySelector('.ovl-active');if(act){" +
+                "  var lr=list2.getBoundingClientRect(),ar=act.getBoundingClientRect();" +
+                "  list2.scrollTop=Math.max(0,list2.scrollTop+(ar.top-lr.top)-(list2.clientHeight/2-ar.height/2));" +
+                "  document.title='folio-ovlscroll:'+Math.round(list2.scrollTop)+':'+Math.random().toString(36).slice(2);}}}" +
+                "if(list2)list2.addEventListener('scroll',function(){clearTimeout(window.__folioOvlSdT);window.__folioOvlSdT=setTimeout(function(){document.title='folio-ovlscroll:'+Math.round(list2.scrollTop)+':'+Math.random().toString(36).slice(2);},80);},{passive:true});" +
                 "var n=0;" +
                 "root.querySelectorAll('[data-act]').forEach(function(el){" +
                 "  if(el.tagName==='INPUT'||el.tagName==='SELECT'){" +
                 "    el.addEventListener('change',function(e){e.stopPropagation();document.title='folio-ovl:'+el.getAttribute('data-act')+':'+encodeURIComponent(el.value)+':'+(++n);});" +
                 "  } else {" +
-                "    el.addEventListener('click',function(e){e.stopPropagation();document.title='folio-ovl:'+el.getAttribute('data-act')+':'+(++n);});" +
+                "    el.addEventListener('click',function(e){e.stopPropagation();var a=el.getAttribute('data-act');" +
+                "      if(a&&a.indexOf('savenote')===0){var ta=root.querySelector('[data-note-input]');a=a+':'+encodeURIComponent(ta?ta.value:'');}" +
+                "      document.title='folio-ovl:'+a+':'+(++n);});" +
                 "  }" +
                 "});})();"
 
+    /** Re-paints the chapter's highlights; a load in flight defers to onLoadEnd. */
+    fun applyHighlights(js: String) {
+        lastHighlightJs = js
+        if (pendingJs != null) return
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+    }
+
+    /** Drops the page selection so the chrome's Highlight button dims again. */
+    fun clearSelection() {
+        val js = "window.__folioClearSel&&window.__folioClearSel();"
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+    }
+
     /** Jumps to an absolute 0..1 fraction of the chapter via the page hook. */
     fun seek(fraction: Float) {
-        val js = "window.__folioSeek&&window.__folioSeek(${fraction.coerceIn(0f, 1f)});"
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        pendingSeekFraction = fraction.coerceIn(0f, 1f)
+        flushPendingSeekFraction()
+    }
+
+    private fun flushPendingSeekFraction() {
+        val target = pendingSeekFraction ?: return
+        if (!ready || pendingJs != null) return
+        val url = expectedUrl ?: return
+        pendingSeekFraction = null
+        val js = "window.__folioSeek&&window.__folioSeek($target);"
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, url, 0) }
+    }
+
+    /** Scrolls to a target ("h:<id>" highlight mark or "p:<index>" paragraph). */
+    fun seekTo(target: String) {
+        pendingSeekTarget = target
+        flushPendingSeek()
+    }
+
+    /**
+     * Applies a queued jump once the document it targets is on screen. Running it
+     * while a load is still in flight would move the *previous* chapter (and can
+     * falsely report end-of-chapter there).
+     */
+    private fun flushPendingSeek() {
+        val target = pendingSeekTarget ?: return
+        if (!ready || pendingJs != null) return
+        val url = expectedUrl ?: return
+        pendingSeekTarget = null
+        val js = "window.__folioSeekTo&&window.__folioSeekTo(${target.toJsStringLiteral()});"
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, url, 0) }
     }
 
     private fun sameUrl(a: String?, b: String?): Boolean {
@@ -676,7 +801,8 @@ private fun readerStyleCss(settings: ReaderSettings): String {
     } else ""
     val elementForceCss = if (original) "" else
         "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:$family !important;}" +
-                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}"
+                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}" +
+                "body,body p,body div,body li,body blockquote{text-indent:0 !important;}"
 
     return "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
             themeBgCss +
@@ -690,6 +816,7 @@ private fun readerStyleCss(settings: ReaderSettings): String {
             normalizedExtra +
             elementForceCss +
             "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
+            HighlightPaint.css +
             "img{max-width:100%;height:auto;break-inside:avoid;}" +
             "a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
 }
@@ -715,9 +842,14 @@ private fun readerBridgeJs(fraction: Float): String = """
   var scroller=document.scrollingElement||document.documentElement;
   scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
   document.body.style.opacity='1';
-  window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));userCrossed=true;restorePending=false;schedule();};
-  ${PageEngine.selectionButtonJs}
-  var scheduled=false,last=0,lastSig='',userCrossed=false;
+  window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));restorePending=false;schedule();};
+  window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+  window.__folioSeekTo=function(t){var parts=String(t).split(':'),el=null;
+    if(parts[0]==='h'&&parts[1]){el=document.querySelector('[data-folio-hl="'+parts[1]+'"]');}
+    if(!el){var pi=parts[0]==='h'?parts[2]:parts[1];var ps=document.querySelectorAll('p');if(!ps.length)return;var n=parseInt(pi,10);if(isNaN(n))n=0;el=ps[Math.min(Math.max(0,n),ps.length-1)];}
+    if(!el)return;el.scrollIntoView({block:'start'});restorePending=false;schedule();};
+  ${PageEngine.selectionWatchJs}
+  var scheduled=false,last=0,lastSig='',maxTotal=1;
   var restorePending=$fraction>0.001;
   function measure(){
     scheduled=false;
@@ -735,15 +867,27 @@ private fun readerBridgeJs(fraction: Float): String = """
     }
     var offset=s.scrollTop||window.scrollY;
     var total=Math.max(1,Math.ceil(docH/vh));
+    // A chapter's content only grows as fonts and images settle, so a smaller total
+    // is always a mid-fling measurement artifact — never let it collapse the counter.
+    if(total>maxTotal)maxTotal=total;else total=maxTotal;
     var current=Math.min(total,Math.floor(offset/vh)+1);
     var p=range>0?Math.min(1,offset/range):0;
-    var crossed=userCrossed&&p>=0.995;
-    var sig=p.toFixed(3)+':'+current+':'+total+':'+crossed;
+    var crossed=false;
+    var sig=p.toFixed(3)+':'+current+':'+total;
     if(sig!==lastSig){lastSig=sig;document.title='folio-progress:'+p.toFixed(4)+':'+current+':'+total+':'+crossed;}
   }
   function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(measure);}}
-  window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;userCrossed=true;restorePending=false;},{passive:true});
-  window.addEventListener('scroll',schedule,{passive:true});
+  var lastEdgeHop=0;
+  function edge(which){
+    var now=Date.now();
+    if(now-lastEdgeHop<600)return;
+    lastEdgeHop=now;
+    document.title='folio-edge:'+which+':'+(++nonce);
+  }
+  function atTop(){var s=document.scrollingElement||document.documentElement;return (s.scrollTop||0)<=1;}
+  function atBottom(){var s=document.scrollingElement||document.documentElement;return s.scrollTop+s.clientHeight>=s.scrollHeight-2;}
+  window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;var d=e.deltaY||0;if(d<0&&atTop())edge('start');if(d>0&&atBottom())edge('end');restorePending=false;},{passive:true});
+  window.addEventListener('scroll',function(){schedule();clearTimeout(window.__folioSettleT);window.__folioSettleT=setTimeout(schedule,180);},{passive:true});
   window.addEventListener('resize',schedule);
   document.addEventListener('click',function(ev){
     var el=ev.target;

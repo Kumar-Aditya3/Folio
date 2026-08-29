@@ -1,6 +1,7 @@
 package com.folio.reader.ui.book
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,12 +14,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -80,6 +83,7 @@ import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.components.StatCard
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -152,34 +156,39 @@ fun BookDetailScreen(
 
     Scaffold(
         containerColor = FolioTheme.colors.background,
+        // No bar: the controls sit directly on the artwork as small glass discs, so
+        // the cover reads as the top of the screen instead of starting under a panel.
         topBar = {
-            com.folio.reader.ui.components.FolioTopBar(
-                title = "",
-                navigationIcon = {
-                    IconButton(onClick = onBackPress) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (onShareClick != null) {
-                        IconButton(onClick = onShareClick) {
-                            Icon(Icons.Filled.Share, contentDescription = "Share EPUB")
-                        }
-                    }
-                    IconButton(onClick = {
-                        showMetadataEditor = true
-                        onEditClick()
-                    }) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Edit metadata")
-                    }
-
-                    if (onDeleteClick != null) {
-                        IconButton(onClick = { showDeleteConfirm = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete book", tint = FolioTheme.colors.error)
-                        }
+            Row(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().height(FolioTokens.barHeight)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FloatingIconButton(onClick = onBackPress) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                Spacer(Modifier.weight(1f))
+                if (onShareClick != null) {
+                    FloatingIconButton(onClick = onShareClick) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share EPUB")
                     }
                 }
-            )
+                FloatingIconButton(onClick = {
+                    showMetadataEditor = true
+                    onEditClick()
+                }) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit metadata")
+                }
+                if (onDeleteClick != null) {
+                    FloatingIconButton(onClick = { showDeleteConfirm = true }) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete book",
+                            tint = FolioTheme.colors.error
+                        )
+                    }
+                }
+            }
         }
     ) { innerPadding ->
         val b = book
@@ -314,6 +323,25 @@ private fun BookMetadataEditorDialog(
     )
 }
 
+/** Small glass disc control that sits on the artwork instead of in a toolbar. */
+@Composable
+private fun FloatingIconButton(
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(FolioTheme.colors.surface.copy(alpha = 0.42f))
+            .border(1.dp, FolioTheme.colors.outline.copy(alpha = 0.35f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
 @Composable
 private fun BookHeaderSection(
     book: Book,
@@ -350,7 +378,6 @@ private fun BookHeaderSection(
                 Text(
                     text = book.title,
                     style = FolioTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
                     color = FolioTheme.colors.onSurface
                 )
 

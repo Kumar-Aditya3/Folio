@@ -303,6 +303,9 @@ class FolioApplication : Application() {
                 }
             }
         }.onFailure { it.printStackTrace() }
+        // Same directory holds the interface faces (Fraunces/Manrope); installed here
+        // so the first frame is never drawn in the system font.
+        com.folio.reader.ui.theme.UiFonts.install(graph.platform.fileSystem.getFontsDir())
     }
 
     override fun onTerminate() {

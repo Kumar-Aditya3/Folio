@@ -23,11 +23,15 @@ expect fun HtmlContentSurface(
     onProgress: (Float) -> Unit,
     onPageChange: (Int, Int) -> Unit,
     onChapterEnd: () -> Unit = {},
+    onChapterStart: () -> Unit = {},
     onTap: () -> Unit = {},
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
-    seekRequest: Pair<Float, Long>? = null
+    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)? = null,
+    clearSelectionRequest: Long? = null,
+    seekRequest: Pair<Float, Long>? = null,
+    seekTargetRequest: Pair<String, Long>? = null
 )
 
 /**

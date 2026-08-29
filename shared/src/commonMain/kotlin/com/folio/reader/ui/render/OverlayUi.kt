@@ -1,15 +1,12 @@
 package com.folio.reader.ui.render
 
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
-
 /**
  * Glass overlay panels (contents, annotations, reading settings) rendered INSIDE
  * the page surface. On desktop the embedded browser is a heavyweight window that
  * always paints above Compose, so floating panels are drawn by the page itself:
  * the host pushes an HTML spec, the page reports interactions back through the
- * folio-ovl title protocol. Actions: close, toc:<i>, set:<key>:<value>,
- * allsettings, del:<kind>:<id>.
+ * folio-ovl title protocol. Actions: close, toc:<i>, ann:<kind>:<id>,
+ * set:<key>:<value>, allsettings, del:<kind>:<id>.
  */
 data class OverlayColors(
     val bg: String,        // page background (#rrggbb)
@@ -21,8 +18,15 @@ data class OverlayColors(
 
 object OverlayUi {
 
-    private fun esc(s: String): String = Json.encodeToString(String.serializer(), s)
-        .removeSurrounding("\"")
+    /** Safe for HTML text nodes and for single/double-quoted attribute values. */
+    private fun esc(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+        .replace('\n', ' ')
+        .replace('\r', ' ')
 
     private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300, kind: String = ""): String {
         val tint = if (c.isDark) "rgba(16,16,22,0.55)" else "rgba(250,248,242,0.52)"
@@ -53,21 +57,43 @@ object OverlayUi {
             val active = i == current
             val style = if (active) "$itemCss background:${c.accent}22;color:${c.accent};font-weight:600;" else
                 "$itemCss color:${c.fg};"
-            "<button data-act=\"toc:$i\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(title)}</button>"
+            val cls = if (active) " class=\"ovl-active\"" else ""
+            "<button$cls data-act=\"toc:$i\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(title)}</button>"
         }.joinToString("")
         return shell("Contents", rows, c, width = 280, kind = "toc")
     }
 
-    data class AnnotationRow(val kind: String, val id: String, val title: String, val sub: String)
+    data class AnnotationRow(
+        val kind: String,
+        val id: String,
+        val title: String,
+        val sub: String,
+        /** Note attached to this row (highlights own their notes). */
+        val note: String? = null,
+        /** Whether this row offers the note action. */
+        val canNote: Boolean = false
+    )
 
     fun annotations(bookmarks: List<AnnotationRow>, highlights: List<AnnotationRow>, notes: List<AnnotationRow>, c: OverlayColors): String {
+        val hover = if (c.isDark) "rgba(255,255,255,0.12)" else "rgba(0,0,0,0.08)"
+        val rest = if (c.isDark) "rgba(255,255,255,0.05)" else "rgba(0,0,0,0.04)"
         fun section(name: String, rows: List<AnnotationRow>) = if (rows.isEmpty()) "" else {
             "<div style='font-size:12px;font-weight:700;letter-spacing:0.6px;opacity:0.6;text-transform:uppercase;margin-top:6px;'>$name</div>" +
                     rows.joinToString("") { r ->
-                        "<div style=\"display:flex;gap:8px;align-items:center;$itemCss background:${if (c.isDark) "rgba(255,255,255,0.05)" else "rgba(0,0,0,0.04)"};\">" +
+                        val noteAction = if (r.canNote)
+                            "<button data-act=\"note:${r.kind}:${r.id}\" title=\"${if (r.note.isNullOrBlank()) "Add note" else "Edit note"}\" style=\"all:unset;cursor:pointer;color:${c.accent};padding:4px 8px;font-size:12px;font-weight:600;\">${if (r.note.isNullOrBlank()) "＋note" else "note"}</button>"
+                        else ""
+                        val nested = if (!r.note.isNullOrBlank())
+                            "<div style=\"margin-top:6px;padding:8px 10px;border-left:2px solid ${c.accent};border-radius:0 8px 8px 0;background:$rest;font-size:12.5px;line-height:1.45;white-space:pre-wrap;\">${esc(r.note)}</div>"
+                        else ""
+                        "<div style=\"display:flex;flex-direction:column;$itemCss background:$rest;\">" +
+                                "<div style=\"display:flex;gap:8px;align-items:center;\" data-act=\"ann:${r.kind}:${r.id}\" " +
+                                "onmouseover=\"this.style.background='$hover'\" onmouseout=\"this.style.background='transparent'\">" +
                                 "<div style=\"flex:1;min-width:0;\"><div style=\"white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">${esc(r.title)}</div>" +
-                                "<div style=\"font-size:11px;opacity:0.6;\">${esc(r.sub)}</div></div>" +
-                                "<button data-act=\"del:${r.kind}:${r.id}\" style=\"all:unset;cursor:pointer;color:${c.accent};padding:4px 8px;\" title=\"Remove\">&#128465;</button></div>"
+                                "<div style=\"font-size:11px;opacity:0.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">${esc(r.sub)}</div></div>" +
+                                noteAction +
+                                "<button data-act=\"del:${r.kind}:${r.id}\" style=\"all:unset;cursor:pointer;color:${c.accent};padding:4px 8px;\" title=\"Remove\">&#128465;</button></div>" +
+                                nested + "</div>"
                     }
         }
         val body = section("Bookmarks", bookmarks) + section("Highlights", highlights) + section("Notes", notes) +
@@ -76,9 +102,27 @@ object OverlayUi {
         return shell("Annotations", body, c, kind = "annotations")
     }
 
+    /**
+     * In-page note composer. Drawn by the page because the embedded browser is a
+     * heavyweight window that paints over any Compose dialog on desktop.
+     */
+    fun noteComposer(highlightId: String, quote: String, existing: String, c: OverlayColors): String {
+        val field = "<textarea data-note-input spellcheck='false' rows='6' style='width:100%;box-sizing:border-box;resize:none;" +
+                "padding:12px;border-radius:12px;background:${if (c.isDark) "rgba(255,255,255,0.06)" else "rgba(0,0,0,0.04)"};" +
+                "color:${c.fg};border:1px solid ${if (c.isDark) "#444" else "#ccc"};font:14px/1.5 " + "\"'Segoe UI',system-ui,sans-serif;\" " +
+                "placeholder='Write a note about this passage…'>${esc(existing)}</textarea>"
+        val body =
+                "<div style='font-size:13px;opacity:0.75;line-height:1.5;padding:10px 12px;border-left:2px solid ${c.accent};" +
+                        "border-radius:0 8px 8px 0;background:${if (c.isDark) "rgba(255,255,255,0.05)" else "rgba(0,0,0,0.04)"};'>${esc(quote)}</div>" +
+                field +
+                "<button data-act='savenote:$highlightId' style='$itemCss text-align:center;background:${c.accent};color:#fff;font-weight:600;margin-top:6px;border-radius:12px;padding:12px;'>Save note</button>"
+        return shell("Note", body, c, kind = "note")
+    }
+
     fun settings(
         fontSize: Float, lineHeight: Float, margin: Float, fontFamily: String,
         fontOptions: List<String>, themeId: String, themes: List<Triple<String, String, String>>, // id, name, bg
+        highlightColors: List<String>, highlightIndex: Int,
         c: OverlayColors
     ): String {
         val slider = { label: String, key: String, min: Double, max: Double, step: Double, value: Double, fmt: String ->
@@ -96,11 +140,19 @@ object OverlayUi {
                     "<button data-act='set:theme:${t.first}' title='${esc(t.second)}' style='all:unset;cursor:pointer;width:40px;height:40px;border-radius:10px;background:${t.third};border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
                             (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
                 } + "</div>"
+        val highlightRow = if (highlightColors.isEmpty()) "" else
+            "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Highlight</span></div>" +
+                    "<div style='display:flex;gap:8px;flex-wrap:wrap;'>" +
+                    highlightColors.mapIndexed { idx, hex ->
+                        val sel = idx == highlightIndex
+                        "<button data-act='set:hlcolor:$idx' title='Highlight colour' style='all:unset;cursor:pointer;width:30px;height:30px;border-radius:8px;background:$hex;border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
+                                (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
+                    } + "</div>"
         val body =
             slider("Text size", "size", 12.0, 26.0, 0.5, fontSize.toDouble(), "%.1f".format(fontSize)) +
                     slider("Line spacing", "lh", 1.0, 3.0, 0.1, lineHeight.toDouble(), "%.1f".format(lineHeight)) +
                     slider("Margins", "mg", 0.0, 64.0, 1.0, margin.toDouble(), "${margin.toInt()} px") +
-                    fontSel + themeRow +
+                    fontSel + themeRow + highlightRow +
                     "<button data-act='allsettings' style='$itemCss text-align:center;background:${c.accent};color:#fff;font-weight:600;margin-top:8px;border-radius:12px;padding:12px;'>All settings</button>"
         return shell("Reading settings", body, c, kind = "settings")
     }
