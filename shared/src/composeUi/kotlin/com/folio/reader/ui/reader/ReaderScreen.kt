@@ -74,7 +74,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import com.folio.reader.ui.render.PageDim
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
@@ -1700,23 +1699,25 @@ fun ReaderSettingsPanel(
                 }
             }
 
-            // Light — dims the page itself, not a scrim over it, so it also works on
-            // desktop where the browser window paints over Compose overlays.
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Light", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
-                    Text("${(settings.brightness * 100).toInt()}%", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.primary)
+            // Light — the device's own screen brightness. Dimming the page instead
+            // washed the ink, and brightness is a property of the hardware, not a
+            // reading preference worth storing or syncing.
+            val brightness = com.folio.reader.ui.components.rememberScreenBrightness()
+            if (brightness.supported) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Light", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
+                        Text("${(brightness.value * 100).toInt()}%", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.primary)
+                    }
+                    androidx.compose.material3.Slider(
+                        value = brightness.value,
+                        onValueChange = { brightness.set(it) },
+                        valueRange = 0.05f..1f
+                    )
                 }
-                androidx.compose.material3.Slider(
-                    value = settings.brightness,
-                    onValueChange = {
-                        onSettingsChange(settings.copy(brightness = it.coerceIn(PageDim.MIN_BRIGHTNESS, 1f)))
-                    },
-                    valueRange = PageDim.MIN_BRIGHTNESS..1f
-                )
             }
 
             // Line spacing

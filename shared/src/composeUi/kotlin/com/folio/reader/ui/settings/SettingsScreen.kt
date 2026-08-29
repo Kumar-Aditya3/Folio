@@ -785,41 +785,38 @@ fun ReadingSettingsPanel(
             )
         }
 
-        // Page dimming — same control the in-reader panel exposes.
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
+        // The device's own screen brightness. Hidden where unsupported: dimming the
+        // page to imitate a brightness control washed the paper, and brightness is a
+        // property of the hardware rather than a reading preference to store or sync.
+        val brightness = com.folio.reader.ui.components.rememberScreenBrightness()
+        if (brightness.supported) {
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text("Light", style = MaterialTheme.typography.bodyLarge)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Light", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${(brightness.value * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 Text(
-                    "${(settings.brightness * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
+                    "Sets the screen brightness for this app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = brightness.value,
+                    onValueChange = { brightness.set(it) },
+                    valueRange = 0.05f..1f
                 )
             }
-            Text(
-                "Dims the page without changing its colours",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Slider(
-                value = settings.brightness,
-                onValueChange = {
-                    onSettingsChange(
-                        settings.copy(
-                            brightness = it.coerceIn(
-                                com.folio.reader.ui.render.PageDim.MIN_BRIGHTNESS, 1f
-                            )
-                        )
-                    )
-                },
-                valueRange = com.folio.reader.ui.render.PageDim.MIN_BRIGHTNESS..1f
-            )
         }
     }
 }
