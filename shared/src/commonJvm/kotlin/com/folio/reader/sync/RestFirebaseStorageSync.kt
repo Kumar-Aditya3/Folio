@@ -3,6 +3,7 @@ package com.folio.reader.sync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,6 +38,12 @@ class RestFirebaseStorageSync(
     private var idToken: String? = null
 
     @Volatile
+    private var refreshToken: String? = null
+
+    @Volatile
+    private var idTokenExpiresAtMs: Long = 0L
+
+    @Volatile
     override var uid: String = uidOverride ?: ""
         private set
 
@@ -49,68 +56,112 @@ class RestFirebaseStorageSync(
             uid = uidOverride
             return
         }
-        if (idToken != null && uid.isNotEmpty()) return
-        val email = accountEmail?.takeIf { it.isNotBlank() } ?: "folio-sync-default@folio.app"
-        val password = accountPassword?.takeIf { it.isNotBlank() } ?: "FolioSyncPass2026!"
+        if (hasValidToken()) return
+        // Id tokens expire after ~1h; long-running sessions must refresh or every
+        // request starts failing with 401.
+        if (refreshToken != null && tryRefreshToken()) return
 
-        val response = runCatching {
-            httpJson(
-                url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$apiKey",
-                method = "POST",
-                body = buildString {
-                    append("{\"email\":\"")
-                    append(storageJsonEscape(email))
-                    append("\",\"password\":\"")
-                    append(storageJsonEscape(password))
-                    append("\",\"returnSecureToken\":true}")
-                },
-                authHeader = null
-            )
-        }.getOrElse { error1 ->
+        val email = accountEmail?.takeIf { it.isNotBlank() }
+        val password = accountPassword?.takeIf { it.isNotBlank() }
+
+        val response = if (email != null && password != null) {
             runCatching {
-                httpJson(
-                    url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey",
-                    method = "POST",
-                    body = buildString {
-                        append("{\"email\":\"")
-                        append(storageJsonEscape(email))
-                        append("\",\"password\":\"")
-                        append(storageJsonEscape(password))
-                        append("\",\"returnSecureToken\":true}")
-                    },
-                    authHeader = null
-                )
-            }.getOrElse { error2 ->
+                identityToolkit("accounts:signInWithPassword", credentialsBody(email, password))
+            }.getOrElse { error1 ->
                 runCatching {
-                    httpJson(
-                        url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey",
-                        method = "POST",
-                        body = "{\"returnSecureToken\":true}",
-                        authHeader = null
-                    )
-                }.getOrElse { error3 ->
-                    val rawMsg = error2.message ?: error1.message ?: error3.message ?: ""
-                    if (rawMsg.contains("OPERATION_NOT_ALLOWED")) {
-                        idToken = null
-                        uid = accountEmail?.takeIf { it.isNotBlank() } ?: "default_user"
+                    identityToolkit("accounts:signUp", credentialsBody(email, password))
+                }.getOrElse { error2 ->
+                    runCatching {
+                        identityToolkit("accounts:signUp", anonymousSignUpBody)
+                    }.getOrElse { error3 ->
+                        authFailure(error2.message ?: error1.message ?: error3.message, email)
                         return
-                    } else {
-                        throw IOException("Firebase Storage Auth failed: ${rawMsg.take(120)}")
                     }
                 }
             }
+        } else {
+            // No shared fallback account compiled into the binary: an install
+            // without credentials gets its own anonymous identity. Cross-device
+            // sync requires entering the same account in Settings -> Advanced.
+            runCatching {
+                identityToolkit("accounts:signUp", anonymousSignUpBody)
+            }.getOrElse { error ->
+                authFailure(error.message, null)
+                return
+            }
         }
 
+        adoptAuthTokens(response)
+    }
+
+    private val anonymousSignUpBody = "{\"returnSecureToken\":true}"
+
+    private fun hasValidToken(): Boolean =
+        idToken != null && uid.isNotEmpty() &&
+                Clock.System.now().toEpochMilliseconds() < idTokenExpiresAtMs - TOKEN_REFRESH_MARGIN_MS
+
+    private fun tryRefreshToken(): Boolean {
+        val current = refreshToken ?: return false
+        val response = runCatching {
+            httpJson(
+                url = "https://securetoken.googleapis.com/v1/token?key=$apiKey",
+                method = "POST",
+                body = "grant_type=refresh_token&refresh_token=${URLEncoder.encode(current, "UTF-8")}",
+                authHeader = null,
+                contentType = "application/x-www-form-urlencoded"
+            )
+        }.getOrNull() ?: return false
+        val obj = runCatching { json.parseToJsonElement(response).jsonObject }.getOrNull() ?: return false
+        val newIdToken = obj["id_token"]?.jsonPrimitive?.content ?: return false
+        idToken = newIdToken
+        obj["refresh_token"]?.jsonPrimitive?.content?.let { refreshToken = it }
+        obj["user_id"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }?.let { uid = it }
+        idTokenExpiresAtMs = Clock.System.now().toEpochMilliseconds() + expiresInMs(obj["expires_in"]?.jsonPrimitive?.content)
+        return true
+    }
+
+    private fun credentialsBody(email: String, password: String): String = buildString {
+        append("{\"email\":\"")
+        append(storageJsonEscape(email))
+        append("\",\"password\":\"")
+        append(storageJsonEscape(password))
+        append("\",\"returnSecureToken\":true}")
+    }
+
+    private fun identityToolkit(endpoint: String, body: String): String = httpJson(
+        url = "https://identitytoolkit.googleapis.com/v1/$endpoint?key=$apiKey",
+        method = "POST",
+        body = body,
+        authHeader = null
+    )
+
+    private fun adoptAuthTokens(response: String) {
         val obj = json.parseToJsonElement(response).jsonObject
         idToken = obj["idToken"]?.jsonPrimitive?.content
+        refreshToken = obj["refreshToken"]?.jsonPrimitive?.content
         uid = obj["localId"]?.jsonPrimitive?.content ?: ""
         if (uid.isEmpty()) {
             uid = "default_user"
         }
+        idTokenExpiresAtMs = Clock.System.now().toEpochMilliseconds() + expiresInMs(obj["expiresIn"]?.jsonPrimitive?.content)
+    }
+
+    private fun expiresInMs(raw: String?): Long = (raw?.toLongOrNull() ?: 3600L) * 1000L
+
+    private fun authFailure(rawMsg: String?, email: String?) {
+        val msg = rawMsg ?: ""
+        if (msg.contains("OPERATION_NOT_ALLOWED")) {
+            idToken = null
+            refreshToken = null
+            idTokenExpiresAtMs = 0L
+            uid = email ?: "default_user"
+        } else {
+            throw IOException("Firebase Storage Auth failed: ${msg.take(120)}")
+        }
     }
 
     private fun ensureAuth() {
-        if (uidOverride == null && (idToken == null || uid.isEmpty())) authenticate()
+        if (uidOverride == null && !hasValidToken()) authenticate()
     }
 
     private fun bearer(): String? = idToken?.let { "Bearer $it" }
@@ -367,7 +418,7 @@ class RestFirebaseStorageSync(
         throw lastException ?: IOException("$opName failed after retries")
     }
 
-    private fun httpJson(url: String, method: String, body: String?, authHeader: String?): String {
+    private fun httpJson(url: String, method: String, body: String?, authHeader: String?, contentType: String = "application/json"): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 10_000
@@ -375,7 +426,7 @@ class RestFirebaseStorageSync(
             doInput = true
             if (body != null) {
                 doOutput = true
-                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Content-Type", contentType)
             }
             authHeader?.let { setRequestProperty("Authorization", it) }
         }
