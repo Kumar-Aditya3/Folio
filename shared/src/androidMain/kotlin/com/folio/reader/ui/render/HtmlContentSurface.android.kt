@@ -86,6 +86,12 @@ actual fun HtmlContentSurface(
             HighlightPaint.applyJs(highlights, theme), null
         )
     }
+    // Brightness is applied through its own style element rather than the reader
+    // stylesheet: changing that stylesheet reloads the chapter, which would flash on
+    // every tick of a slider meant to be dragged.
+    LaunchedEffect(settings.brightness, webViewRef) {
+        webViewRef?.evaluateJavascript(PageDim.applyJs(settings.brightness), null)
+    }
     val content = remember(html, settings, chapterHref, position, highlights) {
         injectReaderCss(html, settings)
     }
@@ -329,7 +335,8 @@ actual fun HtmlContentSurface(
                         })();"""
                 val theme = settings.customTheme
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
-                val js = baseJs + HighlightPaint.js(highlights, theme)
+                val js = baseJs + HighlightPaint.js(highlights, theme) +
+                        PageDim.applyJs(settings.brightness)
                 pendingJs = js
                 pageState.loading(chapterHref)
                 webView.loadDataWithBaseURL("file:///folio/$chapterHref", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)

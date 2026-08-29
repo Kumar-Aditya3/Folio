@@ -819,6 +819,7 @@ private fun readerStyleCss(settings: ReaderSettings): String {
             elementForceCss +
             "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
             HighlightPaint.css +
+            PageDim.css(settings.brightness) +
             "img{max-width:100%;height:auto;break-inside:avoid;}" +
             "a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
 }

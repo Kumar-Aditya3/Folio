@@ -784,6 +784,43 @@ fun ReadingSettingsPanel(
                 onCheckedChange = { onSettingsChange(settings.copy(showClock = it)) }
             )
         }
+
+        // Page dimming — same control the in-reader panel exposes.
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Light", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "${(settings.brightness * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                "Dims the page without changing its colours",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = settings.brightness,
+                onValueChange = {
+                    onSettingsChange(
+                        settings.copy(
+                            brightness = it.coerceIn(
+                                com.folio.reader.ui.render.PageDim.MIN_BRIGHTNESS, 1f
+                            )
+                        )
+                    )
+                },
+                valueRange = com.folio.reader.ui.render.PageDim.MIN_BRIGHTNESS..1f
+            )
+        }
     }
 }
 
