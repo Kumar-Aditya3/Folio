@@ -96,6 +96,8 @@ actual fun HtmlContentSurface(
     var reloadTick by remember { mutableStateOf(0) }
     var appliedSettings by remember { mutableStateOf<ReaderSettings?>(null) }
     var hasLoadedOnce by remember { mutableStateOf(false) }
+    var lastOverlayScroll by remember { mutableStateOf(0) }
+    callbacks.onOverlayScroll = { lastOverlayScroll = it }
 
     // Only geometry changes (page columns, measure cap, gutter) need a document
     // reload; theme/typography changes swap the stylesheet in place, so switching
@@ -180,7 +182,8 @@ actual fun HtmlContentSurface(
     // 5) Push the glass overlay (contents/annotations/settings) into the page.
     LaunchedEffect(overlayHtml, session, resolvedHtml, reloadTick) {
         val current = session ?: return@LaunchedEffect
-        current.pushOverlay(overlayHtml ?: "")
+        if (overlayHtml == null) lastOverlayScroll = 0
+        current.pushOverlay(overlayHtml ?: "", lastOverlayScroll)
     }
 
     // 6) Bottom-bar seeks: jump to the tapped fraction of the chapter.
@@ -240,6 +243,7 @@ private class SurfaceCallbacks {
     @Volatile var onTap: () -> Unit = {}
     @Volatile var onLinkClick: ((String) -> Unit)? = null
     @Volatile var onOverlayAction: ((String) -> Unit)? = null
+    @Volatile var onOverlayScroll: ((Int) -> Unit)? = null
     @Volatile var onHighlightParagraph: ((Int, String) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
 }
@@ -324,6 +328,11 @@ private class JcefSession private constructor(
                         val body = if (last.toIntOrNull() != null) rest.substringBeforeLast(':') else rest
                         callbacks.onOverlayAction?.invoke(body)
                     }
+
+                    t.startsWith("folio-ovlscroll:") -> {
+                        val v = t.removePrefix("folio-ovlscroll:").substringBefore(':').toIntOrNull()
+                        if (v != null) callbacks.onOverlayScroll?.invoke(v)
+                    }
                 }
             }
         })
@@ -338,7 +347,7 @@ private class JcefSession private constructor(
                     pendingJs = null
                     browser.executeJavaScript(js, expected, 0)
                     val overlay = lastOverlay
-                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay), expected, 0)
+                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay, lastOverlayScrollVal), expected, 0)
                 }
             }
 
@@ -431,17 +440,20 @@ private class JcefSession private constructor(
     }
 
     /** Renders (or clears) the glass overlay panel inside the page. */
-    fun pushOverlay(html: String) {
+    fun pushOverlay(html: String, scroll: Int = 0) {
         lastOverlay = html.ifEmpty { null }
-        val js = overlayJs(html)
+        lastOverlayScrollVal = scroll
+        val js = overlayJs(html, scroll)
         EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
     }
 
-    private fun overlayJs(html: String): String =
+    private var lastOverlayScrollVal: Int = 0
+
+    private fun overlayJs(html: String, initScroll: Int = 0): String =
         "(function(){var h=${html.toJsStringLiteral()};var old=document.getElementById('folio-overlay-root');var kind='';" +
                 "var m=h.match(/data-kind=\"([^\"]+)/);if(m)kind=m[1];" +
                 "var keep=old&&kind&&old.getAttribute('data-kind')===kind;" +
-                "var list=keep?old.querySelector('[data-scroll]'):null;var sc=list?list.scrollTop:0;" +
+                "var list=keep?old.querySelector('[data-scroll]'):null;var sc=list?list.scrollTop:$initScroll;" +
                 "if(!keep){if(old&&old.parentNode)old.parentNode.removeChild(old);" +
                 "var d=document.createElement('div');d.id='folio-overlay-root';document.documentElement.appendChild(d);d.innerHTML=h;" +
                 "} else {old.innerHTML=h;}" +
@@ -449,6 +461,7 @@ private class JcefSession private constructor(
                 "var r2=root.querySelector('[data-kind]');if(r2)r2.setAttribute('data-kind',kind);" +
                 "if(kind)root.setAttribute('data-kind',kind);" +
                 "var list2=root.querySelector('[data-scroll]');if(list2)list2.scrollTop=sc;" +
+                "if(list2)list2.addEventListener('scroll',function(){clearTimeout(window.__folioOvlSdT);window.__folioOvlSdT=setTimeout(function(){document.title='folio-ovlscroll:'+Math.round(list2.scrollTop)+':'+Math.random().toString(36).slice(2);},250);},{passive:true});" +
                 "var n=0;" +
                 "root.querySelectorAll('[data-act]').forEach(function(el){" +
                 "  if(el.tagName==='INPUT'||el.tagName==='SELECT'){" +
