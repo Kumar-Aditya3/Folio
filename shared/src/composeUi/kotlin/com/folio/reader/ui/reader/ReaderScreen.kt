@@ -179,6 +179,106 @@ fun ReaderScreen(
     // Chrome follows the reading theme (incl. per-book overrides) so bars and
     // panels never clash with the page on either platform.
     val readerThemePreset = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+
+    fun Int.argbHex(): String = "#" + toUInt().toString(16).padStart(8, '0').drop(2)
+    val overlayColors = com.folio.reader.ui.render.OverlayColors(
+        bg = readerThemePreset.background.argbHex(),
+        fg = readerThemePreset.primaryText.argbHex(),
+        accent = readerThemePreset.progress.argbHex(),
+        surface = readerThemePreset.surface.argbHex(),
+        isDark = readerThemePreset.isDark
+    )
+    val quickFontNames = remember(settings.customFonts) {
+        (listOf(
+            "Calluna", "Comfortaa", "Literata", "Merriweather", "Georgia", "EB Garamond", "Lora",
+            "Open Sans", "Inter", "Noto Serif", "Serif", "Sans Serif", "Monospace"
+        ) + settings.customFonts.map { it.name }).distinct()
+    }
+    val overlayHtml = when {
+        !occludes -> null
+        showReaderPanel -> com.folio.reader.ui.render.OverlayUi.settings(
+            fontSize = settings.fontSize,
+            lineHeight = settings.lineHeight,
+            margin = settings.margins.left,
+            fontFamily = settings.fontFamily,
+            fontOptions = quickFontNames,
+            themeId = settings.themeId,
+            themes = listOf("paper", "white", "sepia", "gray", "dark", "oled_black").map { id ->
+                val t = com.folio.reader.settings.Theme.getPreset(id)
+                Triple(id, t.name, t.background.argbHex())
+            },
+            c = overlayColors
+        )
+        showToc -> com.folio.reader.ui.render.OverlayUi.toc(
+            chapters = chapters.map { it.title },
+            current = currentChapterIndex,
+            c = overlayColors
+        )
+        showAnnotations -> com.folio.reader.ui.render.OverlayUi.annotations(
+            bookmarks = bookmarks.map {
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow("bm", it.id, it.label ?: "Spine ${it.spineIndex + 1}", "Bookmark")
+            },
+            highlights = highlights.filter { !it.isDeleted }.map {
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow("hl", it.id, it.selectedText.take(80).ifBlank { "(highlight)" }, "Highlight")
+            },
+            notes = notes.map {
+                com.folio.reader.ui.render.OverlayUi.AnnotationRow("nt", it.id, it.content.take(80).ifBlank { "(note)" }, "Note")
+            },
+            c = overlayColors
+        )
+        else -> null
+    }
+    fun handleOverlayAction(a: String) {
+        when {
+            a == "close" -> {
+                showReaderPanel = false
+                if (showToc) onToggleToc()
+                if (showAnnotations) onToggleAnnotations()
+            }
+
+            a == "allsettings" -> {
+                showReaderPanel = false
+                onSettingsClick()
+            }
+
+            a.startsWith("toc:") -> {
+                val i = a.substringAfter(':').toIntOrNull() ?: return
+                onChapterChange(i)
+                if (showToc) onToggleToc()
+            }
+
+            a.startsWith("set:size:") -> onSettingsChange(
+                settings.copy(fontSize = a.substringAfterLast(':').toFloatOrNull() ?: settings.fontSize)
+            )
+
+            a.startsWith("set:lh:") -> onSettingsChange(
+                settings.copy(lineHeight = a.substringAfterLast(':').toFloatOrNull() ?: settings.lineHeight)
+            )
+
+            a.startsWith("set:mg:") -> a.substringAfterLast(':').toFloatOrNull()?.let { m ->
+                onSettingsChange(settings.copy(margins = settings.margins.copy(left = m, right = m)))
+            }
+
+            a.startsWith("set:font:") -> {
+                val name = runCatching {
+                    java.net.URLDecoder.decode(a.substringAfter("set:font:"), "UTF-8")
+                }.getOrNull()
+                if (!name.isNullOrBlank()) onSettingsChange(settings.copy(fontFamily = name))
+            }
+
+            a.startsWith("set:theme:") -> {
+                val id = a.substringAfterLast(':')
+                if (com.folio.reader.settings.Theme.PRESETS.containsKey(id)) {
+                    onSettingsChange(settings.copy(themeId = id, customTheme = null))
+                }
+            }
+
+            a.startsWith("del:bm:") -> onRemoveBookmark(a.substringAfterLast(':'))
+            a.startsWith("del:hl:") -> onRemoveHighlight(a.substringAfterLast(':'))
+            a.startsWith("del:nt:") -> onRemoveNote(a.substringAfterLast(':'))
+        }
+    }
+
     FolioTheme.MaterialTheme(
         darkTheme = readerThemePreset.isDark,
         colors = FolioTheme.fromReaderTheme(
@@ -187,10 +287,14 @@ fun ReaderScreen(
             readerThemePreset.divider, readerThemePreset.isDark
         )
     ) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.folio.reader.ui.render.LocalOverlayHtml provides overlayHtml,
+        com.folio.reader.ui.render.LocalOverlayAction provides { handleOverlayAction(it) }
+    ) {
         Box(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
         // Main content - fills entire screen, overlays positioned absolutely
         if (currentChapter != null) {
-            val reservedEnd = when {
+            val reservedEnd = if (occludes) 0.dp else when {
                 showToc -> 260.dp
                 showAnnotations -> 300.dp
                 showReaderPanel -> 280.dp
@@ -444,58 +548,63 @@ fun ReaderScreen(
         }
         }
 
-        // TOC sidebar: slide in from the end edge
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showToc,
-            modifier = Modifier.align(Alignment.CenterEnd),
-            enter = panelEnter,
-            exit = panelExit
-        ) {
-            TOCSidebar(
-                chapters = chapters,
-                currentIndex = currentChapterIndex,
-                onChapterClick = { index ->
-                    onChapterChange(index)
-                },
-                onDismiss = onToggleToc
-            )
-        }
+        // Side panels: Compose overlays on Android; page-side glass overlays on
+        // desktop (the heavyweight browser would cover any Compose overlay).
+        if (!occludes) {
+            // TOC sidebar: slide in from the end edge
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showToc,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = panelEnter,
+                exit = panelExit
+            ) {
+                TOCSidebar(
+                    chapters = chapters,
+                    currentIndex = currentChapterIndex,
+                    onChapterClick = { index ->
+                        onChapterChange(index)
+                    },
+                    onDismiss = onToggleToc
+                )
+            }
 
-        // Annotations sidebar: slide in from the end edge
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showAnnotations,
-            modifier = Modifier.align(Alignment.CenterEnd),
-            enter = panelEnter,
-            exit = panelExit
-        ) {
-            AnnotationsSidebar(
-                bookmarks = bookmarks,
-                highlights = highlights,
-                notes = notes,
-                onDismiss = onToggleAnnotations,
-                onRemoveBookmark = onRemoveBookmark,
-                onRemoveHighlight = onRemoveHighlight,
-                onRemoveNote = onRemoveNote,
-                onAddNote = onAddNote
-            )
-        }
+            // Annotations sidebar: slide in from the end edge
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showAnnotations,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = panelEnter,
+                exit = panelExit
+            ) {
+                AnnotationsSidebar(
+                    bookmarks = bookmarks,
+                    highlights = highlights,
+                    notes = notes,
+                    onDismiss = onToggleAnnotations,
+                    onRemoveBookmark = onRemoveBookmark,
+                    onRemoveHighlight = onRemoveHighlight,
+                    onRemoveNote = onRemoveNote,
+                    onAddNote = onAddNote
+                )
+            }
 
-        // Thorium-style reading settings panel: slides in from the right edge
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showReaderPanel,
-            modifier = Modifier.align(Alignment.CenterEnd),
-            enter = panelEnter,
-            exit = panelExit
-        ) {
-            ReaderSettingsPanel(
-                settings = settings,
-                onSettingsChange = onSettingsChange,
-                onDismiss = { showReaderPanel = false },
-                onOpenFullSettings = {
-                    showReaderPanel = false
-                    onSettingsClick()
-                }
-            )
+            // Thorium-style reading settings panel: slides in from the right edge
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showReaderPanel,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = panelEnter,
+                exit = panelExit
+            ) {
+                ReaderSettingsPanel(
+                    settings = settings,
+                    onSettingsChange = onSettingsChange,
+                    onDismiss = { showReaderPanel = false },
+                    onOpenFullSettings = {
+                        showReaderPanel = false
+                        onSettingsClick()
+                    }
+                )
+            }
+        }
         }
         }
     }

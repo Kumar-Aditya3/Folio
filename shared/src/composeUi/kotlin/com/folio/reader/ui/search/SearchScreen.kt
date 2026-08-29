@@ -168,6 +168,7 @@ fun SearchScreen(
                     value = query,
                     onValueChange = { runSearch(it, scope) },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusControl),
                     placeholder = { Text("Search library, content, annotations…") },
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }

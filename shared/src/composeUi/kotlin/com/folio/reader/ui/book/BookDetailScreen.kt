@@ -153,14 +153,8 @@ fun BookDetailScreen(
     Scaffold(
         containerColor = FolioTheme.colors.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = book?.title ?: "Book Details",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
+            com.folio.reader.ui.components.FolioTopBar(
+                title = book?.title ?: "Book Details",
                 navigationIcon = {
                     IconButton(onClick = onBackPress) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -184,12 +178,7 @@ fun BookDetailScreen(
                             Icon(Icons.Filled.Delete, contentDescription = "Delete book", tint = FolioTheme.colors.error)
                         }
                     }
-
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = FolioTheme.colors.surface,
-                    titleContentColor = FolioTheme.colors.onSurface
-                )
+                }
             )
         }
     ) { innerPadding ->
@@ -606,6 +595,7 @@ private fun ReadingActionSection(
     ) {
         Button(
             onClick = onStartReading,
+            shape = RoundedCornerShape(26.dp),
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             Icon(
