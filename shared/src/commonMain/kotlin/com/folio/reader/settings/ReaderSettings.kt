@@ -25,8 +25,6 @@ data class ReaderSettings(
     val showChapterTitle: Boolean = true,
     val showProgress: Boolean = true,
     val showClock: Boolean = false,
-    /** Page dimming, 0.1..1.0; 1.0 leaves the theme's own colours untouched. */
-    val brightness: Float = 1.0f,
     val customTheme: Theme? = null,
     val useEmbeddedFonts: Boolean = true,
     val appThemeId: String = "light",
