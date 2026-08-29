@@ -14,7 +14,6 @@ import com.folio.reader.firebase.FsRevisitItem
 import com.folio.reader.firebase.FsSeries
 import com.folio.reader.firebase.FsSettings
 import com.folio.reader.firebase.FsTag
-import com.folio.reader.firebase.FirestorePaths
 import com.folio.reader.model.*
 import com.folio.reader.settings.ReaderSettings
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +33,8 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+private const val EDIT_SYNC_DEBOUNCE_MS = 3_000L
 
 class SyncEngine(
     private val scope: CoroutineScope,
@@ -79,14 +80,22 @@ class SyncEngine(
     private var debounceJob: kotlinx.coroutines.Job? = null
 
     /**
-     * Local edits always enter the outbox, but only explicit lifecycle/manual
-     * events start a sync. This prevents scroll-position writes from making a
-     * network request every few seconds; the periodic loop handles them later.
+     * Local edits always enter the outbox. An explicit [immediate] sync runs at
+     * once; otherwise edits schedule one debounced sync, so a burst of frequent
+     * writes (scroll positions) collapses into a single request while a discrete
+     * change like a deletion still leaves this device seconds later instead of
+     * waiting for the next periodic loop.
      */
     fun triggerSync(immediate: Boolean = false) {
-        if (!immediate) return
         debounceJob?.cancel()
-        scope.launch { syncOnce() }
+        if (immediate) {
+            scope.launch { syncOnce() }
+        } else {
+            debounceJob = scope.launch {
+                delay(EDIT_SYNC_DEBOUNCE_MS)
+                syncOnce()
+            }
+        }
     }
 
     /** Runs one full sync cycle synchronously; used by tests and manual refresh. */
@@ -207,6 +216,9 @@ class SyncEngine(
     private suspend fun pushBook(item: SyncQueueItem) {
         // Always sync book metadata; EPUB file body upload is handled separately via uploadBookToCloud (opt-in via syncEpubs setting)
         val book = Json.Default.decodeFromString(Book.serializer(), item.payload)
+        // A fresher remote copy wins; uploading this stale payload would clobber it.
+        val remote = fetchedBooks.firstOrNull { it.id == book.id }
+        if (remote != null && remote.updatedAt > book.updatedAt.toEpochMilliseconds()) return
         val fsBook = FsBook.fromBook(book, deviceId)
         firestoreSync.upsertBook(fsBook)
     }
@@ -243,6 +255,11 @@ class SyncEngine(
         if (settings?.syncAnnotations == false) return
 
         val highlight = Json.Default.decodeFromString(Highlight.serializer(), item.payload)
+        // A fresher remote copy wins; uploading this stale payload would resurrect
+        // a tombstone or overwrite an edit made on another device. applyRemoteChanges
+        // applies that fresher remote state locally afterwards.
+        val remote = fetchedHighlights.firstOrNull { it.id == highlight.id }
+        if (remote != null && remote.updatedAt > highlight.updatedAt.toEpochMilliseconds()) return
         val fsHighlight = FsHighlight.fromHighlight(highlight)
         firestoreSync.upsertHighlight(fsHighlight)
     }
@@ -252,6 +269,8 @@ class SyncEngine(
         if (settings?.syncAnnotations == false) return
 
         val note = Json.Default.decodeFromString(Note.serializer(), item.payload)
+        val remote = fetchedNotes.firstOrNull { it.id == note.id }
+        if (remote != null && remote.updatedAt > note.updatedAt.toEpochMilliseconds()) return
         val fsNote = FsNote.fromNote(note)
         firestoreSync.upsertNote(fsNote)
     }
@@ -261,6 +280,8 @@ class SyncEngine(
         if (settings?.syncAnnotations == false) return
 
         val bookmark = Json.Default.decodeFromString(Bookmark.serializer(), item.payload)
+        val remote = fetchedBookmarks.firstOrNull { it.id == bookmark.id }
+        if (remote != null && remote.updatedAt > bookmark.updatedAt.toEpochMilliseconds()) return
         val fsBookmark = FsBookmark.fromBookmark(bookmark)
         firestoreSync.upsertBookmark(fsBookmark)
     }
@@ -367,26 +388,20 @@ class SyncEngine(
     private var fetchedRevisitItems: List<FsRevisitItem> = emptyList()
 
     private suspend fun fetchRemoteChanges() {
-        fetchedBooks = firestoreSync.fetchBooks(deviceId)
-        fetchedPositions = firestoreSync.fetchPositions(deviceId)
-        fetchedHighlights = firestoreSync.fetchHighlights(deviceId)
-        fetchedNotes = firestoreSync.fetchNotes(deviceId)
-        fetchedBookmarks = firestoreSync.fetchBookmarks(deviceId)
-        fetchedSessions = firestoreSync.fetchSessions(deviceId)
-        fetchedCollections = firestoreSync.fetchCollections(deviceId)
-        fetchedSeries = firestoreSync.fetchSeries(deviceId)
-        fetchedTags = firestoreSync.fetchTags(deviceId)
-        fetchedQuotes = firestoreSync.fetchQuotes(deviceId)
-        fetchedRevisitItems = firestoreSync.fetchRevisitItems(deviceId)
-
-        _syncState.update {
-            it.copy(
-                pendingDownloadCount = fetchedBooks.size + fetchedPositions.size + fetchedHighlights.size +
-                        fetchedNotes.size + fetchedBookmarks.size + fetchedSessions.size +
-                        fetchedCollections.size + fetchedSeries.size + fetchedTags.size +
-                        fetchedQuotes.size + fetchedRevisitItems.size
-            )
-        }
+        fetchedBooks = firestoreSync.fetchBooks()
+        fetchedPositions = firestoreSync.fetchPositions()
+        fetchedHighlights = firestoreSync.fetchHighlights()
+        fetchedNotes = firestoreSync.fetchNotes()
+        fetchedBookmarks = firestoreSync.fetchBookmarks()
+        fetchedSessions = firestoreSync.fetchSessions()
+        fetchedCollections = firestoreSync.fetchCollections()
+        fetchedSeries = firestoreSync.fetchSeries()
+        fetchedTags = firestoreSync.fetchTags()
+        fetchedQuotes = firestoreSync.fetchQuotes()
+        fetchedRevisitItems = firestoreSync.fetchRevisitItems()
+        // Deliberately no pendingDownloadCount publication: remote documents are
+        // applied within this same cycle, never queued, so advertising the fetched
+        // total would only make the UI's pending count spike and reset each cycle.
     }
 
     private suspend fun enqueueBooksMissingRemotely() {
@@ -606,13 +621,6 @@ class SyncEngine(
             }
         }
     }
-
-    private suspend fun bookRepoInsert(remote: FsBook) =
-        bookRepository.insertBook(remote.toBook(), emitSyncEvent = false)
-
-    private suspend fun bookRepoUpdate(remote: FsBook) =
-        runCatching { bookRepository.updateBook(remote.toBook()) }
-            .onFailure { runCatching { bookRepository.insertBook(remote.toBook()) } }
 
     private suspend fun applyRemotePositions() {
         val affectedBookIds = mutableSetOf<String>()
@@ -866,18 +874,17 @@ interface FirestoreSync {
     fun upsertTag(tag: FsTag)
     fun upsertQuote(quote: FsQuote)
     fun upsertRevisitItem(item: FsRevisitItem)
-    fun fetchBooks(excludeDeviceId: String): List<FsBook>
-    fun fetchPositions(excludeDeviceId: String): List<FsReadingPosition>
-    fun fetchHighlights(excludeDeviceId: String): List<FsHighlight>
-    fun fetchNotes(excludeDeviceId: String): List<FsNote>
-    fun fetchBookmarks(excludeDeviceId: String): List<FsBookmark>
-    fun fetchSessions(excludeDeviceId: String): List<FsReadingSession>
-    fun fetchSettings(excludeDeviceId: String): FsSettings?
-    fun fetchCollections(excludeDeviceId: String): List<FsCollection>
-    fun fetchSeries(excludeDeviceId: String): List<FsSeries>
-    fun fetchTags(excludeDeviceId: String): List<FsTag>
-    fun fetchQuotes(excludeDeviceId: String): List<FsQuote>
-    fun fetchRevisitItems(excludeDeviceId: String): List<FsRevisitItem>
+    fun fetchBooks(): List<FsBook>
+    fun fetchPositions(): List<FsReadingPosition>
+    fun fetchHighlights(): List<FsHighlight>
+    fun fetchNotes(): List<FsNote>
+    fun fetchBookmarks(): List<FsBookmark>
+    fun fetchSessions(): List<FsReadingSession>
+    fun fetchCollections(): List<FsCollection>
+    fun fetchSeries(): List<FsSeries>
+    fun fetchTags(): List<FsTag>
+    fun fetchQuotes(): List<FsQuote>
+    fun fetchRevisitItems(): List<FsRevisitItem>
 }
 
 interface StorageSync {

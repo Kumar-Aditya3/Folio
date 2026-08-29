@@ -13,6 +13,7 @@ import com.folio.reader.firebase.FsSeries
 import com.folio.reader.firebase.FsSettings
 import com.folio.reader.firebase.FsTag
 import com.folio.reader.firebase.FirestorePaths
+import kotlinx.datetime.Clock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -54,6 +55,12 @@ class RestFirestoreSync(
     private var idToken: String? = null
 
     @Volatile
+    private var refreshToken: String? = null
+
+    @Volatile
+    private var idTokenExpiresAtMs: Long = 0L
+
+    @Volatile
     var uid: String = uidOverride ?: ""
         private set
 
@@ -70,71 +77,115 @@ class RestFirestoreSync(
             uid = uidOverride
             return
         }
-        if (idToken != null && uid.isNotEmpty()) return
-        val email = accountEmail?.takeIf { it.isNotBlank() } ?: "folio-sync-default@folio.app"
-        val password = accountPassword?.takeIf { it.isNotBlank() } ?: "FolioSyncPass2026!"
+        if (hasValidToken()) return
+        // Id tokens expire after ~1h; long-running sessions must refresh or every
+        // request starts failing with 401.
+        if (refreshToken != null && tryRefreshToken()) return
 
-        val response = runCatching {
-            // 1. Try Email/Password sign in
-            httpJson(
-                url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$apiKey",
-                method = "POST",
-                body = buildString {
-                    append("{\"email\":\"")
-                    append(jsonEscape(email))
-                    append("\",\"password\":\"")
-                    append(jsonEscape(password))
-                    append("\",\"returnSecureToken\":true}")
-                },
-                authHeader = null
-            )
-        }.getOrElse { error1 ->
-            // 2. Try Email/Password sign up
+        val email = accountEmail?.takeIf { it.isNotBlank() }
+        val password = accountPassword?.takeIf { it.isNotBlank() }
+
+        val response = if (email != null && password != null) {
             runCatching {
-                httpJson(
-                    url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey",
-                    method = "POST",
-                    body = buildString {
-                        append("{\"email\":\"")
-                        append(jsonEscape(email))
-                        append("\",\"password\":\"")
-                        append(jsonEscape(password))
-                        append("\",\"returnSecureToken\":true}")
-                    },
-                    authHeader = null
-                )
-            }.getOrElse { error2 ->
-                // 3. Try Anonymous Auth fallback
+                // 1. Try Email/Password sign in
+                identityToolkit("accounts:signInWithPassword", credentialsBody(email, password))
+            }.getOrElse { error1 ->
                 runCatching {
-                    httpJson(
-                        url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey",
-                        method = "POST",
-                        body = "{\"returnSecureToken\":true}",
-                        authHeader = null
-                    )
-                }.getOrElse { error3 ->
-                    val rawMsg = error2.message ?: error1.message ?: error3.message ?: ""
-                    if (rawMsg.contains("OPERATION_NOT_ALLOWED")) {
-                        // Firebase Auth disabled in console — fallback to unauthenticated mode (works if Firestore rules allow read/write)
-                        idToken = null
-                        uid = accountEmail?.takeIf { it.isNotBlank() } ?: "default_user"
+                    // 2. Try Email/Password sign up
+                    identityToolkit("accounts:signUp", credentialsBody(email, password))
+                }.getOrElse { error2 ->
+                    runCatching {
+                        // 3. Try Anonymous Auth fallback
+                        identityToolkit("accounts:signUp", anonymousSignUpBody)
+                    }.getOrElse { error3 ->
+                        authFailure(error2.message ?: error1.message ?: error3.message, email)
                         return
-                    } else if (rawMsg.contains("API key not valid") || rawMsg.contains("API_KEY_INVALID")) {
-                        throw IOException("Invalid Firebase API Key. Check Settings -> Advanced.")
-                    } else {
-                        throw IOException("Firebase Auth failed: ${rawMsg.take(120)}")
                     }
                 }
             }
+        } else {
+            // No shared fallback account compiled into the binary: an install
+            // without credentials gets its own anonymous identity. Cross-device
+            // sync requires entering the same account in Settings -> Advanced.
+            runCatching {
+                identityToolkit("accounts:signUp", anonymousSignUpBody)
+            }.getOrElse { error ->
+                authFailure(error.message, null)
+                return
+            }
         }
 
+        adoptAuthTokens(response)
+    }
+
+    private val anonymousSignUpBody = "{\"returnSecureToken\":true}"
+
+    private fun hasValidToken(): Boolean =
+        idToken != null && uid.isNotEmpty() &&
+                Clock.System.now().toEpochMilliseconds() < idTokenExpiresAtMs - TOKEN_REFRESH_MARGIN_MS
+
+    private fun tryRefreshToken(): Boolean {
+        val current = refreshToken ?: return false
+        val response = runCatching {
+            httpJson(
+                url = "https://securetoken.googleapis.com/v1/token?key=$apiKey",
+                method = "POST",
+                body = "grant_type=refresh_token&refresh_token=${URLEncoder.encode(current, "UTF-8")}",
+                authHeader = null,
+                contentType = "application/x-www-form-urlencoded"
+            )
+        }.getOrNull() ?: return false
+        val obj = runCatching { json.parseToJsonElement(response).jsonObject }.getOrNull() ?: return false
+        val newIdToken = obj["id_token"]?.jsonPrimitive?.content ?: return false
+        idToken = newIdToken
+        obj["refresh_token"]?.jsonPrimitive?.content?.let { refreshToken = it }
+        obj["user_id"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }?.let { uid = it }
+        idTokenExpiresAtMs = Clock.System.now().toEpochMilliseconds() + expiresInMs(obj["expires_in"]?.jsonPrimitive?.content)
+        return true
+    }
+
+    private fun credentialsBody(email: String, password: String): String = buildString {
+        append("{\"email\":\"")
+        append(jsonEscape(email))
+        append("\",\"password\":\"")
+        append(jsonEscape(password))
+        append("\",\"returnSecureToken\":true}")
+    }
+
+    private fun identityToolkit(endpoint: String, body: String): String = httpJson(
+        url = "https://identitytoolkit.googleapis.com/v1/$endpoint?key=$apiKey",
+        method = "POST",
+        body = body,
+        authHeader = null
+    )
+
+    private fun adoptAuthTokens(response: String) {
         val obj = json.parseToJsonElement(response).jsonObject
         idToken = obj["idToken"]?.jsonPrimitive?.content
+        refreshToken = obj["refreshToken"]?.jsonPrimitive?.content
         uid = obj["localId"]?.jsonPrimitive?.content ?: "default_user"
+        idTokenExpiresAtMs = Clock.System.now().toEpochMilliseconds() + expiresInMs(obj["expiresIn"]?.jsonPrimitive?.content)
+    }
+
+    private fun expiresInMs(raw: String?): Long = (raw?.toLongOrNull() ?: 3600L) * 1000L
+
+    private fun authFailure(rawMsg: String?, email: String?) {
+        val msg = rawMsg ?: ""
+        if (msg.contains("OPERATION_NOT_ALLOWED")) {
+            // Firebase Auth disabled in console — fallback to unauthenticated mode (works if Firestore rules allow read/write)
+            idToken = null
+            refreshToken = null
+            idTokenExpiresAtMs = 0L
+            uid = email ?: "default_user"
+        } else if (msg.contains("API key not valid") || msg.contains("API_KEY_INVALID")) {
+            throw IOException("Invalid Firebase API Key. Check Settings -> Advanced.")
+        } else {
+            throw IOException("Firebase Auth failed: ${msg.take(120)}")
+        }
     }
 
     private fun ensureAuth() {
-        if (uidOverride == null && (idToken == null || uid.isEmpty())) authenticate()
+        if (uidOverride == null && !hasValidToken()) authenticate()
     }
 
     override fun upsertBook(book: FsBook) =
@@ -203,11 +254,10 @@ class RestFirestoreSync(
         json.encodeToString(item)
     )
 
-    override fun fetchBooks(excludeDeviceId: String): List<FsBook> {
+    override fun fetchBooks(): List<FsBook> {
         ensureAuth()
         return listCollection(FirestorePaths.userBooks(uid))
             .mapNotNull { decode<FsBook>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
     private fun fetchAllUserBooks(): List<FsBook> {
@@ -215,103 +265,88 @@ class RestFirestoreSync(
         return listCollection(FirestorePaths.userBooks(uid)).mapNotNull { decode(it) }
     }
 
-    override fun fetchPositions(excludeDeviceId: String): List<FsReadingPosition> {
+    override fun fetchPositions(): List<FsReadingPosition> {
         ensureAuth()
         val out = mutableListOf<FsReadingPosition>()
         for (book in fetchAllUserBooks()) {
             listCollection(FirestorePaths.userPositions(uid, book.id)).forEach { doc ->
                 runCatching { json.decodeFromString(FsReadingPosition.serializer(), doc.payload) }.getOrNull()
-                    ?.takeIf { it.deviceId != excludeDeviceId }
                     ?.let { out.add(it) }
             }
         }
         return out
     }
 
-    override fun fetchHighlights(excludeDeviceId: String): List<FsHighlight> {
+    override fun fetchHighlights(): List<FsHighlight> {
         ensureAuth()
         val out = mutableListOf<FsHighlight>()
         for (book in fetchAllUserBooks()) {
             listCollection(FirestorePaths.userHighlights(uid, book.id)).forEach { doc ->
                 runCatching { json.decodeFromString(FsHighlight.serializer(), doc.payload) }.getOrNull()
-                    ?.takeIf { it.deviceId != excludeDeviceId }
                     ?.let { out.add(it) }
             }
         }
         return out
     }
 
-    override fun fetchNotes(excludeDeviceId: String): List<FsNote> {
+    override fun fetchNotes(): List<FsNote> {
         ensureAuth()
         val out = mutableListOf<FsNote>()
         for (book in fetchAllUserBooks()) {
             listCollection(FirestorePaths.userNotes(uid, book.id)).forEach { doc ->
                 runCatching { json.decodeFromString(FsNote.serializer(), doc.payload) }.getOrNull()
-                    ?.takeIf { it.deviceId != excludeDeviceId }
                     ?.let { out.add(it) }
             }
         }
         return out
     }
 
-    override fun fetchBookmarks(excludeDeviceId: String): List<FsBookmark> {
+    override fun fetchBookmarks(): List<FsBookmark> {
         ensureAuth()
         val out = mutableListOf<FsBookmark>()
         for (book in fetchAllUserBooks()) {
             listCollection(FirestorePaths.userBookmarks(uid, book.id)).forEach { doc ->
                 runCatching { json.decodeFromString(FsBookmark.serializer(), doc.payload) }.getOrNull()
-                    ?.takeIf { it.deviceId != excludeDeviceId }
                     ?.let { out.add(it) }
             }
         }
         return out
     }
 
-    override fun fetchSessions(excludeDeviceId: String): List<FsReadingSession> {
+    override fun fetchSessions(): List<FsReadingSession> {
         ensureAuth()
         return listCollection(FirestorePaths.userSessions(uid))
             .mapNotNull { decode<FsReadingSession>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
-    override fun fetchSettings(excludeDeviceId: String): FsSettings? {
-        ensureAuth()
-        return getDocument(FirestorePaths.userSettingsDocument(uid))?.let { decode(it) }
-    }
-
-    override fun fetchCollections(excludeDeviceId: String): List<FsCollection> {
+    override fun fetchCollections(): List<FsCollection> {
         ensureAuth()
         return listCollection(FirestorePaths.userCollections(uid))
             .mapNotNull { decode<FsCollection>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
-    override fun fetchSeries(excludeDeviceId: String): List<FsSeries> {
+    override fun fetchSeries(): List<FsSeries> {
         ensureAuth()
         return listCollection(FirestorePaths.userSeries(uid))
             .mapNotNull { decode<FsSeries>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
-    override fun fetchTags(excludeDeviceId: String): List<FsTag> {
+    override fun fetchTags(): List<FsTag> {
         ensureAuth()
         return listCollection(FirestorePaths.userTags(uid))
             .mapNotNull { decode<FsTag>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
-    override fun fetchQuotes(excludeDeviceId: String): List<FsQuote> {
+    override fun fetchQuotes(): List<FsQuote> {
         ensureAuth()
         return listCollection(FirestorePaths.userQuotes(uid))
             .mapNotNull { decode<FsQuote>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
-    override fun fetchRevisitItems(excludeDeviceId: String): List<FsRevisitItem> {
+    override fun fetchRevisitItems(): List<FsRevisitItem> {
         ensureAuth()
         return listCollection(FirestorePaths.userRevisit(uid))
             .mapNotNull { decode<FsRevisitItem>(it) }
-            .filter { it.deviceId != excludeDeviceId }
     }
 
     // ---------- internals ----------
@@ -372,7 +407,7 @@ class RestFirestoreSync(
 
     private data class RemoteDoc(val name: String, val payload: String, val updatedAtMs: Long)
 
-    private fun httpJson(url: String, method: String, body: String?, authHeader: String?): String {
+    private fun httpJson(url: String, method: String, body: String?, authHeader: String?, contentType: String = "application/json"): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             // The desktop JDK's HttpURLConnection rejects PATCH outright.
             // Firestore accepts Google's standard method-override header, while
@@ -384,7 +419,7 @@ class RestFirestoreSync(
             doInput = true
             if (body != null) {
                 doOutput = true
-                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Content-Type", contentType)
             }
             authHeader?.let { setRequestProperty("Authorization", it) }
         }
@@ -404,6 +439,8 @@ class RestFirestoreSync(
         }
     }
 }
+
+internal const val TOKEN_REFRESH_MARGIN_MS = 60_000L
 
 private fun docId(raw: String): String = URLEncoder.encode(raw, "UTF-8")
 
