@@ -19,6 +19,9 @@ import com.folio.reader.firebase.FsBook
 import com.folio.reader.firebase.FsBookmark
 import com.folio.reader.firebase.FsCollection
 import com.folio.reader.firebase.FsHighlight
+import com.folio.reader.firebase.FsManga
+import com.folio.reader.firebase.FsMangaChapter
+import com.folio.reader.firebase.FsMangaNote
 import com.folio.reader.firebase.FsNote
 import com.folio.reader.firebase.FsQuote
 import com.folio.reader.firebase.FsReadingPosition
@@ -52,7 +55,9 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -80,11 +85,19 @@ class SyncEngineTest {
         val tags = mutableListOf<FsTag>()
         val quotes = mutableListOf<FsQuote>()
         val revisitItems = mutableListOf<FsRevisitItem>()
+        val settingsPayloads = mutableListOf<FsSettings>()
+
+        /** Cursor of the most recent fetchSessions call (null = never called). */
+        var lastSessionCursor: Long? = null
+            private set
 
         var authenticated = false
             private set
 
         var isConnectedState: Boolean = true
+
+        /** Artificial slowdown applied to pushes, for exit-path timing tests. */
+        var pushDelayMs: Long = 0L
 
         override fun isConnected(): Boolean = isConnectedState
 
@@ -103,6 +116,10 @@ class SyncEngineTest {
         }
 
         override fun upsertHighlight(highlight: FsHighlight) {
+            if (conflictOnce) {
+                conflictOnce = false
+                throw java.io.IOException("HTTP 412 from PATCH: currentDocument.updateTime precondition failed")
+            }
             highlights.removeAll { it.id == highlight.id }
             highlights.add(highlight)
         }
@@ -122,9 +139,12 @@ class SyncEngineTest {
             sessions.add(session)
         }
 
-        override fun upsertSettings(settings: FsSettings) = Unit
+        override fun upsertSettings(settings: FsSettings) {
+            settingsPayloads.add(settings)
+        }
 
         override fun upsertCollection(collection: FsCollection) {
+            if (pushDelayMs > 0) Thread.sleep(pushDelayMs)
             collections.removeAll { it.id == collection.id }
             collections.add(collection)
         }
@@ -159,7 +179,10 @@ class SyncEngineTest {
 
         override fun fetchBookmarks(): List<FsBookmark> = bookmarks.toList()
 
-        override fun fetchSessions(): List<FsReadingSession> = sessions.toList()
+        override fun fetchSessions(sinceStartedAtMs: Long): List<FsReadingSession> {
+            lastSessionCursor = sinceStartedAtMs
+            return sessions.filter { it.startedAt > sinceStartedAtMs }
+        }
 
         override fun fetchCollections(): List<FsCollection> = collections.toList()
 
@@ -170,6 +193,39 @@ class SyncEngineTest {
         override fun fetchQuotes(): List<FsQuote> = quotes.toList()
 
         override fun fetchRevisitItems(): List<FsRevisitItem> = revisitItems.toList()
+
+        val manga = mutableListOf<FsManga>()
+        val mangaChapters = mutableListOf<FsMangaChapter>()
+        val mangaNotes = mutableListOf<FsMangaNote>()
+
+        override fun upsertManga(m: FsManga) {
+            manga.removeAll { it.id == m.id }
+            manga.add(m)
+        }
+
+        override fun upsertMangaChapter(chapter: FsMangaChapter) {
+            mangaChapters.removeAll { it.id == chapter.id }
+            mangaChapters.add(chapter)
+        }
+
+        override fun upsertMangaNote(note: FsMangaNote) {
+            mangaNotes.removeAll { it.id == note.id }
+            mangaNotes.add(note)
+        }
+
+        override fun fetchManga(): List<FsManga> = manga.toList()
+
+        override fun fetchMangaChapters(): List<FsMangaChapter> = mangaChapters.toList()
+
+        override fun fetchMangaNotes(): List<FsMangaNote> = mangaNotes.toList()
+
+        /** Settings document served by fetchSettings (null = none in the cloud). */
+        var remoteSettings: FsSettings? = null
+
+        /** When true, the next highlight push fails like a Firestore 412 precondition. */
+        var conflictOnce = false
+
+        override fun fetchSettings(): FsSettings? = remoteSettings
     }
 
     private lateinit var tempRoot: File
@@ -230,9 +286,9 @@ class SyncEngineTest {
         tempRoot.deleteRecursively()
     }
 
-    private fun makeEngine(fake: FakeFirestoreSync): SyncEngine = SyncEngine(
+    private fun makeEngine(fake: FakeFirestoreSync, syncRepo: com.folio.reader.database.SyncRepository = syncQueueRepo): SyncEngine = SyncEngine(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-        syncRepository = syncQueueRepo,
+        syncRepository = syncRepo,
         bookRepository = bookRepo,
         positionRepository = positionRepo,
         highlightRepository = highlightRepo,
@@ -251,6 +307,16 @@ class SyncEngineTest {
         config = SyncConfig(autoSync = true, syncIntervalMinutes = 1),
         deviceId = selfDeviceId
     )
+
+    /** Polls until [condition] holds or fails the test after [timeoutMs]. */
+    private suspend fun awaitTrue(message: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return
+            kotlinx.coroutines.delay(50)
+        }
+        assertTrue(condition(), message)
+    }
 
     private fun seedBook(id: String = "book-1"): Book = Book(
         id = id,
@@ -621,9 +687,9 @@ class SyncEngineTest {
 
         fake.isConnectedState = true
         engine.syncOnAppOpen()
-        kotlinx.coroutines.delay(200)
-
-        assertTrue(fake.collections.any { it.id == "col-open" }, "Pending sync must push on app open")
+        awaitTrue("pending sync must push on app open") {
+            fake.collections.any { it.id == "col-open" }
+        }
     }
 
     @Test
@@ -661,8 +727,9 @@ class SyncEngineTest {
 
         fake.isConnectedState = true
         engine.syncOnAppClose()
-
-        assertTrue(fake.collections.any { it.id == "col-close" }, "Pending sync must push on app close")
+        awaitTrue("pending sync must push on app close") {
+            fake.collections.any { it.id == "col-close" }
+        }
     }
 
     @Test
@@ -680,7 +747,432 @@ class SyncEngineTest {
 
         fake.isConnectedState = false
         engine.syncOnAppClose()
+        kotlinx.coroutines.delay(300)
 
         assertTrue(fake.collections.none { it.id == "col-close-offline" }, "Sync must not run on close when disconnected")
+    }
+
+    @Test
+    fun `exit sync does not block the caller`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        fake.pushDelayMs = 2_000
+        val engine = makeEngine(fake)
+
+        collectionRepo.insertCollection(Collection(id = "col-slow", name = "Slow Push"))
+        syncQueueRepo.enqueueSync(
+            "collection",
+            "col-slow",
+            SyncOperation.CREATE,
+            Json.encodeToString(Collection.serializer(), Collection(id = "col-slow", name = "Slow Push"))
+        )
+
+        fake.isConnectedState = true
+        val start = System.currentTimeMillis()
+        engine.syncOnAppClose()
+        val elapsed = System.currentTimeMillis() - start
+
+        assertTrue(elapsed < 800, "exit sync must not block the UI thread; took ${elapsed}ms")
+        awaitTrue("slow push must still complete in the background") {
+            fake.collections.any { it.id == "col-slow" }
+        }
+    }
+
+    @Test
+    fun `settings push strips credentials from the cloud payload`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val seeded = ReaderSettings(
+            fontSize = 22f,
+            firebaseApiKey = "AIzaSECRETKEY",
+            firebaseProjectId = "test-project",
+            syncAccountEmail = "reader@example.com",
+            syncAccountPassword = "hunter2",
+            cloudSyncEnabled = true
+        )
+        settingsRepo.saveGlobalSettings(seeded)
+        syncQueueRepo.enqueueSync(
+            "settings",
+            "global",
+            SyncOperation.UPSERT,
+            Json.encodeToString(ReaderSettings.serializer(), seeded)
+        )
+
+        engine.syncOnce()
+
+        assertEquals(1, fake.settingsPayloads.size, "settings must still sync")
+        val global = fake.settingsPayloads.single().global
+        assertFalse(global.contains("hunter2"), "password must never reach the cloud")
+        assertFalse(global.contains("AIzaSECRETKEY"), "API key must never reach the cloud")
+        assertFalse(global.contains("reader@example.com"), "account email must never reach the cloud")
+        assertTrue(global.contains("fontSize"), "reading preferences themselves must still sync")
+    }
+
+    @Test
+    fun `settings are not pushed when settings sync is disabled`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        settingsRepo.saveGlobalSettings(
+            ReaderSettings(
+                firebaseApiKey = "k",
+                firebaseProjectId = "test-project",
+                cloudSyncEnabled = true,
+                syncSettings = false
+            )
+        )
+        syncQueueRepo.enqueueSync(
+            "settings",
+            "global",
+            SyncOperation.UPSERT,
+            Json.encodeToString(ReaderSettings.serializer(), ReaderSettings())
+        )
+
+        engine.syncOnce()
+
+        assertTrue(fake.settingsPayloads.isEmpty(), "syncSettings=false must stop the settings push")
+    }
+
+    @Test
+    fun `sessions fetch uses incremental cursor from known remote history`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+        val book = seedBook()
+        bookRepo.insertBook(book)
+        val now = Clock.System.now().toEpochMilliseconds()
+
+        // A session already applied from another device anchors the cursor.
+        sessionRepo.insertSession(
+            com.folio.reader.model.ReadingSession(
+                id = "known-other",
+                bookId = book.id,
+                cycleId = null,
+                deviceId = "phone-2",
+                startedAt = Instant.fromEpochMilliseconds(now - 3_600_000L),
+                endedAt = Instant.fromEpochMilliseconds(now - 3_000_000L),
+                durationMs = 600_000L,
+                startPosition = com.folio.reader.model.ReadingPosition(
+                    bookId = book.id, deviceId = "phone-2", chapterId = "c0",
+                    spineIndex = 0, contentLocator = ""
+                ),
+                isActive = false
+            ),
+            emitSyncEvent = false
+        )
+
+        val positionJson = Json.encodeToString(
+            com.folio.reader.model.ReadingPosition.serializer(),
+            com.folio.reader.model.ReadingPosition(
+                bookId = book.id, deviceId = "phone-2", chapterId = "c0",
+                spineIndex = 0, contentLocator = ""
+            )
+        )
+        // One session far older than the skew margin, one brand new.
+        fake.sessions.add(
+            FsReadingSession(
+                id = "old-one", bookId = book.id, deviceId = "phone-2",
+                startedAt = now - 30L * 3_600_000L, endedAt = now - 30L * 3_600_000L + 60_000L,
+                durationMs = 60_000L, startPosition = positionJson, isActive = false
+            )
+        )
+        fake.sessions.add(
+            FsReadingSession(
+                id = "new-one", bookId = book.id, deviceId = "phone-2",
+                startedAt = now + 60_000L, endedAt = now + 120_000L,
+                durationMs = 60_000L, startPosition = positionJson, isActive = false
+            )
+        )
+
+        engine.syncOnce()
+
+        val cursor = fake.lastSessionCursor
+        assertNotNull(cursor, "engine must pass an incremental cursor")
+        assertEquals(
+            now - 3_600_000L - 24L * 3_600_000L,
+            cursor,
+            "cursor = newest known remote session minus the skew margin"
+        )
+        val applied = sessionRepo.getSessionsForBook(book.id).first().map { it.id }
+        assertTrue("new-one" in applied, "session newer than the cursor must be applied")
+        assertTrue("old-one" !in applied, "session older than the cursor must not be re-fetched")
+    }
+
+    /** Fails the first enqueue of one entity type, then behaves like the delegate. */
+    private class FlakyEnqueue(
+        private val delegate: com.folio.reader.database.SyncRepository,
+        private val failEntityType: String
+    ) : com.folio.reader.database.SyncRepository {
+        var failOnce = true
+
+        override suspend fun enqueueSync(
+            entityType: String,
+            entityId: String,
+            operation: SyncOperation,
+            payload: String
+        ) {
+            if (failOnce && entityType == failEntityType) {
+                failOnce = false
+                throw java.io.IOException("simulated enqueue failure")
+            }
+            delegate.enqueueSync(entityType, entityId, operation, payload)
+        }
+
+        override suspend fun getPendingSync(limit: Int) = delegate.getPendingSync(limit)
+        override suspend fun getPendingSyncCount() = delegate.getPendingSyncCount()
+        override suspend fun recoverStaleSyncing(before: Instant) = delegate.recoverStaleSyncing(before)
+        override suspend fun markSyncing(id: String) = delegate.markSyncing(id)
+        override suspend fun markSynced(id: String) = delegate.markSynced(id)
+        override suspend fun markError(id: String) = delegate.markError(id)
+        override suspend fun clearSynced(before: Instant) = delegate.clearSynced(before)
+        override fun getSyncState() = delegate.getSyncState()
+        override suspend fun updateSyncState(state: com.folio.reader.sync.SyncState) =
+            delegate.updateSyncState(state)
+    }
+
+    @Test
+    fun `backfill retries when the first attempt fails`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake, FlakyEnqueue(syncQueueRepo, "highlight"))
+
+        val book = seedBook()
+        bookRepo.insertBook(book)
+        highlightRepo.insertHighlight(
+            Highlight(
+                id = "hl-backfill",
+                bookId = book.id,
+                chapterId = "c1",
+                spineIndex = 1,
+                startLocator = "/1/1:0",
+                endLocator = "/1/1:9",
+                selectedText = "pre-sync highlight",
+                color = HighlightColor.YELLOW,
+                deviceId = selfDeviceId
+            ),
+            emitSyncEvent = false
+        )
+
+        engine.syncOnce()
+        assertNull(
+            settingsRepo.getRaw("annotations_backfilled_at"),
+            "a failed backfill must not stamp the done flag"
+        )
+
+        engine.syncOnce()
+        assertNotNull(
+            settingsRepo.getRaw("annotations_backfilled_at"),
+            "retried backfill must stamp the done flag once it succeeds"
+        )
+        assertTrue(
+            fake.highlights.any { it.id == "hl-backfill" },
+            "retried backfill must reach the cloud"
+        )
+    }
+
+    @Test
+    fun `book deletion pushes a tombstone to the cloud`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val book = seedBook()
+        bookRepo.insertBook(book)
+        engine.syncOnce()
+        assertTrue(fake.books.any { it.id == book.id && !it.isDeleted }, "book must sync first")
+
+        bookRepo.deleteBook(book.id)
+        // Production wires Database.onEntityChanged to the outbox; the test DB does
+        // not, so queue the delete the same way the app would.
+        syncQueueRepo.enqueueSync("book", book.id, SyncOperation.DELETE, "{}")
+        engine.syncOnce()
+
+        val tombstone = fake.books.single { it.id == book.id }
+        assertTrue(tombstone.isDeleted, "deletion must propagate as a tombstone")
+        assertTrue(syncQueueRepo.getPendingSync(10).isEmpty(), "tombstone push must drain the queue")
+    }
+
+    @Test
+    fun `remote tombstone deletes the local book without echo`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val book = seedBook()
+        bookRepo.insertBook(book)
+
+        fake.books.add(
+            FsBook(
+                id = book.id,
+                title = "",
+                epubHash = book.epubHash,
+                epubFileSize = 0,
+                addedAt = 0,
+                updatedAt = Clock.System.now().toEpochMilliseconds() + 60_000L,
+                deviceId = "tablet-1",
+                isDeleted = true
+            )
+        )
+
+        engine.syncOnce()
+
+        assertNull(bookRepo.getBook(book.id), "remote tombstone must remove the local book")
+        assertTrue(
+            syncQueueRepo.getPendingSync(10).isEmpty(),
+            "applying a tombstone must not re-enqueue a delete"
+        )
+    }
+
+    @Test
+    fun `remote settings apply once and keep local credentials`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        settingsRepo.saveGlobalSettings(
+            ReaderSettings(
+                fontSize = 18f,
+                firebaseApiKey = "LOCAL-KEY",
+                firebaseProjectId = "local-project",
+                syncAccountEmail = "local@example.com",
+                syncAccountPassword = "local-pass",
+                cloudSyncEnabled = true
+            )
+        )
+
+        val remotePrefs = ReaderSettings(fontSize = 21f, lineHeight = 2.2f)
+        fake.remoteSettings = FsSettings(
+            userId = "",
+            global = Json.encodeToString(ReaderSettings.serializer(), remotePrefs),
+            updatedAt = Clock.System.now().toEpochMilliseconds(),
+            deviceId = "tablet-1"
+        )
+
+        engine.syncOnce()
+
+        val applied = settingsRepo.getGlobalSettings()
+        assertEquals(21f, applied.fontSize, "remote reading preferences must apply")
+        assertEquals(2.2f, applied.lineHeight)
+        assertEquals("LOCAL-KEY", applied.firebaseApiKey, "local credentials must be preserved")
+        assertEquals("local-pass", applied.syncAccountPassword)
+
+        // A second cycle must not re-apply or echo the same document.
+        val appliedAt = settingsRepo.getRaw("remote_settings_applied_at")
+        assertNotNull(appliedAt, "applied watermark must be recorded")
+        fake.settingsPayloads.clear()
+        engine.syncOnce()
+        assertTrue(
+            fake.settingsPayloads.isEmpty(),
+            "an applied settings document must never be echoed back to the cloud"
+        )
+        assertEquals(appliedAt, settingsRepo.getRaw("remote_settings_applied_at"))
+    }
+
+    @Test
+    fun `settings apply is skipped when settings sync is disabled`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        settingsRepo.saveGlobalSettings(ReaderSettings(fontSize = 18f, syncSettings = false))
+        fake.remoteSettings = FsSettings(
+            userId = "",
+            global = Json.encodeToString(ReaderSettings.serializer(), ReaderSettings(fontSize = 21f)),
+            updatedAt = Clock.System.now().toEpochMilliseconds(),
+            deviceId = "tablet-1"
+        )
+
+        engine.syncOnce()
+
+        assertEquals(18f, settingsRepo.getGlobalSettings().fontSize, "syncSettings=false must block apply")
+    }
+
+    @Test
+    fun `tag and collection edits converge by updatedAt`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val older = Clock.System.now().minus(kotlin.time.Duration.parse("PT2H")).toEpochMilliseconds()
+        val newer = Clock.System.now().plus(kotlin.time.Duration.parse("PT1H")).toEpochMilliseconds()
+
+        tagRepo.insertTag(
+            com.folio.reader.model.Tag(
+                id = "tag-1", name = "Old name", createdAt = kotlinx.datetime.Instant.fromEpochMilliseconds(older),
+                updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(older)
+            ),
+            emitSyncEvent = false
+        )
+        collectionRepo.insertCollection(
+            com.folio.reader.model.Collection(
+                id = "col-1", name = "Old collection",
+                createdAt = kotlinx.datetime.Instant.fromEpochMilliseconds(older),
+                updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(older)
+            ),
+            emitSyncEvent = false
+        )
+
+        fake.tags.add(
+            FsTag(id = "tag-1", name = "Renamed elsewhere", color = null, createdAt = older, deviceId = "tablet-1", updatedAt = newer)
+        )
+        fake.collections.add(
+            FsCollection(id = "col-1", name = "Renamed collection", color = null, sortOrder = 0, createdAt = older, deviceId = "tablet-1", updatedAt = newer)
+        )
+
+        engine.syncOnce()
+
+        assertEquals("Renamed elsewhere", tagRepo.getAllTags().first().single { it.id == "tag-1" }.name)
+        assertEquals("Renamed collection", collectionRepo.getAllCollections().first().single { it.id == "col-1" }.name)
+        assertTrue(
+            syncQueueRepo.getPendingSync(10).none { it.entityType == "tag" || it.entityType == "collection" },
+            "remote-applied edits must not echo into the outbox"
+        )
+    }
+
+    @Test
+    fun `a conflicted push recovers from the fresher remote copy`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+
+        val book = seedBook()
+        bookRepo.insertBook(book)
+        val stale = com.folio.reader.model.Highlight(
+            id = "hl-conflict",
+            bookId = book.id,
+            chapterId = "c1",
+            spineIndex = 1,
+            startLocator = "/1/1:0",
+            endLocator = "/1/1:9",
+            selectedText = "stale local text",
+            color = HighlightColor.YELLOW,
+            deviceId = selfDeviceId,
+            updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(
+                Clock.System.now().minus(kotlin.time.Duration.parse("PT2H")).toEpochMilliseconds()
+            )
+        )
+        highlightRepo.insertHighlight(stale, emitSyncEvent = false)
+        syncQueueRepo.enqueueSync(
+            "highlight", stale.id, SyncOperation.UPSERT,
+            Json.encodeToString(com.folio.reader.model.Highlight.serializer(), stale)
+        )
+
+        // The cloud already holds a fresher version of the same highlight.
+        val freshMs = Clock.System.now().toEpochMilliseconds()
+        fake.highlights.add(
+            FsHighlight(
+                id = stale.id, bookId = book.id, chapterId = "c1", spineIndex = 1,
+                startLocator = "/1/1:0", endLocator = "/1/1:9",
+                selectedText = "fresher remote text",
+                createdAt = stale.createdAt.toEpochMilliseconds(),
+                updatedAt = freshMs,
+                deviceId = selfDeviceId
+            )
+        )
+        fake.conflictOnce = true
+
+        engine.syncOnce()
+
+        // The 412-style failure marks the item errored; the fresher remote copy was
+        // applied locally in the same cycle.
+        assertEquals("fresher remote text", highlightRepo.getHighlight(stale.id)?.selectedText)
+
+        // Next cycle: the retried push sees the fresher remote and yields, draining
+        // the queue without resurrecting the stale text.
+        engine.syncOnce()
+        assertTrue(syncQueueRepo.getPendingSync(10).isEmpty(), "stale push must drain after convergence")
+        assertEquals("fresher remote text", fake.highlights.single { it.id == stale.id }.selectedText)
     }
 }

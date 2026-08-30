@@ -43,7 +43,9 @@ data class FolioColors(
     val scrim: Color = Color.Black,
     val inverseSurface: Color = Color(0xFF0F172A),
     val inverseOnSurface: Color = Color(0xFFF8FAFC),
-    val inversePrimary: Color = Color(0xFF818CF8)     // indigo-400
+    val inversePrimary: Color = Color(0xFF818CF8),    // indigo-400
+    /** Darker themed band behind the OS status bar on non-reader screens. */
+    val statusBar: Color = Color(0xFF0F172A)
 )
 
 val LightFolioColors = FolioColors()
@@ -78,7 +80,8 @@ val DarkFolioColors = FolioColors(
     scrim = Color.Black,
     inverseSurface = Color(0xFFE5E7EB),
     inverseOnSurface = Color(0xFF1A1A1A),
-    inversePrimary = Color(0xFF5B5D61)
+    inversePrimary = Color(0xFF5B5D61),
+    statusBar = Color(0xFF000000)
 )
 
 /**
@@ -98,7 +101,72 @@ private val WarmFolioColors = LightFolioColors.copy(
     outline = Color(0xFFD8CEC2),
     outlineVariant = Color(0xFFE7DED3),
     inverseSurface = Color(0xFF2B2622),
-    inverseOnSurface = Color(0xFFFAF7F2)
+    inverseOnSurface = Color(0xFFFAF7F2),
+    statusBar = Color(0xFF241F1A)
+)
+
+private val MatchaFolioColors = LightFolioColors.copy(
+    background = Color(0xFFF5F8F0),
+    onBackground = Color(0xFF252E1F),
+    surface = Color(0xFFFCFEF9),
+    onSurface = Color(0xFF252E1F),
+    surfaceVariant = Color(0xFFE8EFDF),
+    onSurfaceVariant = Color(0xFF5F6D52),
+    surfaceContainerHighest = Color(0xFFDCE7CF),
+    outline = Color(0xFFC4D2B4),
+    outlineVariant = Color(0xFFDCE7CF),
+    inverseSurface = Color(0xFF252E1F),
+    inverseOnSurface = Color(0xFFF5F8F0),
+    statusBar = Color(0xFF1B2415)
+)
+
+private val ArcticFolioColors = LightFolioColors.copy(
+    background = Color(0xFFF1F7FA),
+    onBackground = Color(0xFF1E2B33),
+    surface = Color(0xFFFAFDFE),
+    onSurface = Color(0xFF1E2B33),
+    surfaceVariant = Color(0xFFE1EDF3),
+    onSurfaceVariant = Color(0xFF587080),
+    surfaceContainerHighest = Color(0xFFD3E4EC),
+    outline = Color(0xFFB9CFDA),
+    outlineVariant = Color(0xFFD3E4EC),
+    inverseSurface = Color(0xFF1E2B33),
+    inverseOnSurface = Color(0xFFF1F7FA),
+    statusBar = Color(0xFF0F202B)
+)
+
+private val DuskFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF141120),
+    onBackground = Color(0xFFE4E0F2),
+    surface = Color(0xFF1C1830),
+    onSurface = Color(0xFFE4E0F2),
+    surfaceVariant = Color(0xFF251F3C),
+    onSurfaceVariant = Color(0xFF9E97BC),
+    surfaceContainerHighest = Color(0xFF2F2848),
+    primaryContainer = Color(0xFF292244),
+    secondaryContainer = Color(0xFF251F3C),
+    outline = Color(0xFF3B3357),
+    outlineVariant = Color(0xFF2F2848),
+    inverseSurface = Color(0xFFE4E0F2),
+    inverseOnSurface = Color(0xFF1C1830),
+    statusBar = Color(0xFF0A0814)
+)
+
+private val EspressoFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF161210),
+    onBackground = Color(0xFFE9E1D6),
+    surface = Color(0xFF1F1915),
+    onSurface = Color(0xFFE9E1D6),
+    surfaceVariant = Color(0xFF28211B),
+    onSurfaceVariant = Color(0xFFA79A8C),
+    surfaceContainerHighest = Color(0xFF322A22),
+    primaryContainer = Color(0xFF2E261E),
+    secondaryContainer = Color(0xFF28211B),
+    outline = Color(0xFF3D342B),
+    outlineVariant = Color(0xFF322A22),
+    inverseSurface = Color(0xFFE9E1D6),
+    inverseOnSurface = Color(0xFF1F1915),
+    statusBar = Color(0xFF0C0906)
 )
 
 private val MidnightFolioColors = DarkFolioColors.copy(
@@ -114,7 +182,8 @@ private val MidnightFolioColors = DarkFolioColors.copy(
     outline = Color(0xFF33425C),
     outlineVariant = Color(0xFF24334D),
     inverseSurface = Color(0xFFDCE3EF),
-    inverseOnSurface = Color(0xFF131C2E)
+    inverseOnSurface = Color(0xFF131C2E),
+    statusBar = Color(0xFF060B16)
 )
 
 private val OledFolioColors = DarkFolioColors.copy(
@@ -126,7 +195,8 @@ private val OledFolioColors = DarkFolioColors.copy(
     secondaryContainer = Color(0xFF17181B),
     tertiaryContainer = Color(0xFF121A18),
     outline = Color(0xFF2A2A2A),
-    outlineVariant = Color(0xFF1A1A1A)
+    outlineVariant = Color(0xFF1A1A1A),
+    statusBar = Color(0xFF000000)
 )
 
 /** The app's own selectable chrome themes, entirely separate from [Theme]. */
@@ -138,12 +208,41 @@ enum class AppPalette(
 ) {
     LIGHT("light", "Light", false, LightFolioColors),
     WARM("warm", "Warm", false, WarmFolioColors),
+    MATCHA("matcha", "Matcha", false, MatchaFolioColors),
+    ARCTIC("arctic", "Arctic", false, ArcticFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
+    DUSK("dusk", "Dusk", true, DuskFolioColors),
+    ESPRESSO("espresso", "Espresso", true, EspressoFolioColors),
     OLED("oled", "Black", true, OledFolioColors);
 
     companion object {
         fun byId(id: String): AppPalette = entries.firstOrNull { it.id == id } ?: LIGHT
+    }
+}
+
+/**
+ * A curated pair of app chrome + reading page so the two moods match without being
+ * the same theme. Applying a pack sets both; each side stays independently editable
+ * afterwards.
+ */
+data class ThemePack(
+    val id: String,
+    val name: String,
+    val appPaletteId: String,
+    val readerThemeId: String,
+) {
+    companion object {
+        val ALL = listOf(
+            ThemePack("gallery", "Gallery", "light", "white"),
+            ThemePack("manuscript", "Manuscript", "warm", "sepia"),
+            ThemePack("matcha", "Matcha", "matcha", "matcha"),
+            ThemePack("arctic", "Arctic", "arctic", "arctic"),
+            ThemePack("nocturne", "Nocturne", "midnight", "dark"),
+            ThemePack("dusk", "Dusk", "dusk", "dusk"),
+            ThemePack("espresso", "Espresso", "espresso", "espresso"),
+            ThemePack("obsidian", "Obsidian", "oled", "oled_black"),
+        )
     }
 }
 

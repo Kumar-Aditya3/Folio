@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Mihon's injekt fork, required by the vendored manga/extension runtime.
+        maven(url = "https://jitpack.io")
     }
 }
 

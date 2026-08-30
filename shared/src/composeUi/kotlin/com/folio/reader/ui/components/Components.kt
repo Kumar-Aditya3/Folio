@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -175,33 +178,50 @@ fun FolioTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
 ) {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(colors.surface.copy(alpha = 0.85f))
-            .statusBarsPadding()
-    ) {
-        Row(
+    Column(modifier = modifier.fillMaxWidth()) {
+        FolioStatusBarBand()
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .background(colors.surface.copy(alpha = 0.85f))
         ) {
-        if (navigationIcon != null) navigationIcon()
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            color = colors.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp)
-        )
-        actions()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+            if (navigationIcon != null) navigationIcon()
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
+            )
+            actions()
+            }
         }
     }
+}
+
+/**
+ * Darker themed band behind the OS status bar on non-reader screens, so the
+ * notification icons always sit on the theme's own ink instead of blending into
+ * the background. Zero-height on desktop, where there is no OS bar.
+ */
+@Composable
+fun FolioStatusBarBand(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsTopHeight(WindowInsets.statusBars)
+            .background(com.folio.reader.ui.theme.FolioTheme.colors.statusBar)
+    )
 }
 
 /** Thin rounded progress bar in the theme accent. */

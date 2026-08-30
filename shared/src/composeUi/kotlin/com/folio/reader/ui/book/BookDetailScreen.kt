@@ -159,11 +159,13 @@ fun BookDetailScreen(
         // No bar: the controls sit directly on the artwork as small glass discs, so
         // the cover reads as the top of the screen instead of starting under a panel.
         topBar = {
-            Row(
-                modifier = Modifier.fillMaxWidth().statusBarsPadding().height(FolioTokens.barHeight)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(Modifier.fillMaxWidth()) {
+                com.folio.reader.ui.components.FolioStatusBarBand()
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(FolioTokens.barHeight)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 FloatingIconButton(onClick = onBackPress) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
@@ -187,6 +189,7 @@ fun BookDetailScreen(
                             tint = FolioTheme.colors.error
                         )
                     }
+                }
                 }
             }
         }

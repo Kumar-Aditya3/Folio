@@ -7,7 +7,6 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.CloudState
 import com.folio.reader.model.FormattingMode
-import com.folio.reader.model.ParsedEpub
 import com.folio.reader.platform.FolioPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -130,10 +129,6 @@ class BookImporter(
                 searchIndexer.indexChaptersBulk(bookId, indexEntries)
                 println("Import: Search indexing complete")
 
-                // 12. Save metadata JSON
-                println("Import: Saving metadata...")
-                saveMetadataJson(bookId, parsed)
-
                 println("Import: Successfully imported '${book.title}'")
                 return@withContext Result.success(book)
             } catch (e: Exception) {
@@ -142,12 +137,6 @@ class BookImporter(
                 return@withContext Result.failure(e)
             }
         }
-    }
-
-    private fun saveMetadataJson(bookId: String, parsed: ParsedEpub) {
-        val metadataFile = File(platform.fileSystem.getBookMetadataPath(bookId))
-        val json = com.folio.reader.util.JsonUtils.toJson(parsed)
-        metadataFile.writeText(json)
     }
 
     suspend fun importMultiple(filePaths: List<String>): List<Result<Book>> {

@@ -1,18 +1,7 @@
 package com.folio.reader.platform
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import com.folio.reader.settings.AppSettings
-import kotlinx.coroutines.flow.first
-import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.UUID
-
-private val Context.folioDataStore by preferencesDataStore(name = "folio_settings")
-private val APP_SETTINGS_KEY = stringPreferencesKey("app_settings_json")
-private val DEVICE_ID_KEY = stringPreferencesKey("device_id")
 
 class AndroidFileSystem(private val context: Context) : FolioFileSystem {
 
@@ -34,6 +23,19 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
 
     override val libraryBooksDir: File
         get() = File(libraryDir, "books").apply { mkdirs() }
+
+    private val mangaDir: File by lazy {
+        File(context.filesDir, "manga").apply { mkdirs() }
+    }
+
+    override val mangaLocalDir: File
+        get() = File(mangaDir, "local").apply { mkdirs() }
+
+    override val mangaCoversDir: File
+        get() = File(mangaDir, "covers").apply { mkdirs() }
+
+    override val mangaDownloadsDir: File
+        get() = File(mangaDir, "downloads").apply { mkdirs() }
 
     override fun getBookDir(bookId: String): File = File(libraryBooksDir, bookId).apply { mkdirs() }
 
@@ -80,45 +82,8 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
     override fun getBookSize(bookId: String): Long = dirSize(getBookDir(bookId))
 }
 
-class AndroidSettingsStore(private val context: Context) : SettingsStore {
-
-    private val json = Json { ignoreUnknownKeys = true }
-
-    override suspend fun getAppSettings(): AppSettings {
-        val prefs = context.folioDataStore.data.first()
-        val stored = prefs[APP_SETTINGS_KEY]
-            ?.let { runCatching { json.decodeFromString(AppSettings.serializer(), it) }.getOrNull() }
-        return stored ?: AppSettings(
-            deviceId = getOrCreateDeviceId(),
-            deviceName = android.os.Build.MODEL ?: "Android Device",
-            platform = "android"
-        )
-    }
-
-    override suspend fun saveAppSettings(settings: AppSettings) {
-        context.folioDataStore.edit { prefs ->
-            prefs[APP_SETTINGS_KEY] = json.encodeToString(AppSettings.serializer(), settings)
-        }
-    }
-
-    private suspend fun getOrCreateDeviceId(): String {
-        var id: String? = null
-        context.folioDataStore.edit { prefs ->
-            val existing = prefs[DEVICE_ID_KEY]
-            if (existing == null) {
-                val generated = UUID.randomUUID().toString()
-                prefs[DEVICE_ID_KEY] = generated
-                id = generated
-            } else {
-                id = existing
-            }
-        }
-        return id ?: UUID.randomUUID().toString()
-    }
-}
 
 class AndroidPlatform(private val context: Context) : FolioPlatform {
     override val fileSystem: FolioFileSystem = AndroidFileSystem(context)
     override val hasher: FileHasher = MessageDigestFileHasher()
-    override val settingsStore: SettingsStore = AndroidSettingsStore(context)
 }

@@ -1,11 +1,8 @@
 package com.folio.reader.platform
 
-import com.folio.reader.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.UUID
 
 class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSystem {
 
@@ -20,6 +17,17 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
 
     override val libraryBooksDir: File
         get() = File(libraryDir, "books").apply { mkdirs() }
+
+    private val mangaDir: File by lazy { File(appDir, "manga").apply { mkdirs() } }
+
+    override val mangaLocalDir: File
+        get() = File(mangaDir, "local").apply { mkdirs() }
+
+    override val mangaCoversDir: File
+        get() = File(mangaDir, "covers").apply { mkdirs() }
+
+    override val mangaDownloadsDir: File
+        get() = File(mangaDir, "downloads").apply { mkdirs() }
 
     override fun getBookDir(bookId: String): File = File(libraryBooksDir, bookId).apply { mkdirs() }
 
@@ -71,39 +79,8 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
     override fun getBookSize(bookId: String): Long = dirSize(getBookDir(bookId))
 }
 
-class DesktopSettingsStore(rootOverride: File? = null) : SettingsStore {
-
-    private val settingsFile: File = File(
-        rootOverride ?: File(System.getProperty("user.home"), ".folio"),
-        "settings.json"
-    )
-    private val json = Json { ignoreUnknownKeys = true }
-
-    override suspend fun getAppSettings(): AppSettings {
-        return withContext(Dispatchers.IO) {
-            if (settingsFile.exists()) {
-                runCatching { json.decodeFromString(AppSettings.serializer(), settingsFile.readText()) }
-                    .getOrElse { AppSettings(platform = "desktop") }
-            } else {
-                AppSettings(
-                    deviceId = UUID.randomUUID().toString(),
-                    deviceName = System.getProperty("user.name")?.let { "$it's Computer" } ?: "Desktop",
-                    platform = "desktop"
-                )
-            }
-        }
-    }
-
-    override suspend fun saveAppSettings(settings: AppSettings) {
-        withContext(Dispatchers.IO) {
-            settingsFile.parentFile?.mkdirs()
-            settingsFile.writeText(json.encodeToString(AppSettings.serializer(), settings))
-        }
-    }
-}
 
 class DesktopPlatform(rootOverride: File? = null) : FolioPlatform {
     override val fileSystem: FolioFileSystem = DesktopFileSystem(rootOverride)
     override val hasher: FileHasher = MessageDigestFileHasher()
-    override val settingsStore: SettingsStore = DesktopSettingsStore(rootOverride)
 }

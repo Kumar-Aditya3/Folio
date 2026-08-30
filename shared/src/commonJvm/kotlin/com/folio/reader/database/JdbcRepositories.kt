@@ -38,9 +38,9 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
         db.updateBook(book)
         if (emitSyncEvent) db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
     }
-    override suspend fun deleteBook(bookId: String) {
+    override suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean) {
         db.deleteBook(bookId)
-        db.onEntityChanged?.invoke("book", bookId, "DELETE", "{}")
+        if (emitSyncEvent) db.onEntityChanged?.invoke("book", bookId, "DELETE", "{}")
     }
     override suspend fun getBook(bookId: String): Book? = db.getBook(bookId)
     override suspend fun getBookByEpubHash(hash: String): Book? = db.getBookByEpubHash(hash)
@@ -286,6 +286,22 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
                     val out = mutableListOf<ReadingSession>()
                     while (rs.next()) out.add(mapRow(rs))
                     out
+                }
+            }
+        }
+    }
+
+    override suspend fun maxStartedAtExcludingDevice(deviceId: String): Instant? {
+        return db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT MAX(started_at) FROM reading_sessions WHERE device_id != ?"
+            ).use { stmt ->
+                stmt.setString(1, deviceId)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val max = rs.getLong(1)
+                        if (!rs.wasNull() && max > 0) Instant.fromEpochMilliseconds(max) else null
+                    } else null
                 }
             }
         }
@@ -629,21 +645,26 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
     private fun mapRow(rs: ResultSet) = Collection(
         id = rs.getString("id"),
         name = rs.getString("name"),
-        color = rs.getInt("color").takeIf { !rs.wasNull() },
+        color = (rs.getObject("color") as? Number)?.toInt(),
         sortOrder = rs.getInt("sort_order"),
-        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at"))
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        // Legacy rows carry 0 until first edited; treat that as "as old as creation".
+        updatedAt = rs.getLong("updated_at").takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+            ?: Instant.fromEpochMilliseconds(rs.getLong("created_at"))
     )
 
     override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {
         db.withConnection { conn ->
             conn.prepareStatement(
-                "INSERT OR REPLACE INTO collections (id, name, color, sort_order, created_at) VALUES (?, ?, ?, ?, ?)"
+                "INSERT OR REPLACE INTO collections (id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
             ).use { stmt ->
                 stmt.setString(1, collection.id)
                 stmt.setString(2, collection.name)
-                stmt.setInt(3, collection.color ?: -1)
+                if (collection.color != null) stmt.setInt(3, collection.color)
+                else stmt.setNull(3, java.sql.Types.INTEGER)
                 stmt.setInt(4, collection.sortOrder)
                 stmt.setLong(5, collection.createdAt.toEpochMilliseconds())
+                stmt.setLong(6, collection.updatedAt.toEpochMilliseconds())
                 stmt.executeUpdate()
             }
         }
@@ -729,15 +750,18 @@ class JdbcSeriesRepository(private val db: Database) : SeriesRepository {
     private fun mapRow(rs: ResultSet) = Series(
         id = rs.getString("id"),
         name = rs.getString("name"),
-        sortOrder = rs.getInt("sort_order")
+        sortOrder = rs.getInt("sort_order"),
+        updatedAt = rs.getLong("updated_at").takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+            ?: Clock.System.now()
     )
 
     override suspend fun insertSeries(series: Series, emitSyncEvent: Boolean) {
         db.withConnection { conn ->
-            conn.prepareStatement("INSERT OR REPLACE INTO series (id, name, sort_order) VALUES (?, ?, ?)").use { stmt ->
+            conn.prepareStatement("INSERT OR REPLACE INTO series (id, name, sort_order, updated_at) VALUES (?, ?, ?, ?)").use { stmt ->
                 stmt.setString(1, series.id)
                 stmt.setString(2, series.name)
                 stmt.setInt(3, series.sortOrder)
+                stmt.setLong(4, series.updatedAt.toEpochMilliseconds())
                 stmt.executeUpdate()
             }
         }
@@ -1074,9 +1098,11 @@ class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
             runCatching { repoJson.decodeFromString(ReaderSettings.serializer(), it) }.getOrNull()
         } ?: ReaderSettings()
 
-    override suspend fun saveGlobalSettings(settings: ReaderSettings) {
+    override suspend fun saveGlobalSettings(settings: ReaderSettings, emitSyncEvent: Boolean) {
         db.setSettings(KEY_GLOBAL, repoJson.encodeToString(ReaderSettings.serializer(), settings))
-        db.onEntityChanged?.invoke("settings", "global", "UPSERT", repoJson.encodeToString(ReaderSettings.serializer(), settings))
+        if (emitSyncEvent) {
+            db.onEntityChanged?.invoke("settings", "global", "UPSERT", repoJson.encodeToString(ReaderSettings.serializer(), settings))
+        }
     }
 
     override suspend fun getBookSettings(bookId: String): BookReaderSettings? =
@@ -1089,7 +1115,12 @@ class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
     }
 
     override suspend fun deleteBookSettings(bookId: String) {
-        db.setSettings(keyForBook(bookId), "")
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->
+                stmt.setString(1, keyForBook(bookId))
+                stmt.executeUpdate()
+            }
+        }
     }
 
     override suspend fun setRaw(key: String, value: String) {

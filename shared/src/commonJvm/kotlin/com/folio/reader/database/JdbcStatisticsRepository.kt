@@ -4,8 +4,6 @@ import com.folio.reader.statistics.BookStatistics
 import com.folio.reader.statistics.CycleStatistics
 import com.folio.reader.statistics.DailyStatistics
 import com.folio.reader.statistics.HeatmapDay
-import com.folio.reader.statistics.ReadingHistoryEntry
-import com.folio.reader.statistics.SessionSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.datetime.Instant
@@ -172,33 +170,6 @@ class JdbcStatisticsRepository(private val db: Database) : StatisticsRepository 
                 )
             }
         )
-    }
-
-    override fun getHistoryTimeline(deviceId: String, limit: Int): Flow<List<ReadingHistoryEntry>> = flow {
-        val sessions = loadDailyStats(deviceId, LocalDate(2000, 1, 1))
-            .flatMap { it.sessions }
-            .sortedByDescending { it.startedAt }
-            .take(limit)
-        val grouped = sessions.groupBy { it.startedAt.toLocalDateTime(TimeZone.currentSystemDefault()).date }
-            .map { (date, daySessions) ->
-                ReadingHistoryEntry(
-                    date = date,
-                    sessions = daySessions.map { session ->
-                        SessionSummary(
-                            bookId = session.bookId,
-                            bookTitle = session.bookId,
-                            startTime = session.startedAt,
-                            endTime = session.endedAt ?: session.startedAt,
-                            durationMs = session.durationMs,
-                            startProgress = session.startProgress,
-                            endProgress = session.endProgress,
-                            wordsRead = session.wordsRead,
-                            position = session.endPosition ?: session.startPosition
-                        )
-                    }
-                )
-            }
-        emit(grouped)
     }
 
     private fun setNullableLong(stmt: java.sql.PreparedStatement, index: Int, value: Instant?) {

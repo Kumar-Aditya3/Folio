@@ -4,6 +4,9 @@ import com.folio.reader.firebase.FsBook
 import com.folio.reader.firebase.FsBookmark
 import com.folio.reader.firebase.FsCollection
 import com.folio.reader.firebase.FsHighlight
+import com.folio.reader.firebase.FsManga
+import com.folio.reader.firebase.FsMangaChapter
+import com.folio.reader.firebase.FsMangaNote
 import com.folio.reader.firebase.FsNote
 import com.folio.reader.firebase.FsQuote
 import com.folio.reader.firebase.FsReadingPosition
@@ -45,11 +48,14 @@ class RestFirestoreSync(
     private val apiKey: String,
     private val uidOverride: String? = null,
     private val accountEmail: String? = null,
-    private val accountPassword: String? = null
+    private val accountPassword: String? = null,
+    internal val identityToolkitBaseUrl: String = "https://identitytoolkit.googleapis.com/v1",
+    firestoreBaseUrl: String? = null
 ) : FirestoreSync {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    private val baseUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents"
+    private val baseUrl = firestoreBaseUrl
+        ?: "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents"
 
     @Volatile
     private var idToken: String? = null
@@ -91,16 +97,14 @@ class RestFirestoreSync(
                 identityToolkit("accounts:signInWithPassword", credentialsBody(email, password))
             }.getOrElse { error1 ->
                 runCatching {
-                    // 2. Try Email/Password sign up
+                    // 2. Try Email/Password sign up (first-time account creation)
                     identityToolkit("accounts:signUp", credentialsBody(email, password))
                 }.getOrElse { error2 ->
-                    runCatching {
-                        // 3. Try Anonymous Auth fallback
-                        identityToolkit("accounts:signUp", anonymousSignUpBody)
-                    }.getOrElse { error3 ->
-                        authFailure(error2.message ?: error1.message ?: error3.message, email)
-                        return
-                    }
+                    // No anonymous fallback: silently adopting a fresh anonymous
+                    // identity signed the reader into an empty account they did
+                    // not ask for, making their library appear lost.
+                    authFailure(error1.message ?: error2.message, email)
+                    return
                 }
             }
         } else {
@@ -153,7 +157,7 @@ class RestFirestoreSync(
     }
 
     private fun identityToolkit(endpoint: String, body: String): String = httpJson(
-        url = "https://identitytoolkit.googleapis.com/v1/$endpoint?key=$apiKey",
+        url = "$identityToolkitBaseUrl/$endpoint?key=$apiKey",
         method = "POST",
         body = body,
         authHeader = null
@@ -179,6 +183,11 @@ class RestFirestoreSync(
             uid = email ?: "default_user"
         } else if (msg.contains("API key not valid") || msg.contains("API_KEY_INVALID")) {
             throw IOException("Invalid Firebase API Key. Check Settings -> Advanced.")
+        } else if (msg.contains("INVALID_PASSWORD") || msg.contains("EMAIL_NOT_FOUND") ||
+            msg.contains("EMAIL_EXISTS") || msg.contains("INVALID_EMAIL") ||
+            msg.contains("INVALID_LOGIN_CREDENTIALS")
+        ) {
+            throw IOException("Sync account sign-in failed — check the email and password in Settings -> Advanced.")
         } else {
             throw IOException("Firebase Auth failed: ${msg.take(120)}")
         }
@@ -189,34 +198,38 @@ class RestFirestoreSync(
     }
 
     override fun upsertBook(book: FsBook) =
-        putPayload(FirestorePaths.userBook(uid, book.id), book.updatedAt, json.encodeToString(book))
+        putPayload(
+            FirestorePaths.userBook(uid, book.id),
+            book.updatedAt,
+            json.encodeToString(book)
+        )
 
     override fun upsertPosition(position: FsReadingPosition) = putPayload(
-        "${FirestorePaths.userPositions(uid, position.bookId)}/${docId(position.deviceId)}",
+        "${FirestorePaths.userPositions(uid, position.bookId)}/${position.deviceId}",
         position.updatedAt,
         json.encodeToString(position)
     )
 
     override fun upsertHighlight(highlight: FsHighlight) = putPayload(
-        "${FirestorePaths.userHighlights(uid, highlight.bookId)}/${docId(highlight.id)}",
+        "${FirestorePaths.userHighlights(uid, highlight.bookId)}/${highlight.id}",
         highlight.updatedAt,
         json.encodeToString(highlight)
     )
 
     override fun upsertNote(note: FsNote) = putPayload(
-        "${FirestorePaths.userNotes(uid, note.bookId)}/${docId(note.id)}",
+        "${FirestorePaths.userNotes(uid, note.bookId)}/${note.id}",
         note.updatedAt,
         json.encodeToString(note)
     )
 
     override fun upsertBookmark(bookmark: FsBookmark) = putPayload(
-        "${FirestorePaths.userBookmarks(uid, bookmark.bookId)}/${docId(bookmark.id)}",
+        "${FirestorePaths.userBookmarks(uid, bookmark.bookId)}/${bookmark.id}",
         bookmark.updatedAt,
         json.encodeToString(bookmark)
     )
 
     override fun upsertSession(session: FsReadingSession) = putPayload(
-        "${FirestorePaths.userSessions(uid)}/${docId(session.id)}",
+        "${FirestorePaths.userSessions(uid)}/${session.id}",
         session.startedAt,
         json.encodeToString(session)
     )
@@ -225,52 +238,61 @@ class RestFirestoreSync(
         putPayload(FirestorePaths.userSettingsDocument(uid), settings.updatedAt, json.encodeToString(settings))
 
     override fun upsertCollection(collection: FsCollection) = putPayload(
-        "${FirestorePaths.userCollections(uid)}/${docId(collection.id)}",
-        collection.createdAt,
+        "${FirestorePaths.userCollections(uid)}/${collection.id}",
+        collection.updatedAt,
         json.encodeToString(collection)
     )
 
     override fun upsertSeries(series: FsSeries) = putPayload(
-        "${FirestorePaths.userSeries(uid)}/${docId(series.id)}",
-        0L,
+        "${FirestorePaths.userSeries(uid)}/${series.id}",
+        series.updatedAt,
         json.encodeToString(series)
     )
 
     override fun upsertTag(tag: FsTag) = putPayload(
-        "${FirestorePaths.userTags(uid)}/${docId(tag.id)}",
-        tag.createdAt,
+        "${FirestorePaths.userTags(uid)}/${tag.id}",
+        tag.updatedAt,
         json.encodeToString(tag)
     )
 
     override fun upsertQuote(quote: FsQuote) = putPayload(
-        "${FirestorePaths.userQuotes(uid)}/${docId(quote.id)}",
+        "${FirestorePaths.userQuotes(uid)}/${quote.id}",
         quote.createdAt,
         json.encodeToString(quote)
     )
 
     override fun upsertRevisitItem(item: FsRevisitItem) = putPayload(
-        "${FirestorePaths.userRevisit(uid)}/${docId(item.id)}",
+        "${FirestorePaths.userRevisit(uid)}/${item.id}",
         item.resolvedAt ?: item.createdAt,
         json.encodeToString(item)
     )
 
     override fun fetchBooks(): List<FsBook> {
         ensureAuth()
-        return listCollection(FirestorePaths.userBooks(uid))
-            .mapNotNull { decode<FsBook>(it) }
+        // Cycle boundary: preconditions must reflect only this cycle's fetches.
+        docUpdateTimes.clear()
+        val docs = listCollection(FirestorePaths.userBooks(uid))
+        // The engine fetches books first every cycle; the annotation fan-out below
+        // reuses this listing instead of re-listing the collection four more times.
+        booksCache = docs
+        return docs.mapNotNull { decode<FsBook>(it) }
     }
 
-    private fun fetchAllUserBooks(): List<FsBook> {
+    private var booksCache: List<RemoteDoc>? = null
+
+    private fun fetchAllUserBooks(): List<RemoteDoc> {
         ensureAuth()
-        return listCollection(FirestorePaths.userBooks(uid)).mapNotNull { decode(it) }
+        booksCache?.let { return it }
+        return listCollection(FirestorePaths.userBooks(uid)).also { booksCache = it }
     }
 
     override fun fetchPositions(): List<FsReadingPosition> {
         ensureAuth()
         val out = mutableListOf<FsReadingPosition>()
-        for (book in fetchAllUserBooks()) {
-            listCollection(FirestorePaths.userPositions(uid, book.id)).forEach { doc ->
-                runCatching { json.decodeFromString(FsReadingPosition.serializer(), doc.payload) }.getOrNull()
+        for (doc in fetchAllUserBooks()) {
+            val book = decode<FsBook>(doc) ?: continue
+            listCollection(FirestorePaths.userPositions(uid, book.id)).forEach { sub ->
+                runCatching { json.decodeFromString(FsReadingPosition.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
         }
@@ -280,9 +302,10 @@ class RestFirestoreSync(
     override fun fetchHighlights(): List<FsHighlight> {
         ensureAuth()
         val out = mutableListOf<FsHighlight>()
-        for (book in fetchAllUserBooks()) {
-            listCollection(FirestorePaths.userHighlights(uid, book.id)).forEach { doc ->
-                runCatching { json.decodeFromString(FsHighlight.serializer(), doc.payload) }.getOrNull()
+        for (doc in fetchAllUserBooks()) {
+            val book = decode<FsBook>(doc) ?: continue
+            listCollection(FirestorePaths.userHighlights(uid, book.id)).forEach { sub ->
+                runCatching { json.decodeFromString(FsHighlight.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
         }
@@ -292,9 +315,10 @@ class RestFirestoreSync(
     override fun fetchNotes(): List<FsNote> {
         ensureAuth()
         val out = mutableListOf<FsNote>()
-        for (book in fetchAllUserBooks()) {
-            listCollection(FirestorePaths.userNotes(uid, book.id)).forEach { doc ->
-                runCatching { json.decodeFromString(FsNote.serializer(), doc.payload) }.getOrNull()
+        for (doc in fetchAllUserBooks()) {
+            val book = decode<FsBook>(doc) ?: continue
+            listCollection(FirestorePaths.userNotes(uid, book.id)).forEach { sub ->
+                runCatching { json.decodeFromString(FsNote.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
         }
@@ -304,19 +328,31 @@ class RestFirestoreSync(
     override fun fetchBookmarks(): List<FsBookmark> {
         ensureAuth()
         val out = mutableListOf<FsBookmark>()
-        for (book in fetchAllUserBooks()) {
-            listCollection(FirestorePaths.userBookmarks(uid, book.id)).forEach { doc ->
-                runCatching { json.decodeFromString(FsBookmark.serializer(), doc.payload) }.getOrNull()
+        for (doc in fetchAllUserBooks()) {
+            val book = decode<FsBook>(doc) ?: continue
+            listCollection(FirestorePaths.userBookmarks(uid, book.id)).forEach { sub ->
+                runCatching { json.decodeFromString(FsBookmark.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
         }
         return out
     }
 
-    override fun fetchSessions(): List<FsReadingSession> {
+    override fun fetchSessions(sinceStartedAtMs: Long): List<FsReadingSession> {
         ensureAuth()
-        return listCollection(FirestorePaths.userSessions(uid))
-            .mapNotNull { decode<FsReadingSession>(it) }
+        if (sinceStartedAtMs <= 0L) {
+            return listCollection(FirestorePaths.userSessions(uid))
+                .mapNotNull { decode<FsReadingSession>(it) }
+        }
+        // Sessions are append-only, so an inequality query on the updatedAt field
+        // (which stores startedAt) pulls just the new history instead of the whole
+        // collection every cycle — the session list is what grows without bound.
+        return runStructuredQuery(
+            parentPath = FirestorePaths.USERS + "/" + uid,
+            collectionId = FirestorePaths.SESSIONS,
+            filterField = "updatedAt",
+            greaterThan = sinceStartedAtMs.toDouble()
+        ).mapNotNull { decode<FsReadingSession>(it) }
     }
 
     override fun fetchCollections(): List<FsCollection> {
@@ -349,7 +385,58 @@ class RestFirestoreSync(
             .mapNotNull { decode<FsRevisitItem>(it) }
     }
 
+    override fun fetchSettings(): FsSettings? {
+        ensureAuth()
+        val doc = getDocument(FirestorePaths.userSettingsDocument(uid)) ?: return null
+        return decode<FsSettings>(doc)
+    }
+
+    override fun upsertManga(manga: FsManga) = putPayload(
+        "${FirestorePaths.userManga(uid)}/${manga.id}",
+        manga.updatedAt,
+        json.encodeToString(manga)
+    )
+
+    override fun upsertMangaChapter(chapter: FsMangaChapter) = putPayload(
+        "${FirestorePaths.userMangaChapters(uid)}/${chapter.id}",
+        chapter.updatedAt,
+        json.encodeToString(chapter)
+    )
+
+    override fun upsertMangaNote(note: FsMangaNote) = putPayload(
+        "${FirestorePaths.userMangaNotes(uid)}/${note.id}",
+        note.updatedAt,
+        json.encodeToString(note)
+    )
+
+    override fun fetchManga(): List<FsManga> {
+        ensureAuth()
+        return listCollection(FirestorePaths.userManga(uid)).mapNotNull { decode<FsManga>(it) }
+    }
+
+    override fun fetchMangaChapters(): List<FsMangaChapter> {
+        ensureAuth()
+        return listCollection(FirestorePaths.userMangaChapters(uid)).mapNotNull { decode<FsMangaChapter>(it) }
+    }
+
+    override fun fetchMangaNotes(): List<FsMangaNote> {
+        ensureAuth()
+        return listCollection(FirestorePaths.userMangaNotes(uid)).mapNotNull { decode<FsMangaNote>(it) }
+    }
+
     // ---------- internals ----------
+
+    /**
+     * Server updateTime of every document fetched this cycle, keyed by short path
+     * ("users/{uid}/books/…" etc.). Writes to a known document carry it back as a
+     * currentDocument.updateTime precondition: if another device wrote in between,
+     * Firestore rejects the PATCH and the engine converges from the fresher remote
+     * copy on the next cycle instead of clobbering it.
+     */
+    private val docUpdateTimes = mutableMapOf<String, String>()
+
+    private fun shortKey(fullResourceName: String): String =
+        fullResourceName.substringAfter("/documents/", fullResourceName)
 
     private inline fun <reified T : Any> decode(doc: RemoteDoc): T? =
         runCatching { json.decodeFromString<T>(doc.payload) }.getOrNull()
@@ -360,7 +447,9 @@ class RestFirestoreSync(
             put("updatedAt", buildJsonObject { put("doubleValue", updatedAtMs.toDouble()) })
         }
         val body = JsonObject(mapOf("fields" to fields)).toString()
-        httpJson("$baseUrl/${encodePath(path)}", "PATCH", body, bearer())
+        val precondition = docUpdateTimes[path]
+        val query = precondition?.let { "?currentDocument.updateTime=${URLEncoder.encode(it, "UTF-8")}" } ?: ""
+        httpJson("$baseUrl/${encodePath(path)}$query", "PATCH", body, bearer())
     }
 
     /** Lists a collection fully (paginated). Personal-scale collections only. */
@@ -381,11 +470,75 @@ class RestFirestoreSync(
                         ?: continue
                     val updated = fields["updatedAt"]?.jsonObject?.get("doubleValue")?.jsonPrimitive?.double
                         ?: 0.0
+                    val updateTime = docObj["updateTime"]?.jsonPrimitive?.content
+                    updateTime?.let { docUpdateTimes[shortKey(name)] = it }
                     out.add(RemoteDoc(name, payload, updated.toLong()))
                 }
             }
             pageToken = obj["nextPageToken"]?.jsonPrimitive?.content
         } while (pageToken != null)
+        return out
+    }
+
+    /**
+     * Runs a scoped structured query (inequality on a numeric field) against one
+     * collection under [parentPath]. Used for incremental fetches of append-only
+     * collections. Inequality filters require ordering by the same field.
+     */
+    private fun runStructuredQuery(
+        parentPath: String,
+        collectionId: String,
+        filterField: String,
+        greaterThan: Double
+    ): List<RemoteDoc> {
+        val body = buildJsonObject {
+            put(
+                "structuredQuery",
+                buildJsonObject {
+                    put(
+                        "from",
+                        JsonArray(listOf(buildJsonObject { put("collectionId", collectionId) }))
+                    )
+                    put(
+                        "where",
+                        buildJsonObject {
+                            put(
+                                "fieldFilter",
+                                buildJsonObject {
+                                    put("field", buildJsonObject { put("fieldPath", filterField) })
+                                    put("op", "GREATER_THAN")
+                                    put("value", buildJsonObject { put("doubleValue", greaterThan) })
+                                }
+                            )
+                        }
+                    )
+                    put(
+                        "orderBy",
+                        JsonArray(
+                            listOf(
+                                buildJsonObject {
+                                    put("field", buildJsonObject { put("fieldPath", filterField) })
+                                    put("direction", "ASCENDING")
+                                }
+                            )
+                        )
+                    )
+                }
+            )
+        }.toString()
+        val response = httpJson("$baseUrl/${encodePath(parentPath)}:runQuery", "POST", body, bearer())
+        val out = mutableListOf<RemoteDoc>()
+        for (element in (json.parseToJsonElement(response) as? JsonArray) ?: return out) {
+            val docObj = element.jsonObject["document"]?.jsonObject ?: continue
+            val name = docObj["name"]?.jsonPrimitive?.content ?: continue
+            val fields = docObj["fields"]?.jsonObject ?: continue
+            val payload = fields["payload"]?.jsonObject?.get("stringValue")?.jsonPrimitive?.content
+                ?: continue
+            val updated = fields["updatedAt"]?.jsonObject?.get("doubleValue")?.jsonPrimitive?.double
+                ?: 0.0
+            docObj["updateTime"]?.jsonPrimitive?.content?.let { docUpdateTimes[shortKey(name)] = it }
+            out.add(RemoteDoc(name, payload, updated.toLong()))
+        }
         return out
     }
 
@@ -441,8 +594,6 @@ class RestFirestoreSync(
 }
 
 internal const val TOKEN_REFRESH_MARGIN_MS = 60_000L
-
-private fun docId(raw: String): String = URLEncoder.encode(raw, "UTF-8")
 
 internal fun jsonEscape(raw: String): String =
     buildString {

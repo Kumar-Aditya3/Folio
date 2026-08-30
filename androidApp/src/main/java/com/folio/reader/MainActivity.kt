@@ -69,6 +69,14 @@ private sealed interface Screen {
     data object TagManager : Screen
     data object QuoteBrowser : Screen
     data object RevisitItems : Screen
+
+    // Manga category (separate from books).
+    data object MangaBrowse : Screen
+    data class MangaSourceBrowse(val sourceId: Long, val query: String = "") : Screen
+    data object MangaExtensions : Screen
+    data object MangaDownloads : Screen
+    data class MangaDetail(val mangaId: String) : Screen
+    data class MangaReader(val mangaId: String, val chapterId: String) : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -113,6 +121,17 @@ class MainActivity : ComponentActivity() {
                 if (navStack.size > 1) navStack.removeAt(navStack.size - 1)
             }
             var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
+            var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
+            var sharedViewIndex by remember { mutableStateOf(0) }
+            var mangaSearchActive by remember { mutableStateOf(false) }
+            val mangaLibVM = remember {
+                com.folio.reader.ui.manga.MangaLibraryViewModel(
+                    backend = graph.mangaBackend,
+                    mangaRepo = graph.mangaRepository,
+                    categoryRepo = graph.mangaCategoryRepository,
+                    chapterRepo = graph.mangaChapterRepository,
+                )
+            }
 
             // Top-level sync state for library screen
             val librarySyncState by remember(graph.syncEngine) {
@@ -124,9 +143,24 @@ class MainActivity : ComponentActivity() {
             }
 
             // Gesture/system back pops the previous screen off the stack; at the
-            // library root no handler is enabled so back finishes the activity
-            // (standard Android exit behavior).
-            BackHandler(enabled = navStack.size > 1) { popScreen() }
+            // Back walks back through states instead of exiting: pushed screens pop
+            // first, then an open manga search closes, then Manga returns to Books,
+            // and only at the Books root does back exit the app.
+            val mangaBrowseVM = remember {
+                com.folio.reader.ui.manga.BrowseViewModel(graph.mangaBackend, graph.mangaRepository)
+            }
+            BackHandler {
+                when {
+                    mangaLibVM.isSelectionMode.value -> mangaLibVM.clearSelection()
+                    navStack.lastOrNull() is Screen.MangaBrowse && mangaBrowseVM.searchActive.value ->
+                        mangaBrowseVM.exitSearch()
+                    navStack.size > 1 -> popScreen()
+                    mangaSearchActive -> mangaSearchActive = false
+                    libraryMode == com.folio.reader.ui.library.LibraryMode.MANGA ->
+                        libraryMode = com.folio.reader.ui.library.LibraryMode.BOOKS
+                    else -> finish()
+                }
+            }
 
             // Auto-clear import status after 3 seconds
             LaunchedEffect(importStatus) {
@@ -140,6 +174,62 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.OpenMultipleDocuments()
             ) { uris ->
                 importEpubUris(uris)
+            }
+
+            val pickMangaArchives = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenMultipleDocuments()
+            ) { uris ->
+                importMangaUris(uris)
+            }
+
+            val mangaBackupManager = remember {
+                com.folio.reader.manga.backup.MangaBackupManager(
+                    mangaRepo = graph.mangaRepository,
+                    chapterRepo = graph.mangaChapterRepository,
+                    categoryRepo = graph.mangaCategoryRepository,
+                    historyRepo = graph.mangaHistoryRepository,
+                )
+            }
+
+            val pickMangaBackup = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    appScope.launch(Dispatchers.IO) {
+                        val tmp = File(cacheDir, "manga_backup_${System.currentTimeMillis()}.backup")
+                        try {
+                            contentResolver.openInputStream(uri)?.use { input ->
+                                tmp.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            val result = mangaBackupManager.importFromMihonBackup(tmp)
+                            appScope.launch(Dispatchers.Main) {
+                                importStatus = "Imported ${result.manga} manga, ${result.chapters} chapters"
+                                refreshTick++
+                            }
+                        } catch (e: Exception) {
+                            appScope.launch(Dispatchers.Main) { importStatus = "Backup import failed: ${e.message}" }
+                        } finally { tmp.delete() }
+                    }
+                }
+            }
+
+            val exportMangaBackup = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("application/octet-stream")
+            ) { uri ->
+                if (uri != null) {
+                    appScope.launch(Dispatchers.IO) {
+                        val tmp = File(cacheDir, "folio_manga.backup")
+                        try {
+                            val count = mangaBackupManager.exportToMihonBackup(tmp)
+                            contentResolver.openOutputStream(uri)?.use { output ->
+                                tmp.inputStream().use { input -> input.copyTo(output) }
+                            }
+                            appScope.launch(Dispatchers.Main) { importStatus = "Exported $count manga to Mihon backup" }
+                        } catch (e: Exception) {
+                            appScope.launch(Dispatchers.Main) { importStatus = "Backup export failed: ${e.message}" }
+                        } finally { tmp.delete() }
+                    }
+                }
             }
 
             val pickFont = rememberLauncherForActivityResult(
@@ -294,6 +384,15 @@ class MainActivity : ComponentActivity() {
             // The app chrome follows the app's own light/dark choice. A reading theme
             // describes the page and nothing else — feeding themeId in here is what
             // made the two bleed into each other.
+            val isReadingScreen = navStack.last() is Screen.Reader || navStack.last() is Screen.MangaReader
+            LaunchedEffect(isReadingScreen) {
+                // Outside the reader the status bar sits on the theme's dark ink
+                // band, so icons are always light there; readers own their bars.
+                if (!isReadingScreen) {
+                    androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
+                        .isAppearanceLightStatusBars = false
+                }
+            }
             FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -351,7 +450,61 @@ class MainActivity : ComponentActivity() {
                                     )
                                 },
                                 syncState = librarySyncState,
-                                onSyncNow = { graph.syncEngine?.triggerSync(immediate = true) }
+                                onSyncNow = { graph.syncEngine?.triggerSync(immediate = true) },
+                                libraryMode = libraryMode,
+                                mangaLibraryViewModel = mangaLibVM,
+                                onLibraryModeChange = { libraryMode = it },
+                                mangaExtensionsAvailable = graph.mangaBackend.supportsExtensions,
+                                onMangaBrowseClick = { pushScreen(Screen.MangaBrowse) },
+                                onMangaExtensionsClick = { pushScreen(Screen.MangaExtensions) },
+                                onMangaDownloadsClick = { pushScreen(Screen.MangaDownloads) },
+                                onMangaStatsClick = { pushScreen(Screen.Statistics) },
+                                onMangaBackupImport = { pickMangaBackup.launch(arrayOf("*/*")) },
+                                onMangaBackupExport = { exportMangaBackup.launch("folio_manga.backup") },
+                                booksViewMode = com.folio.reader.ui.library.LibraryViewModel.ViewMode.entries[sharedViewIndex],
+                                onBooksViewModeChange = { sharedViewIndex = it.ordinal },
+                                mangaViewMode = com.folio.reader.ui.manga.MangaViewMode.entries[sharedViewIndex],
+                                onMangaViewModeChange = { sharedViewIndex = it.ordinal },
+                                onMangaSearchClick = { mangaSearchActive = !mangaSearchActive },
+                                onMangaImportClick = {
+                                    pickMangaArchives.launch(
+                                        arrayOf(
+                                            "application/x-cbz",
+                                            "application/vnd.comicbook+zip",
+                                            "application/zip",
+                                            "application/octet-stream",
+                                            "*/*"
+                                        )
+                                    )
+                                },
+                                mangaContent = {
+                                    com.folio.reader.ui.manga.MangaLibraryScreen(
+                                        viewModel = mangaLibVM,
+                                        backend = graph.mangaBackend,
+                                        supportsExtensions = graph.mangaBackend.supportsExtensions,
+                                        onOpenManga = { id -> pushScreen(Screen.MangaDetail(id)) },
+                                        onOpenBrowse = { pushScreen(Screen.MangaBrowse) },
+                                        onOpenExtensions = { pushScreen(Screen.MangaExtensions) },
+                                        onOpenDownloads = { pushScreen(Screen.MangaDownloads) },
+                                        onOpenSource = { source, q -> pushScreen(Screen.MangaSourceBrowse(source.id, q)) },
+                                        viewMode = com.folio.reader.ui.manga.MangaViewMode.entries[sharedViewIndex],
+                                        onViewModeChange = { sharedViewIndex = it.ordinal },
+                                        searchActive = mangaSearchActive,
+                                        onSearchActiveChange = { mangaSearchActive = it },
+                                        browseViewModel = mangaBrowseVM,
+                                        onImportLocal = {
+                                            pickMangaArchives.launch(
+                                                arrayOf(
+                                                    "application/x-cbz",
+                                                    "application/vnd.comicbook+zip",
+                                                    "application/zip",
+                                                    "application/octet-stream",
+                                                    "*/*"
+                                                )
+                                            )
+                                        },
+                                    )
+                                }
                             )
 
                             is Screen.Reader -> ReaderRoute(
@@ -434,7 +587,11 @@ class MainActivity : ComponentActivity() {
                                             appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
                                         }
                                     }
-                                }
+                                },
+                                mangaStatsRepo = remember {
+                                    com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
+                                },
+                                onMangaClick = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) }
                             )
 
                             is Screen.Search -> SearchRoute(
@@ -560,6 +717,88 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             )
+
+                            is Screen.MangaBrowse -> com.folio.reader.ui.manga.MangaBrowseScreen(
+                                viewModel = mangaBrowseVM,
+                                onOpenSource = { source, query -> pushScreen(Screen.MangaSourceBrowse(source.id, query)) },
+                                onOpenExtensions = { pushScreen(Screen.MangaExtensions) },
+                                onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
+                                onBack = { popScreen() },
+                            )
+
+                            is Screen.MangaSourceBrowse -> {
+                                val sources by remember { graph.mangaBackend.observeSources() }
+                                    .collectAsState(initial = emptyList())
+                                val sourceInfo = sources.firstOrNull { it.id == current.sourceId }
+                                if (sourceInfo == null) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        androidx.compose.material3.CircularProgressIndicator()
+                                    }
+                                } else {
+                                    com.folio.reader.ui.manga.SourceBrowseScreen(
+                                        viewModel = remember(sourceInfo.id, current.query) {
+                                            com.folio.reader.ui.manga.SourceBrowseViewModel(
+                                                backend = graph.mangaBackend,
+                                                source = sourceInfo,
+                                                mangaRepo = graph.mangaRepository,
+                                                initialQuery = current.query,
+                                            )
+                                        },
+                                        onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
+                                        onBack = { popScreen() },
+                                    )
+                                }
+                            }
+
+                            is Screen.MangaExtensions -> com.folio.reader.ui.manga.ExtensionsScreen(
+                                viewModel = remember {
+                                    com.folio.reader.ui.manga.BrowseViewModel(
+                                        graph.mangaBackend,
+                                        graph.mangaRepository,
+                                    )
+                                },
+                                onBack = { popScreen() },
+                            )
+
+                            is Screen.MangaDownloads -> com.folio.reader.ui.manga.DownloadsScreen(
+                                viewModel = remember {
+                                    com.folio.reader.ui.manga.DownloadsViewModel(
+                                        downloadRepo = graph.mangaDownloadRepository,
+                                        mangaRepo = graph.mangaRepository,
+                                        chapterRepo = graph.mangaChapterRepository,
+                                        downloadManager = graph.mangaDownloadManager,
+                                    )
+                                },
+                                onBack = { popScreen() },
+                            )
+
+                            is Screen.MangaDetail -> com.folio.reader.ui.manga.MangaDetailScreen(
+                                viewModel = remember(current.mangaId) {
+                                    com.folio.reader.ui.manga.MangaDetailViewModel(
+                                        backend = graph.mangaBackend,
+                                        mangaRepo = graph.mangaRepository,
+                                        chapterRepo = graph.mangaChapterRepository,
+                                        historyRepo = graph.mangaHistoryRepository,
+                                        downloadManager = graph.mangaDownloadManager,
+                                    )
+                                }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
+                                backend = graph.mangaBackend,
+                                downloadsAvailable = graph.mangaBackend.supportsExtensions,
+                                onRead = { manga, chapter ->
+                                    pushScreen(Screen.MangaReader(manga.id, chapter.id))
+                                },
+                                onBack = { popScreen() },
+                            )
+
+                            is Screen.MangaReader -> MangaReaderRoute(
+                                graph = graph,
+                                mangaId = current.mangaId,
+                                chapterId = current.chapterId,
+                                onBack = { popScreen() },
+                                onNextChapter = { nextChapterId ->
+                                    pushScreen(Screen.MangaReader(current.mangaId, nextChapterId))
+                                },
+                            )
                         }
                     }
 
@@ -633,6 +872,58 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    /** Imports CBZ/ZIP manga archives into the local manga source. */
+    private fun importMangaUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+
+        val graph = (application as FolioApplication).graph
+        appScope.launch(Dispatchers.IO) {
+            var imported = 0
+            for ((index, uri) in uris.withIndex()) {
+                withContext(Dispatchers.Main) {
+                    importStatus = "Importing manga ${index + 1}/${uris.size}..."
+                }
+                val displayName = runCatching {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                }.getOrNull() ?: "manga_$index.cbz"
+                val tempFile = File(cacheDir, "manga_${UUID.randomUUID()}_$displayName")
+                try {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw IllegalArgumentException("Unable to open archive")
+
+                    val seriesName = graph.mangaBackend.localSource.import(tempFile)
+                    graph.mangaRepository.upsert(
+                        com.folio.reader.manga.MangaEntry(
+                            id = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName),
+                            sourceId = com.folio.reader.manga.LOCAL_SOURCE_ID,
+                            sourceName = "Local manga",
+                            url = seriesName,
+                            title = seriesName,
+                            inLibrary = true,
+                            initialized = true,
+                        )
+                    )
+                    imported++
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        importStatus = "Manga import failed: ${e.message ?: "unknown error"}"
+                    }
+                } finally {
+                    tempFile.delete()
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (imported > 0) {
+                    importStatus = if (imported == 1) "Imported 1 manga" else "Imported $imported manga"
+                }
+                refreshTick++
+            }
+        }
+    }
+
     private fun handleEpubIntent(intent: Intent) {
             val uri = when (intent.action) {
                 Intent.ACTION_VIEW -> intent.data
@@ -643,7 +934,14 @@ class MainActivity : ComponentActivity() {
                 ) ?: intent.clipData?.getItemAt(0)?.uri
                 else -> null
             }
-            uri?.let { importEpubUris(listOf(it)) }
+            uri?.let {
+                val path = it.path.orEmpty()
+                val type = intent.type.orEmpty()
+                val isManga = path.endsWith(".cbz", ignoreCase = true) ||
+                    path.endsWith(".zip", ignoreCase = true) ||
+                    type.contains("cbz") || type.contains("comicbook")
+                if (isManga) importMangaUris(listOf(it)) else importEpubUris(listOf(it))
+            }
         }
 
     /** Shares the imported EPUB using the app's existing FileProvider grant. */
@@ -803,6 +1101,56 @@ class MainActivity : ComponentActivity() {
                 val target = hit.spineIndex.takeIf { it >= 0 }
                 books.firstOrNull { it.id == hit.book.id }?.let { onOpenBook(it, target) }
             }
+        )
+    }
+
+    @Composable
+    private fun MangaReaderRoute(
+        graph: AppGraph,
+        mangaId: String,
+        chapterId: String,
+        onBack: () -> Unit,
+        onNextChapter: (String) -> Unit,
+    ) {
+        var manga by remember(mangaId) { mutableStateOf<com.folio.reader.manga.MangaEntry?>(null) }
+        var chapter by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
+        var next by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
+
+        LaunchedEffect(mangaId, chapterId) {
+            manga = graph.mangaRepository.get(mangaId)
+            chapter = graph.mangaChapterRepository.getChapter(chapterId)
+            val all = graph.mangaChapterRepository.getChapters(mangaId)
+            val index = all.indexOfFirst { it.id == chapterId }
+            next = if (index in 0 until all.size - 1) all[index + 1] else null
+        }
+
+        val m = manga
+        val c = chapter
+        if (m == null || c == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
+            return
+        }
+
+        com.folio.reader.ui.manga.MangaReaderScreen(
+            viewModel = remember(c.id) {
+                com.folio.reader.ui.manga.MangaReaderViewModel(
+                    backend = graph.mangaBackend,
+                    downloadManager = graph.mangaDownloadManager,
+                    chapterRepo = graph.mangaChapterRepository,
+                    mangaRepo = graph.mangaRepository,
+                    historyRepo = graph.mangaHistoryRepository,
+                    noteRepo = graph.mangaNoteRepository,
+                    settingsRepo = graph.settingsRepository,
+                    sessionRepo = graph.sessionRepository,
+                )
+            },
+            manga = m,
+            chapter = c,
+            nextChapter = next,
+            onNextChapter = { onNextChapter(it.id) },
+            onBack = onBack,
         )
     }
 }

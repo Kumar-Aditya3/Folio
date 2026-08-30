@@ -242,4 +242,52 @@ class ExportManagerTest {
         // CSV escaping: embedded quotes are doubled
         assertTrue(csvText.contains("\"quoted, \"\"tricky\"\" text\""), "csv quoted escaping")
     }
+
+    @Test
+    fun `backup excludes sync credentials`() = runBlocking {
+        reposA.settings.saveGlobalSettings(
+            com.folio.reader.settings.ReaderSettings(
+                firebaseApiKey = "AIzaSECRETKEY",
+                firebaseProjectId = "proj",
+                syncAccountEmail = "reader@example.com",
+                syncAccountPassword = "hunter2",
+                cloudSyncEnabled = true
+            )
+        )
+
+        val backupFile = File(tempRootA, "creds-backup.json")
+        managerA.createFullBackup(backupFile, deviceId = "dev-a").getOrThrow()
+
+        val text = backupFile.readText()
+        assertTrue(!text.contains("hunter2"), "password must not be exported")
+        assertTrue(!text.contains("AIzaSECRETKEY"), "API key must not be exported")
+        assertTrue(!text.contains("reader@example.com"), "account email must not be exported")
+    }
+
+    @Test
+    fun `restoring a legacy backup never replants credentials`() = runBlocking {
+        reposA.settings.saveGlobalSettings(
+            com.folio.reader.settings.ReaderSettings(
+                firebaseApiKey = "AIzaSECRETKEY",
+                firebaseProjectId = "proj",
+                syncAccountEmail = "reader@example.com",
+                syncAccountPassword = "hunter2"
+            )
+        )
+        val backupFile = File(tempRootA, "legacy-backup.json")
+        managerA.createFullBackup(backupFile, deviceId = "dev-a").getOrThrow()
+        // Forge a pre-fix backup that still carries secrets in its settings block.
+        val legacy = backupFile.readText()
+            .replace("\"firebaseApiKey\": \"\"", "\"firebaseApiKey\": \"AIzaSECRETKEY\"")
+            .replace("\"syncAccountEmail\": \"\"", "\"syncAccountEmail\": \"reader@example.com\"")
+            .replace("\"syncAccountPassword\": \"\"", "\"syncAccountPassword\": \"hunter2\"")
+        backupFile.writeText(legacy)
+
+        managerB().restoreBackup(backupFile, RestoreMode.MERGE).getOrThrow()
+
+        val restored = reposB.settings.getGlobalSettings()
+        assertTrue(restored.syncAccountPassword.isEmpty(), "restored password must be scrubbed")
+        assertTrue(restored.firebaseApiKey.isEmpty(), "restored API key must be scrubbed")
+        assertTrue(restored.syncAccountEmail.isEmpty(), "restored email must be scrubbed")
+    }
 }
