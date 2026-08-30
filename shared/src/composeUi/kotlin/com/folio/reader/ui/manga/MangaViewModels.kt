@@ -872,10 +872,12 @@ class MangaDetailViewModel(
         }
     }
 
-    /** First unread chapter, falling back to the most recently read one. */
+    /** First unread chapter; once everything is read, continue from the most recent one. */
     suspend fun nextChapterToRead(): MangaChapter? {
         val all = chapterRepo.getChapters(manga.value?.id ?: return null)
-        return all.firstOrNull { !it.read } ?: all.firstOrNull()
+        return all.firstOrNull { !it.read }
+            ?: all.maxByOrNull { it.updatedAt }
+            ?: all.firstOrNull()
     }
 
     fun continueFrom(chapter: MangaChapter): MangaChapter? {
