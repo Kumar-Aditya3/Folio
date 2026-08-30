@@ -28,6 +28,7 @@ data class ReaderSettings(
     val customTheme: Theme? = null,
     val useEmbeddedFonts: Boolean = true,
     val appThemeId: String = "light",
+    val fontThemeId: String = "classic",
     val customFonts: List<CustomFont> = emptyList(),
     // Index into the active theme's highlightColors palette used for new highlights.
     val highlightColorIndex: Int = 0,

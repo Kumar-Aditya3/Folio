@@ -328,6 +328,29 @@ fun GeneralSettingsPanel(
             }
         }
 
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Typeface", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Display and UI font pairing for the app chrome.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(com.folio.reader.ui.theme.FontTheme.entries) { ft ->
+                    FontThemeCard(
+                        fontTheme = ft,
+                        selected = settings.fontThemeId == ft.id,
+                        onClick = { onSettingsChange(settings.copy(fontThemeId = ft.id)) },
+                    )
+                }
+            }
+        }
+
         // Use embedded fonts toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -401,6 +424,45 @@ private fun ThemePackCard(
         }
         Text(
             pack.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (selected) colors.primary else colors.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun FontThemeCard(
+    fontTheme: com.folio.reader.ui.theme.FontTheme,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(
+        com.folio.reader.ui.theme.FolioTokens.radiusControl
+    )
+    androidx.compose.foundation.layout.Column(
+        modifier = Modifier
+            .width(132.dp)
+            .background(colors.surface.copy(alpha = 0.55f), shape)
+            .border(
+                1.dp,
+                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
+                shape
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Ag",
+            fontFamily = com.folio.reader.ui.theme.UiFonts.display(fontTheme, weight = 600, opticalSize = 28f),
+            fontSize = 28.sp,
+            color = colors.onSurface,
+        )
+        Text(
+            fontTheme.label,
             style = MaterialTheme.typography.titleSmall,
             color = if (selected) colors.primary else colors.onSurface,
             maxLines = 1,

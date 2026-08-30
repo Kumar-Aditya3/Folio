@@ -14,52 +14,51 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 data class FolioColors(
-    val primary: Color = Color(0xFF4F46E5),           // indigo-600
+    val primary: Color = Color(0xFF4F46E5),
     val onPrimary: Color = Color.White,
-    val primaryContainer: Color = Color(0xFFE0E7FF),  // indigo-100
-    val onPrimaryContainer: Color = Color(0xFF1E1B4B),// indigo-900
-    val secondary: Color = Color(0xFF475569),         // slate-600
+    val primaryContainer: Color = Color(0xFFE0E7FF),
+    val onPrimaryContainer: Color = Color(0xFF1E1B4B),
+    val secondary: Color = Color(0xFF475569),
     val onSecondary: Color = Color.White,
-    val secondaryContainer: Color = Color(0xFFF1F5F9),// slate-100
-    val onSecondaryContainer: Color = Color(0xFF0F172A),// slate-900
-    val tertiary: Color = Color(0xFF0D9488),          // teal-600
+    val secondaryContainer: Color = Color(0xFFF1F5F9),
+    val onSecondaryContainer: Color = Color(0xFF0F172A),
+    val tertiary: Color = Color(0xFF0D9488),
     val onTertiary: Color = Color.White,
-    val tertiaryContainer: Color = Color(0xFFCCFBF1), // teal-100
-    val onTertiaryContainer: Color = Color(0xFF134E4A),// teal-900
+    val tertiaryContainer: Color = Color(0xFFCCFBF1),
+    val onTertiaryContainer: Color = Color(0xFF134E4A),
     val error: Color = Color(0xFFB3261E),
     val onError: Color = Color.White,
     val errorContainer: Color = Color(0xFFF9DEDC),
     val onErrorContainer: Color = Color(0xFF410E0B),
-    val background: Color = Color(0xFFF8FAFC),        // slate-50
-    val onBackground: Color = Color(0xFF0F172A),      // slate-950
+    val background: Color = Color(0xFFF8FAFC),
+    val onBackground: Color = Color(0xFF0F172A),
     val surface: Color = Color.White,
     val onSurface: Color = Color(0xFF0F172A),
-    val surfaceVariant: Color = Color(0xFFF1F5F9),    // slate-100
-    val onSurfaceVariant: Color = Color(0xFF64748B),  // slate-500
-    val surfaceContainerHighest: Color = Color(0xFFE2E8F0), // slate-200
-    val outline: Color = Color(0xFFCBD5E1),           // slate-300
+    val surfaceVariant: Color = Color(0xFFF1F5F9),
+    val onSurfaceVariant: Color = Color(0xFF64748B),
+    val surfaceContainerHighest: Color = Color(0xFFE2E8F0),
+    val outline: Color = Color(0xFFCBD5E1),
     val outlineVariant: Color = Color(0xFFE2E8F0),
     val shadow: Color = Color.Black,
     val scrim: Color = Color.Black,
     val inverseSurface: Color = Color(0xFF0F172A),
     val inverseOnSurface: Color = Color(0xFFF8FAFC),
-    val inversePrimary: Color = Color(0xFF818CF8),    // indigo-400
-    /** Darker themed band behind the OS status bar on non-reader screens. */
+    val inversePrimary: Color = Color(0xFF818CF8),
     val statusBar: Color = Color(0xFF0F172A)
 )
 
 val LightFolioColors = FolioColors()
 
 val DarkFolioColors = FolioColors(
-    primary = Color(0xFF8B9DC3),          // Muted indigo-gray (keeping some character)
+    primary = Color(0xFF8B9DC3),
     onPrimary = Color(0xFF0F0F0F),
-    primaryContainer = Color(0xFF2D2F33), // Neutral dark gray
+    primaryContainer = Color(0xFF2D2F33),
     onPrimaryContainer = Color(0xFFD4D6DA),
-    secondary = Color(0xFF9CA3AF),        // Neutral gray
+    secondary = Color(0xFF9CA3AF),
     onSecondary = Color(0xFF0F0F0F),
     secondaryContainer = Color(0xFF27282C),
     onSecondaryContainer = Color(0xFFD1D5DB),
-    tertiary = Color(0xFF6EE7B7),         // Accent teal
+    tertiary = Color(0xFF6EE7B7),
     onTertiary = Color(0xFF0F0F0F),
     tertiaryContainer = Color(0xFF1E2825),
     onTertiaryContainer = Color(0xFFD1F4E5),
@@ -67,11 +66,11 @@ val DarkFolioColors = FolioColors(
     onError = Color(0xFF0F0F0F),
     errorContainer = Color(0xFF5D1F1A),
     onErrorContainer = Color(0xFFF9DEDC),
-    background = Color(0xFF0F0F0F),       // Pure dark background
+    background = Color(0xFF0F0F0F),
     onBackground = Color(0xFFE5E7EB),
-    surface = Color(0xFF1A1A1A),          // Neutral dark charcoal
+    surface = Color(0xFF1A1A1A),
     onSurface = Color(0xFFE5E7EB),
-    surfaceVariant = Color(0xFF232323),   // Slightly lighter neutral
+    surfaceVariant = Color(0xFF232323),
     onSurfaceVariant = Color(0xFF9CA3AF),
     surfaceContainerHighest = Color(0xFF2A2A2A),
     outline = Color(0xFF3A3A3A),
@@ -84,12 +83,6 @@ val DarkFolioColors = FolioColors(
     statusBar = Color(0xFF000000)
 )
 
-/**
- * Chrome-only neutrals. Each app palette overrides background/surface/outline and
- * leaves the accent alone, so switching the app theme changes the room the app is in
- * without changing its identity — and never touches the page, which has its own
- * theme entirely.
- */
 private val WarmFolioColors = LightFolioColors.copy(
     background = Color(0xFFFAF7F2),
     onBackground = Color(0xFF2B2622),
@@ -133,6 +126,36 @@ private val ArcticFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF1E2B33),
     inverseOnSurface = Color(0xFFF1F7FA),
     statusBar = Color(0xFF0F202B)
+)
+
+private val SakuraFolioColors = LightFolioColors.copy(
+    background = Color(0xFFFBF5F6),
+    onBackground = Color(0xFF2E2024),
+    surface = Color(0xFFFFF9FA),
+    onSurface = Color(0xFF2E2024),
+    surfaceVariant = Color(0xFFF5E8EB),
+    onSurfaceVariant = Color(0xFF705A60),
+    surfaceContainerHighest = Color(0xFFECDDE1),
+    outline = Color(0xFFDBCACF),
+    outlineVariant = Color(0xFFECDDE1),
+    inverseSurface = Color(0xFF2E2024),
+    inverseOnSurface = Color(0xFFFBF5F6),
+    statusBar = Color(0xFF24181C)
+)
+
+private val HoneyFolioColors = LightFolioColors.copy(
+    background = Color(0xFFFAF6EE),
+    onBackground = Color(0xFF2C2517),
+    surface = Color(0xFFFFFCF5),
+    onSurface = Color(0xFF2C2517),
+    surfaceVariant = Color(0xFFF2EADB),
+    onSurfaceVariant = Color(0xFF6D6049),
+    surfaceContainerHighest = Color(0xFFE8DDC9),
+    outline = Color(0xFFD9CCB4),
+    outlineVariant = Color(0xFFE8DDC9),
+    inverseSurface = Color(0xFF2C2517),
+    inverseOnSurface = Color(0xFFFAF6EE),
+    statusBar = Color(0xFF221C0F)
 )
 
 private val DuskFolioColors = DarkFolioColors.copy(
@@ -186,6 +209,40 @@ private val MidnightFolioColors = DarkFolioColors.copy(
     statusBar = Color(0xFF060B16)
 )
 
+private val OceanFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF0A1518),
+    onBackground = Color(0xFFD8E6EA),
+    surface = Color(0xFF111E23),
+    onSurface = Color(0xFFD8E6EA),
+    surfaceVariant = Color(0xFF182A31),
+    onSurfaceVariant = Color(0xFF8DAAB5),
+    surfaceContainerHighest = Color(0xFF20363F),
+    primaryContainer = Color(0xFF1A2E36),
+    secondaryContainer = Color(0xFF182A31),
+    outline = Color(0xFF2E444D),
+    outlineVariant = Color(0xFF20363F),
+    inverseSurface = Color(0xFFD8E6EA),
+    inverseOnSurface = Color(0xFF111E23),
+    statusBar = Color(0xFF050C0E)
+)
+
+private val GrapeFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF16101A),
+    onBackground = Color(0xFFE8DCF0),
+    surface = Color(0xFF1F1724),
+    onSurface = Color(0xFFE8DCF0),
+    surfaceVariant = Color(0xFF2A1F30),
+    onSurfaceVariant = Color(0xFFA998B5),
+    surfaceContainerHighest = Color(0xFF35283D),
+    primaryContainer = Color(0xFF2E2236),
+    secondaryContainer = Color(0xFF2A1F30),
+    outline = Color(0xFF40334A),
+    outlineVariant = Color(0xFF35283D),
+    inverseSurface = Color(0xFFE8DCF0),
+    inverseOnSurface = Color(0xFF1F1724),
+    statusBar = Color(0xFF0C0810)
+)
+
 private val OledFolioColors = DarkFolioColors.copy(
     background = Color(0xFF000000),
     surface = Color(0xFF0C0C0C),
@@ -199,7 +256,6 @@ private val OledFolioColors = DarkFolioColors.copy(
     statusBar = Color(0xFF000000)
 )
 
-/** The app's own selectable chrome themes, entirely separate from [Theme]. */
 enum class AppPalette(
     val id: String,
     val label: String,
@@ -210,10 +266,14 @@ enum class AppPalette(
     WARM("warm", "Warm", false, WarmFolioColors),
     MATCHA("matcha", "Matcha", false, MatchaFolioColors),
     ARCTIC("arctic", "Arctic", false, ArcticFolioColors),
+    SAKURA("sakura", "Sakura", false, SakuraFolioColors),
+    HONEY("honey", "Honey", false, HoneyFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
     DUSK("dusk", "Dusk", true, DuskFolioColors),
     ESPRESSO("espresso", "Espresso", true, EspressoFolioColors),
+    OCEAN("ocean", "Ocean", true, OceanFolioColors),
+    GRAPE("grape", "Grape", true, GrapeFolioColors),
     OLED("oled", "Black", true, OledFolioColors);
 
     companion object {
@@ -221,11 +281,6 @@ enum class AppPalette(
     }
 }
 
-/**
- * A curated pair of app chrome + reading page so the two moods match without being
- * the same theme. Applying a pack sets both; each side stays independently editable
- * afterwards.
- */
 data class ThemePack(
     val id: String,
     val name: String,
@@ -238,139 +293,133 @@ data class ThemePack(
             ThemePack("manuscript", "Manuscript", "warm", "sepia"),
             ThemePack("matcha", "Matcha", "matcha", "matcha"),
             ThemePack("arctic", "Arctic", "arctic", "arctic"),
+            ThemePack("sakura", "Sakura", "sakura", "paper"),
+            ThemePack("honey", "Honey", "honey", "sepia"),
             ThemePack("nocturne", "Nocturne", "midnight", "dark"),
             ThemePack("dusk", "Dusk", "dusk", "dusk"),
             ThemePack("espresso", "Espresso", "espresso", "espresso"),
+            ThemePack("ocean", "Ocean", "ocean", "dark"),
+            ThemePack("grape", "Grape", "grape", "dusk"),
             ThemePack("obsidian", "Obsidian", "oled", "oled_black"),
         )
     }
 }
 
-/**
- * The type scale. Two faces only: Fraunces for the display voice (wordmark, book
- * titles, screen headers, stat numbers, quotations) and Manrope for everything
- * functional. Sizes and line heights are unchanged from the previous scale, so this
- * shifts no layout — the difference is made of weight and tracking.
- */
-data class FolioTypography(
+data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {
     val displayLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 96f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 96f),
         fontWeight = FontWeight.W600,
         fontSize = 57.sp,
         lineHeight = 64.sp,
         letterSpacing = (-0.02).em
-    ),
+    )
     val displayMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 72f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 72f),
         fontWeight = FontWeight.W600,
         fontSize = 45.sp,
         lineHeight = 52.sp,
         letterSpacing = (-0.015).em
-    ),
+    )
     val displaySmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 60f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 60f),
         fontWeight = FontWeight.W600,
         fontSize = 36.sp,
         lineHeight = 44.sp,
         letterSpacing = (-0.01).em
-    ),
+    )
     val headlineLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 44f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 44f),
         fontWeight = FontWeight.W600,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = (-0.01).em
-    ),
+    )
     val headlineMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 36f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 36f),
         fontWeight = FontWeight.W600,
         fontSize = 28.sp,
         lineHeight = 36.sp
-    ),
+    )
     val headlineSmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 28f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 28f),
         fontWeight = FontWeight.W600,
         fontSize = 24.sp,
         lineHeight = 32.sp
-    ),
-    // Book titles and screen headers: the serif is the "book" in a book app.
+    )
     val titleLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 600, opticalSize = 22f),
+        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 22f),
         fontWeight = FontWeight.W600,
         fontSize = 22.sp,
         lineHeight = 28.sp
-    ),
+    )
     val titleMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 600),
+        fontFamily = UiFonts.text(fontTheme, weight = 600),
         fontWeight = FontWeight.W600,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.1.sp
-    ),
+    )
     val titleSmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 600),
+        fontFamily = UiFonts.text(fontTheme, weight = 600),
         fontWeight = FontWeight.W600,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
-    ),
+    )
     val bodyLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 400),
+        fontFamily = UiFonts.text(fontTheme, weight = 400),
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.1.sp
-    ),
+    )
     val bodyMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 400),
+        fontFamily = UiFonts.text(fontTheme, weight = 400),
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.05.sp
-    ),
+    )
     val bodySmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 400),
+        fontFamily = UiFonts.text(fontTheme, weight = 400),
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.15.sp
-    ),
+    )
     val labelLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 600),
+        fontFamily = UiFonts.text(fontTheme, weight = 600),
         fontWeight = FontWeight.W600,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
-    ),
+    )
     val labelMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 600),
+        fontFamily = UiFonts.text(fontTheme, weight = 600),
         fontWeight = FontWeight.W600,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.3.sp
-    ),
-    // Section labels ("READING STATS", chips): small, wide-tracked sentence case —
-    // the quiet-luxury step that needs no third face.
+    )
     val labelSmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(weight = 600),
+        fontFamily = UiFonts.text(fontTheme, weight = 600),
         fontWeight = FontWeight.W600,
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
-    ),
-    /** Quotations and revisit items: the display face in its italic cut. */
+    )
     val quote: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(weight = 400, italic = true, opticalSize = 24f),
+        fontFamily = UiFonts.display(fontTheme, weight = 400, italic = true, opticalSize = 24f),
         fontWeight = FontWeight.Normal,
         fontSize = 18.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp
     )
-)
+}
 
 val LocalFolioColors = staticCompositionLocalOf { LightFolioColors }
+val LocalFolioTypography = staticCompositionLocalOf { FolioTypography() }
 
-/** Shared design vocabulary: one radius/spacing scale for the whole app. */
 object FolioTokens {
     val radiusCard = 20.dp
     val radiusControl = 14.dp
@@ -389,24 +438,21 @@ object FolioTheme {
         @Composable
         get() = LocalFolioColors.current
 
-    /**
-     * Built once: the scale is immutable and the interface faces are installed before
-     * the first frame, so screens can share it instead of rebuilding ~18 TextStyles on
-     * every read.
-     */
-    private val sharedTypography: FolioTypography by lazy { FolioTypography() }
-
     val typography: FolioTypography
-        get() = sharedTypography
+        @Composable
+        get() = LocalFolioTypography.current
 
     @Composable
     fun MaterialTheme(
         darkTheme: Boolean = false,
         colors: FolioColors = if (darkTheme) DarkFolioColors else LightFolioColors,
-        typography: FolioTypography = sharedTypography,
+        typography: FolioTypography = FolioTypography(),
         content: @Composable () -> Unit
     ) {
-        CompositionLocalProvider(LocalFolioColors provides colors) {
+        CompositionLocalProvider(
+            LocalFolioColors provides colors,
+            LocalFolioTypography provides typography
+        ) {
             androidx.compose.material3.MaterialTheme(
                 colorScheme = colors.toColorScheme(),
                 typography = typography.toTypography(),
@@ -416,17 +462,14 @@ object FolioTheme {
         }
     }
 
-    /**
-     * The app's own chrome theme, chosen by [AppPalette].
-     *
-     * A reading theme describes the page: paper colour, text colour, typeface. It is
-     * a per-book reading decision and must not leak into the app, and equally the app
-     * must not repaint the page. Every surface that is not book text — library,
-     * settings, reader bars, panels and the in-page overlays — comes from here.
-     */
     @Composable
-    fun AppTheme(palette: AppPalette, content: @Composable () -> Unit) {
-        MaterialTheme(darkTheme = palette.isDark, colors = palette.colors, content = content)
+    fun AppTheme(
+        palette: AppPalette,
+        fontTheme: FontTheme = FontTheme.CLASSIC,
+        content: @Composable () -> Unit
+    ) {
+        val typo = FolioTypography(fontTheme)
+        MaterialTheme(darkTheme = palette.isDark, colors = palette.colors, typography = typo, content = content)
     }
 }
 

@@ -393,7 +393,7 @@ class MainActivity : ComponentActivity() {
                         .isAppearanceLightStatusBars = false
                 }
             }
-            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)) {
+            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId), fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId)) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
@@ -782,6 +782,7 @@ class MainActivity : ComponentActivity() {
                                         historyRepo = graph.mangaHistoryRepository,
                                         downloadManager = graph.mangaDownloadManager,
                                         categoryRepo = graph.mangaCategoryRepository,
+                                        settingsRepo = graph.settingsRepository,
                                     )
                                 }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                 backend = graph.mangaBackend,
@@ -1116,14 +1117,10 @@ class MainActivity : ComponentActivity() {
     ) {
         var manga by remember(mangaId) { mutableStateOf<com.folio.reader.manga.MangaEntry?>(null) }
         var chapter by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
-        var next by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
 
         LaunchedEffect(mangaId, chapterId) {
             manga = graph.mangaRepository.get(mangaId)
             chapter = graph.mangaChapterRepository.getChapter(chapterId)
-            val all = graph.mangaChapterRepository.getChapters(mangaId)
-            val index = all.indexOfFirst { it.id == chapterId }
-            next = if (index in 0 until all.size - 1) all[index + 1] else null
         }
 
         val m = manga
@@ -1151,8 +1148,7 @@ class MainActivity : ComponentActivity() {
             },
             manga = m,
             chapter = c,
-            nextChapter = next,
-            onNextChapter = { onNextChapter(it.id) },
+            onOpenChapter = { onNextChapter(it.id) },
             onBack = onBack,
         )
     }

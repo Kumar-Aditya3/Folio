@@ -1854,7 +1854,7 @@ fun MangaDetailScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                     }
                 }
-                IconButton(onClick = { viewModel.sortAscending.value = !sortAscending }) {
+                IconButton(onClick = { viewModel.toggleSort() }) {
                     Icon(Icons.Filled.Sort, contentDescription = "Sort order")
                 }
                 Box {
@@ -1875,7 +1875,7 @@ fun MangaDetailScreen(
                                 },
                                 onClick = {
                                     filterOpen = false
-                                    viewModel.chapterFilter.value = f
+                                    viewModel.setChapterFilter(f)
                                 },
                             )
                         }

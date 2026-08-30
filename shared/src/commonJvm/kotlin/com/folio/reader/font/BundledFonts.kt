@@ -45,7 +45,8 @@ object BundledFonts {
     val UI_ONLY = listOf(
         "fraunces_variable.ttf",
         "fraunces_italic_variable.ttf",
-        "manrope_variable.ttf"
+        "manrope_variable.ttf",
+        "shancalluna_regular.ttf"
     )
 
     /**
