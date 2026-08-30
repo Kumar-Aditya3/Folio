@@ -935,6 +935,17 @@ class MangaReaderViewModel(
     val localCount = MutableStateFlow(0)
     val extendingForward = MutableStateFlow(false)
 
+    /** Reader zoom shared by the whole flow: webtoon widens every page, paged modes scale the sheet. */
+    val zoom = MutableStateFlow(1f)
+
+    fun setZoom(level: Float) {
+        zoom.value = level.coerceIn(0.5f, 3f)
+    }
+
+    fun resetZoom() {
+        zoom.value = 1f
+    }
+
     private var mangaId: String = ""
     private var sourceId: Long = 0L
     private var activeSession: com.folio.reader.model.ReadingSession? = null
