@@ -837,7 +837,12 @@ class MangaDetailViewModel(
 
     fun bulkMarkRead(read: Boolean) {
         val ids = selectedChapterIds.value.toList()
-        scope.launch { chapterRepo.markRead(ids, read); clearChapterSelection() }
+        val mangaId = manga.value?.id ?: return
+        scope.launch {
+            chapterRepo.markRead(ids, read)
+            chapters.value = chapterRepo.getChapters(mangaId)
+            clearChapterSelection()
+        }
     }
 
     fun bulkDownload() {
@@ -872,9 +877,18 @@ class MangaDetailViewModel(
         }
     }
 
-    /** First unread chapter; once everything is read, continue from the most recent one. */
+    /** Continue = the chapter last actually read: resume it mid-way, or the one after it once finished. */
     suspend fun nextChapterToRead(): MangaChapter? {
-        val all = chapterRepo.getChapters(manga.value?.id ?: return null)
+        val id = manga.value?.id ?: return null
+        val all = chapterRepo.getChapters(id)
+        val lastId = historyRepo.observeRecent(100).first()
+            .firstOrNull { it.mangaId == id }?.chapterId
+        val last = all.firstOrNull { it.id == lastId }
+        if (last != null) {
+            if (!last.read) return last
+            val idx = all.indexOfFirst { it.id == last.id }
+            return all.getOrNull(idx + 1) ?: last
+        }
         return all.firstOrNull { !it.read }
             ?: all.maxByOrNull { it.updatedAt }
             ?: all.firstOrNull()
