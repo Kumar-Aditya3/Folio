@@ -109,6 +109,11 @@ class AppGraph(private val app: Application) {
                 if (type != "position") syncEngine?.triggerSync(immediate = false)
             }
         }
+        // Seed the built-in Main category and adopt uncategorized library manga once
+        // the sync hook above is live, so the seed document reaches other devices too.
+        appScope.launch {
+            runCatching { mangaCategoryRepository.ensureSeeded() }
+        }
     }
 
     /** Stable per-installation device id, persisted next to the database. */
@@ -255,6 +260,7 @@ class AppGraph(private val app: Application) {
             mangaRepository = mangaRepository,
             mangaChapterRepository = mangaChapterRepository,
             mangaNoteRepository = mangaNoteRepository,
+            mangaCategoryRepository = mangaCategoryRepository,
         )
     }
 

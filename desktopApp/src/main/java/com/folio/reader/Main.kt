@@ -156,6 +156,11 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
                 if (type != "position") syncEngine?.triggerSync(immediate = false)
             }
         }
+        // Seed the built-in Main category and adopt uncategorized library manga once
+        // the sync hook above is live, so the seed document reaches other devices too.
+        appScope.launch {
+            runCatching { mangaCategoryRepository.ensureSeeded() }
+        }
     }
 
     val deviceId: String by lazy {
@@ -270,6 +275,7 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
             mangaRepository = mangaRepository,
             mangaChapterRepository = mangaChapterRepository,
             mangaNoteRepository = mangaNoteRepository,
+            mangaCategoryRepository = mangaCategoryRepository,
         )
     }
 
@@ -1073,6 +1079,7 @@ fun main(args: Array<String>) {
                                                     backend = deps.mangaBackend,
                                                     source = sourceInfo,
                                                     mangaRepo = deps.mangaRepository,
+                                                    categoryRepo = deps.mangaCategoryRepository,
                                                     initialQuery = current.query,
                                                 )
                                             },
@@ -1112,6 +1119,7 @@ fun main(args: Array<String>) {
                                             chapterRepo = deps.mangaChapterRepository,
                                             historyRepo = deps.mangaHistoryRepository,
                                             downloadManager = deps.mangaDownloadManager,
+                                            categoryRepo = deps.mangaCategoryRepository,
                                         )
                                     }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                     backend = deps.mangaBackend,
@@ -1351,6 +1359,7 @@ private fun MangaReaderRoute(
                 historyRepo = deps.mangaHistoryRepository,
                 noteRepo = deps.mangaNoteRepository,
                 settingsRepo = deps.settingsRepository,
+                fileSystem = deps.platform.fileSystem,
                 sessionRepo = deps.sessionRepository,
             )
         },

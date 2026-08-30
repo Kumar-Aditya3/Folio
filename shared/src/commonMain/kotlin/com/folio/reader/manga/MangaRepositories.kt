@@ -51,13 +51,34 @@ interface MangaNoteRepository {
 }
 
 interface MangaCategoryRepository {
-    suspend fun create(name: String): MangaCategory
-    suspend fun rename(id: String, name: String)
-    suspend fun delete(id: String)
+    suspend fun create(name: String, emitSyncEvent: Boolean = true): MangaCategory
+    suspend fun rename(id: String, name: String, emitSyncEvent: Boolean = true)
+
+    /** Returns false when the delete was refused (Main survives while it is the only category). */
+    suspend fun delete(id: String, emitSyncEvent: Boolean = true): Boolean
+
     fun observeCategories(): Flow<List<MangaCategory>>
-    suspend fun assign(mangaId: String, categoryIds: Set<String>)
+    suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean = true)
     suspend fun categoriesFor(mangaId: String): Set<String>
+    suspend fun get(id: String): MangaCategory?
+    fun observeCategoriesFor(mangaId: String): Flow<Set<String>>
     suspend fun mangaIdsInCategory(categoryId: String): Set<String>
+
+    /** Applies a remote category document (membership included) without re-emitting sync events. */
+    suspend fun applyRemote(category: MangaCategory, mangaIds: Set<String>)
+
+    /** Main if it exists, otherwise the first category by sort order; null when there are none. */
+    suspend fun defaultCategory(): MangaCategory?
+
+    /** Gives the manga the default category when it belongs to no category yet. */
+    suspend fun ensureMembership(mangaId: String)
+
+    /**
+     * Startup repair: creates Main when the table is empty and moves every uncategorized
+     * library manga into the default category, so nothing is invisible now that the
+     * virtual "All" bucket is gone.
+     */
+    suspend fun ensureSeeded()
 }
 
 interface MangaHistoryRepository {

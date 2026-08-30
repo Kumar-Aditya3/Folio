@@ -103,6 +103,10 @@ class MangaBackupManager(
             val assignedNames = bm.categories.mapNotNull { idx -> backup.backupCategories.getOrNull(idx.toInt())?.name }
             if (assignedNames.isNotEmpty()) {
                 categoryRepo.assign(id, allCategories.filter { it.name in assignedNames }.map { it.id }.toSet())
+            } else if (bm.favorite) {
+                // No categories in the backup: land on the default shelf so the manga
+                // stays visible now that there is no virtual All bucket.
+                categoryRepo.ensureMembership(id)
             }
 
             for (bh in bm.history) {

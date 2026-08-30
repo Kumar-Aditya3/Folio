@@ -55,8 +55,25 @@ interface FolioFileSystem {
     fun getLibrarySize(): Long
     fun getBookSize(bookId: String): Long
 
+    /**
+     * Saves user-facing bytes (e.g. a manga page) into the system Downloads folder,
+     * picking a unique name when one already exists. Returns the display location.
+     */
+    suspend fun exportToDownloads(fileName: String, bytes: ByteArray): String
+
     fun dirSize(dir: File): Long =
         dir.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+
+    /** "name.ext" → "name (1).ext" → "name (2).ext"… until [exists] is false. */
+    fun uniqueFileName(fileName: String, exists: (String) -> Boolean): String {
+        if (!exists(fileName)) return fileName
+        val dot = fileName.lastIndexOf('.')
+        val base = if (dot > 0) fileName.substring(0, dot) else fileName
+        val ext = if (dot > 0) fileName.substring(dot) else ""
+        var i = 1
+        while (exists("$base ($i)$ext")) i++
+        return "$base ($i)$ext"
+    }
 }
 
 interface FolioPlatform {

@@ -741,6 +741,7 @@ class MainActivity : ComponentActivity() {
                                                 backend = graph.mangaBackend,
                                                 source = sourceInfo,
                                                 mangaRepo = graph.mangaRepository,
+                                                categoryRepo = graph.mangaCategoryRepository,
                                                 initialQuery = current.query,
                                             )
                                         },
@@ -780,6 +781,7 @@ class MainActivity : ComponentActivity() {
                                         chapterRepo = graph.mangaChapterRepository,
                                         historyRepo = graph.mangaHistoryRepository,
                                         downloadManager = graph.mangaDownloadManager,
+                                        categoryRepo = graph.mangaCategoryRepository,
                                     )
                                 }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                 backend = graph.mangaBackend,
@@ -1143,6 +1145,7 @@ class MainActivity : ComponentActivity() {
                     historyRepo = graph.mangaHistoryRepository,
                     noteRepo = graph.mangaNoteRepository,
                     settingsRepo = graph.settingsRepository,
+                    fileSystem = graph.platform.fileSystem,
                     sessionRepo = graph.sessionRepository,
                 )
             },

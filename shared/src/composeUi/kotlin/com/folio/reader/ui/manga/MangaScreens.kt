@@ -1,5 +1,10 @@
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +42,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
@@ -224,21 +230,35 @@ fun MangaLibraryScreen(
     val categories by viewModel.categories.collectAsState()
     val selectedCategory by viewModel.selectedCategoryId.collectAsState()
     val query by viewModel.query.collectAsState()
+    val sourceQuery by viewModel.sourceQuery.collectAsState()
+    val searchScope by viewModel.searchScope.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     var manageCollectionsOpen by remember { mutableStateOf(false) }
-    var searchScope by remember { mutableStateOf(MangaSearchScope.LIBRARY) }
-    var sourceQuery by remember { mutableStateOf("") }
+    val bulkCategoryInitial by viewModel.bulkPickerInitial.collectAsState()
+    var singlePickerManga by remember { mutableStateOf<MangaEntry?>(null) }
+    var singlePickerInitial by remember { mutableStateOf<Set<String>?>(null) }
+    val libraryScope = rememberCoroutineScope()
     val searchingSources = searchActive && searchScope == MangaSearchScope.SOURCES && browseViewModel != null
 
-    // Hosts may close search externally (back gesture); never leave stale queries behind.
+    // The host owns the search bar's visibility; the ViewModel mirrors it so the
+    // library filter is only applied while search is actually open.
     LaunchedEffect(searchActive) {
-        if (!searchActive) {
-            viewModel.query.value = ""
-            sourceQuery = ""
-            searchScope = MangaSearchScope.LIBRARY
-            browseViewModel?.exitSearch()
+        viewModel.searchActive.value = searchActive
+        if (!searchActive) browseViewModel?.exitSearch()
+    }
+
+    // Drive the global source search from the persisted source-scope text. Re-keyed on
+    // scope and visibility too, so returning to All sources resumes the saved query.
+    LaunchedEffect(searchingSources, sourceQuery) {
+        val browseVm = browseViewModel ?: return@LaunchedEffect
+        if (!searchingSources) {
+            browseVm.exitSearch()
+            return@LaunchedEffect
         }
+        kotlinx.coroutines.delay(350)
+        val trimmed = sourceQuery.trim()
+        browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
     }
 
     Column(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
@@ -246,23 +266,14 @@ fun MangaLibraryScreen(
             MangaSearchHeader(
                 scope = searchScope,
                 onScopeChange = { next ->
-                    if (next != searchScope) {
-                        searchScope = next
-                        if (next == MangaSearchScope.LIBRARY) browseViewModel?.exitSearch()
-                    }
+                    if (next != searchScope) viewModel.searchScope.value = next
                 },
                 libraryQuery = query,
                 onLibraryQueryChange = { viewModel.query.value = it },
                 sourceQuery = sourceQuery,
-                onSourceQueryChange = { sourceQuery = it },
+                onSourceQueryChange = { viewModel.sourceQuery.value = it },
                 sourcesAvailable = browseViewModel != null,
-                onClose = {
-                    onSearchActiveChange(false)
-                    viewModel.query.value = ""
-                    sourceQuery = ""
-                    searchScope = MangaSearchScope.LIBRARY
-                    browseViewModel?.exitSearch()
-                },
+                onClose = { onSearchActiveChange(false) },
             )
         } else {
             LazyRow(
@@ -270,13 +281,6 @@ fun MangaLibraryScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item {
-                    FolioChip(
-                        selected = selectedCategory == null,
-                        onClick = { viewModel.selectCategory(null) },
-                        label = "All",
-                    )
-                }
                 items(categories) { category ->
                     FolioChip(
                         selected = selectedCategory == category.id,
@@ -297,11 +301,6 @@ fun MangaLibraryScreen(
 
         val browseVm = browseViewModel
         if (searchingSources && browseVm != null) {
-            LaunchedEffect(sourceQuery) {
-                kotlinx.coroutines.delay(350)
-                val trimmed = sourceQuery.trim()
-                browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
-            }
             SourceSearchResults(
                 viewModel = browseVm,
                 onOpenManga = onOpenManga,
@@ -373,6 +372,13 @@ fun MangaLibraryScreen(
                         onLongClick = { viewModel.toggleSelection(manga.id) },
                         onRemove = { viewModel.removeFromLibrary(manga.id) },
                         onMarkRead = { read -> viewModel.markOneRead(manga.id, read) },
+                        onCategories = {
+                            singlePickerManga = manga
+                            singlePickerInitial = null
+                            libraryScope.launch {
+                                singlePickerInitial = viewModel.categoriesFor(manga.id)
+                            }
+                        },
                     )
                 }
             }
@@ -402,6 +408,13 @@ fun MangaLibraryScreen(
                         onLongClick = { viewModel.toggleSelection(manga.id) },
                         onRemove = { viewModel.removeFromLibrary(manga.id) },
                         onMarkRead = { read -> viewModel.markOneRead(manga.id, read) },
+                        onCategories = {
+                            singlePickerManga = manga
+                            singlePickerInitial = null
+                            libraryScope.launch {
+                                singlePickerInitial = viewModel.categoriesFor(manga.id)
+                            }
+                        },
                     )
                 }
             }
@@ -409,10 +422,10 @@ fun MangaLibraryScreen(
     }
 
     if (manageCollectionsOpen) {
-        var newCollection by remember { mutableStateOf("") }
+        var newCategory by remember { mutableStateOf("") }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { manageCollectionsOpen = false },
-            title = { Text("Collections") },
+            title = { Text("Categories") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
@@ -421,20 +434,21 @@ fun MangaLibraryScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         androidx.compose.material3.OutlinedTextField(
-                            value = newCollection,
-                            onValueChange = { newCollection = it },
+                            value = newCategory,
+                            onValueChange = { newCategory = it },
                             modifier = Modifier.weight(1f),
-                            placeholder = { Text("New collection") },
+                            placeholder = { Text("New category") },
                             singleLine = true,
                         )
                         androidx.compose.material3.TextButton(
                             onClick = {
-                                if (newCollection.isNotBlank()) {
-                                    viewModel.addCollection(newCollection.trim())
-                                    newCollection = ""
+                                val name = newCategory.trim()
+                                if (name.isNotBlank()) {
+                                    libraryScope.launch { viewModel.createCategory(name) }
+                                    newCategory = ""
                                 }
                             },
-                            enabled = newCollection.isNotBlank(),
+                            enabled = newCategory.isNotBlank(),
                         ) { Text("Add") }
                     }
                     androidx.compose.foundation.lazy.LazyColumn(
@@ -444,6 +458,10 @@ fun MangaLibraryScreen(
                         items(categories) { category ->
                             CollectionRow(
                                 category = category,
+                                // Main holds the library together: it can only go once
+                                // another category exists to take over.
+                                canDelete = category.id != com.folio.reader.manga.MangaCategory.MAIN_ID ||
+                                    categories.size > 1,
                                 onRename = { newName -> viewModel.renameCategory(category.id, newName) },
                                 onDelete = { viewModel.deleteCategory(category.id) },
                             )
@@ -454,6 +472,35 @@ fun MangaLibraryScreen(
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { manageCollectionsOpen = false }) { Text("Done") }
             },
+        )
+    }
+
+    val pickerManga = singlePickerManga
+    val pickerInitial = singlePickerInitial
+    if (pickerManga != null && pickerInitial != null) {
+        CategoryPickerDialog(
+            categories = categories,
+            initialSelected = pickerInitial,
+            onCreate = { name -> viewModel.createCategory(name) },
+            onSave = { set ->
+                viewModel.setCategoriesFor(pickerManga.id, set)
+                singlePickerManga = null
+                singlePickerInitial = null
+            },
+            onDismiss = {
+                singlePickerManga = null
+                singlePickerInitial = null
+            },
+        )
+    }
+
+    if (bulkCategoryInitial != null) {
+        CategoryPickerDialog(
+            categories = categories,
+            initialSelected = bulkCategoryInitial ?: emptySet(),
+            onCreate = { name -> viewModel.createCategory(name) },
+            onSave = { set -> viewModel.assignCategories(selectedIds, set) },
+            onDismiss = { viewModel.closeBulkPicker() },
         )
     }
 }
@@ -476,17 +523,37 @@ private fun MangaSearchHeader(
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = if (scope == MangaSearchScope.LIBRARY) libraryQuery else sourceQuery,
-                onValueChange = if (scope == MangaSearchScope.LIBRARY) onLibraryQueryChange else onSourceQueryChange,
-                modifier = Modifier.weight(1f),
-                placeholder = {
-                    Text(if (scope == MangaSearchScope.LIBRARY) "Search your library" else "Search all sources")
-                },
-                singleLine = true,
-            )
+            // Separate fields per scope: each keeps its own text, so switching scopes
+            // mid-session never throws either query away.
+            if (scope == MangaSearchScope.LIBRARY) {
+                OutlinedTextField(
+                    value = libraryQuery,
+                    onValueChange = onLibraryQueryChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search your library") },
+                    singleLine = true,
+                )
+                if (libraryQuery.isNotBlank()) {
+                    IconButton(onClick = { onLibraryQueryChange("") }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear library search")
+                    }
+                }
+            } else {
+                OutlinedTextField(
+                    value = sourceQuery,
+                    onValueChange = onSourceQueryChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search all sources") },
+                    singleLine = true,
+                )
+                if (sourceQuery.isNotBlank()) {
+                    IconButton(onClick = { onSourceQueryChange("") }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear source search")
+                    }
+                }
+            }
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = "Close search")
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Close search")
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -515,6 +582,7 @@ private fun SourceSearchResults(
     val globalResults by viewModel.globalResults.collectAsState()
     val globalResultsOrdered by viewModel.globalResultsOrdered.collectAsState()
     val query by viewModel.globalQuery.collectAsState()
+    val preparing by viewModel.preparingSources.collectAsState()
     val scope = rememberCoroutineScope()
 
     if (query.isBlank()) {
@@ -538,10 +606,10 @@ private fun SourceSearchResults(
     ) {
         item {
             Text(
-                if (finished < globalResults.size) {
-                    "Searching ${finished + 1}/${globalResults.size}…"
-                } else {
-                    "$totalItems results from ${globalResults.count { it.items.isNotEmpty() }} sources"
+                when {
+                    preparing && globalResults.isEmpty() -> "Preparing sources…"
+                    finished < globalResults.size -> "Searching ${finished + 1}/${globalResults.size}…"
+                    else -> "$totalItems results from ${globalResults.count { it.items.isNotEmpty() }} sources"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = FolioTheme.colors.onSurfaceVariant,
@@ -549,20 +617,22 @@ private fun SourceSearchResults(
         }
         globalResultsOrdered.forEach { result ->
             item(key = "global-${result.source.id}") {
-                GlobalSourceSection(
-                    result = result,
-                    viewModel = viewModel,
-                    onViewAll = { onOpenSource(result.source) },
-                    onOpenManga = { item ->
-                        scope.launch {
-                            val entry = viewModel.ensureEntry(result.source, item)
-                            onOpenManga(entry.id)
-                        }
-                    },
-                )
+                Box(Modifier.animateItem()) {
+                    GlobalSourceSection(
+                        result = result,
+                        viewModel = viewModel,
+                        onViewAll = { onOpenSource(result.source) },
+                        onOpenManga = { item ->
+                            scope.launch {
+                                val entry = viewModel.ensureEntry(result.source, item)
+                                onOpenManga(entry.id)
+                            }
+                        },
+                    )
+                }
             }
         }
-        if (finished == globalResults.size && totalItems == 0) {
+        if (!preparing && finished == globalResults.size && totalItems == 0) {
             item {
                 Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
                     Text(
@@ -579,6 +649,7 @@ private fun SourceSearchResults(
 @Composable
 private fun CollectionRow(
     category: com.folio.reader.manga.MangaCategory,
+    canDelete: Boolean,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -606,11 +677,11 @@ private fun CollectionRow(
                 modifier = Modifier.weight(1f),
             )
             androidx.compose.material3.TextButton(onClick = { editing = true }) { Text("Rename") }
-            androidx.compose.material3.IconButton(onClick = onDelete) {
+            androidx.compose.material3.IconButton(onClick = onDelete, enabled = canDelete) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = "Remove",
-                    tint = FolioTheme.colors.error,
+                    contentDescription = if (canDelete) "Remove" else "Create another category before removing this one",
+                    tint = if (canDelete) FolioTheme.colors.error else FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.4f),
                 )
             }
         }
@@ -633,6 +704,7 @@ private fun MangaGridItem(
     onLongClick: () -> Unit,
     onRemove: () -> Unit,
     onMarkRead: (Boolean) -> Unit,
+    onCategories: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     androidx.compose.material3.Card(
@@ -725,6 +797,11 @@ private fun MangaGridItem(
                 )
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
+                        text = { Text("Categories…") },
+                        leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+                        onClick = { menuOpen = false; onCategories() },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Mark all as read") },
                         leadingIcon = { Icon(Icons.Filled.Done, contentDescription = null) },
                         onClick = { menuOpen = false; onMarkRead(true) },
@@ -794,6 +871,7 @@ private fun MangaListItem(
     onLongClick: () -> Unit,
     onRemove: () -> Unit,
     onMarkRead: (Boolean) -> Unit,
+    onCategories: () -> Unit,
 ) {
     val percent = (progress * 100).toInt()
     val statusLabel = when {
@@ -842,6 +920,7 @@ private fun MangaListItem(
                 fullyRead = fullyRead,
                 onMarkRead = onMarkRead,
                 onRemove = onRemove,
+                onCategories = onCategories,
                 modifier = Modifier.padding(end = 8.dp),
             )
         }
@@ -889,6 +968,7 @@ private fun MangaListItem(
                     fullyRead = fullyRead,
                     onMarkRead = onMarkRead,
                     onRemove = onRemove,
+                    onCategories = onCategories,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
@@ -901,6 +981,7 @@ private fun MangaRowOptions(
     fullyRead: Boolean,
     onMarkRead: (Boolean) -> Unit,
     onRemove: () -> Unit,
+    onCategories: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -909,6 +990,11 @@ private fun MangaRowOptions(
             Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = FolioTheme.colors.onSurfaceVariant)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Categories…") },
+                leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+                onClick = { open = false; onCategories() },
+            )
             DropdownMenuItem(
                 text = { Text("Mark all as read") },
                 leadingIcon = { Icon(Icons.Filled.Done, contentDescription = null) },
@@ -945,6 +1031,7 @@ fun MangaBrowseScreen(
     val globalResults by viewModel.globalResults.collectAsState()
     val globalResultsOrdered by viewModel.globalResultsOrdered.collectAsState()
     val searchActive by viewModel.searchActive.collectAsState()
+    val preparing by viewModel.preparingSources.collectAsState()
     var queryText by remember { mutableStateOf(viewModel.globalQuery.value) }
     val scope = rememberCoroutineScope()
 
@@ -971,7 +1058,7 @@ fun MangaBrowseScreen(
         )
 
         if (searchActive) {
-            LaunchedEffect(queryText) {
+            LaunchedEffect(searchActive, queryText) {
                 kotlinx.coroutines.delay(350)
                 val trimmed = queryText.trim()
                 viewModel.globalSearch(if (trimmed.length >= 2) trimmed else "")
@@ -995,7 +1082,7 @@ fun MangaBrowseScreen(
             Spacer(Modifier.height(FolioTokens.space1))
         }
 
-        if (globalQuery.isNotBlank()) {
+        if (searchActive && globalQuery.isNotBlank()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(FolioTokens.space3),
@@ -1004,10 +1091,10 @@ fun MangaBrowseScreen(
                 val finished = globalResults.count { !it.loading }
                 item {
                     Text(
-                        if (finished < globalResults.size) {
-                            "Searching ${finished + 1}/${globalResults.size}…"
-                        } else {
-                            "${globalResults.sumOf { it.items.size }} results from ${globalResults.count { it.items.isNotEmpty() }} sources"
+                        when {
+                            preparing && globalResults.isEmpty() -> "Preparing sources…"
+                            finished < globalResults.size -> "Searching ${finished + 1}/${globalResults.size}…"
+                            else -> "${globalResults.sumOf { it.items.size }} results from ${globalResults.count { it.items.isNotEmpty() }} sources"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = FolioTheme.colors.onSurfaceVariant,
@@ -1015,17 +1102,19 @@ fun MangaBrowseScreen(
                 }
                 globalResultsOrdered.forEach { result ->
                     item(key = "global-${result.source.id}") {
-                        GlobalSourceSection(
-                            result = result,
-                            viewModel = viewModel,
-                            onViewAll = { onOpenSource(result.source, globalQuery) },
-                            onOpenManga = { item ->
-                                scope.launch {
-                                    val entry = viewModel.ensureEntry(result.source, item)
-                                    onOpenManga(entry.id)
-                                }
-                            },
-                        )
+                        Box(Modifier.animateItem()) {
+                            GlobalSourceSection(
+                                result = result,
+                                viewModel = viewModel,
+                                onViewAll = { onOpenSource(result.source, globalQuery) },
+                                onOpenManga = { item ->
+                                    scope.launch {
+                                        val entry = viewModel.ensureEntry(result.source, item)
+                                        onOpenManga(entry.id)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1129,6 +1218,96 @@ fun MangaBrowseScreen(
     }
 }
 
+/**
+ * Checkable category editor shared by the detail screen (single manga) and the
+ * library selection mode (bulk). Creating a category inline selects it, so a
+ * brand-new shelf can be filled without leaving the dialog.
+ */
+@Composable
+private fun CategoryPickerDialog(
+    categories: List<com.folio.reader.manga.MangaCategory>,
+    initialSelected: Set<String>,
+    onCreate: suspend (String) -> String?,
+    onSave: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = FolioTheme.colors
+    val scope = rememberCoroutineScope()
+    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
+    var newName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Categories") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (categories.isEmpty()) {
+                    Text(
+                        "No categories yet — create one below.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+                categories.forEach { category ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selected = if (category.id in selected) selected - category.id
+                                else selected + category.id
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = category.id in selected,
+                            onCheckedChange = {
+                                selected = if (it) selected + category.id else selected - category.id
+                            },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            category.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("New category") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = {
+                            val name = newName.trim()
+                            if (name.isNotBlank()) {
+                                scope.launch {
+                                    onCreate(name)?.let { selected = selected + it }
+                                }
+                                newName = ""
+                            }
+                        },
+                        enabled = newName.trim().isNotEmpty(),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create category")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(selected) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
 @Composable
 private fun GlobalSourceSection(
     result: BrowseViewModel.GlobalSourceResult,
@@ -1151,8 +1330,13 @@ private fun GlobalSourceSection(
             }
         }
         Spacer(Modifier.height(FolioTokens.space1))
-        when {
-            result.loading -> LazyRow(
+        AnimatedContent(
+            targetState = result.loading,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            label = "source-section-${result.source.id}",
+        ) { loading ->
+            when {
+                loading -> LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
                 items(3) {
@@ -1179,7 +1363,22 @@ private fun GlobalSourceSection(
                     }
                 }
             }
-            else -> LazyRow(
+            else -> if (result.items.isEmpty() && result.error != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = FolioTheme.colors.error,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        result.error ?: "Search failed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            } else LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
                 items(result.items, key = { it.url + it.title }) { item ->
@@ -1211,6 +1410,7 @@ private fun GlobalSourceSection(
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -1614,6 +1814,9 @@ fun MangaDetailScreen(
     val scope = rememberCoroutineScope()
     var startChapter by remember { mutableStateOf<MangaChapter?>(null) }
     var filterOpen by remember { mutableStateOf(false) }
+    val allCategories by viewModel.allCategories.collectAsState()
+    val myCategoryIds by viewModel.myCategoryIds.collectAsState()
+    var categoryPickerOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { startChapter = viewModel.nextChapterToRead() }
 
@@ -1630,7 +1833,9 @@ fun MangaDetailScreen(
 
     Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
         FolioTopBar(
-            title = m.title,
+            // The title/author/status block below already carries the identity; a top-bar
+            // title just repeats it.
+            title = "",
             navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
             },
@@ -1696,6 +1901,35 @@ fun MangaDetailScreen(
                 }
             },
         )
+
+        if (m.inLibrary) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = FolioTokens.space3),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(allCategories.filter { it.id in myCategoryIds }) { category ->
+                    FolioChip(selected = true, onClick = { categoryPickerOpen = true }, label = category.name)
+                }
+                item {
+                    FolioChip(selected = false, onClick = { categoryPickerOpen = true }, label = "Categories")
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
+        if (categoryPickerOpen) {
+            CategoryPickerDialog(
+                categories = allCategories,
+                initialSelected = myCategoryIds,
+                onCreate = { name -> viewModel.createCategory(name) },
+                onSave = { set ->
+                    viewModel.setCategories(set)
+                    categoryPickerOpen = false
+                },
+                onDismiss = { categoryPickerOpen = false },
+            )
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

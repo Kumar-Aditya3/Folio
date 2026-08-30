@@ -1,7 +1,14 @@
 package com.folio.reader.platform
 
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 class AndroidFileSystem(private val context: Context) : FolioFileSystem {
 
@@ -80,6 +87,36 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
     override fun getLibrarySize(): Long = dirSize(libraryDir)
 
     override fun getBookSize(bookId: String): Long = dirSize(getBookDir(bookId))
+
+    override suspend fun exportToDownloads(fileName: String, bytes: ByteArray): String = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val resolver = context.contentResolver
+            val taken = mutableSetOf<String>()
+            resolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Downloads.DISPLAY_NAME),
+                "${MediaStore.Downloads.RELATIVE_PATH} = ?",
+                arrayOf(Environment.DIRECTORY_DOWNLOADS + "/"),
+                null,
+            )?.use { cursor -> while (cursor.moveToNext()) taken += cursor.getString(0) }
+            val unique = uniqueFileName(fileName) { it in taken }
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, unique)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("MediaStore refused to create $unique in Downloads")
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: throw IOException("Could not open an output stream for $unique")
+            "Downloads/$unique"
+        } else {
+            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            dir.mkdirs()
+            val unique = uniqueFileName(fileName) { File(dir, it).exists() }
+            File(dir, unique).writeBytes(bytes)
+            "${dir.name}/$unique"
+        }
+    }
 }
 
 
