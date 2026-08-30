@@ -1832,6 +1832,37 @@ fun MangaDetailScreen(
     }
 
     Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+        if (chapterSelectionMode) {
+            // Chapter selection swaps the regular chrome for bulk actions in the same
+            // bar — no extra block, no layout shift below.
+            FolioTopBar(
+                title = "${selectedChapterIds.size} selected",
+                navigationIcon = {
+                    IconButton(onClick = { viewModel.clearChapterSelection() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.selectAllChapters() }) {
+                        Icon(Icons.Filled.SelectAll, contentDescription = "Select all")
+                    }
+                    IconButton(onClick = { viewModel.bulkMarkRead(true) }) {
+                        Icon(Icons.Filled.Done, contentDescription = "Mark read")
+                    }
+                    IconButton(onClick = { viewModel.bulkMarkRead(false) }) {
+                        Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
+                    }
+                    if (downloadsAvailable && !m.isLocal) {
+                        IconButton(onClick = { viewModel.bulkDownload() }) {
+                            Icon(Icons.Filled.Download, contentDescription = "Download")
+                        }
+                    }
+                    IconButton(onClick = { viewModel.bulkDeleteDownloads() }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Delete downloads", tint = FolioTheme.colors.error)
+                    }
+                },
+            )
+        } else {
         FolioTopBar(
             // The title/author/status block below already carries the identity; a top-bar
             // title just repeats it.
@@ -1901,6 +1932,7 @@ fun MangaDetailScreen(
                 }
             },
         )
+        }
 
         if (m.inLibrary) {
             LazyRow(
@@ -2078,53 +2110,6 @@ fun MangaDetailScreen(
                 item {
                     Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
-                    }
-                }
-            }
-
-            if (chapterSelectionMode) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(FolioTheme.colors.primaryContainer, RoundedCornerShape(FolioTokens.radiusChip))
-                            .padding(horizontal = FolioTokens.space2, vertical = FolioTokens.space1),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { viewModel.clearChapterSelection() }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Clear")
-                            }
-                            Text(
-                                "${selectedChapterIds.size} selected",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = FolioTheme.colors.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(onClick = { viewModel.selectAllChapters() }) {
-                                Icon(Icons.Filled.SelectAll, contentDescription = "Select all")
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                        ) {
-                            IconButton(onClick = { viewModel.bulkMarkRead(true) }) {
-                                Icon(Icons.Filled.Done, contentDescription = "Mark read")
-                            }
-                            IconButton(onClick = { viewModel.bulkMarkRead(false) }) {
-                                Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
-                            }
-                            if (downloadsAvailable && !m.isLocal) {
-                                IconButton(onClick = { viewModel.bulkDownload() }) {
-                                    Icon(Icons.Filled.Download, contentDescription = "Download")
-                                }
-                            }
-                            IconButton(onClick = { viewModel.bulkDeleteDownloads() }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Delete downloads", tint = FolioTheme.colors.error)
-                            }
-                        }
                     }
                 }
             }
