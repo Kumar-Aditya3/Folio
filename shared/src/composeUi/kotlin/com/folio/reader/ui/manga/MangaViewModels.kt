@@ -904,18 +904,15 @@ class MangaReaderViewModel(
     private var activeSession: com.folio.reader.model.ReadingSession? = null
     private var lastProgressSaveMs: Long = 0L
 
-    init {
-        scope.launch {
-            settingsRepo.getRaw(KEY_READER_MODE)?.let { name ->
-                MangaReaderMode.entries.firstOrNull { it.name == name }?.let { mode.value = it }
-            }
-        }
-    }
-
     fun setMode(newMode: MangaReaderMode) {
         mode.value = newMode
-        scope.launch { settingsRepo.setRaw(KEY_READER_MODE, newMode.name) }
+        // Reading mode persists per manga; the global key only seeds manga that
+        // have never been given their own mode.
+        val id = mangaId
+        scope.launch { settingsRepo.setRaw(readerModeKey(id), newMode.name) }
     }
+
+    private fun readerModeKey(mangaId: String) = "$KEY_READER_MODE.$mangaId"
 
     fun toggleBookmark() {
         scope.launch {
@@ -964,6 +961,12 @@ class MangaReaderViewModel(
         error.value = null
         startSession(manga, chapter)
         scope.launch {
+            // Resolve this manga's own mode (global key only as default) before pages
+            // arrive, so the layout never flashes through another mode.
+            val savedName = settingsRepo.getRaw(readerModeKey(manga.id))
+                ?: settingsRepo.getRaw(KEY_READER_MODE)
+            mode.value = MangaReaderMode.entries.firstOrNull { it.name == savedName }
+                ?: MangaReaderMode.WEBTOON
             loading.value = true
             try {
                 val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
