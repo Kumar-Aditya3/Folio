@@ -635,6 +635,18 @@ enum class ChapterFilter(val label: String) {
     BOOKMARKED("Bookmarked only"),
 }
 
+fun filterChapters(list: List<MangaChapter>, filter: ChapterFilter): List<MangaChapter> =
+    when (filter) {
+        ChapterFilter.ALL -> list
+        ChapterFilter.HIDE_READ -> list.filter { !it.read }
+        ChapterFilter.UNREAD -> list.filter { !it.read }
+        ChapterFilter.DOWNLOADED -> list.filter { it.downloadedPages > 0 }
+        ChapterFilter.BOOKMARKED -> list.filter { it.bookmarked }
+    }
+
+private const val KEY_CHAPTER_FILTER = "manga.chapter.filter"
+private const val KEY_CHAPTER_SORT = "manga.chapter.sort"
+
 // ---------- Manga detail ----------
 
 class MangaDetailViewModel(
@@ -644,6 +656,7 @@ class MangaDetailViewModel(
     private val historyRepo: MangaHistoryRepository,
     private val downloadManager: MangaDownloadManager?,
     private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
+    private val settingsRepo: com.folio.reader.database.SettingsRepository,
 ) {
     val scope = mangaVmScope()
 
@@ -655,19 +668,33 @@ class MangaDetailViewModel(
     val chapterFilter = MutableStateFlow(ChapterFilter.ALL)
     val queuedChapters = MutableStateFlow<Set<String>>(emptySet())
 
-    fun applyFilter(list: List<com.folio.reader.manga.MangaChapter>): List<com.folio.reader.manga.MangaChapter> =
-        when (chapterFilter.value) {
-            ChapterFilter.ALL -> list
-            ChapterFilter.HIDE_READ -> list.filter { !it.read }
-            ChapterFilter.UNREAD -> list.filter { !it.read }
-            ChapterFilter.DOWNLOADED -> list.filter { it.downloadedPages > 0 }
-            ChapterFilter.BOOKMARKED -> list.filter { it.bookmarked }
-        }
+    fun applyFilter(list: List<MangaChapter>): List<MangaChapter> =
+        filterChapters(list, chapterFilter.value)
+
+    fun setChapterFilter(f: ChapterFilter) {
+        chapterFilter.value = f
+        val id = manga.value?.id ?: return
+        scope.launch { settingsRepo.setRaw("$KEY_CHAPTER_FILTER.$id", f.name) }
+    }
+
+    fun toggleSort() {
+        sortAscending.value = !sortAscending.value
+        val id = manga.value?.id ?: return
+        scope.launch { settingsRepo.setRaw("$KEY_CHAPTER_SORT.$id", if (sortAscending.value) "ASC" else "DESC") }
+    }
 
     fun open(mangaId: String) {
         scope.launch {
             manga.value = mangaRepo.get(mangaId)
             chapters.value = chapterRepo.getChapters(mangaId)
+            val savedFilter = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.$mangaId")
+            if (savedFilter != null) {
+                chapterFilter.value = ChapterFilter.entries.firstOrNull { it.name == savedFilter } ?: ChapterFilter.ALL
+            } else {
+                chapterFilter.value = ChapterFilter.ALL
+            }
+            val savedSort = settingsRepo.getRaw("$KEY_CHAPTER_SORT.$mangaId")
+            sortAscending.value = savedSort == "ASC"
             if (manga.value?.initialized != true || chapters.value.isEmpty()) {
                 refresh()
             }
@@ -876,6 +903,12 @@ enum class MangaReaderMode { WEBTOON, PAGED_LTR, PAGED_RTL, PAGED_VERTICAL }
 
 private const val KEY_READER_MODE = "manga.reader.mode"
 
+data class ChapterSlot(
+    val chapter: MangaChapter,
+    val pages: List<MangaPageRef>,
+    val startIndex: Int,
+)
+
 class MangaReaderViewModel(
     private val backend: MangaBackend,
     private val downloadManager: MangaDownloadManager?,
@@ -898,16 +931,63 @@ class MangaReaderViewModel(
     val error = MutableStateFlow<String?>(null)
     val showControls = MutableStateFlow(true)
     val notesRevision = MutableStateFlow(0)
+    val localPage = MutableStateFlow(0)
+    val localCount = MutableStateFlow(0)
+    val extendingForward = MutableStateFlow(false)
 
     private var mangaId: String = ""
     private var sourceId: Long = 0L
     private var activeSession: com.folio.reader.model.ReadingSession? = null
     private var lastProgressSaveMs: Long = 0L
 
+    private var navList: List<MangaChapter> = emptyList()
+    private var slots: MutableList<ChapterSlot> = mutableListOf()
+    private val failedChapters = mutableSetOf<String>()
+    private var isAtEndOfNav = false
+    private var extendingBackward = false
+
+    fun pageKey(index: Int): String {
+        for (slot in slots) {
+            val local = index - slot.startIndex
+            if (local in slot.pages.indices) return "${slot.chapter.id}:$local"
+        }
+        return "unknown:$index"
+    }
+
+    fun seekLocal(local: Int) {
+        val activeSlot = activeSlot() ?: return
+        val combined = activeSlot.startIndex + local
+        onPageChanged(combined)
+    }
+
+    fun previousBeyond(): MangaChapter? {
+        if (slots.isEmpty()) return null
+        val firstSlotChapterId = slots.first().chapter.id
+        val navIdx = navList.indexOfFirst { it.id == firstSlotChapterId }
+        return if (navIdx > 0) navList[navIdx - 1] else null
+    }
+
+    fun activeSlotForDisplay(): ChapterSlot? = activeSlot()
+
+    fun isAtEndOfNavList(): Boolean = isAtEndOfNav
+
+    private fun activeSlot(): ChapterSlot? {
+        val idx = currentIndex.value
+        for (slot in slots) {
+            if (idx in slot.startIndex until slot.startIndex + slot.pages.size) return slot
+        }
+        return slots.lastOrNull()
+    }
+
+    private fun slotForIndex(index: Int): ChapterSlot? {
+        for (slot in slots) {
+            if (index in slot.startIndex until slot.startIndex + slot.pages.size) return slot
+        }
+        return null
+    }
+
     fun setMode(newMode: MangaReaderMode) {
         mode.value = newMode
-        // Reading mode persists per manga; the global key only seeds manga that
-        // have never been given their own mode.
         val id = mangaId
         scope.launch { settingsRepo.setRaw(readerModeKey(id), newMode.name) }
     }
@@ -961,26 +1041,156 @@ class MangaReaderViewModel(
         error.value = null
         startSession(manga, chapter)
         scope.launch {
-            // Resolve this manga's own mode (global key only as default) before pages
-            // arrive, so the layout never flashes through another mode.
             val savedName = settingsRepo.getRaw(readerModeKey(manga.id))
                 ?: settingsRepo.getRaw(KEY_READER_MODE)
             mode.value = MangaReaderMode.entries.firstOrNull { it.name == savedName }
                 ?: MangaReaderMode.WEBTOON
             loading.value = true
             try {
-                val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
-                val result = backend.fetchPageList(sourceId, ref)
-                pages.value = result
-                // Resume one page past the saved position (page N means N pages already seen).
-                if (chapter.lastPageRead in 1 until result.size) {
-                    currentIndex.value = chapter.lastPageRead
+                val allChapters = chapterRepo.getChapters(manga.id)
+                val savedFilterName = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.${manga.id}")
+                val filter = ChapterFilter.entries.firstOrNull { it.name == savedFilterName } ?: ChapterFilter.ALL
+                val savedSort = settingsRepo.getRaw("$KEY_CHAPTER_SORT.${manga.id}")
+                val ascending = savedSort == "ASC"
+                val filtered = filterChapters(allChapters, filter)
+                val sorted = if (ascending) filtered.sortedBy { it.sortOrder } else filtered.sortedByDescending { it.sortOrder }
+                navList = if (sorted.any { it.id == chapter.id }) sorted
+                    else if (ascending) allChapters.sortedBy { it.sortOrder }
+                    else allChapters.sortedByDescending { it.sortOrder }
+
+                val navIdx = navList.indexOfFirst { it.id == chapter.id }
+                slots.clear()
+                failedChapters.clear()
+                isAtEndOfNav = false
+
+                val prevIdx = navIdx - 1
+                val curIdx = navIdx
+                val nextIdx = navIdx + 1
+
+                var offset = 0
+                if (prevIdx >= 0) {
+                    val slot = fetchSlot(navList[prevIdx], offset)
+                    if (slot != null) {
+                        slots.add(slot)
+                        offset += slot.pages.size
+                    }
                 }
+                val currentSlot = fetchSlot(navList[curIdx], offset)
+                if (currentSlot != null) {
+                    slots.add(currentSlot)
+                    offset += currentSlot.pages.size
+                } else {
+                    error.value = "Failed to load pages"
+                    loading.value = false
+                    return@launch
+                }
+                if (nextIdx < navList.size) {
+                    val slot = fetchSlot(navList[nextIdx], offset)
+                    if (slot != null) {
+                        slots.add(slot)
+                        offset += slot.pages.size
+                    }
+                } else {
+                    isAtEndOfNav = true
+                }
+
+                publishPages()
+
+                if (chapter.lastPageRead in 1 until currentSlot.pages.size) {
+                    currentIndex.value = currentSlot.startIndex + chapter.lastPageRead
+                } else {
+                    currentIndex.value = currentSlot.startIndex
+                }
+                updateActiveChapter()
                 historyRepo.record(manga.id, chapter.id)
             } catch (e: Throwable) {
                 error.value = e.message ?: "Failed to load pages"
             }
             loading.value = false
+        }
+    }
+
+    private suspend fun fetchSlot(chapter: MangaChapter, startIndex: Int): ChapterSlot? {
+        if (chapter.id in failedChapters) return null
+        return try {
+            val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
+            val pages = backend.fetchPageList(sourceId, ref)
+            ChapterSlot(chapter = chapter, pages = pages, startIndex = startIndex)
+        } catch (_: Throwable) {
+            failedChapters.add(chapter.id)
+            null
+        }
+    }
+
+    private fun publishPages() {
+        val all = slots.flatMap { it.pages }
+        pages.value = all
+        localCount.value = activeSlot()?.pages?.size ?: 0
+        updateLocals()
+    }
+
+    private fun updateLocals() {
+        val slot = activeSlot() ?: return
+        val local = currentIndex.value - slot.startIndex
+        localPage.value = local
+        localCount.value = slot.pages.size
+    }
+
+    private fun updateActiveChapter() {
+        val slot = activeSlot() ?: return
+        if (chapter.value?.id != slot.chapter.id) {
+            chapter.value = slot.chapter
+        }
+        updateLocals()
+    }
+
+    fun extendForward() {
+        if (extendingForward.value || isAtEndOfNav) return
+        scope.launch {
+            extendingForward.value = true
+            val lastSlot = slots.lastOrNull() ?: run { extendingForward.value = false; return@launch }
+            val lastNavIdx = navList.indexOfFirst { it.id == lastSlot.chapter.id }
+            val nextNavIdx = lastNavIdx + 1
+            if (nextNavIdx >= navList.size) {
+                isAtEndOfNav = true
+                extendingForward.value = false
+                return@launch
+            }
+            var offset = lastSlot.startIndex + lastSlot.pages.size
+            val slot = fetchSlot(navList[nextNavIdx], offset)
+            if (slot != null) {
+                slots.add(slot)
+                offset += slot.pages.size
+                publishPages()
+            } else {
+                val afterNext = nextNavIdx + 1
+                if (afterNext >= navList.size) isAtEndOfNav = true
+            }
+            extendingForward.value = false
+        }
+    }
+
+    fun extendBackward() {
+        if (mode.value != MangaReaderMode.WEBTOON) return
+        if (extendingBackward) return
+        val firstSlot = slots.firstOrNull() ?: return
+        val firstNavIdx = navList.indexOfFirst { it.id == firstSlot.chapter.id }
+        if (firstNavIdx <= 0) return
+        extendingBackward = true
+        scope.launch {
+            try {
+                val prevNavIdx = firstNavIdx - 1
+                val slot = fetchSlot(navList[prevNavIdx], 0) ?: return@launch
+                val addedCount = slot.pages.size
+                for (i in slots.indices) {
+                    slots[i] = slots[i].copy(startIndex = slots[i].startIndex + addedCount)
+                }
+                slots.add(0, slot)
+                currentIndex.value = currentIndex.value + addedCount
+                publishPages()
+            } finally {
+                extendingBackward = false
+            }
         }
     }
 
@@ -1006,7 +1216,6 @@ class MangaReaderViewModel(
         scope.launch { runCatching { repo.insertSession(session) } }
     }
 
-    /** Ends the active reading session, recording elapsed time for statistics/sync. */
     suspend fun close() {
         saveProgress()
         val repo = sessionRepo ?: return
@@ -1022,11 +1231,12 @@ class MangaReaderViewModel(
     }
 
     suspend fun resolvePageImage(index: Int): ByteArray? {
-        val c = chapter.value ?: return null
-        val page = pages.value.getOrNull(index) ?: return null
-        val downloaded = downloadManager?.readDownloadedPage(mangaId, c.id, index)
+        val slot = slotForIndex(index) ?: return null
+        val local = index - slot.startIndex
+        val page = slot.pages.getOrNull(local) ?: return null
+        val downloaded = downloadManager?.readDownloadedPage(mangaId, slot.chapter.id, local)
         if (downloaded != null) return downloaded
-        val ref = MangaChapterRef(url = c.url, name = c.name, chapterNumber = c.chapterNumber)
+        val ref = MangaChapterRef(url = slot.chapter.url, name = slot.chapter.name, chapterNumber = slot.chapter.chapterNumber)
         return try {
             backend.fetchPageImage(sourceId, ref, page).bytes
         } catch (_: Throwable) {
@@ -1034,17 +1244,14 @@ class MangaReaderViewModel(
         }
     }
 
-    /**
-     * Saves one page image into the system Downloads folder (long-press "Save page").
-     * Returns a display location on success, null when the page could not be resolved
-     * or written.
-     */
     suspend fun savePage(index: Int): String? {
         val bytes = resolvePageImage(index) ?: return null
+        val slot = slotForIndex(index) ?: return null
+        val local = index - slot.startIndex
         val mangaTitle = manga.value?.title?.ifBlank { "manga" } ?: "manga"
-        val chapterName = chapter.value?.name?.ifBlank { "chapter" } ?: "chapter"
+        val chapterName = slot.chapter.name.ifBlank { "chapter" }
         val safe = Regex("[^A-Za-z0-9 ._()-]")
-        val base = "${mangaTitle.take(60)} - ${chapterName.take(40)} - p${index + 1}"
+        val base = "${mangaTitle.take(60)} - ${chapterName.take(40)} - p${local + 1}"
             .replace(safe, "_").trim()
         return runCatching {
             fileSystem.exportToDownloads("$base.${imageExtensionFor(bytes)}", bytes)
@@ -1062,10 +1269,32 @@ class MangaReaderViewModel(
 
     fun onPageChanged(index: Int) {
         currentIndex.value = index
+        val slot = slotForIndex(index)
+        if (slot != null && chapter.value?.id != slot.chapter.id) {
+            chapter.value = slot.chapter
+            scope.launch { historyRepo.record(mangaId, slot.chapter.id) }
+        }
+        updateLocals()
         val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         if (now - lastProgressSaveMs > 2000) {
             lastProgressSaveMs = now
             scope.launch { saveProgress() }
+        }
+        checkExtensions(index)
+    }
+
+    private fun checkExtensions(index: Int) {
+        val lastSlot = slots.lastOrNull() ?: return
+        val lastLocal = index - lastSlot.startIndex
+        if (lastSlot.pages.isNotEmpty() && lastLocal >= lastSlot.pages.size - 3) {
+            extendForward()
+        }
+        if (mode.value == MangaReaderMode.WEBTOON) {
+            val firstSlot = slots.firstOrNull() ?: return
+            val firstLocal = index - firstSlot.startIndex
+            if (firstLocal <= 1) {
+                extendBackward()
+            }
         }
     }
 
@@ -1074,12 +1303,12 @@ class MangaReaderViewModel(
     }
 
     suspend fun saveProgress() {
-        val c = chapter.value ?: return
-        val last = currentIndex.value
-        val total = pages.value.size
-        chapterRepo.saveProgress(c.id, last, total)
-        if (total > 0 && last >= total - 1) {
-            chapterRepo.markRead(listOf(c.id), true)
+        val slot = activeSlot() ?: return
+        val local = currentIndex.value - slot.startIndex
+        val total = slot.pages.size
+        chapterRepo.saveProgress(slot.chapter.id, local, total)
+        if (total > 0 && local >= total - 1) {
+            chapterRepo.markRead(listOf(slot.chapter.id), true)
         }
         mangaRepo.touchLastRead(mangaId)
     }

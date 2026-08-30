@@ -745,7 +745,7 @@ fun main(args: Array<String>) {
             // The app chrome follows the app's own light/dark choice. A reading theme
             // describes the page and nothing else — feeding themeId in here is what
             // made the two bleed into each other.
-            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)) {
+            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId), fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId)) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
@@ -1120,6 +1120,7 @@ fun main(args: Array<String>) {
                                             historyRepo = deps.mangaHistoryRepository,
                                             downloadManager = deps.mangaDownloadManager,
                                             categoryRepo = deps.mangaCategoryRepository,
+                                            settingsRepo = deps.settingsRepository,
                                         )
                                     }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                     backend = deps.mangaBackend,
@@ -1330,14 +1331,10 @@ private fun MangaReaderRoute(
 ) {
     var manga by remember(mangaId) { mutableStateOf<com.folio.reader.manga.MangaEntry?>(null) }
     var chapter by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
-    var next by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
 
     LaunchedEffect(mangaId, chapterId) {
         manga = deps.mangaRepository.get(mangaId)
         chapter = deps.mangaChapterRepository.getChapter(chapterId)
-        val all = deps.mangaChapterRepository.getChapters(mangaId)
-        val index = all.indexOfFirst { it.id == chapterId }
-        next = if (index in 0 until all.size - 1) all[index + 1] else null
     }
 
     val m = manga
@@ -1365,8 +1362,7 @@ private fun MangaReaderRoute(
         },
         manga = m,
         chapter = c,
-        nextChapter = next,
-        onNextChapter = { onNextChapter(it.id) },
+        onOpenChapter = { onNextChapter(it.id) },
         onBack = onBack,
     )
 }

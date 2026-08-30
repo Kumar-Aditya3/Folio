@@ -4,7 +4,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
@@ -34,7 +36,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -54,6 +55,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,8 +65,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
@@ -76,7 +82,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Page image decode cache, bounded so long chapters don't balloon memory. */
 private val pageBitmapCache = LinkedHashMap<String, ImageBitmap>(16, 0.75f, true)
 private const val PAGE_CACHE_MAX = 10
 
@@ -94,8 +99,7 @@ fun MangaReaderScreen(
     viewModel: MangaReaderViewModel,
     manga: MangaEntry,
     chapter: MangaChapter,
-    nextChapter: MangaChapter?,
-    onNextChapter: (MangaChapter) -> Unit,
+    onOpenChapter: (MangaChapter) -> Unit,
     onBack: () -> Unit,
 ) {
     val pages by viewModel.pages.collectAsState()
@@ -104,6 +108,9 @@ fun MangaReaderScreen(
     val showControls by viewModel.showControls.collectAsState()
     val mode by viewModel.mode.collectAsState()
     val chapterState by viewModel.chapter.collectAsState()
+    val localPageVal by viewModel.localPage.collectAsState()
+    val localCountVal by viewModel.localCount.collectAsState()
+    val extendingForward by viewModel.extendingForward.collectAsState()
     val vmScope = viewModel.scope
 
     var pageActionIndex by remember { mutableStateOf<Int?>(null) }
@@ -149,8 +156,7 @@ fun MangaReaderScreen(
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
                     onLongPressPage = { pageActionIndex = it },
-                    nextChapter = nextChapter,
-                    onNextChapter = onNextChapter,
+                    extendingForward = extendingForward,
                 )
                 MangaReaderMode.PAGED_LTR, MangaReaderMode.PAGED_RTL -> PagedReader(
                     viewModel = viewModel,
@@ -159,8 +165,7 @@ fun MangaReaderScreen(
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
                     onLongPressPage = { pageActionIndex = it },
-                    nextChapter = nextChapter,
-                    onNextChapter = onNextChapter,
+                    onOpenChapter = onOpenChapter,
                 )
                 MangaReaderMode.PAGED_VERTICAL -> VerticalReader(
                     viewModel = viewModel,
@@ -168,8 +173,7 @@ fun MangaReaderScreen(
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
                     onLongPressPage = { pageActionIndex = it },
-                    nextChapter = nextChapter,
-                    onNextChapter = onNextChapter,
+                    onOpenChapter = onOpenChapter,
                 )
             }
         }
@@ -179,15 +183,15 @@ fun MangaReaderScreen(
         if (showControls && pages.isNotEmpty()) {
             ReaderControls(
                 mangaTitle = manga.title,
-                chapterName = chapter.name,
-                pageCount = pages.size,
-                currentPage = viewModel.currentIndex.collectAsState().value,
+                chapterName = chapterState?.name ?: chapter.name,
+                pageCount = localCountVal,
+                currentPage = localPageVal,
                 mode = mode,
                 bookmarked = chapterState?.bookmarked == true,
                 onToggleBookmark = { viewModel.toggleBookmark() },
                 onShowNotes = { showNotesList = true },
                 onShowSettings = { showReaderSettings = true },
-                onSeek = { viewModel.onPageChanged(it) },
+                onSeek = { viewModel.seekLocal(it) },
                 onBack = onBack,
             )
         }
@@ -215,18 +219,20 @@ fun MangaReaderScreen(
         )
     }
 
-    pageActionIndex?.let { pageIndex ->
+    pageActionIndex?.let { combinedIndex ->
+        val slot = viewModel.activeSlotForDisplay()
+        val localIndex = if (slot != null) combinedIndex - slot.startIndex else combinedIndex
         PageActionsDialog(
-            pageIndex = pageIndex,
+            pageIndex = localIndex,
             onNote = {
                 pageActionIndex = null
-                noteDialogPage = pageIndex
+                noteDialogPage = localIndex
             },
             onSave = {
                 pageActionIndex = null
                 readerScope.launch {
                     pageMessage = "Saving page…"
-                    val location = viewModel.savePage(pageIndex)
+                    val location = viewModel.savePage(combinedIndex)
                     pageMessage = if (location != null) "Saved to $location" else "Could not save this page"
                 }
             },
@@ -234,11 +240,11 @@ fun MangaReaderScreen(
         )
     }
 
-    noteDialogPage?.let { pageIndex ->
+    noteDialogPage?.let { localIndex ->
         NoteDialog(
-            pageIndex = pageIndex,
+            pageIndex = localIndex,
             existing = null,
-            onSave = { content -> viewModel.saveNote(content, pageIndex, null) },
+            onSave = { content -> viewModel.saveNote(content, localIndex, null) },
             onDismiss = { noteDialogPage = null },
         )
     }
@@ -258,14 +264,13 @@ private fun WebtoonReader(
     onPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
-    nextChapter: MangaChapter?,
-    onNextChapter: (MangaChapter) -> Unit,
+    extendingForward: Boolean,
 ) {
     var visibleIndex by remember { mutableStateOf(0) }
     LaunchedEffect(visibleIndex) { onPageChanged(visibleIndex) }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(pages.size, key = { it }) { index ->
+        items(pages.size, key = { viewModel.pageKey(it) }) { index ->
             ReaderPage(
                 viewModel = viewModel,
                 index = index,
@@ -275,19 +280,20 @@ private fun WebtoonReader(
                 onVisible = { visibleIndex = index },
             )
         }
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(FolioTokens.space4),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("End of chapter", color = Color.White.copy(alpha = 0.7f))
-                if (nextChapter != null) {
-                    Spacer(Modifier.height(FolioTokens.space2))
-                    Button(onClick = { onNextChapter(nextChapter) }) {
-                        Icon(Icons.Filled.SkipNext, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Next chapter")
-                    }
+        if (extendingForward) {
+            item(key = "loading-indicator") {
+                Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+                }
+            }
+        }
+        if (!extendingForward && viewModel.isAtEndOfNavList()) {
+            item(key = "end-of-chapters") {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(FolioTokens.space4),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("End of chapters", color = Color.White.copy(alpha = 0.7f))
                 }
             }
         }
@@ -303,8 +309,7 @@ private fun PagedReader(
     onPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
-    nextChapter: MangaChapter?,
-    onNextChapter: (MangaChapter) -> Unit,
+    onOpenChapter: (MangaChapter) -> Unit,
 ) {
     val pagerState = rememberPagerState(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
@@ -319,7 +324,11 @@ private fun PagedReader(
 
     fun goPrev() {
         val current = pagerState.currentPage
-        if (current > 0) scope.launch { pagerState.animateScrollToPage(current - 1) }
+        if (current > 0) {
+            scope.launch { pagerState.animateScrollToPage(current - 1) }
+        } else {
+            viewModel.previousBeyond()?.let { onOpenChapter(it) }
+        }
     }
 
     LaunchedEffect(pagerState) {
@@ -370,16 +379,6 @@ private fun PagedReader(
                         )
                 )
             }
-            if (index == pages.size - 1 && nextChapter != null) {
-                Button(
-                    onClick = { onNextChapter(nextChapter) },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(FolioTokens.space4),
-                ) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Next chapter")
-                }
-            }
         }
     }
 }
@@ -392,8 +391,7 @@ private fun VerticalReader(
     onPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
-    nextChapter: MangaChapter?,
-    onNextChapter: (MangaChapter) -> Unit,
+    onOpenChapter: (MangaChapter) -> Unit,
 ) {
     val pagerState = rememberPagerState(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
@@ -418,16 +416,6 @@ private fun VerticalReader(
                 onTap = onTap,
                 onLongPress = { onLongPressPage(index) },
             )
-            if (index == pages.size - 1 && nextChapter != null) {
-                Button(
-                    onClick = { onNextChapter(nextChapter) },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(FolioTokens.space4),
-                ) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Next chapter")
-                }
-            }
         }
     }
 }
@@ -517,8 +505,7 @@ private fun ReaderPage(
 ) {
     var bitmap by remember(index) { mutableStateOf<ImageBitmap?>(null) }
     var failed by remember(index) { mutableStateOf(false) }
-    val chapterId = viewModel.chapter.collectAsState().value?.id ?: ""
-    val cacheKey = "$chapterId:$index"
+    val cacheKey = viewModel.pageKey(index)
 
     LaunchedEffect(index) {
         onVisible()
@@ -540,19 +527,64 @@ private fun ReaderPage(
         }
     }
 
+    var scale by remember(index) { mutableFloatStateOf(1f) }
+    var offsetX by remember(index) { mutableFloatStateOf(0f) }
+    var offsetY by remember(index) { mutableFloatStateOf(0f) }
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newScale = (scale * zoomChange).coerceIn(1f, 4f)
+        val maxTx = ((newScale - 1f) * viewSize.width) / 2f
+        val maxTy = ((newScale - 1f) * viewSize.height) / 2f
+        offsetX = (offsetX + panChange.x).coerceIn(-maxTx, maxTx)
+        offsetY = (offsetY + panChange.y).coerceIn(-maxTy, maxTy)
+        scale = newScale
+    }
+
+    fun resetZoom() {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+
     Box(
         modifier = modifier
             .background(Color.Black)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress),
+            .onSizeChanged { viewSize = it }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onDoubleTap = { resetZoom() },
+                    onLongPress = { onLongPress() },
+                )
+            }
+            .transformable(state = transformableState)
+            .then(
+                if (scale > 1f) Modifier.pointerInput(scale, viewSize) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        val maxTx = ((scale - 1f) * viewSize.width) / 2f
+                        val maxTy = ((scale - 1f) * viewSize.height) / 2f
+                        offsetX = (offsetX + dragAmount.x).coerceIn(-maxTx, maxTx)
+                        offsetY = (offsetY + dragAmount.y).coerceIn(-maxTy, maxTy)
+                    }
+                } else Modifier
+            ),
         contentAlignment = Alignment.Center,
     ) {
         when {
             bitmap != null -> Image(
                 bitmap = bitmap!!,
                 contentDescription = null,
-                modifier = Modifier.fillMaxWidth().let { base ->
-                    if (fit) base.fillMaxSize() else base
-                },
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    }
+                    .fillMaxWidth()
+                    .let { base -> if (fit) base.fillMaxSize() else base },
                 contentScale = if (fit) ContentScale.Fit else ContentScale.FillWidth,
             )
             failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
