@@ -273,10 +273,13 @@ private fun WebtoonReader(
     onLongPressPage: (Int) -> Unit,
     extendingForward: Boolean,
 ) {
-    var visibleIndex by remember { mutableStateOf(0) }
+    // Seed from the saved position so the flow opens exactly where the reader left off
+    // instead of reporting page 0 and clobbering the resume index.
+    val initialIndex = remember { viewModel.currentIndex.value }
+    var visibleIndex by remember { mutableStateOf(initialIndex) }
     val seekIndex by viewModel.currentIndex.collectAsState()
     val zoom by viewModel.zoom.collectAsState()
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(initialIndex)
     val hState = rememberScrollState()
 
     LaunchedEffect(visibleIndex) { onPageChanged(visibleIndex) }
@@ -288,7 +291,7 @@ private fun WebtoonReader(
         val viewport = maxWidth
         val columnWidth = viewport * maxOf(zoom, 1f)
         val imageWidth = viewport * zoom
-        Box(Modifier.fillMaxSize().horizontalScroll(hState)) {
+        Box(Modifier.fillMaxSize().pinchZoom(viewModel, fallback = true).horizontalScroll(hState)) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.width(columnWidth).fillMaxHeight(),
@@ -300,7 +303,6 @@ private fun WebtoonReader(
                             index = index,
                             modifier = Modifier.width(imageWidth),
                             zoomable = false,
-                            pinchZoom = true,
                             onTap = { onTap() },
                             onDoubleTap = { viewModel.resetZoom() },
                             onLongPress = { onLongPressPage(index) },
@@ -519,6 +521,50 @@ private fun ReaderModeChip(label: String, selected: Boolean, onClick: () -> Unit
     }
 }
 
+/**
+ * Pinch-to-zoom for the whole reading flow. Pages sit below the scroll containers, so
+ * the page-level handler (fallback = false) wins gesture arbitration; the reader adds a
+ * second handler above the scrollers (fallback = true) that only acts when the inner
+ * one was starved, so pinch in/out never dies mid-session.
+ */
+private fun Modifier.pinchZoom(
+    viewModel: MangaReaderViewModel,
+    fallback: Boolean,
+    onPinch: (Boolean) -> Unit = {},
+): Modifier =
+    pointerInput(Unit) {
+        forEachGesture {
+            awaitPointerEventScope {
+                awaitFirstDown(requireUnconsumed = false)
+                var previousDistance: Float? = null
+                var pinching = false
+                do {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.filter { it.pressed }
+                    val active = pressed.size >= 2 && (!fallback || event.changes.none { it.isConsumed })
+                    if (active) {
+                        if (!pinching) {
+                            pinching = true
+                            onPinch(true)
+                        }
+                        val dx = pressed[0].position.x - pressed[1].position.x
+                        val dy = pressed[0].position.y - pressed[1].position.y
+                        val distance = kotlin.math.hypot(dx, dy)
+                        event.changes.forEach { it.consume() }
+                        val prev = previousDistance
+                        if (prev != null && prev > 0f && distance > 0f) {
+                            viewModel.setZoom(viewModel.zoom.value * (distance / prev))
+                        }
+                        previousDistance = distance
+                    } else if (pressed.size < 2) {
+                        previousDistance = null
+                    }
+                } while (event.changes.any { it.pressed })
+                if (pinching) onPinch(false)
+            }
+        }
+    }
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ReaderPage(
@@ -527,7 +573,6 @@ private fun ReaderPage(
     modifier: Modifier = Modifier,
     fit: Boolean = false,
     zoomable: Boolean = true,
-    pinchZoom: Boolean = false,
     tapZones: Boolean = false,
     rtl: Boolean = false,
     onTap: (Int) -> Unit = {},
@@ -563,50 +608,14 @@ private fun ReaderPage(
     var offsetX by remember(index) { mutableFloatStateOf(0f) }
     var offsetY by remember(index) { mutableFloatStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
-
-    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
-        val next = (zoom * zoomChange).coerceIn(0.5f, 3f)
-        viewModel.setZoom(next)
-        val maxTx = maxOf(0f, ((next - 1f) * viewSize.width) / 2f)
-        val maxTy = maxOf(0f, ((next - 1f) * viewSize.height) / 2f)
-        offsetX = (offsetX + panChange.x).coerceIn(-maxTx, maxTx)
-        offsetY = (offsetY + panChange.y).coerceIn(-maxTy, maxTy)
-    }
+    var pinchActive by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
             .background(Color.Black)
             // A zoomed sheet must never draw into the neighbouring page.
             .clip(RectangleShape)
-            .let { m ->
-                if (pinchZoom) m.pointerInput(Unit) {
-                    // Pages sit below the scroll containers, so consuming here wins over
-                    // their scrolling: one finger scrolls the flow, two fingers zoom it.
-                    forEachGesture {
-                        awaitPointerEventScope {
-                            awaitFirstDown(requireUnconsumed = false)
-                            var previousDistance: Float? = null
-                            do {
-                                val event = awaitPointerEvent()
-                                val pressed = event.changes.filter { it.pressed }
-                                if (pressed.size >= 2) {
-                                    val dx = pressed[0].position.x - pressed[1].position.x
-                                    val dy = pressed[0].position.y - pressed[1].position.y
-                                    val distance = kotlin.math.hypot(dx, dy)
-                                    event.changes.forEach { it.consume() }
-                                    val prev = previousDistance
-                                    if (prev != null && prev > 0f && distance > 0f) {
-                                        viewModel.setZoom(viewModel.zoom.value * (distance / prev))
-                                    }
-                                    previousDistance = distance
-                                } else {
-                                    previousDistance = null
-                                }
-                            } while (event.changes.any { it.pressed })
-                        }
-                    }
-                } else m
-            }
+            .pinchZoom(viewModel, fallback = false, onPinch = { pinchActive = it })
             .onSizeChanged { viewSize = it }
             .pointerInput(tapZones, rtl) {
                 detectTapGestures(
@@ -623,10 +632,10 @@ private fun ReaderPage(
                         offsetY = 0f
                         onDoubleTap()
                     },
-                    onLongPress = { onLongPress() },
+                    // A two-finger gesture is a zoom, not a hold: no note/save sheet.
+                    onLongPress = { if (!pinchActive) onLongPress() },
                 )
             }
-            .let { m -> if (zoomable) m.transformable(state = transformableState) else m }
             .then(
                 if (zoomable && zoom > 1f) Modifier.pointerInput(zoom, viewSize) {
                     detectDragGestures { change, dragAmount ->
