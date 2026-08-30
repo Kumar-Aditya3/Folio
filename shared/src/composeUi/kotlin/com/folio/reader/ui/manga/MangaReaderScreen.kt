@@ -3,13 +3,14 @@ package com.folio.reader.ui.manga
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -257,6 +259,7 @@ fun MangaReaderScreen(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun WebtoonReader(
     viewModel: MangaReaderViewModel,
@@ -267,33 +270,61 @@ private fun WebtoonReader(
     extendingForward: Boolean,
 ) {
     var visibleIndex by remember { mutableStateOf(0) }
-    LaunchedEffect(visibleIndex) { onPageChanged(visibleIndex) }
+    val seekIndex by viewModel.currentIndex.collectAsState()
+    val zoom by viewModel.zoom.collectAsState()
+    val listState = rememberLazyListState()
+    val hState = rememberScrollState()
+    // Pinch anywhere on the flow: the whole column widens/narrows together.
+    val zoomState = rememberTransformableState { zoomChange, _, _ ->
+        viewModel.setZoom(zoom * zoomChange)
+    }
 
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(pages.size, key = { viewModel.pageKey(it) }) { index ->
-            ReaderPage(
-                viewModel = viewModel,
-                index = index,
-                modifier = Modifier.fillMaxWidth(),
-                onTap = onTap,
-                onLongPress = { onLongPressPage(index) },
-                onVisible = { visibleIndex = index },
-            )
-        }
-        if (extendingForward) {
-            item(key = "loading-indicator") {
-                Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
-                }
-            }
-        }
-        if (!extendingForward && viewModel.isAtEndOfNavList()) {
-            item(key = "end-of-chapters") {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(FolioTokens.space4),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+    LaunchedEffect(visibleIndex) { onPageChanged(visibleIndex) }
+    LaunchedEffect(seekIndex) {
+        if (seekIndex != visibleIndex) listState.scrollToItem(seekIndex)
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewport = maxWidth
+        val columnWidth = viewport * maxOf(zoom, 1f)
+        val imageWidth = viewport * zoom
+        Box(Modifier.fillMaxSize().transformable(state = zoomState)) {
+            Box(Modifier.fillMaxSize().horizontalScroll(hState)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.width(columnWidth).fillMaxHeight(),
                 ) {
-                    Text("End of chapters", color = Color.White.copy(alpha = 0.7f))
+                    items(pages.size, key = { viewModel.pageKey(it) }) { index ->
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            ReaderPage(
+                                viewModel = viewModel,
+                                index = index,
+                                modifier = Modifier.width(imageWidth),
+                                zoomable = false,
+                                onTap = { onTap() },
+                                onDoubleTap = { viewModel.resetZoom() },
+                                onLongPress = { onLongPressPage(index) },
+                                onVisible = { visibleIndex = index },
+                            )
+                        }
+                    }
+                    if (extendingForward) {
+                        item(key = "loading-indicator") {
+                            Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+                            }
+                        }
+                    }
+                    if (!extendingForward && viewModel.isAtEndOfNavList()) {
+                        item(key = "end-of-chapters") {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(FolioTokens.space4),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text("End of chapters", color = Color.White.copy(alpha = 0.7f))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -316,6 +347,7 @@ private fun PagedReader(
         pageCount = { pages.size },
     )
     val scope = rememberCoroutineScope()
+    val seekIndex by viewModel.currentIndex.collectAsState()
 
     fun goNext() {
         val current = pagerState.currentPage
@@ -334,6 +366,12 @@ private fun PagedReader(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { onPageChanged(it) }
     }
+    // Slider / external seeks drive the pager.
+    LaunchedEffect(seekIndex) {
+        if (seekIndex != pagerState.currentPage) {
+            pagerState.scrollToPage(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+        }
+    }
 
     HorizontalPager(
         state = pagerState,
@@ -341,45 +379,24 @@ private fun PagedReader(
         reverseLayout = rtl,
         beyondViewportPageCount = 1,
     ) { index ->
-        Box(Modifier.fillMaxSize()) {
-            ReaderPage(
-                viewModel = viewModel,
-                index = index,
-                modifier = Modifier.fillMaxSize(),
-                fit = true,
-                onTap = {},
-                onLongPress = { onLongPressPage(index) },
-            )
-            Row(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .combinedClickable(
-                            onClick = { if (rtl) goNext() else goPrev() },
-                            onLongClick = { onLongPressPage(index) },
-                        )
-                )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .combinedClickable(
-                            onClick = onTap,
-                            onLongClick = { onLongPressPage(index) },
-                        )
-                )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .combinedClickable(
-                            onClick = { if (rtl) goPrev() else goNext() },
-                            onLongClick = { onLongPressPage(index) },
-                        )
-                )
-            }
-        }
+        ReaderPage(
+            viewModel = viewModel,
+            index = index,
+            modifier = Modifier.fillMaxSize(),
+            fit = true,
+            zoomable = true,
+            tapZones = true,
+            rtl = rtl,
+            onTap = { zone ->
+                when (zone) {
+                    -1 -> if (rtl) goNext() else goPrev()
+                    1 -> if (rtl) goPrev() else goNext()
+                    else -> onTap()
+                }
+            },
+            onDoubleTap = { viewModel.resetZoom() },
+            onLongPress = { onLongPressPage(index) },
+        )
     }
 }
 
@@ -397,9 +414,15 @@ private fun VerticalReader(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
         pageCount = { pages.size },
     )
+    val seekIndex by viewModel.currentIndex.collectAsState()
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { onPageChanged(it) }
+    }
+    LaunchedEffect(seekIndex) {
+        if (seekIndex != pagerState.currentPage) {
+            pagerState.scrollToPage(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+        }
     }
 
     VerticalPager(
@@ -407,16 +430,16 @@ private fun VerticalReader(
         modifier = Modifier.fillMaxSize(),
         beyondViewportPageCount = 1,
     ) { index ->
-        Box(Modifier.fillMaxSize()) {
-            ReaderPage(
-                viewModel = viewModel,
-                index = index,
-                modifier = Modifier.fillMaxSize(),
-                fit = true,
-                onTap = onTap,
-                onLongPress = { onLongPressPage(index) },
-            )
-        }
+        ReaderPage(
+            viewModel = viewModel,
+            index = index,
+            modifier = Modifier.fillMaxSize(),
+            fit = true,
+            zoomable = true,
+            onTap = { onTap() },
+            onDoubleTap = { viewModel.resetZoom() },
+            onLongPress = { onLongPressPage(index) },
+        )
     }
 }
 
@@ -499,7 +522,11 @@ private fun ReaderPage(
     index: Int,
     modifier: Modifier = Modifier,
     fit: Boolean = false,
-    onTap: () -> Unit = {},
+    zoomable: Boolean = true,
+    tapZones: Boolean = false,
+    rtl: Boolean = false,
+    onTap: (Int) -> Unit = {},
+    onDoubleTap: () -> Unit = {},
     onLongPress: () -> Unit = {},
     onVisible: () -> Unit = {},
 ) {
@@ -527,44 +554,49 @@ private fun ReaderPage(
         }
     }
 
-    var scale by remember(index) { mutableFloatStateOf(1f) }
+    val zoom by viewModel.zoom.collectAsState()
     var offsetX by remember(index) { mutableFloatStateOf(0f) }
     var offsetY by remember(index) { mutableFloatStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
 
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
-        val newScale = (scale * zoomChange).coerceIn(1f, 4f)
-        val maxTx = ((newScale - 1f) * viewSize.width) / 2f
-        val maxTy = ((newScale - 1f) * viewSize.height) / 2f
+        val next = (zoom * zoomChange).coerceIn(0.5f, 3f)
+        viewModel.setZoom(next)
+        val maxTx = maxOf(0f, ((next - 1f) * viewSize.width) / 2f)
+        val maxTy = maxOf(0f, ((next - 1f) * viewSize.height) / 2f)
         offsetX = (offsetX + panChange.x).coerceIn(-maxTx, maxTx)
         offsetY = (offsetY + panChange.y).coerceIn(-maxTy, maxTy)
-        scale = newScale
-    }
-
-    fun resetZoom() {
-        scale = 1f
-        offsetX = 0f
-        offsetY = 0f
     }
 
     Box(
         modifier = modifier
             .background(Color.Black)
             .onSizeChanged { viewSize = it }
-            .pointerInput(Unit) {
+            .pointerInput(tapZones, rtl) {
                 detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = { resetZoom() },
+                    onTap = { pos ->
+                        val zone = if (!tapZones) 0 else when {
+                            pos.x < size.width / 3f -> -1
+                            pos.x > size.width * 2f / 3f -> 1
+                            else -> 0
+                        }
+                        onTap(zone)
+                    },
+                    onDoubleTap = {
+                        offsetX = 0f
+                        offsetY = 0f
+                        onDoubleTap()
+                    },
                     onLongPress = { onLongPress() },
                 )
             }
-            .transformable(state = transformableState)
+            .let { m -> if (zoomable) m.transformable(state = transformableState) else m }
             .then(
-                if (scale > 1f) Modifier.pointerInput(scale, viewSize) {
+                if (zoomable && zoom > 1f) Modifier.pointerInput(zoom, viewSize) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        val maxTx = ((scale - 1f) * viewSize.width) / 2f
-                        val maxTy = ((scale - 1f) * viewSize.height) / 2f
+                        val maxTx = ((zoom - 1f) * viewSize.width) / 2f
+                        val maxTy = ((zoom - 1f) * viewSize.height) / 2f
                         offsetX = (offsetX + dragAmount.x).coerceIn(-maxTx, maxTx)
                         offsetY = (offsetY + dragAmount.y).coerceIn(-maxTy, maxTy)
                     }
@@ -577,11 +609,13 @@ private fun ReaderPage(
                 bitmap = bitmap!!,
                 contentDescription = null,
                 modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offsetX
-                        translationY = offsetY
+                    .let { m ->
+                        if (zoomable) m.graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationX = offsetX
+                            translationY = offsetY
+                        } else m
                     }
                     .fillMaxWidth()
                     .let { base -> if (fit) base.fillMaxSize() else base },
