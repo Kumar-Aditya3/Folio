@@ -67,6 +67,25 @@ class AppGraph(private val app: Application) {
     val searchRepository = JdbcSearchRepository(database)
     val searchIndexer = SearchIndexer(searchRepository)
 
+    // ---------- Manga category (Mihon-powered backend) ----------
+    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database)
+    val mangaChapterRepository = com.folio.reader.database.JdbcMangaChapterRepository(database)
+    val mangaCategoryRepository = com.folio.reader.database.JdbcMangaCategoryRepository(database)
+    val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
+    val mangaDownloadRepository = com.folio.reader.database.JdbcMangaDownloadRepository(database)
+    val mangaNoteRepository = com.folio.reader.database.JdbcMangaNoteRepository(database)
+    val mangaBackend = com.folio.reader.manga.AndroidMangaBackend(
+        context = app,
+        settings = settingsRepository,
+        fileSystem = platform.fileSystem,
+    )
+    val mangaDownloadManager = com.folio.reader.manga.MangaDownloadManager(
+        backend = mangaBackend,
+        downloadsRepo = mangaDownloadRepository,
+        chapterRepo = mangaChapterRepository,
+        downloadsDir = platform.fileSystem.mangaDownloadsDir,
+    ).apply { start() }
+
     val epubParser = EpubParser(platform)
     val contentProvider = JvmChapterContentProvider(platform, epubParser)
     val fontManager = com.folio.reader.font.FontManager(platform)
@@ -119,7 +138,7 @@ class AppGraph(private val app: Application) {
 
     private fun firebaseCreds(): FirebaseCredentials {
         // User-entered API key (Settings > Advanced) takes priority over env fallback.
-        val global = runBlocking { runCatching { settingsRepository.getGlobalSettings() }.getOrNull() }
+        val global = cachedGlobalSettings
         val projectId = global?.firebaseProjectId?.takeIf { it.isNotBlank() }
             ?: System.getenv("FOLIO_FB_PROJECT_ID")
             ?: stringRes(app, "folio_fb_project_id")
@@ -162,6 +181,24 @@ class AppGraph(private val app: Application) {
     private var cachedSyncEngine: SyncEngine? = null
 
     /**
+     * Settings snapshot used to build sync credentials. Loaded off-main at startup
+     * and refreshed by [restartSync]; [syncEngine] is reached from composition, so
+     * building it must never block on the database (runBlocking here parked the UI
+     * thread for seconds — a full ANR — whenever the IO pool or SQLite was busy).
+     */
+    @Volatile
+    private var cachedGlobalSettings: com.folio.reader.settings.ReaderSettings? = null
+
+    private val graphScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        graphScope.launch {
+            cachedGlobalSettings =
+                runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+        }
+    }
+
+    /**
      * The active sync engine, or null when Firebase credentials are absent.
      * Built lazily from [firebaseCreds] and cached; rebuilt by [restartSync]
      * whenever the user changes the API key in Settings > Advanced so new
@@ -178,7 +215,7 @@ class AppGraph(private val app: Application) {
     private fun createSyncEngine(): SyncEngine? {
         val creds = firebaseCreds()
         if (!creds.isConfigured) return null
-        val settings = runBlocking { runCatching { settingsRepository.getGlobalSettings() }.getOrNull() }
+        val settings = cachedGlobalSettings
         val email = settings?.syncAccountEmail?.takeIf { it.isNotBlank() }
         val password = settings?.syncAccountPassword?.takeIf { it.isNotBlank() }
         return SyncEngine(
@@ -214,7 +251,10 @@ class AppGraph(private val app: Application) {
                 )
             } ?: NoopStorageSync,
             config = SyncConfig(),
-            deviceId = deviceId
+            deviceId = deviceId,
+            mangaRepository = mangaRepository,
+            mangaChapterRepository = mangaChapterRepository,
+            mangaNoteRepository = mangaNoteRepository,
         )
     }
 
@@ -230,7 +270,12 @@ class AppGraph(private val app: Application) {
         val old = syncEngine
         cachedSyncEngine = null // next access rebuilds from current credentials
         old?.stop()
-        startSync(appScope)
+        appScope.launch(Dispatchers.IO) {
+            cachedGlobalSettings =
+                runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+            cachedSyncEngine = null
+            startSync(appScope)
+        }
     }
 
     fun startSync(scope: CoroutineScope) {
@@ -246,6 +291,13 @@ class AppGraph(private val app: Application) {
     suspend fun uploadBookToCloud(bookId: String): Result<Unit> {
         val storage = (syncEngine?.storageSync as? RestFirebaseStorageSync)
             ?: return Result.failure(IllegalStateException("Cloud storage not configured"))
+        // The uid only exists after sign-in; authenticate before reading it or the
+        // very first upload always fails with "not signed in".
+        runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { storage.authenticate() }
+        }.onFailure {
+            return Result.failure(IllegalStateException("Cloud storage sign-in failed: ${it.message}"))
+        }
         val uid = storage.uid
         if (uid.isBlank()) return Result.failure(IllegalStateException("Not signed in to cloud storage"))
         val localPath = platform.fileSystem.getBookEpubPath(bookId)

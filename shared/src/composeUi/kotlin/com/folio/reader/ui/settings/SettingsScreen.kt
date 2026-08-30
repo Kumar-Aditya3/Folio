@@ -107,7 +107,7 @@ fun SettingsScreen(
     var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
     var showPreview by remember { mutableStateOf(true) }
 
-    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         com.folio.reader.ui.components.FolioTopBar(
             title = "Settings",
             navigationIcon = {
@@ -158,7 +158,6 @@ fun SettingsScreen(
 
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
@@ -178,7 +177,6 @@ fun SettingsScreen(
                         if (showPreview && selectedCategory in setOf(
                                 SettingsCategory.TYPOGRAPHY,
                                 SettingsCategory.LAYOUT,
-                                SettingsCategory.THEMES,
                                 SettingsCategory.FORMATTING
                             )
                         ) {
@@ -238,7 +236,6 @@ fun SettingsScreen(
 
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.THEMES -> ThemesSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
@@ -258,7 +255,6 @@ fun SettingsScreen(
                         if (showPreview && selectedCategory in setOf(
                                 SettingsCategory.TYPOGRAPHY,
                                 SettingsCategory.LAYOUT,
-                                SettingsCategory.THEMES,
                                 SettingsCategory.FORMATTING
                             )
                         ) {
@@ -276,7 +272,6 @@ enum class SettingsCategory(val displayName: String) {
     GENERAL("General"),
     TYPOGRAPHY("Typography"),
     LAYOUT("Layout"),
-    THEMES("Themes"),
     FORMATTING("Formatting"),
     READING("Reading"),
     CLOUD_SYNC("Cloud Sync"),
@@ -298,27 +293,36 @@ fun GeneralSettingsPanel(
     ) {
         Text("General Settings", style = MaterialTheme.typography.titleLarge)
 
-        // App theme — the chrome's own palette, deliberately unrelated to the page.
+        // Theme packs: a curated chrome + page pair, applied together.
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("App theme", style = MaterialTheme.typography.bodyLarge)
+                Text("Theme packs", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Colours the app's screens, bars and panels — including the reader's " +
-                        "contents, annotations and settings popups. The page itself is " +
-                        "themed separately under Themes.",
+                    "Matched pairs of app colours and page colours. Applying a pack " +
+                        "changes both; either side can still be adjusted on its own.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(AppPalette.entries.toList()) { palette ->
-                    com.folio.reader.ui.components.FolioChip(
-                        selected = settings.appThemeId == palette.id,
-                        onClick = { onSettingsChange(settings.copy(appThemeId = palette.id)) },
-                        label = palette.label
+                items(com.folio.reader.ui.theme.ThemePack.ALL) { pack ->
+                    ThemePackCard(
+                        pack = pack,
+                        selected = settings.appThemeId == pack.appPaletteId &&
+                            settings.themeId == pack.readerThemeId &&
+                            settings.customTheme == null,
+                        onClick = {
+                            onSettingsChange(
+                                settings.copy(
+                                    appThemeId = pack.appPaletteId,
+                                    themeId = pack.readerThemeId,
+                                    customTheme = null,
+                                )
+                            )
+                        },
                     )
                 }
             }
@@ -351,6 +355,57 @@ fun GeneralSettingsPanel(
         ) {
             Text("Import custom font")
         }
+    }
+}
+
+@Composable
+private fun ThemePackCard(
+    pack: com.folio.reader.ui.theme.ThemePack,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val chrome = com.folio.reader.ui.theme.AppPalette.byId(pack.appPaletteId).colors
+    val page = com.folio.reader.settings.Theme.getPreset(pack.readerThemeId)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(
+        com.folio.reader.ui.theme.FolioTokens.radiusControl
+    )
+    androidx.compose.foundation.layout.Column(
+        modifier = Modifier
+            .width(132.dp)
+            .background(colors.surface.copy(alpha = 0.55f), shape)
+            .border(
+                1.dp,
+                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
+                shape
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .background(chrome.background)
+                    .border(1.dp, colors.outline.copy(alpha = 0.5f), androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .background(androidx.compose.ui.graphics.Color(page.background))
+                    .border(1.dp, colors.outline.copy(alpha = 0.5f), androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+            )
+        }
+        Text(
+            pack.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (selected) colors.primary else colors.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -578,77 +633,6 @@ fun LayoutSettingsPanel(
                 },
                 valueRange = 0f..64f
             )
-        }
-    }
-}
-
-@Composable
-fun ThemesSettingsPanel(
-    settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit
-) {
-    val presetIds = listOf(
-        "paper", "white", "sepia", "gray", "dark", "oled_black",
-        "solarized_light", "solarized_dark", "nord_light", "nord_dark", "dracula"
-    )
-
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text("Themes", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "Choose a color theme for reading", style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // Theme swatches grid
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            presetIds.chunked(4).forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    row.forEach { id ->
-                        val theme = Theme.getPreset(id)
-                        val selected = settings.themeId == id && settings.customTheme == null
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(theme.background))
-                                    .border(
-                                        width = if (selected) 3.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outline,
-                                        shape = CircleShape
-                                    )
-                                    .clickable {
-                                        onSettingsChange(settings.copy(themeId = id, customTheme = null))
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "Aa",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color(theme.primaryText)
-                                )
-                            }
-                            Text(
-                                theme.name,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 }

@@ -159,8 +159,10 @@ fun RevisitItemsScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.statusBarsPadding()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                com.folio.reader.ui.components.FolioStatusBarBand()
                 TopAppBar(
+                    windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                     title = {
                         Column {
                             Text("Revisit", fontWeight = FontWeight.Bold)

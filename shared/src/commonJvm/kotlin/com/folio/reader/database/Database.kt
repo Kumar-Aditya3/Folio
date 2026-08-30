@@ -31,6 +31,15 @@ import java.io.File
  */
 class Database(private val dbPath: String, private val dispatcher: CoroutineDispatcher = Dispatchers.IO) {
     var onEntityChanged: ((entityType: String, entityId: String, operation: String, payloadJson: String) -> Unit)? = null
+
+    /**
+     * Bumped after every manga library/chapter write. The manga observe* flows
+     * re-query on this so the library, unread counts and favorite state update
+     * live (they were previously collected once and went stale).
+     */
+    val mangaDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpMangaData() { mangaDataRevision.value += 1 }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val writeMutex = Mutex() // Serialize ALL database access (SQLite single connection)
     private val driverDelegate = object : DatabaseDriver {
@@ -53,13 +62,17 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
          */
         private fun openConnection(): Connection {
             val sqldroid = runCatching { Class.forName("org.sqldroid.SQLDroidDriver") }.getOrNull()
-            return if (sqldroid != null) {
+            val connection = if (sqldroid != null) {
                 val driver = sqldroid.getDeclaredConstructor().newInstance() as java.sql.Driver
                 driver.connect("jdbc:sqlite:$dbPath", java.util.Properties())
                     ?: throw SQLException("sqldroid could not open $dbPath")
             } else {
                 DriverManager.getConnection("jdbc:sqlite:$dbPath")
             }
+            // WAL keeps reads from stalling behind checkpointed writes. Some
+            // drivers refuse the pragma; a failure only loses the optimization.
+            runCatching { connection.createStatement().use { it.execute("PRAGMA journal_mode=WAL") } }
+            return connection
         }
         override fun close() = synchronized(this) {
             cachedConnection?.let { runCatching { it.close() } }
@@ -211,7 +224,8 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 CREATE TABLE IF NOT EXISTS series (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
-                    sort_order INTEGER NOT NULL DEFAULT 0
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
             conn.createStatementExec("""
@@ -220,7 +234,8 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     name TEXT NOT NULL UNIQUE,
                     color INTEGER,
                     sort_order INTEGER NOT NULL DEFAULT 0,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
             conn.createStatementExec("""
@@ -272,17 +287,13 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             // Older builds generated a random queue id for each edit, producing
             // thousands of duplicate uploads for the same entity. Keep only the
             // newest mutation before enforcing the entity-level outbox invariant.
+            // GROUP BY + MAX(rowid) instead of ROW_NUMBER(): Android 7/8 ship a
+            // system SQLite older than 3.25, which has no window functions.
             conn.createStatementExec(
                 """
                 DELETE FROM sync_queue
-                WHERE id NOT IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY entity_type, entity_id
-                            ORDER BY created_at DESC, rowid DESC
-                        ) AS row_number
-                        FROM sync_queue
-                    ) WHERE row_number = 1
+                WHERE rowid NOT IN (
+                    SELECT MAX(rowid) FROM sync_queue GROUP BY entity_type, entity_id
                 )
                 """.trimIndent()
             )
@@ -336,29 +347,30 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             """.trimIndent())
 
             // Tags, quotes and revisit items (backing the sync + annotation model)
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS tags (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     color INTEGER,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS book_tags (
                     book_id TEXT NOT NULL,
                     tag_id TEXT NOT NULL,
                     PRIMARY KEY (book_id, tag_id)
                 )
             """.trimIndent())
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS highlight_tags (
                     highlight_id TEXT NOT NULL,
                     tag_id TEXT NOT NULL,
                     PRIMARY KEY (highlight_id, tag_id)
                 )
             """.trimIndent())
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS quotes (
                     id TEXT PRIMARY KEY,
                     book_id TEXT NOT NULL,
@@ -370,10 +382,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     device_id TEXT NOT NULL
                 )
             """.trimIndent())
-            conn.createStatement().execute(
+            conn.createStatementExec(
                 "CREATE INDEX IF NOT EXISTS idx_quotes_book ON quotes(book_id)"
             )
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS revisit_items (
                     id TEXT PRIMARY KEY,
                     book_id TEXT NOT NULL,
@@ -386,10 +398,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     device_id TEXT NOT NULL
                 )
             """.trimIndent())
-            conn.createStatement().execute(
+            conn.createStatementExec(
                 "CREATE INDEX IF NOT EXISTS idx_revisit_book ON revisit_items(book_id)"
             )
-            conn.createStatement().execute("""
+            conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS reading_cycles (
                     id TEXT PRIMARY KEY,
                     book_id TEXT NOT NULL,
@@ -401,9 +413,21 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     final_progress REAL NOT NULL DEFAULT 0.0
                 )
             """.trimIndent())
-            conn.createStatement().execute(
+            conn.createStatementExec(
                 "CREATE INDEX IF NOT EXISTS idx_cycles_book ON reading_cycles(book_id, cycle_number)"
             )
+            // Migration: watermark columns for tags/collections/series (edit sync).
+            // Constant-default ALTERs run on old Android SQLite too.
+            for (table in listOf("tags", "collections", "series")) {
+                val present = runCatching {
+                    conn.prepareStatement("SELECT updated_at FROM $table LIMIT 0").use {
+                        it.executeQuery().use { }
+                    }
+                }.isSuccess
+                if (!present) {
+                    conn.createStatementExec("ALTER TABLE $table ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+                }
+            }
             try {
                 conn.createStatementExec(
                     """
@@ -431,13 +455,18 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     """.trimIndent()
                 )
             }
+            // Manga library tables live in the same database but are managed entirely by
+            // the manga domain (separate category from books).
+            MangaSchema.initialize(conn)
             // Sessions recorded before reading time was measured (rather than elapsed)
             // are nonsense and cannot be repaired; drop them once. New rows always
             // start after the cutoff, so this matches nothing after its first run.
             purgeUnmeasuredSessions(conn)
             // No commit needed with autoCommit=true
         } catch (e: SQLException) {
-            e.printStackTrace()
+            // A half-built schema causes scattered "no such table" failures later;
+            // surface the real error at startup instead.
+            throw RuntimeException("Folio database schema initialization failed", e)
         } finally {
             // Keep the single shared connection open for reuse.
         }
@@ -493,7 +522,8 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 stmt.setLong(17, book.totalWords)
                 stmt.setInt(18, book.chapterCount)
                 stmt.setString(19, book.seriesId)
-                stmt.setDouble(20, book.seriesNumber ?: 0.0)
+                if (book.seriesNumber != null) stmt.setDouble(20, book.seriesNumber)
+                else stmt.setNull(20, java.sql.Types.REAL)
                 stmt.setInt(21, book.status.value)
                 stmt.setInt(22, book.cloudState.value)
                 stmt.setInt(23, book.formattingMode.value)
@@ -581,13 +611,14 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             stmt.setString(7, book.description)
             stmt.setLong(8, book.publicationDate?.toEpochMilliseconds() ?: 0L)
             stmt.setString(9, book.coverPath)
-            stmt.setLong(10, Clock.System.now().toEpochMilliseconds())
+            stmt.setLong(10, book.updatedAt.toEpochMilliseconds())
             stmt.setLong(11, book.lastOpenedAt?.toEpochMilliseconds() ?: 0L)
             stmt.setLong(12, book.totalCharacters)
             stmt.setLong(13, book.totalWords)
             stmt.setInt(14, book.chapterCount)
             stmt.setString(15, book.seriesId)
-            stmt.setDouble(16, book.seriesNumber ?: 0.0)
+            if (book.seriesNumber != null) stmt.setDouble(16, book.seriesNumber)
+            else stmt.setNull(16, java.sql.Types.REAL)
             stmt.setInt(17, book.status.value)
             stmt.setInt(18, book.cloudState.value)
             stmt.setInt(19, book.formattingMode.value)
@@ -965,7 +996,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             totalWords = rs.getLong("total_words"),
             chapterCount = rs.getInt("chapter_count"),
             seriesId = rs.getString("series_id")?.takeIf { it.isNotBlank() },
-            seriesNumber = rs.getDouble("series_number").takeIf { !rs.wasNull() && it != 0.0 },
+            seriesNumber = rs.getDouble("series_number").takeIf { !rs.wasNull() },
             status = BookStatus.fromValue(rs.getInt("status")),
             cloudState = CloudState.fromValue(rs.getInt("cloud_state")),
             formattingMode = FormattingMode.fromValue(rs.getInt("formatting_mode"))

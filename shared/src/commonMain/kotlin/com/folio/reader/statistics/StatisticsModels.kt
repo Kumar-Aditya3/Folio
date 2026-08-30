@@ -212,31 +212,6 @@ data class HeatmapMonth(
 }
 
 @Serializable
-data class ReadingHistoryEntry(
-    val date: LocalDate,
-    val sessions: List<SessionSummary>
-)
-
-@Serializable
-data class SessionSummary(
-    val bookId: String,
-    val bookTitle: String,
-    val startTime: Instant,
-    val endTime: Instant,
-    val durationMs: Long,
-    val startProgress: Double,
-    val endProgress: Double,
-    val wordsRead: Long,
-    val position: ReadingPosition
-) {
-    val durationMinutes: Int
-        get() = (durationMs / 60_000).toInt()
-
-    val progressGained: Double
-        get() = endProgress - startProgress
-}
-
-@Serializable
 data class DashboardData(
     val continueReading: Book? = null,
     val currentlyReading: List<Book> = emptyList(),

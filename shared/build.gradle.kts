@@ -10,6 +10,8 @@ plugins {
 repositories {
     google()
     mavenCentral()
+    // Mihon's injekt fork (extension runtime DI expected by loaded extension APKs).
+    maven(url = "https://jitpack.io")
 }
 
 kotlin {
@@ -30,6 +32,7 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kotlinx.serialization.protobuf)
                 implementation(libs.kotlinx.datetime)
             }
         }
@@ -39,7 +42,9 @@ kotlin {
             dependsOn(getByName("commonMain"))
             dependencies {
                 implementation(libs.sqlite.jdbc)
-                implementation(libs.kxml2)
+                // API only: Android ships org.xmlpull.v1 in the framework; desktop
+                // packages the implementation via desktopMain below.
+                compileOnly(libs.kxml2)
             }
         }
 
@@ -61,9 +66,20 @@ kotlin {
             dependsOn(getByName("composeUi"))
             dependencies {
                 implementation(libs.androidx.lifecycle.runtime)
-                implementation(libs.androidx.datastore.preferences)
                 implementation(libs.androidx.core.ktx)
                 implementation(libs.coil.compose)
+                // Mihon manga backend: extension runtime + source engine. okhttp 5.5.0
+                // matches what Mihon ships; extensions are compiled against it.
+                implementation(libs.okhttp)
+                implementation(libs.okhttp.brotli)
+                implementation(libs.okhttp.zstd)
+                runtimeOnly(libs.quickjs)
+                implementation(libs.jsoup)
+                implementation(libs.rxjava1)
+                implementation(libs.injekt)
+                implementation(libs.androidx.preference)
+                implementation(libs.androidx.webkit)
+                implementation(libs.kotlinx.coroutines.core)
             }
         }
 
@@ -71,6 +87,9 @@ kotlin {
             dependsOn(getByName("commonJvm"))
             dependsOn(getByName("composeUi"))
             dependencies {
+                // Desktop has no platform XmlPullParser; Android ships its own
+                // (bundling kxml2 there collided with framework classes in R8).
+                implementation(libs.kxml2)
                 implementation(libs.jcefmaven)
                 runtimeOnly(libs.jcef.natives.windows.amd64)
                 implementation(libs.slf4j.api)

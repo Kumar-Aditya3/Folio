@@ -184,13 +184,13 @@ fun SearchScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header: reserved status bar, a field with room for its own text, and chips
+        // Header: the themed status band, a field with room for its own text, and chips
         // that scroll instead of being crushed into the remaining width.
+        com.folio.reader.ui.components.FolioStatusBarBand()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(FolioTheme.colors.surface)
-                .statusBarsPadding()
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp),

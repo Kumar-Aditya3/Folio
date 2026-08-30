@@ -59,6 +59,26 @@ class HtmlRenderer(
         private val CONTAINER_TAGS = setOf(
             "div", "section", "article", "header", "footer", "main", "aside", "body", "html"
         )
+
+        // Patterns are compiled once: renderToBlocks matches selectors for every
+        // node against every CSS rule, and compiling per call blocked the main
+        // thread for seconds on long chapters (ANR).
+        val WHITESPACE = Regex("\\s+")
+        val ID_SELECTOR = Regex("#([\\w-]+)")
+        val CLASS_SELECTOR = Regex("\\.([\\w-]+)")
+        val HIDDEN_DECLARATION = Regex("(?i)(display\\s*:\\s*none|visibility\\s*:\\s*hidden)")
+        val TEXT_INDENT_DECLARATION = Regex("(?i)text-indent\\s*:\\s*(-?[0-9.]+)\\s*(px|pt|em|rem)?")
+        val TEXT_ALIGN_DECLARATION = Regex("text-align\\s*:\\s*(center|justify|right|left|start|end)")
+        val STYLE_BLOCK = Regex("(?is)<style[^>]*>(.*?)</style>")
+        val CSS_RULE = Regex("(?is)([^{}]+)\\{([^{}]*)\\}")
+        val ENTITY_DECIMAL = Regex("&#([0-9]+);")
+        val ENTITY_HEX = Regex("&#x([0-9a-fA-F]+);")
+        val ENTITY_NAMED = Regex("&([a-zA-Z0-9]+);")
+        val ENTITY_STRAY_AMP = Regex("&(?!(amp|lt|gt|quot|apos);)")
+
+        private val declarationPatterns = java.util.concurrent.ConcurrentHashMap<String, Regex>()
+        fun declarationPattern(name: String): Regex =
+            declarationPatterns.getOrPut(name) { Regex("(?i)(?:^|;)\\s*$name\\s*:\\s*([^;]+)") }
     }
 
     private fun decodeHtmlEntities(html: String): String {
@@ -97,16 +117,16 @@ class HtmlRenderer(
             .replace("&Ccedil;", "Ç")
 
         // Handle numeric decimal entities (e.g. &#39; &#8217;)
-        clean = clean.replace(Regex("&#([0-9]+);")) { mr ->
+        clean = clean.replace(ENTITY_DECIMAL) { mr ->
             mr.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: ""
         }
         // Handle numeric hex entities (e.g. &#x27; &#x2019;)
-        clean = clean.replace(Regex("&#x([0-9a-fA-F]+);")) { mr ->
+        clean = clean.replace(ENTITY_HEX) { mr ->
             mr.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: ""
         }
 
         // Replace remaining non-standard HTML entities that break XmlPullParser
-        clean = clean.replace(Regex("&([a-zA-Z0-9]+);")) { mr ->
+        clean = clean.replace(ENTITY_NAMED) { mr ->
             val entity = mr.groupValues[1]
             when (entity) {
                 "amp", "lt", "gt", "quot", "apos" -> mr.value
@@ -115,7 +135,7 @@ class HtmlRenderer(
         }
 
         // Escape raw '&' not part of valid XML entities
-        clean = clean.replace(Regex("&(?!(amp|lt|gt|quot|apos);)")) {
+        clean = clean.replace(ENTITY_STRAY_AMP) {
             "&amp;"
         }
 
@@ -196,7 +216,7 @@ class HtmlRenderer(
                                 if (name in BLOCK_TAGS || name == "li" || name == "dd") parsePublisherAlign(parser) else null
                             val inlineStyle = parseInlineStyle(parser)
                             val classes = parser.getAttributeValue(null, "class")
-                                ?.split(Regex("\\s+"))?.filter { it.isNotBlank() } ?: emptyList()
+                                ?.split(WHITESPACE)?.filter { it.isNotBlank() } ?: emptyList()
                             val id = parser.getAttributeValue(null, "id")
                             val matchingRules = cssRules.filter { matchesSelector(it.selector, name, classes, id) }
                             val selectorStyle = matchingRules.map { it.style }
@@ -208,7 +228,7 @@ class HtmlRenderer(
                                 openTags.add(OpenTag(name, isBlock = false, hidden = true))
                             } else when {
                                 name == "br" -> emit("\n")
-                                name == "hr" -> { emit("\n"); emit("â€”â€”â€”"); emit("\n") }
+                                name == "hr" -> { emit("\n"); emit("———"); emit("\n") }
                                 name == "img" -> {
                                     val src = parser.getAttributeValue(null, "src")
                                     if (!src.isNullOrBlank()) {
@@ -393,7 +413,7 @@ class HtmlRenderer(
             if (it == "right" || it == "end") return TextAlign.End
         }
         parser.getAttributeValue(null, "style")?.lowercase()?.let { style ->
-            val m = Regex("text-align\\s*:\\s*(center|justify|right|left|start|end)").find(style) ?: return@let null
+            val m = TEXT_ALIGN_DECLARATION.find(style) ?: return@let null
             return when (m.groupValues[1]) {
                 "center" -> TextAlign.Center
                 "justify" -> TextAlign.Justify
@@ -410,7 +430,7 @@ class HtmlRenderer(
 
     private fun parseStyleDeclarations(declarations: String?): TextStyle? {
         if (declarations.isNullOrBlank()) return null
-        fun value(name: String) = Regex("(?i)(?:^|;)\\s*$name\\s*:\\s*([^;]+)").find(declarations)
+        fun value(name: String) = declarationPattern(name).find(declarations)
             ?.groupValues?.getOrNull(1)?.trim()?.lowercase()
         var style = TextStyle()
         value("font-style")?.let { if (it == "italic" || it == "oblique") style = style.copy(fontStyle = FontStyle.Italic) }
@@ -457,11 +477,11 @@ class HtmlRenderer(
     }
 
     private fun isHidden(declarations: String?): Boolean =
-        declarations?.let { Regex("(?i)(display\\s*:\\s*none|visibility\\s*:\\s*hidden)").containsMatchIn(it) } == true
+        declarations?.let { HIDDEN_DECLARATION.containsMatchIn(it) } == true
 
     private fun parseTextIndent(declarations: String?): Float? =
         declarations?.let {
-            Regex("(?i)text-indent\\s*:\\s*(-?[0-9.]+)\\s*(px|pt|em|rem)?").find(it)?.let { m ->
+            TEXT_INDENT_DECLARATION.find(it)?.let { m ->
                 val value = m.groupValues[1].toFloatOrNull() ?: return@let null
                 if (m.groupValues[2].lowercase() == "em" || m.groupValues[2].lowercase() == "rem") {
                     value * settings.fontSize
@@ -470,23 +490,23 @@ class HtmlRenderer(
         }
 
     private fun matchesSelector(selector: String, tag: String, classes: List<String>, id: String?): Boolean {
-        val part = selector.trim().split(Regex("\\s+")).lastOrNull() ?: return false
+        val part = selector.trim().split(WHITESPACE).lastOrNull() ?: return false
         val wantedTag = part.substringBefore('.').substringBefore('#').substringBefore('[').lowercase()
         if (wantedTag.isNotBlank() && wantedTag != "*" && wantedTag != tag) return false
-        Regex("#([\\w-]+)").find(part)?.groupValues?.get(1)?.let { if (it != id) return false }
-        val wantedClasses = Regex("\\.([\\w-]+)").findAll(part).map { it.groupValues[1] }.toList()
+        ID_SELECTOR.find(part)?.groupValues?.get(1)?.let { if (it != id) return false }
+        val wantedClasses = CLASS_SELECTOR.findAll(part).map { it.groupValues[1] }.toList()
         return classes.containsAll(wantedClasses)
     }
 
     private fun parseCssRules(html: String): List<CssRule> {
-        val css = Regex("(?is)<style[^>]*>(.*?)</style>").findAll(html)
+        val css = STYLE_BLOCK.findAll(html)
             .joinToString("\n") { it.groupValues[1] }
         if (css.isBlank()) return emptyList()
-        return Regex("(?is)([^{}]+)\\{([^{}]*)\\}").findAll(css).flatMap { match ->
+        return CSS_RULE.findAll(css).flatMap { match ->
             val declarations = match.groupValues[2]
             val style = parseStyleDeclarations(declarations) ?: TextStyle()
-            val hidden = Regex("(?i)(display\\s*:\\s*none|visibility\\s*:\\s*hidden)").containsMatchIn(declarations)
-            val indent = Regex("(?i)text-indent\\s*:\\s*(-?[0-9.]+)\\s*(px|pt|em|rem)?")
+            val hidden = HIDDEN_DECLARATION.containsMatchIn(declarations)
+            val indent = TEXT_INDENT_DECLARATION
                 .find(declarations)?.let { it.groupValues[1].toFloatOrNull() }
             match.groupValues[1].split(',').asSequence()
                 .map { CssRule(it.trim(), style, hidden, indent) }

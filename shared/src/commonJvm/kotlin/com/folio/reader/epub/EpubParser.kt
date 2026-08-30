@@ -5,6 +5,9 @@ import com.folio.reader.platform.FolioPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -41,7 +44,7 @@ class EpubParser(
                 val (coverData, coverMimeType) = extractCover(zipFile, manifest, metadata, opfPath)
 
                 // 5. Read all HTML content
-                val htmlContent = readHtmlContent(zipFile, manifest, spine)
+                val htmlContent = readHtmlContent(zipFile, manifest, spine, opfPath)
 
                 // 6. Normalize chapters
                 val chapters = normalizeChapters(spine, manifest, toc, htmlContent, metadata)
@@ -93,7 +96,7 @@ class EpubParser(
 
     private fun parseOpf(opfData: ByteArray, opfPath: String): Triple<EpubMetadata, List<EpubManifestItem>, List<EpubSpineItem>> {
         val parser = xmlFactory.newPullParser()
-        parser.setInput(ByteArrayInputStream(bomFree(opfData)), "UTF-8")
+        parser.setInput(ByteArrayInputStream(bomFree(opfData)), declaredCharset(opfData) ?: "UTF-8")
 
         var metadata = EpubMetadata(title = "")
         val manifest = mutableListOf<EpubManifestItem>()
@@ -371,7 +374,7 @@ class EpubParser(
         return null to null
     }
 
-    private fun readHtmlContent(zipFile: ZipFile, manifest: List<EpubManifestItem>, spine: List<EpubSpineItem>): Map<String, String> {
+    private fun readHtmlContent(zipFile: ZipFile, manifest: List<EpubManifestItem>, spine: List<EpubSpineItem>, opfPath: String): Map<String, String> {
         val htmlMap = mutableMapOf<String, String>()
         val htmlItems = manifest.filter { it.mediaType == "application/xhtml+xml" || it.href.endsWith(".xhtml") || it.href.endsWith(".html") }
             .associateBy { it.id }
@@ -380,7 +383,8 @@ class EpubParser(
             val manifestItem = htmlItems[spineItem.idref]
             manifestItem?.let { item ->
                 try {
-                    val content = readZipEntry(zipFile, item.href).decodeToString()
+                    val entryPath = findZipEntry(zipFile, opfPath, item.href) ?: return@let
+                    val content = decodeEpubBytes(readZipEntry(zipFile, entryPath))
                     htmlMap[item.href] = content
                 } catch (e: Exception) {
                     // Skip unreadable content
@@ -556,24 +560,74 @@ class EpubParser(
     /**
      * Manifest hrefs are stored already resolved against the OPF base dir, but some
      * call sites still pass raw-relative or previously-resolved values. Try the value
-     * as-is first, then the OPF-resolved variant.
+     * as-is first, then the OPF-resolved variant. Percent-encoded hrefs
+     * ("Chapter%201.xhtml") additionally get a URL-decoded attempt.
      */
     private fun findZipEntry(zipFile: ZipFile, opfPath: String, href: String): String? {
         if (href.isNotBlank() && zipFile.getEntry(href) != null) return href
+        urlDecoded(href)?.let { decoded ->
+            if (zipFile.getEntry(decoded) != null) return decoded
+        }
         if (href.startsWith("/") || href.contains("://")) return null
         val resolved = resolveHref(opfPath, href)
         if (resolved != href && zipFile.getEntry(resolved) != null) return resolved
+        urlDecoded(resolved)?.let { decoded ->
+            if (zipFile.getEntry(decoded) != null) return decoded
+        }
         return null
     }
 
+    private fun urlDecoded(value: String): String? {
+        if (!value.contains('%')) return null
+        val decoded = runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrNull() ?: return null
+        return decoded.takeIf { it != value }
+    }
+
     private fun parseDate(dateStr: String): Instant? {
-        return try {
-            // Try various date formats
-            Instant.parse(dateStr)
-        } catch (e: Exception) {
-            null
+        val trimmed = dateStr.trim()
+        // Strict ISO-8601 instant first, then the common EPUB2 shapes.
+        runCatching { Instant.parse(trimmed) }.getOrNull()?.let { return it }
+        runCatching { LocalDate.parse(trimmed).atStartOfDayIn(TimeZone.UTC) }.getOrNull()?.let { return it }
+        Regex("^([0-9]{4})-([0-9]{2})$").find(trimmed)?.let { m ->
+            runCatching {
+                LocalDate(m.groupValues[1].toInt(), m.groupValues[2].toInt(), 1).atStartOfDayIn(TimeZone.UTC)
+            }.getOrNull()?.let { return it }
         }
+        Regex("^([0-9]{4})$").find(trimmed)?.let { m ->
+            runCatching {
+                LocalDate(m.groupValues[1].toInt(), 1, 1).atStartOfDayIn(TimeZone.UTC)
+            }.getOrNull()?.let { return it }
+        }
+        return null
     }
 }
 
 class EpubParseException(message: String) : Exception(message)
+
+/**
+ * Scans the ASCII-safe prefix of a document for an XML prolog or meta-charset
+ * encoding declaration. EPUB2 books commonly declare ISO-8859-1/Windows-1252;
+ * forcing UTF-8 on those turns accented text into mojibake.
+ */
+internal fun declaredCharset(data: ByteArray): String? {
+    val head = String(data, 0, minOf(data.size, 1024), Charsets.ISO_8859_1)
+    Regex("encoding\\s*=\\s*[\"']([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
+        .find(head)?.let { return it.groupValues[1] }
+    Regex("<meta[^>]+charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
+        .find(head)?.let { return it.groupValues[1] }
+    return null
+}
+
+/** Decodes document bytes with their declared charset, defaulting to UTF-8. */
+internal fun decodeEpubBytes(data: ByteArray): String {
+    val bomFree =
+        if (data.size >= 3 && data[0] == 0xEF.toByte() && data[1] == 0xBB.toByte() && data[2] == 0xBF.toByte()) {
+            data.copyOfRange(3, data.size)
+        } else {
+            data
+        }
+    val charset = declaredCharset(data)?.let { name ->
+        runCatching { java.nio.charset.Charset.forName(name) }.getOrNull()
+    } ?: Charsets.UTF_8
+    return String(bomFree, charset)
+}

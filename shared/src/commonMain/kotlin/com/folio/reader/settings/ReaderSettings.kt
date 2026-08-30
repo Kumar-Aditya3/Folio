@@ -335,6 +335,58 @@ data class Theme(
                 ),
                 progress = 0xFFFB4934.toInt(), divider = 0xFF3C3836.toInt(),
                 isDark = true
+            ),
+            "matcha" to Theme(
+                id = "matcha", name = "Matcha",
+                background = 0xFFF3F7EC.toInt(), surface = 0xFFE9F0DC.toInt(),
+                primaryText = 0xFF2B3524.toInt(), secondaryText = 0xFF5D6B50.toInt(),
+                headingText = 0xFF1F2A18.toInt(), link = 0xFF47773B.toInt(),
+                selection = 0xFFC8DFAF.toInt(), bookmark = 0xFFB0563B.toInt(),
+                highlightColors = listOf(
+                    0xFFA3C76D.toInt(), 0xFF5B9AA8.toInt(), 0xFFD9B84A.toInt(), 0xFFC96F5E.toInt(),
+                    0xFF9B87C9.toInt(), 0xFF7BAF7A.toInt(), 0xFF6FB5C9.toInt(), 0xFFC97BA8.toInt()
+                ),
+                progress = 0xFF47773B.toInt(), divider = 0xFFDCE7CC.toInt(),
+                isDark = false
+            ),
+            "dusk" to Theme(
+                id = "dusk", name = "Dusk",
+                background = 0xFF161325.toInt(), surface = 0xFF1F1B33.toInt(),
+                primaryText = 0xFFDCD7EC.toInt(), secondaryText = 0xFF9A93B8.toInt(),
+                headingText = 0xFFF0EDFA.toInt(), link = 0xFFA79DF0.toInt(),
+                selection = 0xFF332C52.toInt(), bookmark = 0xFFE08BB0.toInt(),
+                highlightColors = listOf(
+                    0xFFE5C06B.toInt(), 0xFF7FB4D9.toInt(), 0xFF8FC98F.toInt(), 0xFFD98C8C.toInt(),
+                    0xFFB39DE0.toInt(), 0xFFD9B84A.toInt(), 0xFF7FC9C9.toInt(), 0xFFD98BB8.toInt()
+                ),
+                progress = 0xFFA79DF0.toInt(), divider = 0xFF2A2442.toInt(),
+                isDark = true
+            ),
+            "espresso" to Theme(
+                id = "espresso", name = "Espresso",
+                background = 0xFF181310.toInt(), surface = 0xFF221B16.toInt(),
+                primaryText = 0xFFE9DFD2.toInt(), secondaryText = 0xFFA5978A.toInt(),
+                headingText = 0xFFF6EEE2.toInt(), link = 0xFFD2A878.toInt(),
+                selection = 0xFF3B2E22.toInt(), bookmark = 0xFFC96F5E.toInt(),
+                highlightColors = listOf(
+                    0xFFD9B84A.toInt(), 0xFF8FB4C9.toInt(), 0xFFA8C98F.toInt(), 0xFFD98C7B.toInt(),
+                    0xFFB89BC9.toInt(), 0xFFD9A86B.toInt(), 0xFF8FC9BF.toInt(), 0xFFC98FA8.toInt()
+                ),
+                progress = 0xFFD2A878.toInt(), divider = 0xFF2E261E.toInt(),
+                isDark = true
+            ),
+            "arctic" to Theme(
+                id = "arctic", name = "Arctic",
+                background = 0xFFF2F8FB.toInt(), surface = 0xFFE7F1F6.toInt(),
+                primaryText = 0xFF22313A.toInt(), secondaryText = 0xFF52666F.toInt(),
+                headingText = 0xFF14232B.toInt(), link = 0xFF2277A8.toInt(),
+                selection = 0xFFBBDCEA.toInt(), bookmark = 0xFFB0563B.toInt(),
+                highlightColors = listOf(
+                    0xFFE0C34E.toInt(), 0xFF4E93C0.toInt(), 0xFF63B088.toInt(), 0xFFD07A6B.toInt(),
+                    0xFF9C8CC9.toInt(), 0xFFD9A84E.toInt(), 0xFF6BB5CC.toInt(), 0xFFCC7BA3.toInt()
+                ),
+                progress = 0xFF2277A8.toInt(), divider = 0xFFD8E7EE.toInt(),
+                isDark = false
             )
         )
 
@@ -353,110 +405,3 @@ data class CustomFont(
     val addedAt: Instant = Clock.System.now()
 )
 
-@Serializable
-data class GlobalSettings(
-    val themeId: String = "paper",
-    val fontFamily: String = "Literata",
-    val fontSize: Float = 18f,
-    val lineHeight: Float = 1.5f,
-    val layoutMode: LayoutMode = LayoutMode.CONTINUOUS,
-    val formattingMode: FormattingMode = FormattingMode.HYBRID,
-    val autoDownloadBooks: Boolean = false,
-    val syncOnWifiOnly: Boolean = true,
-    val storageStrategy: StorageStrategy = StorageStrategy.WIFI_EPUB,
-    val keepScreenOn: Boolean = false,
-    val screenBehavior: ScreenBehavior = ScreenBehavior.SYSTEM,
-    val gestures: GestureSettings = GestureSettings(),
-    val keyboardShortcuts: KeyboardShortcuts = KeyboardShortcuts(),
-    val accessibility: AccessibilitySettings = AccessibilitySettings()
-)
-
-@Serializable
-data class GestureSettings(
-    val tapCenter: TapAction = TapAction.TOGGLE_CONTROLS,
-    val tapLeft: TapAction = TapAction.PREVIOUS_PAGE,
-    val tapRight: TapAction = TapAction.NEXT_PAGE,
-    val doubleTap: TapAction = TapAction.ZOOM,
-    val longPress: TapAction = TapAction.SELECT_TEXT,
-    val swipeHorizontal: SwipeAction = SwipeAction.PAGE_NAVIGATION,
-    val swipeVertical: SwipeAction = SwipeAction.SCROLL,
-    val volumeKeys: VolumeKeyAction = VolumeKeyAction.PAGE_NAVIGATION
-)
-
-enum class TapAction {
-    TOGGLE_CONTROLS,
-    PREVIOUS_PAGE,
-    NEXT_PAGE,
-    ZOOM,
-    SELECT_TEXT,
-    BOOKMARK,
-    HIGHLIGHT,
-    SEARCH,
-    TOC,
-    NONE
-}
-
-enum class SwipeAction {
-    PAGE_NAVIGATION,
-    SCROLL,
-    CHAPTER_NAVIGATION,
-    NONE
-}
-
-enum class VolumeKeyAction {
-    PAGE_NAVIGATION,
-    VOLUME,
-    NONE
-}
-
-@Serializable
-data class KeyboardShortcuts(
-    val nextPage: String = "Space",
-    val prevPage: String = "Shift+Space",
-    val nextChapter: String = "N",
-    val prevChapter: String = "P",
-    val openToc: String = "T",
-    val search: String = "Ctrl+F",
-    val toggleSidebar: String = "B",
-    val bookmark: String = "Ctrl+B",
-    val highlight: String = "Ctrl+H",
-    val increaseFont: String = "Ctrl+=",
-    val decreaseFont: String = "Ctrl+-",
-    val openSettings: String = "Ctrl+,",
-    val focusMode: String = "F11",
-    val toggleTheme: String = "Ctrl+T"
-)
-
-enum class ScreenBehavior {
-    SYSTEM,
-    KEEP_AWAKE_READING,
-    KEEP_AWAKE_ACTIVE
-}
-
-enum class StorageStrategy {
-    METADATA_ONLY,
-    WIFI_EPUB,
-    ALWAYS_EPUB
-}
-
-@Serializable
-data class AccessibilitySettings(
-    val highContrast: Boolean = false,
-    val largeText: Boolean = false,
-    val reducedMotion: Boolean = false,
-    val increasedLineSpacing: Boolean = false,
-    val increasedLetterSpacing: Boolean = false,
-    val fontOverride: String? = null,
-    val systemFontScale: Float = 1.0f
-)
-
-@Serializable
-data class AppSettings(
-    val global: GlobalSettings = GlobalSettings(),
-    val bookSettings: Map<String, BookReaderSettings> = emptyMap(),
-    val deviceId: String = "unset-device",
-    val deviceName: String = "Unknown Device",
-    val platform: String = "unknown",
-    val appVersion: String = "1.0.0",
-    val lastSyncAt: Instant? = null
-)

@@ -638,8 +638,9 @@ private object JcefRuntime {
             // reader chrome reserves its own space instead (see ReaderScreen).
             getCefSettings().windowless_rendering_enabled = false
             // Chapter pages are file:// documents that must reach other file://
-            // resources (images, cached CSS, bundled fonts).
-            addJcefArgs("--disable-gpu", "--allow-file-access-from-files", "--disable-web-security", "--allow-file-access")
+            // resources (images, cached CSS, bundled fonts). Scripts are stripped
+            // by ChapterSanitizer before load, so web security stays on.
+            addJcefArgs("--disable-gpu", "--allow-file-access-from-files")
         }.build().also { instance = it }
     }
 }
@@ -824,11 +825,12 @@ private fun readerStyleCss(settings: ReaderSettings): String {
 }
 
 private fun injectReaderCss(html: String, settings: ReaderSettings): String {
+    val safeHtml = com.folio.reader.epub.ChapterSanitizer.sanitize(html)
     val fontFaces = fontFaceCss(settings)
     val css = "<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
             (if (fontFaces.isNotEmpty()) "<style id=\"folio-fonts\">$fontFaces</style>" else "") +
             "<style id=\"folio-reader-style\">" + readerStyleCss(settings) + "</style>"
-    return if (html.contains("</head>", true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
+    return if (safeHtml.contains("</head>", true)) safeHtml.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$safeHtml"
 }
 
 /**

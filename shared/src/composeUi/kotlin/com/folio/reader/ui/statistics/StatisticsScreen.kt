@@ -20,18 +20,24 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.HeatmapCell
+import com.folio.reader.ui.components.StatCard
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -49,9 +55,12 @@ import kotlinx.datetime.LocalDate
 fun StatisticsScreen(
     viewModel: StatisticsViewModel,
     onBackPress: () -> Unit,
-    onBookClick: (String) -> Unit
+    onBookClick: (String) -> Unit,
+    mangaStatsRepo: com.folio.reader.manga.MangaStatisticsRepository? = null,
+    onMangaClick: (String) -> Unit = {},
 ) {
     val stats by viewModel.state.collectAsState(initial = StatisticsUiState())
+    var section by remember { mutableStateOf(0) } // 0 books, 1 manga
 
     Column(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
         FolioTopBar(
@@ -62,6 +71,22 @@ fun StatisticsScreen(
                 }
             }
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = FolioTokens.space3)
+                .padding(bottom = FolioTokens.space1),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FolioChip(selected = section == 0, onClick = { section = 0 }, label = "Books")
+            FolioChip(selected = section == 1, onClick = { section = 1 }, label = "Manga")
+        }
+
+        if (section == 1 && mangaStatsRepo != null) {
+            MangaStatsContent(mangaStatsRepo, onMangaClick)
+            return@Column
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -378,3 +403,135 @@ private fun plural(count: Int, word: String): String =
     "$count $word" + if (count == 1) "" else "s"
 
 private fun LocalDate.shortLabel(): String = "$dayOfMonth.$monthNumber"
+
+@Composable
+private fun MangaStatsContent(
+    repo: com.folio.reader.manga.MangaStatisticsRepository,
+    onMangaClick: (String) -> Unit,
+) {
+    var stats by remember { mutableStateOf<com.folio.reader.manga.MangaStatistics?>(null) }
+    LaunchedEffect(repo) { stats = repo.getStatistics() }
+
+    val s = stats
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = FolioTokens.space3, end = FolioTokens.space3,
+            top = FolioTokens.space3, bottom = FolioTokens.space4,
+        ),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
+    ) {
+        if (s == null || !s.hasData) {
+            item {
+                Text(
+                    "No manga activity yet. Read a chapter to start tracking.",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = FolioTokens.space4),
+                )
+            }
+        } else {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                    StatCard("Reading time", formatMinutes(s.totalReadMinutes), modifier = Modifier.weight(1f))
+                    StatCard("Chapters read", s.readChapters.toString(), modifier = Modifier.weight(1f))
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                    StatCard("Downloaded", s.downloadedChapters.toString(), modifier = Modifier.weight(1f))
+                    StatCard("Completed", s.completedCount.toString(), modifier = Modifier.weight(1f))
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                    StatCard("Bookmarked", s.bookmarkedChapters.toString(), modifier = Modifier.weight(1f))
+                    StatCard("Notes", s.notesCount.toString(), modifier = Modifier.weight(1f))
+                }
+            }
+            item { MangaWeekChart(s) }
+            if (s.topManga.isNotEmpty()) {
+                item { MangaTopCard(s.topManga, onMangaClick) }
+            }
+        }
+        item { Spacer(Modifier.height(FolioTokens.space1)) }
+    }
+}
+
+private fun formatMinutes(min: Long): String = when {
+    min < 60 -> "${min}m"
+    else -> "${min / 60}h ${min % 60}m"
+}
+
+@Composable
+private fun MangaWeekChart(s: com.folio.reader.manga.MangaStatistics) {
+    FolioSectionCard(title = "Chapters read this week") {
+        val peak = (s.weekReadChapters.maxOrNull() ?: 0).coerceAtLeast(1)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
+        ) {
+            s.weekReadChapters.forEachIndexed { i, v ->
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height((64 * v.toFloat() / peak).dp.coerceAtLeast(if (v > 0) 4.dp else 1.dp))
+                                .background(
+                                    FolioTheme.colors.primary.copy(alpha = if (v > 0) 0.9f else 0.15f),
+                                    RoundedCornerShape(4.dp),
+                                )
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        s.weekLabels[i],
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MangaTopCard(
+    top: List<com.folio.reader.manga.MangaTopEntry>,
+    onMangaClick: (String) -> Unit,
+) {
+    FolioSectionCard(title = "Most read") {
+        top.forEach { entry ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onMangaClick(entry.mangaId) }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    entry.title,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${entry.readChapters} ch",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                    color = FolioTheme.colors.primary,
+                )
+            }
+        }
+    }
+}

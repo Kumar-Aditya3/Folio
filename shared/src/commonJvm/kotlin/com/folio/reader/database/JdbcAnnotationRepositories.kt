@@ -18,12 +18,13 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
     override suspend fun insertTag(tag: Tag, emitSyncEvent: Boolean): Unit = withContext(Dispatchers.IO) {
         db.withConnection { conn ->
             conn.prepareStatement(
-                "INSERT OR REPLACE INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)"
+                "INSERT OR REPLACE INTO tags (id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
             ).use { stmt ->
                 stmt.setString(1, tag.id)
                 stmt.setString(2, tag.name)
                 if (tag.color == null) stmt.setNull(3, java.sql.Types.INTEGER) else stmt.setInt(3, tag.color)
                 stmt.setLong(4, tag.createdAt.toEpochMilliseconds())
+                stmt.setLong(5, tag.updatedAt.toEpochMilliseconds())
                 stmt.executeUpdate()
             }
         }
@@ -50,8 +51,11 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
     private fun mapTag(rs: java.sql.ResultSet) = Tag(
         id = rs.getString("id"),
         name = rs.getString("name"),
-        color = rs.getObject("color") as Int?,
-        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at"))
+        color = (rs.getObject("color") as? Number)?.toInt(),
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        // Legacy rows carry 0 until first edited; treat that as "as old as creation".
+        updatedAt = rs.getLong("updated_at").takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+            ?: Instant.fromEpochMilliseconds(rs.getLong("created_at"))
     )
 
     override suspend fun getAllTags(): Flow<List<Tag>> = flow {

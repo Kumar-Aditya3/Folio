@@ -261,6 +261,10 @@ actual fun HtmlContentSurface(
                 }
             }
         },
+        onRelease = { webView ->
+            // Compose has already detached the view; release the engine underneath.
+            runCatching { webView.destroy() }
+        },
         update = { webView ->
             webView.isEnabled = enabled
             val contentKey = "$chapterHref:${content.hashCode()}"
@@ -462,7 +466,8 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
     return segments.joinToString("/")
 }
 
-private fun injectReaderCss(html: String, settings: ReaderSettings): String {
+private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
+    val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val align = when (settings.alignment) {
         com.folio.reader.settings.TextAlignment.CENTER -> "center"

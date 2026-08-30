@@ -85,6 +85,10 @@ graphify-out/
 bin/
 *.ps1
 screen_*.png
+phone_*.png
+desktop_*.png
+folio_*_launch.png
+review-findings.md
 current_phone.png
 crash_log*.txt
 logcat_output.txt
@@ -97,3 +101,7 @@ ui_*.txt
 ui_*.xml
 ui_after.txt
 after_import_fixed.txt
+
+# Upstream Mihon checkout used only as vendoring reference; the runtime itself
+# lives under shared/src/androidMain/kotlin/{eu,mihon,tachiyomi,logcat}.
+mihon-main/

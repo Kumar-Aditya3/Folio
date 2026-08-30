@@ -33,15 +33,8 @@ import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import kotlinx.datetime.Clock
 
-enum class LayoutMode {
-        CONTINUOUS,
-        PAGINATED,
-        TWO_COLUMN,
-        FOCUS
-    }
-
-    /** Small stateful guard shared by browser and Compose scroll surfaces. */
-    internal class ChapterEndGuard {
+/** Small stateful guard shared by browser and Compose scroll surfaces. */
+internal class ChapterEndGuard {
         private var handledChapter: String? = null
 
         fun accept(chapterId: String): Boolean {
@@ -118,6 +111,7 @@ class ReaderViewModel(
 
     private var currentBookId: String? = null
     private var deviceId: String = ""
+    private var closeStarted = false
 
     /**
      * Engagement clock. [activeSpanMs] grows only in the intervals between reading
@@ -149,6 +143,7 @@ class ReaderViewModel(
     fun openBook(bookId: String, deviceId: String, initialSettings: ReaderSettings = ReaderSettings(), startChapterOverride: Int? = null) {
         this.deviceId = deviceId
         currentBookId = bookId
+        closeStarted = false
         _settings.value = initialSettings
 
         viewModelScope.launch {
@@ -645,6 +640,13 @@ class ReaderViewModel(
 
     /** Ends the active session with its measured reading time, then syncs the position. */
     fun closeBook(onDone: () -> Unit = {}) {
+        // Back navigation and the composition's dispose both call closeBook; only
+        // the first may end the session and trigger the close-time sync.
+        if (closeStarted) {
+            onDone()
+            return
+        }
+        closeStarted = true
         val session = _session.value
         val position = _position.value
         val bookId = currentBookId

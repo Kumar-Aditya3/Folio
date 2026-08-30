@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -103,7 +104,6 @@ import com.folio.reader.model.locatorFraction
 import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
-import com.folio.reader.ui.render.rememberHtmlRenderer
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -528,14 +528,15 @@ fun ReaderScreen(
             enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it }
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .height(56.dp),
-                color = FolioTheme.colors.surface.copy(alpha = 0.92f),
-                shadowElevation = 4.dp
-            ) {
+            Column(Modifier.fillMaxWidth()) {
+                com.folio.reader.ui.components.FolioStatusBarBand()
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    color = FolioTheme.colors.surface.copy(alpha = 0.92f),
+                    shadowElevation = 4.dp
+                ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -626,6 +627,7 @@ fun ReaderScreen(
                             )
                         }
                     }
+                }
                 }
             }
         }
@@ -817,397 +819,6 @@ fun ReaderScreen(
         }
     }
 }
-
-@Composable
-private fun RenderHtmlBlocks(
-    blocks: List<com.folio.reader.ui.render.HtmlBlock>,
-    settings: com.folio.reader.settings.ReaderSettings,
-    textColor: androidx.compose.ui.graphics.Color,
-    chapterHref: String,
-    onTap: () -> Unit,
-    onLinkClick: ((String) -> Unit)?,
-    onResolveImage: suspend (chapterHref: String, src: String) -> String?,
-    onTextLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit,
-    highlights: List<Highlight> = emptyList(),
-    modifier: Modifier = Modifier
-) {
-    val selColors = androidx.compose.foundation.text.selection.TextSelectionColors(
-        handleColor = FolioTheme.colors.primary,
-        backgroundColor = FolioTheme.colors.primary.copy(alpha = 0.25f)
-    )
-    androidx.compose.runtime.CompositionLocalProvider(
-        androidx.compose.foundation.text.selection.LocalTextSelectionColors provides selColors
-    ) {
-        androidx.compose.foundation.text.selection.SelectionContainer {
-            Column(
-                modifier = modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.Start,
-                verticalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                blocks.forEach { block ->
-                    when (block) {
-                        is com.folio.reader.ui.render.HtmlBlock.Text -> {
-                            val fontFamily = com.folio.reader.ui.components.systemFontFamily(settings.fontFamily)
-                            // Use Text (not ClickableText) to preserve paragraph styles from AnnotatedString
-                            // ClickableText is deprecated and doesn't properly handle paragraph styles
-                            val annotatedText = block.annotated.withHighlightBackgrounds(highlights)
-                            var layoutResult by remember(annotatedText) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
-                            androidx.compose.material3.Text(
-                                text = annotatedText,
-                                style = TextStyle(
-                                    fontFamily = fontFamily,
-                                    fontSize = settings.fontSize.sp,
-                                    lineHeight = (settings.fontSize * settings.lineHeight).sp,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight(settings.fontWeight),
-                                    color = textColor
-                                ),
-                                onTextLayout = {
-                                    layoutResult = it
-                                    onTextLayout(it)
-                                },
-                                modifier = Modifier
-                                    .readerWidth(settings.textWidth)
-                                    .fillMaxWidth()
-                                    .padding(vertical = (settings.fontSize * 0.35f * (settings.paragraphSpacing - 1f).coerceAtLeast(0f)).dp)
-                                    .pointerInput(annotatedText) {
-                                        detectTapGestures { pos ->
-                                            layoutResult?.let { layout ->
-                                                val offset = layout.getOffsetForPosition(pos)
-                                                annotatedText.getStringAnnotations(tag = "url", start = offset, end = offset)
-                                                    .firstOrNull()?.let { ann -> onLinkClick?.invoke(ann.item) } ?: onTap()
-                                            } ?: onTap()
-                                        }
-                                    }
-                            )
-                        }
-                        is com.folio.reader.ui.render.HtmlBlock.Image -> com.folio.reader.ui.components.EpubImage(
-                            src = block.src,
-                            resolve = { src -> onResolveImage(chapterHref, src) },
-                            modifier = Modifier
-                                .readerWidth(settings.textWidth)
-                                .fillMaxWidth()
-                                .padding(vertical = (settings.fontSize * 0.35f * (settings.paragraphSpacing - 1f).coerceAtLeast(0f)).dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PaginatedChapterView(
-    blocks: List<com.folio.reader.ui.render.HtmlBlock>,
-    chapter: Chapter,
-    settings: com.folio.reader.settings.ReaderSettings,
-    textColor: androidx.compose.ui.graphics.Color,
-    enabled: Boolean,
-    onTap: () -> Unit,
-    onScrollFraction: (Float) -> Unit,
-    onLinkClick: ((String) -> Unit)?,
-    onResolveImage: suspend (chapterHref: String, src: String) -> String?,
-    onTextLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit,
-    highlights: List<Highlight>,
-    hasPrevChapter: Boolean,
-    hasNextChapter: Boolean,
-    onPrevChapter: (() -> Unit)?,
-    onNextChapter: (() -> Unit)?,
-    onPageChange: (currentPage: Int, totalPages: Int) -> Unit
-) {
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize().padding(
-            horizontal = settings.margins.left.dp,
-            vertical = settings.margins.top.dp
-        )
-    ) {
-        // Reflow from the available page dimensions and typography, not a fixed
-        // character/block count. Pages are clipped columns, never scrolling documents.
-        val textMeasurer = rememberTextMeasurer()
-        val density = LocalDensity.current
-        val pageChunks = remember(blocks, maxWidth, maxHeight, settings.fontSize, settings.lineHeight, settings.fontFamily) {
-            val pageHeight = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
-            val width = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
-            val pages = mutableListOf<List<com.folio.reader.ui.render.HtmlBlock>>()
-            var current = mutableListOf<com.folio.reader.ui.render.HtmlBlock>()
-            var usedHeight = 0
-            for (block in blocks) {
-                val blockHeight = when (block) {
-                    is com.folio.reader.ui.render.HtmlBlock.Text -> textMeasurer.measure(
-                        text = block.annotated,
-                        style = TextStyle(fontSize = settings.fontSize.sp, lineHeight = (settings.fontSize * settings.lineHeight).sp),
-                        constraints = Constraints(maxWidth = width)
-                    ).size.height.coerceAtLeast(1)
-                    is com.folio.reader.ui.render.HtmlBlock.Image -> (pageHeight / 3).coerceAtLeast(with(density) { settings.fontSize.sp.roundToPx() } * 3)
-                }
-                if (current.isNotEmpty() && usedHeight + blockHeight > pageHeight) {
-                    pages.add(current)
-                    current = mutableListOf()
-                    usedHeight = 0
-                }
-                current.add(block)
-                usedHeight += blockHeight
-            }
-            if (current.isNotEmpty()) pages.add(current)
-            pages.ifEmpty { listOf(emptyList()) }
-        }
-        val pagerState = rememberPagerState(pageCount = { pageChunks.size })
-        val scope = rememberCoroutineScope()
-
-        LaunchedEffect(pagerState.currentPage, pageChunks.size) {
-            val page = (pagerState.currentPage + 1).coerceIn(1, pageChunks.size)
-            onPageChange(page, pageChunks.size)
-            onScrollFraction(page.toFloat() / pageChunks.size.toFloat())
-        }
-
-        Column(modifier = Modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.weight(1f).fillMaxWidth()
-        ) { pageIndex ->
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.Start
-            ) {
-                RenderHtmlBlocks(
-                    blocks = pageChunks.getOrElse(pageIndex) { emptyList() },
-                    settings = settings,
-                    textColor = textColor,
-                    chapterHref = chapter.href,
-                    onTap = onTap,
-                    onLinkClick = onLinkClick,
-                    onResolveImage = onResolveImage,
-                    onTextLayout = onTextLayout,
-                    highlights = highlights
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        if (pagerState.currentPage > 0) {
-                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                        } else if (hasPrevChapter && onPrevChapter != null) {
-                            onPrevChapter()
-                        }
-                    }
-                ) {
-                    Text("←", style = TextStyle(fontSize = 18.sp, color = textColor))
-                }
-
-                Text(
-                    text = "Page ${pagerState.currentPage + 1} of ${pageChunks.size}",
-                    style = FolioTheme.typography.bodySmall,
-                    color = textColor.copy(alpha = 0.7f)
-                )
-
-                IconButton(
-                    onClick = {
-                        if (pagerState.currentPage < pageChunks.size - 1) {
-                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                        } else if (hasNextChapter && onNextChapter != null) {
-                            onNextChapter()
-                        }
-                    }
-                ) {
-                    Text("→", style = TextStyle(fontSize = 18.sp, color = textColor))
-                }
-            }
-
-            if (pageChunks.size > 1) {
-                Slider(
-                    value = pagerState.currentPage.toFloat(),
-                    valueRange = 0f..(pageChunks.size - 1).toFloat(),
-                    steps = (pageChunks.size - 2).coerceAtLeast(0),
-                    onValueChange = { value ->
-                        scope.launch { pagerState.scrollToPage(value.toInt()) }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                )
-            }
-        }
-    }
-}
-}
-
-@Composable
-private fun TwoColumnChapterView(
-    blocks: List<com.folio.reader.ui.render.HtmlBlock>,
-    chapter: Chapter,
-    settings: com.folio.reader.settings.ReaderSettings,
-    textColor: androidx.compose.ui.graphics.Color,
-    scrollState: androidx.compose.foundation.ScrollState,
-    enabled: Boolean,
-    onTap: () -> Unit,
-    onLinkClick: ((String) -> Unit)?,
-    onResolveImage: suspend (chapterHref: String, src: String) -> String?,
-    onTextLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit,
-    highlights: List<Highlight>,
-    hasPrevChapter: Boolean,
-    hasNextChapter: Boolean,
-    onPrevChapter: (() -> Unit)?,
-    onNextChapter: (() -> Unit)?
-) {
-    val leftBlocks = remember(blocks) { blocks.take((blocks.size + 1) / 2) }
-    val rightBlocks = remember(blocks) { blocks.drop((blocks.size + 1) / 2) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState, enabled = enabled)
-            .padding(horizontal = settings.margins.left.dp, vertical = settings.margins.top.dp),
-        horizontalAlignment = Alignment.Start
-    ) {
-        if (settings.showChapterTitle) {
-            Text(
-                text = chapter.title,
-                style = FolioTheme.typography.headlineMedium,
-                textAlign = TextAlign.Center,
-                color = textColor,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-            horizontalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                RenderHtmlBlocks(
-                    blocks = leftBlocks,
-                    settings = settings,
-                    textColor = textColor,
-                    chapterHref = chapter.href,
-                    onTap = onTap,
-                    onLinkClick = onLinkClick,
-                    onResolveImage = onResolveImage,
-                    onTextLayout = onTextLayout,
-                    highlights = highlights,
-                    modifier = Modifier.readerWidth(settings.textWidth)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(textColor.copy(alpha = 0.15f))
-            )
-
-            Column(modifier = Modifier.weight(1f)) {
-                RenderHtmlBlocks(
-                    blocks = rightBlocks,
-                    settings = settings,
-                    textColor = textColor,
-                    chapterHref = chapter.href,
-                    onTap = onTap,
-                    onLinkClick = onLinkClick,
-                    onResolveImage = onResolveImage,
-                    onTextLayout = onTextLayout,
-                    highlights = highlights,
-                    modifier = Modifier.readerWidth(settings.textWidth)
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 32.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (hasPrevChapter && onPrevChapter != null) {
-                androidx.compose.material3.TextButton(onClick = onPrevChapter) {
-                    Text("← Previous")
-                }
-            } else {
-                Spacer(Modifier.width(1.dp))
-            }
-            if (hasNextChapter && onNextChapter != null) {
-                androidx.compose.material3.Button(onClick = onNextChapter) {
-                    Text("Next →")
-                }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun ContinuousChapterView(
-    blocks: List<com.folio.reader.ui.render.HtmlBlock>,
-    chapter: Chapter,
-    settings: com.folio.reader.settings.ReaderSettings,
-    textColor: androidx.compose.ui.graphics.Color,
-    scrollState: androidx.compose.foundation.ScrollState,
-    enabled: Boolean,
-    html: String,
-    layoutResult: androidx.compose.ui.text.TextLayoutResult?,
-    onTap: () -> Unit,
-    onLinkClick: ((String) -> Unit)?,
-    onResolveImage: suspend (chapterHref: String, src: String) -> String?,
-    onLongPress: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
-    onTextLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit,
-    highlights: List<Highlight>,
-    hasPrevChapter: Boolean,
-    hasNextChapter: Boolean,
-    onPrevChapter: (() -> Unit)?,
-    onNextChapter: (() -> Unit)?
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState, enabled = enabled)
-            .pointerInput(enabled, html) {
-                if (!enabled) return@pointerInput
-                detectTapGestures(onLongPress = { offset ->
-                    val layout = layoutResult ?: return@detectTapGestures
-                    val text = layout.layoutInput.text
-                    if (text.isEmpty()) return@detectTapGestures
-                    val charOffset = layout.getOffsetForPosition(offset)
-                        .coerceIn(0, text.length - 1)
-                    val paragraphIndex = text.take(charOffset).count { it == '\n' }
-                    val paraStart = text.lastIndexOf('\n', charOffset) + 1
-                    val paraEnd = text.indexOf('\n', charOffset)
-                        .let { if (it == -1) text.length else it }
-                    val snippet = text.substring(paraStart, paraEnd)
-                        .trim()
-                        .take(160)
-                    if (snippet.isNotBlank()) {
-                        onLongPress?.invoke(paragraphIndex, snippet)
-                    }
-                })
-            }
-            .padding(horizontal = settings.margins.left.dp, vertical = settings.margins.top.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        RenderHtmlBlocks(
-            blocks = blocks,
-            settings = settings,
-            textColor = textColor,
-            chapterHref = chapter.href,
-            onTap = onTap,
-            onLinkClick = onLinkClick,
-            onResolveImage = onResolveImage,
-            onTextLayout = onTextLayout,
-            highlights = highlights,
-            modifier = Modifier.readerWidth(settings.textWidth)
-        )
-        // Removed chapter navigation buttons for seamless flow
-        Spacer(Modifier.height(64.dp)) // Extra space at chapter end for smooth transition
-    }
-}
-
 @Composable
 fun ChapterContent(
     chapter: Chapter,
@@ -1239,7 +850,6 @@ fun ChapterContent(
     onChapterEnd: () -> Unit = {},
     onChapterStart: () -> Unit = {}
 ) {
-    val renderer = rememberHtmlRenderer(settings, onLinkClick)
     val scrollState = rememberScrollState()
     val readerTheme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val bgColor = Color(readerTheme.background)
@@ -1395,16 +1005,22 @@ fun ChapterContent(
                         .height(600.dp)
                 )
                 if (html.isNotBlank() && html.length > 40) {
-                    // Cover chapter also carries real text — parse and render it properly
-                    val coverBlocks = remember(html, settings) {
-                        runCatching {
-                            val renderer = com.folio.reader.ui.render.HtmlRenderer(
-                                settings = settings,
-                                linkColor = Color(0xFF1A73E8)
-                            )
-                            renderer.renderToBlocks(html, TextStyle(fontSize = settings.fontSize.sp))
-                        }.getOrElse {
-                            emptyList()
+                    // Cover chapter also carries real text — parse and render it properly.
+                    // Rendering is heavy; keep it off the composition/main thread.
+                    var coverBlocks by remember(html, settings) {
+                        mutableStateOf<List<com.folio.reader.ui.render.HtmlBlock>>(emptyList())
+                    }
+                    LaunchedEffect(html, settings) {
+                        coverBlocks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            runCatching {
+                                val renderer = com.folio.reader.ui.render.HtmlRenderer(
+                                    settings = settings,
+                                    linkColor = Color(0xFF1A73E8)
+                                )
+                                renderer.renderToBlocks(html, TextStyle(fontSize = settings.fontSize.sp))
+                            }.getOrElse {
+                                emptyList()
+                            }
                         }
                     }
 
@@ -1924,8 +1540,7 @@ fun TOCSidebar(
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
 
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                items(chapters, key = { "${it.bookId}:${it.id}" }) { chapter ->
-                    val index = chapters.indexOf(chapter)
+                itemsIndexed(chapters, key = { _, chapter -> "${chapter.bookId}:${chapter.id}" }) { index, chapter ->
                     val isCurrent = index == currentIndex
                     Row(
                         modifier = Modifier
@@ -2193,37 +1808,3 @@ private fun AnnotationRow(
     }
 }
 
-private fun androidx.compose.ui.text.AnnotatedString.withHighlightBackgrounds(
-    highlights: List<Highlight>
-): androidx.compose.ui.text.AnnotatedString {
-    if (highlights.isEmpty()) return this
-
-    val builder = androidx.compose.ui.text.AnnotatedString.Builder().apply { append(this@withHighlightBackgrounds) }
-    highlights.forEach { highlight ->
-        val selectedText = highlight.selectedText
-        if (selectedText.isBlank()) return@forEach
-
-        var startIndex = text.indexOf(selectedText)
-        while (startIndex >= 0) {
-            builder.addStyle(
-                androidx.compose.ui.text.SpanStyle(
-                    background = Color(highlight.color.argb).copy(alpha = 0.35f)
-                ),
-                start = startIndex,
-                end = startIndex + selectedText.length
-            )
-            startIndex = text.indexOf(selectedText, startIndex + selectedText.length)
-        }
-    }
-    return builder.toAnnotatedString()
-}
-
-private fun Modifier.readerWidth(textWidth: com.folio.reader.settings.TextWidth): Modifier {
-    return when (textWidth) {
-        com.folio.reader.settings.TextWidth.NARROW -> this.widthIn(max = 560.dp)
-        com.folio.reader.settings.TextWidth.MEDIUM -> this.widthIn(max = 720.dp)
-        com.folio.reader.settings.TextWidth.WIDE -> this.widthIn(max = 960.dp)
-        com.folio.reader.settings.TextWidth.FULL -> this
-        com.folio.reader.settings.TextWidth.CUSTOM -> this.widthIn(max = 1200.dp)
-    }
-}

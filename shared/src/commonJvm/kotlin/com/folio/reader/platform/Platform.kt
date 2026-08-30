@@ -1,6 +1,5 @@
 package com.folio.reader.platform
 
-import com.folio.reader.settings.AppSettings
 import java.io.File
 import java.security.MessageDigest
 
@@ -31,6 +30,16 @@ class MessageDigestFileHasher : FileHasher {
 
 interface FolioFileSystem {
     val libraryBooksDir: File
+
+    /** Root for the built-in local manga source (CBZ/ZIP/folder series). */
+    val mangaLocalDir: File
+
+    /** Cache directory for downloaded manga covers. */
+    val mangaCoversDir: File
+
+    /** Directory where downloaded manga chapters are stored. */
+    val mangaDownloadsDir: File
+
     fun getBookDir(bookId: String): File
     fun getBookEpubPath(bookId: String): String
     fun getBookCoverPath(bookId: String): String
@@ -50,13 +59,7 @@ interface FolioFileSystem {
         dir.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
 }
 
-interface SettingsStore {
-    suspend fun getAppSettings(): AppSettings
-    suspend fun saveAppSettings(settings: AppSettings)
-}
-
 interface FolioPlatform {
     val fileSystem: FolioFileSystem
     val hasher: FileHasher
-    val settingsStore: SettingsStore
 }

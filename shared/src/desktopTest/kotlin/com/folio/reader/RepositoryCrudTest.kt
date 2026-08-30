@@ -59,6 +59,7 @@ class RepositoryCrudTest {
     private lateinit var collections: JdbcCollectionRepository
     private lateinit var seriesRepo: JdbcSeriesRepository
     private lateinit var positions: JdbcReadingPositionRepository
+    private lateinit var sessions: com.folio.reader.database.JdbcReadingSessionRepository
     private lateinit var settingsRepo: JdbcSettingsRepository
     private lateinit var syncQueue: JdbcSyncQueueRepository
     private lateinit var devices: JdbcDeviceRepository
@@ -75,6 +76,7 @@ class RepositoryCrudTest {
         collections = JdbcCollectionRepository(database)
         seriesRepo = JdbcSeriesRepository(database)
         positions = JdbcReadingPositionRepository(database)
+        sessions = com.folio.reader.database.JdbcReadingSessionRepository(database)
         settingsRepo = JdbcSettingsRepository(database)
         syncQueue = JdbcSyncQueueRepository(database)
         devices = JdbcDeviceRepository(database)
@@ -321,5 +323,65 @@ class RepositoryCrudTest {
         devices.upsertDevice(updated)
         assertEquals("Pixel 8", devices.getDevice("dev-x")?.name)
         assertEquals(1, devices.getAllDevices().first().size)
+    }
+
+    @Test
+    fun `updateBook preserves the entity updatedAt watermark`() = runBlocking {
+        seedBook()
+        val explicit = Clock.System.now().minus(kotlin.time.Duration.parse("PT2H"))
+        val current = books.getBook("book-1")!!
+        books.updateBook(current.copy(title = "Renamed", updatedAt = explicit))
+        val reloaded = books.getBook("book-1")!!
+        assertEquals("Renamed", reloaded.title)
+        assertEquals(
+            explicit.toEpochMilliseconds(),
+            reloaded.updatedAt.toEpochMilliseconds(),
+            "updated_at must come from the entity, not the clock — sync LWW depends on it"
+        )
+    }
+
+    @Test
+    fun `series number zero and null both roundtrip`() = runBlocking {
+        books.insertBook(testBook("bk-prequel").copy(seriesId = "s1", seriesNumber = 0.0))
+        books.insertBook(testBook("bk-standalone").copy(seriesId = null, seriesNumber = null))
+        assertEquals(0.0, books.getBook("bk-prequel")?.seriesNumber, "prequel number 0 must survive")
+        assertNull(books.getBook("bk-standalone")?.seriesNumber, "absent number must stay null, not 0")
+    }
+
+    @Test
+    fun `collection null color roundtrips as null`() = runBlocking {
+        collections.insertCollection(Collection(id = "c-null", name = "No color"))
+        collections.insertCollection(Collection(id = "c-red", name = "Red", color = 0xFFCC0000.toInt()))
+        val all = collections.getAllCollections().first()
+        assertNull(all.first { it.id == "c-null" }.color, "null color must not become -1/white")
+        assertEquals(0xFFCC0000.toInt(), all.first { it.id == "c-red" }.color)
+    }
+
+    @Test
+    fun `max startedAt excludes the given device`() = runBlocking {
+        seedBook()
+        fun session(id: String, device: String, startedAtMs: Long) = com.folio.reader.model.ReadingSession(
+            id = id,
+            bookId = "book-1",
+            cycleId = null,
+            deviceId = device,
+            startedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(startedAtMs),
+            startPosition = ReadingPosition(
+                bookId = "book-1", deviceId = device, chapterId = "c0",
+                spineIndex = 0, contentLocator = ""
+            ),
+            isActive = false
+        )
+        sessions.insertSession(session("s1", "phone-2", 1_000_000L), emitSyncEvent = false)
+        sessions.insertSession(session("s2", "phone-2", 3_000_000L), emitSyncEvent = false)
+        sessions.insertSession(session("s3", "self-device", 9_000_000L), emitSyncEvent = false)
+
+        val max = sessions.maxStartedAtExcludingDevice("self-device")
+        assertEquals(3_000_000L, max?.toEpochMilliseconds(), "own-device sessions must not anchor the cursor")
+        assertEquals(
+            9_000_000L,
+            sessions.maxStartedAtExcludingDevice("phone-2")?.toEpochMilliseconds(),
+            "excluding the other device must leave the own session as the anchor"
+        )
     }
 }

@@ -71,14 +71,7 @@ class JvmChapterContentProvider(
                 ZipFile(file).use { zip ->
                     val entry = findEntry(zip, path) ?: return@runCatching null
                     val bytes = zip.getInputStream(entry).use { input -> input.readBytes() }
-                    // Strip a UTF-8 BOM (EF BB BF) from the raw bytes, mirroring EpubParser.bomFree.
-                    val bomFree =
-                        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
-                            bytes.copyOfRange(3, bytes.size)
-                        } else {
-                            bytes
-                        }
-                    withStylesheets(zip, path, String(bomFree, Charsets.UTF_8))
+                    withStylesheets(zip, path, com.folio.reader.epub.decodeEpubBytes(bytes))
                 }
             }.getOrNull()
         }

@@ -32,9 +32,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -47,6 +51,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,6 +84,9 @@ import com.folio.reader.model.Series
 import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.theme.FolioTheme
 
+/** Top-level library category: books (EPUB) and manga are separate collections. */
+enum class LibraryMode { BOOKS, MANGA }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
@@ -95,18 +103,46 @@ fun LibraryScreen(
     onSetBookStatus: (Set<String>, BookStatus) -> Unit = { _, _ -> },
     viewModel: LibraryViewModel,
     syncState: com.folio.reader.sync.SyncState? = null,
-    onSyncNow: () -> Unit = {}
+    onSyncNow: () -> Unit = {},
+    libraryMode: LibraryMode = LibraryMode.BOOKS,
+    onLibraryModeChange: (LibraryMode) -> Unit = {},
+    booksViewMode: LibraryViewModel.ViewMode = LibraryViewModel.ViewMode.GRID,
+    onBooksViewModeChange: (LibraryViewModel.ViewMode) -> Unit = {},
+    mangaContent: (@Composable () -> Unit)? = null,
+    mangaExtensionsAvailable: Boolean = false,
+    onMangaBrowseClick: () -> Unit = {},
+    onMangaExtensionsClick: () -> Unit = {},
+    onMangaDownloadsClick: () -> Unit = {},
+    onMangaImportClick: () -> Unit = {},
+    onMangaSearchClick: () -> Unit = {},
+    onMangaStatsClick: () -> Unit = {},
+    onMangaBackupImport: () -> Unit = {},
+    onMangaBackupExport: () -> Unit = {},
+    mangaViewMode: com.folio.reader.ui.manga.MangaViewMode = com.folio.reader.ui.manga.MangaViewMode.GRID,
+    onMangaViewModeChange: (com.folio.reader.ui.manga.MangaViewMode) -> Unit = {},
+    mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null
 ) {
-    var viewMode by remember { mutableStateOf(LibraryViewModel.ViewMode.GRID) }
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(LibraryViewModel.FilterState()) }
     var selectedBooks by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var overflowOpen by remember { mutableStateOf(false) }
+    var mangaOverflowOpen by remember { mutableStateOf(false) }
     var seriesFilterOpen by remember { mutableStateOf(false) }
     var collectionFilterOpen by remember { mutableStateOf(false) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
+
+    val mangaSelActive by remember {
+        mangaLibraryViewModel?.isSelectionMode ?: kotlinx.coroutines.flow.MutableStateFlow(false)
+    }.collectAsState(initial = false)
+    val mangaSelIds by remember {
+        mangaLibraryViewModel?.selectedIds ?: kotlinx.coroutines.flow.MutableStateFlow(emptySet())
+    }.collectAsState(initial = emptySet<String>())
+    val mangaActiveFilters by remember {
+        mangaLibraryViewModel?.activeFilters
+            ?: kotlinx.coroutines.flow.MutableStateFlow<Set<com.folio.reader.ui.manga.MangaLibFilter>>(emptySet())
+    }.collectAsState(initial = emptySet<com.folio.reader.ui.manga.MangaLibFilter>())
 
     if (bookToDelete != null) {
         AlertDialog(
@@ -136,7 +172,7 @@ fun LibraryScreen(
 
     val books by viewModel.filteredBooks(
         LibraryViewModel.LibraryState(
-            viewMode = viewMode,
+            viewMode = booksViewMode,
             sortBy = sortBy,
             sortAscending = sortAscending,
             filter = filter,
@@ -152,7 +188,7 @@ fun LibraryScreen(
 
     if (isSelectionMode) {
         // Selection top bar with bulk actions
-        Column(modifier = Modifier.statusBarsPadding()) {
+        Column(modifier = Modifier.fillMaxSize()) {
             com.folio.reader.ui.components.FolioTopBar(
                 title = "${selectedBooks.size} selected",
                 navigationIcon = {
@@ -190,7 +226,7 @@ fun LibraryScreen(
             )
             LibraryContent(
                 books = books,
-                viewMode = viewMode,
+                viewMode = booksViewMode,
                 sortBy = sortBy,
                 sortAscending = sortAscending,
                 filter = filter,
@@ -198,7 +234,7 @@ fun LibraryScreen(
                 allCollections = allCollections,
                 selectedBooks = selectedBooks,
                 isSelectionMode = true,
-                onViewMode = { viewMode = it },
+                onViewMode = onBooksViewModeChange,
                 onSortChange = { sortBy = it },
                 onDirectionChange = { sortAscending = it },
                 onFilterChange = { filter = it },
@@ -213,72 +249,253 @@ fun LibraryScreen(
             )
         }
     } else {
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        val mangaMode = libraryMode == LibraryMode.MANGA && mangaContent != null
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (mangaMode && mangaSelActive) {
+                com.folio.reader.ui.components.FolioTopBar(
+                    title = "${mangaSelIds.size} selected",
+                    navigationIcon = {
+                        IconButton(onClick = { mangaLibraryViewModel?.clearSelection() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(true) }) {
+                            Icon(Icons.Filled.Done, contentDescription = "Mark read")
+                        }
+                        IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(false) }) {
+                            Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
+                        }
+                        IconButton(onClick = { mangaLibraryViewModel?.removeSelected() }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = FolioTheme.colors.error)
+                        }
+                    }
+                )
+            } else {
             com.folio.reader.ui.components.FolioTopBar(
                 title = "Folio",
                 actions = {
-                    // Sync status badge (only when sync is configured)
                     if (syncState != null) {
                         com.folio.reader.ui.components.SyncStatusBadge(
                             syncState = syncState,
                             onClick = onSyncNow
                         )
                     }
-                    IconButton(onClick = onSearchClick) {
+                    IconButton(onClick = { if (mangaMode) onMangaSearchClick() else onSearchClick() }) {
                         Icon(Icons.Filled.Search, contentDescription = "Search")
                     }
-                    IconButton(onClick = onImportClick) {
+                    IconButton(onClick = { if (mangaMode) onMangaImportClick() else onImportClick() }) {
                         Icon(Icons.Filled.Add, contentDescription = "Import")
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                     Box {
-                        IconButton(onClick = { overflowOpen = true }) {
+                        IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
-                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Statistics") },
-                                onClick = { overflowOpen = false; onStatsClick() }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Tags") },
-                                onClick = { overflowOpen = false; onTagManagerClick() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Revisit Items") },
-                                onClick = { overflowOpen = false; onRevisitClick() }
-                            )
+                        if (mangaMode) {
+                            DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Grid view") },
+                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.GRID) },
+                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.GRID) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("List view") },
+                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.LIST) },
+                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.LIST) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Compact view") },
+                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.COMPACT) },
+                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.COMPACT) },
+                                )
+                                HorizontalDivider()
+                                com.folio.reader.ui.manga.MangaSortBy.entries.forEach { o ->
+                                    val active = mangaLibraryViewModel?.sortBy?.value == o
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(o.label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface)
+                                        },
+                                        leadingIcon = { ViewCheck(active) },
+                                        onClick = {
+                                            mangaOverflowOpen = false
+                                            mangaLibraryViewModel?.sortBy?.value = o
+                                        },
+                                    )
+                                }
+                                HorizontalDivider()
+                                com.folio.reader.ui.manga.MangaLibFilter.entries.forEach { f ->
+                                    val active = f in mangaActiveFilters
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(f.label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface)
+                                        },
+                                        leadingIcon = { ViewCheck(active) },
+                                        // Menu stays open so several filters can be combined in one go.
+                                        onClick = { mangaLibraryViewModel?.toggleFilter(f) },
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Browse sources") },
+                                    onClick = { mangaOverflowOpen = false; onMangaBrowseClick() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Downloads") },
+                                    onClick = { mangaOverflowOpen = false; onMangaDownloadsClick() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Check for new chapters") },
+                                    onClick = { mangaOverflowOpen = false; mangaLibraryViewModel?.updateLibrary() },
+                                )
+                                if (mangaExtensionsAvailable) {
+                                    DropdownMenuItem(
+                                        text = { Text("Extensions") },
+                                        onClick = { mangaOverflowOpen = false; onMangaExtensionsClick() },
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Statistics") },
+                                    onClick = { mangaOverflowOpen = false; onMangaStatsClick() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Import Mihon backup") },
+                                    onClick = { mangaOverflowOpen = false; onMangaBackupImport() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Export Mihon backup") },
+                                    onClick = { mangaOverflowOpen = false; onMangaBackupExport() },
+                                )
+                            }
+                        } else {
+                            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                val bookFriendlyNames = linkedMapOf(
+                                    LibraryViewModel.SortBy.LAST_OPENED to "Recently opened",
+                                    LibraryViewModel.SortBy.DATE_ADDED to "Date added",
+                                    LibraryViewModel.SortBy.TITLE to "Title",
+                                    LibraryViewModel.SortBy.AUTHOR to "Author",
+                                    LibraryViewModel.SortBy.PROGRESS to "Progress",
+                                    LibraryViewModel.SortBy.READING_TIME to "Length",
+                                    LibraryViewModel.SortBy.COMPLETION_DATE to "Completion date",
+                                    LibraryViewModel.SortBy.FILE_SIZE to "File size",
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Grid view") },
+                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.GRID) },
+                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.GRID) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("List view") },
+                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.LIST) },
+                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.LIST) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Compact view") },
+                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.COMPACT) },
+                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.COMPACT) },
+                                )
+                                HorizontalDivider()
+                                bookFriendlyNames.forEach { (option, label) ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                label,
+                                                color = if (option == sortBy) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
+                                            )
+                                        },
+                                        leadingIcon = { ViewCheck(option == sortBy) },
+                                        onClick = { overflowOpen = false; sortBy = option },
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(if (sortAscending) "Ascending" else "Descending") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = if (sortAscending) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = { overflowOpen = false; sortAscending = !sortAscending },
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Statistics") },
+                                    onClick = { overflowOpen = false; onStatsClick() }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Tags") },
+                                    onClick = { overflowOpen = false; onTagManagerClick() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Revisit Items") },
+                                    onClick = { overflowOpen = false; onRevisitClick() }
+                                )
+                            }
                         }
                     }
                 }
             )
+            }
 
-            LibraryContent(
-                books = books,
-                viewMode = viewMode,
-                sortBy = sortBy,
-                sortAscending = sortAscending,
-                filter = filter,
-                allSeries = allSeries,
-                allCollections = allCollections,
-                selectedBooks = selectedBooks,
-                isSelectionMode = false,
-                onViewMode = { viewMode = it },
-                onSortChange = { sortBy = it },
-                onDirectionChange = { sortAscending = it },
-                onFilterChange = { filter = it },
-                onSeriesFilterOpen = { seriesFilterOpen = it },
-                onCollectionFilterOpen = { collectionFilterOpen = it },
-                seriesFilterOpen = seriesFilterOpen,
-                collectionFilterOpen = collectionFilterOpen,
-                onBookClick = { onBookDetailClick(it) },
-                onBookLongClick = { toggleSelection(it.id) },
-                onDeleteBook = { bookToDelete = it },
-                onImportClick = onImportClick
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(vertical = com.folio.reader.ui.theme.FolioTokens.space1),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                com.folio.reader.ui.components.FolioChip(
+                    selected = !mangaMode,
+                    onClick = { if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS) },
+                    label = "Books",
+                )
+                com.folio.reader.ui.components.FolioChip(
+                    selected = mangaMode,
+                    onClick = { if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA) },
+                    label = "Manga",
+                )
+            }
+
+            androidx.compose.animation.Crossfade(
+                targetState = libraryMode,
+                modifier = Modifier.fillMaxSize(),
+            ) { mode ->
+            if (mode == LibraryMode.MANGA) {
+                mangaContent?.invoke()
+            } else {
+                LibraryContent(
+                    books = books,
+                    viewMode = booksViewMode,
+                    sortBy = sortBy,
+                    sortAscending = sortAscending,
+                    filter = filter,
+                    allSeries = allSeries,
+                    allCollections = allCollections,
+                    selectedBooks = selectedBooks,
+                    isSelectionMode = false,
+                    onViewMode = onBooksViewModeChange,
+                    onSortChange = { sortBy = it },
+                    onDirectionChange = { sortAscending = it },
+                    onFilterChange = { filter = it },
+                    onSeriesFilterOpen = { seriesFilterOpen = it },
+                    onCollectionFilterOpen = { collectionFilterOpen = it },
+                    seriesFilterOpen = seriesFilterOpen,
+                    collectionFilterOpen = collectionFilterOpen,
+                    onBookClick = { onBookDetailClick(it) },
+                    onBookLongClick = { toggleSelection(it.id) },
+                    onDeleteBook = { bookToDelete = it },
+                    onImportClick = onImportClick
+                )
+            }
+            }
         }
     }
 }
@@ -308,27 +525,6 @@ private fun LibraryContent(
     onImportClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // View mode & sort bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            viewModeButton("Grid", LibraryViewModel.ViewMode.GRID, viewMode, onViewMode)
-            viewModeButton("List", LibraryViewModel.ViewMode.LIST, viewMode, onViewMode)
-            viewModeButton("Compact", LibraryViewModel.ViewMode.COMPACT, viewMode, onViewMode)
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            SortMenu(sortBy, sortAscending, onSortChange, onDirectionChange)
-        }
-
-        // Fixed 4dp separation between toolbar row and chips row on all screen sizes.
-        // Do not use flexible/weighted spacers or extra vertical padding here.
-        Spacer(modifier = Modifier.height(4.dp))
-
         // Filter chips: status + series + collection (horizontally scrollable)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -495,100 +691,16 @@ private fun LibraryContent(
 }
 
 @Composable
-private fun viewModeButton(
-    label: String,
-    mode: LibraryViewModel.ViewMode,
-    current: LibraryViewModel.ViewMode,
-    onClick: (LibraryViewModel.ViewMode) -> Unit
-) {
-    com.folio.reader.ui.components.FolioChip(
-        selected = current == mode,
-        onClick = { onClick(mode) },
-        label = label
-    )
-}
-
-@Composable
-private fun SortMenu(
-    sortBy: LibraryViewModel.SortBy,
-    sortAscending: Boolean,
-    onSortChange: (LibraryViewModel.SortBy) -> Unit,
-    onDirectionChange: (Boolean) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    val friendlyNames = mapOf(
-        LibraryViewModel.SortBy.LAST_OPENED to "Recently opened",
-        LibraryViewModel.SortBy.DATE_ADDED to "Date added",
-        LibraryViewModel.SortBy.TITLE to "Title",
-        LibraryViewModel.SortBy.AUTHOR to "Author",
-        LibraryViewModel.SortBy.PROGRESS to "Progress",
-        LibraryViewModel.SortBy.READING_TIME to "Length",
-        LibraryViewModel.SortBy.COMPLETION_DATE to "Completion date",
-        LibraryViewModel.SortBy.FILE_SIZE to "File size"
-    )
-
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = friendlyNames[sortBy] ?: sortBy.name,
-                style = FolioTheme.typography.labelLarge,
-                color = FolioTheme.colors.onSurfaceVariant
-            )
-            androidx.compose.material3.Icon(
-                imageVector = androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
-                contentDescription = "Sort options",
-                tint = FolioTheme.colors.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            friendlyNames.keys.forEach { option ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = friendlyNames[option] ?: option.name,
-                            fontWeight = if (option == sortBy) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (option == sortBy) FolioTheme.colors.primary else FolioTheme.colors.onSurface
-                        )
-                    },
-                    onClick = {
-                        onSortChange(option)
-                        expanded = false
-                    },
-                    leadingIcon = {
-                        if (option == sortBy) {
-                            androidx.compose.material3.Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Filled.Check,
-                                contentDescription = "Selected",
-                                tint = FolioTheme.colors.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                )
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text(if (sortAscending) "Ascending" else "Descending") },
-                onClick = { onDirectionChange(!sortAscending) },
-                leadingIcon = {
-                    androidx.compose.material3.Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = if (sortAscending) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            )
-        }
+private fun ViewCheck(active: Boolean) {
+    if (active) {
+        Icon(
+            imageVector = androidx.compose.material.icons.Icons.Filled.Check,
+            contentDescription = null,
+            tint = FolioTheme.colors.primary,
+            modifier = Modifier.size(18.dp),
+        )
+    } else {
+        Spacer(modifier = Modifier.size(18.dp))
     }
 }
 

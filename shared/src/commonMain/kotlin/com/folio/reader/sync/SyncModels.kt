@@ -17,92 +17,11 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
-@Serializable
-sealed class SyncEntity {
-    @Serializable
-    data class BookEntity(
-        val book: Book,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class PositionEntity(
-        val position: ReadingPosition,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class HighlightEntity(
-        val highlight: Highlight,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class NoteEntity(
-        val note: Note,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class BookmarkEntity(
-        val bookmark: Bookmark,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class SessionEntity(
-        val session: ReadingSession,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class CycleEntity(
-        val cycle: ReadingCycle,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class SettingsEntity(
-        val settings: ReaderSettings,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class TagEntity(
-        val tag: Tag,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class CollectionEntity(
-        val collection: Collection,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class SeriesEntity(
-        val series: Series,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class QuoteEntity(
-        val quote: Quote,
-        val operation: SyncOperation
-    ) : SyncEntity()
-
-    @Serializable
-    data class RevisitEntity(
-        val revisit: RevisitItem,
-        val operation: SyncOperation
-    ) : SyncEntity()
-}
-
 enum class SyncOperation(val value: Int) {
     CREATE(0),
     UPDATE(1),
     DELETE(2),
-    UPSERT(1);
+    UPSERT(3);
 
     companion object {
         fun fromValue(value: Int): SyncOperation = values().firstOrNull { it.value == value } ?: CREATE
@@ -135,42 +54,6 @@ enum class SyncStatus(val value: Int) {
 }
 
 @Serializable
-data class SyncResult(
-    val success: Boolean,
-    val syncedCount: Int = 0,
-    val errorCount: Int = 0,
-    val errors: List<String> = emptyList(),
-    val conflicts: List<SyncConflict> = emptyList(),
-    val lastSyncAt: Instant = Clock.System.now()
-)
-
-@Serializable
-data class SyncConflict(
-    val entityType: String,
-    val entityId: String,
-    val localVersion: String, // JSON
-    val remoteVersion: String, // JSON
-    val conflictType: ConflictType,
-    val resolution: ConflictResolution? = null
-)
-
-enum class ConflictType {
-    SCALAR_FIELD,      // last-write-wins
-    INDEPENDENT_ENTITY, // merge
-    READING_POSITION,   // latest updatedAt + user prompt
-    SETTINGS,           // last-write-wins per device
-    COLLECTION          // merge
-}
-
-enum class ConflictResolution {
-    LOCAL_WINS,
-    REMOTE_WINS,
-    MERGE,
-    USER_CHOICE,
-    KEEP_BOTH
-}
-
-@Serializable
 data class BookStorageProgress(
     val bookId: String,
     val percent: Float = 0f,
@@ -188,16 +71,7 @@ data class SyncState(
     val isSyncing: Boolean = false,
     val lastError: String? = null,
     val isConfigured: Boolean = true,
-    val deviceStates: Map<String, DeviceSyncState> = emptyMap(),
     val storageProgress: Map<String, BookStorageProgress> = emptyMap()
-)
-
-@Serializable
-data class DeviceSyncState(
-    val deviceId: String,
-    val lastSyncedAt: Instant? = null,
-    val pendingCount: Int = 0,
-    val hasErrors: Boolean = false
 )
 
 @Serializable

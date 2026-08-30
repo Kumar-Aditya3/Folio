@@ -20,7 +20,6 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.statistics.BookStatistics
 import com.folio.reader.statistics.DailyStatistics
 import com.folio.reader.statistics.HeatmapDay
-import com.folio.reader.statistics.ReadingHistoryEntry
 import com.folio.reader.sync.SyncOperation
 import com.folio.reader.sync.SyncQueueItem
 import com.folio.reader.sync.SyncState
@@ -32,7 +31,7 @@ import kotlinx.serialization.Serializable
 interface BookRepository {
     suspend fun insertBook(book: Book, emitSyncEvent: Boolean = true)
     suspend fun updateBook(book: Book, emitSyncEvent: Boolean = true)
-    suspend fun deleteBook(bookId: String)
+    suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean = true)
     suspend fun getBook(bookId: String): Book?
     fun getAllBooks(): Flow<List<Book>>
     fun getBooksByStatus(status: BookStatus): Flow<List<Book>>
@@ -68,6 +67,9 @@ interface ReadingSessionRepository {
     suspend fun getActiveSession(bookId: String): ReadingSession?
     suspend fun getSessionsForDateRange(start: Instant, end: Instant): List<ReadingSession>
     suspend fun getSessionsByDevice(deviceId: String): List<ReadingSession>
+
+    /** Newest session start recorded by any OTHER device, or null when none exist. */
+    suspend fun maxStartedAtExcludingDevice(deviceId: String): Instant?
 
     /**
      * Every device's sessions since [from]. Sessions are synced, so this is the
@@ -199,7 +201,7 @@ data class SearchResult(
 
 interface SettingsRepository {
     suspend fun getGlobalSettings(): ReaderSettings
-    suspend fun saveGlobalSettings(settings: ReaderSettings)
+    suspend fun saveGlobalSettings(settings: ReaderSettings, emitSyncEvent: Boolean = true)
     suspend fun getBookSettings(bookId: String): BookReaderSettings?
     suspend fun saveBookSettings(bookId: String, settings: BookReaderSettings)
     suspend fun deleteBookSettings(bookId: String)
@@ -215,7 +217,6 @@ interface StatisticsRepository {
     suspend fun upsertDailyStats(stats: DailyStatistics)
     fun getDailyStats(deviceId: String, fromDate: LocalDate): Flow<List<DailyStatistics>>
     fun getHeatmapData(deviceId: String, year: Int): Flow<List<HeatmapDay>>
-    fun getHistoryTimeline(deviceId: String, limit: Int = 100): Flow<List<ReadingHistoryEntry>>
 }
 
 interface SyncRepository {

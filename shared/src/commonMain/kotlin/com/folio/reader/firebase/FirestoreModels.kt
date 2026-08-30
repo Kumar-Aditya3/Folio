@@ -33,7 +33,8 @@ data class FsBook(
     val status: Int = 0,
     val formattingMode: Int = 1,
     val updatedAt: Long = Clock.System.now().toEpochMilliseconds(),
-    val deviceId: String
+    val deviceId: String,
+    val isDeleted: Boolean = false
 ) {
     fun toBook(): Book {
         return Book(
@@ -294,18 +295,6 @@ data class FsReadingSession(
 )
 
 @Serializable
-data class FsReadingCycle(
-    val id: String,
-    val bookId: String,
-    val cycleNumber: Int,
-    val startedAt: Long,
-    val finishedAt: Long? = null,
-    val totalDurationMs: Long = 0,
-    val sessionCount: Int = 0,
-    val finalProgress: Double = 0.0
-)
-
-@Serializable
 data class FsSettings(
     val userId: String,
     val global: String, // JSON GlobalSettings
@@ -320,7 +309,8 @@ data class FsTag(
     val name: String,
     val color: Int? = null,
     val createdAt: Long,
-    val deviceId: String = ""
+    val deviceId: String = "",
+    val updatedAt: Long = createdAt
 )
 
 @Serializable
@@ -330,7 +320,8 @@ data class FsCollection(
     val color: Int? = null,
     val sortOrder: Int = 0,
     val createdAt: Long,
-    val deviceId: String = ""
+    val deviceId: String = "",
+    val updatedAt: Long = createdAt
 )
 
 @Serializable
@@ -338,7 +329,8 @@ data class FsSeries(
     val id: String,
     val name: String,
     val sortOrder: Int = 0,
-    val deviceId: String = ""
+    val deviceId: String = "",
+    val updatedAt: Long = 0L
 )
 
 @Serializable
@@ -367,25 +359,51 @@ data class FsRevisitItem(
 )
 
 @Serializable
-data class FsDevice(
+data class FsManga(
     val id: String,
-    val name: String,
-    val platform: String,
-    val appVersion: String,
-    val lastSeenAt: Long = Clock.System.now().toEpochMilliseconds(),
-    val isActive: Boolean = true
+    val sourceId: Long,
+    val sourceName: String,
+    val url: String,
+    val title: String,
+    val author: String? = null,
+    val artist: String? = null,
+    val description: String? = null,
+    val genres: String = "[]",
+    val status: Int = 0,
+    val thumbnailUrl: String? = null,
+    val favorite: Boolean = false,
+    val initialized: Boolean = false,
+    val addedAt: Long,
+    val updatedAt: Long,
+    val deviceId: String,
+    val isDeleted: Boolean = false,
 )
 
 @Serializable
-data class FsSyncState(
-    val userId: String,
-    val lastFullSyncAt: Long? = null,
-    val lastIncrementalSyncAt: Long? = null,
-    val pendingUploadCount: Int = 0,
-    val pendingDownloadCount: Int = 0,
-    val isSyncing: Boolean = false,
-    val lastError: String? = null,
-    val updatedAt: Long = Clock.System.now().toEpochMilliseconds()
+data class FsMangaChapter(
+    val id: String,
+    val mangaId: String,
+    val url: String,
+    val name: String,
+    val read: Boolean = false,
+    val bookmarked: Boolean = false,
+    val lastPageRead: Int = 0,
+    val totalPages: Int = 0,
+    val updatedAt: Long,
+    val deviceId: String,
+)
+
+@Serializable
+data class FsMangaNote(
+    val id: String,
+    val mangaId: String,
+    val chapterId: String,
+    val pageIndex: Int,
+    val content: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val deviceId: String,
+    val isDeleted: Boolean = false,
 )
 
 // Collection paths
@@ -406,6 +424,9 @@ object FirestorePaths {
     val REVISIT = "revisitItems"
     val DEVICES = "devices"
     val SYNC_STATE = "syncState"
+    val MANGA = "manga"
+    val MANGA_CHAPTERS = "mangaChapters"
+    val MANGA_NOTES = "mangaNotes"
 
     fun userBooks(uid: String) = "$USERS/$uid/$BOOKS"
     fun userBook(uid: String, bookId: String) = "$USERS/$uid/$BOOKS/$bookId"
@@ -424,6 +445,9 @@ object FirestorePaths {
     fun userRevisit(uid: String) = "$USERS/$uid/$REVISIT"
     fun userDevices(uid: String) = "$USERS/$uid/$DEVICES"
     fun userSyncState(uid: String) = "$USERS/$uid/$SYNC_STATE"
+    fun userManga(uid: String) = "$USERS/$uid/$MANGA"
+    fun userMangaChapters(uid: String) = "$USERS/$uid/$MANGA_CHAPTERS"
+    fun userMangaNotes(uid: String) = "$USERS/$uid/$MANGA_NOTES"
 
     // Storage paths
     const val STORAGE_BOOKS = "books"

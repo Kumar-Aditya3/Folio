@@ -121,7 +121,8 @@ data class Chapter(
 data class Series(
     val id: String,
     val name: String,
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    val updatedAt: Instant = Clock.System.now()
 )
 
 @Serializable
@@ -130,7 +131,8 @@ data class Collection(
     val name: String,
     val color: Int? = null,
     val sortOrder: Int = 0,
-    val createdAt: Instant = Clock.System.now()
+    val createdAt: Instant = Clock.System.now(),
+    val updatedAt: Instant = Clock.System.now()
 )
 
 @Serializable
@@ -138,7 +140,8 @@ data class Tag(
     val id: String,
     val name: String,
     val color: Int? = null,
-    val createdAt: Instant = Clock.System.now()
+    val createdAt: Instant = Clock.System.now(),
+    val updatedAt: Instant = Clock.System.now()
 )
 
 @Serializable

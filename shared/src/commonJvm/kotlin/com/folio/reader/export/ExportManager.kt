@@ -404,11 +404,18 @@ class ExportManager(
             series = series,
             quotes = quotes,
             revisitItems = revisitById.values.toList(),
-            globalSettings = settingsRepository.getGlobalSettings(),
+            globalSettings = settingsRepository.getGlobalSettings().withoutCredentials(),
             bookSettings = bookSettings,
             bookStatistics = bookStatistics
         )
     }
+
+    /** Credentials stay on the device — backups are shared/plain files. */
+    private fun com.folio.reader.settings.ReaderSettings.withoutCredentials() = copy(
+        firebaseApiKey = "",
+        syncAccountEmail = "",
+        syncAccountPassword = ""
+    )
 
     private suspend fun applyBackup(backup: FolioBackupV2, mode: RestoreMode): RestoreSummary {
         val errors = mutableListOf<String>()
@@ -632,7 +639,8 @@ class ExportManager(
         }
 
         try {
-            settingsRepository.saveGlobalSettings(backup.globalSettings)
+            // Older backups may still carry credentials; never restore them.
+            settingsRepository.saveGlobalSettings(backup.globalSettings.withoutCredentials())
         } catch (e: Exception) {
             errors += "Failed to restore global settings: ${e.message}"
         }

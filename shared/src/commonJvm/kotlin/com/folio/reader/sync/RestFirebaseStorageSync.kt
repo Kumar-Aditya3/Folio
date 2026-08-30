@@ -27,7 +27,8 @@ class RestFirebaseStorageSync(
     private val uidOverride: String? = null,
     private val accountEmail: String? = null,
     private val accountPassword: String? = null,
-    private val maxRetries: Int = 5
+    private val maxRetries: Int = 5,
+    internal val identityToolkitBaseUrl: String = "https://identitytoolkit.googleapis.com/v1"
 ) : StorageSync {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -71,12 +72,11 @@ class RestFirebaseStorageSync(
                 runCatching {
                     identityToolkit("accounts:signUp", credentialsBody(email, password))
                 }.getOrElse { error2 ->
-                    runCatching {
-                        identityToolkit("accounts:signUp", anonymousSignUpBody)
-                    }.getOrElse { error3 ->
-                        authFailure(error2.message ?: error1.message ?: error3.message, email)
-                        return
-                    }
+                    // No anonymous fallback: silently adopting a fresh anonymous
+                    // identity signed the reader into an empty account they did
+                    // not ask for, making uploads land in the wrong place.
+                    authFailure(error1.message ?: error2.message, email)
+                    return
                 }
             }
         } else {
@@ -129,7 +129,7 @@ class RestFirebaseStorageSync(
     }
 
     private fun identityToolkit(endpoint: String, body: String): String = httpJson(
-        url = "https://identitytoolkit.googleapis.com/v1/$endpoint?key=$apiKey",
+        url = "$identityToolkitBaseUrl/$endpoint?key=$apiKey",
         method = "POST",
         body = body,
         authHeader = null
@@ -155,6 +155,11 @@ class RestFirebaseStorageSync(
             refreshToken = null
             idTokenExpiresAtMs = 0L
             uid = email ?: "default_user"
+        } else if (msg.contains("INVALID_PASSWORD") || msg.contains("EMAIL_NOT_FOUND") ||
+            msg.contains("EMAIL_EXISTS") || msg.contains("INVALID_EMAIL") ||
+            msg.contains("INVALID_LOGIN_CREDENTIALS")
+        ) {
+            throw IOException("Cloud storage sign-in failed — check the email and password in Settings -> Advanced.")
         } else {
             throw IOException("Firebase Storage Auth failed: ${msg.take(120)}")
         }
@@ -334,7 +339,10 @@ class RestFirebaseStorageSync(
         val destFile = File(destinationPath)
         destFile.parentFile?.mkdirs()
 
-        val digest = if (verifySha256) MessageDigest.getInstance("SHA-256") else null
+        // GCS object metadata carries a base64 MD5; verify against that exact
+        // value. (An earlier revision compared a SHA-256 hex digest to the MD5,
+        // which could never match and deleted every finished download.)
+        val md5Digest = if (verifySha256) MessageDigest.getInstance("MD5") else null
         var downloadedBytes = 0L
 
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -361,7 +369,7 @@ class RestFirebaseStorageSync(
                         val bytesRead = input.read(buffer)
                         if (bytesRead <= 0) break
                         fos.write(buffer, 0, bytesRead)
-                        digest?.update(buffer, 0, bytesRead)
+                        md5Digest?.update(buffer, 0, bytesRead)
                         downloadedBytes += bytesRead
                         if (contentLength != null && contentLength > 0) {
                             val progress = downloadedBytes.toFloat() / contentLength.toFloat()
@@ -372,12 +380,12 @@ class RestFirebaseStorageSync(
             }
             onProgress?.invoke(1f)
 
-            if (verifySha256 && digest != null) {
-                val computedSha = digest.digest().toHex()
-                val metadataSha = runCatching { getObjectSha256(objectPath) }.getOrNull()
-                if (metadataSha != null && computedSha.lowercase() != metadataSha.lowercase()) {
+            if (verifySha256 && md5Digest != null) {
+                val computedMd5 = md5Digest.digest()
+                val metadataMd5 = runCatching { getObjectMd5Base64(objectPath) }.getOrNull()
+                if (metadataMd5 != null && !md5Matches(computedMd5, metadataMd5)) {
                     destFile.delete()
-                    throw IOException("SHA-256 mismatch for $objectPath: expected=$metadataSha computed=$computedSha")
+                    throw IOException("Checksum mismatch for $objectPath")
                 }
             }
         } finally {
@@ -385,14 +393,13 @@ class RestFirebaseStorageSync(
         }
     }
 
-    private fun getObjectSha256(objectPath: String): String? {
+    private fun getObjectMd5Base64(objectPath: String): String? {
         val encoded = URLEncoder.encode(objectPath, "UTF-8")
         val response = runCatching {
             httpRequest("$storageBaseUrl/$encoded", "GET", null, bearer(), readTimeoutMs = 15_000)
         }.getOrNull() ?: return null
         val obj = runCatching { json.parseToJsonElement(response).jsonObject }.getOrNull() ?: return null
-        return obj["md5Hash"]?.jsonPrimitive?.content
-            ?: obj["crc32c"]?.jsonPrimitive?.content
+        return obj["md5Hash"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun guessContentType(path: String): String = when {
@@ -479,8 +486,12 @@ class RestFirebaseStorageSync(
         }
     }
 
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }
+
+/** True when the streamed MD5 equals the object metadata's base64 md5Hash. */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+internal fun md5Matches(computedMd5: ByteArray, metadataMd5Base64: String): Boolean =
+    kotlin.io.encoding.Base64.encode(computedMd5) == metadataMd5Base64.trim()
 
 private fun storageJsonEscape(raw: String): String =
     buildString {

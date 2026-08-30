@@ -19,8 +19,13 @@ actual fun ReaderSystemBars(visible: Boolean) {
     LaunchedEffect(visible, controller) {
         val c = controller ?: return@LaunchedEffect
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (visible) c.show(WindowInsetsCompat.Type.systemBars())
-        else c.hide(WindowInsetsCompat.Type.systemBars())
+        if (visible) {
+            c.show(WindowInsetsCompat.Type.systemBars())
+            // The chrome draws the theme's dark band behind the status bar.
+            c.isAppearanceLightStatusBars = false
+        } else {
+            c.hide(WindowInsetsCompat.Type.systemBars())
+        }
     }
     DisposableEffect(Unit) {
         onDispose {
