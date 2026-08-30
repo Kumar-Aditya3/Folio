@@ -77,6 +77,12 @@ class MangaLibraryViewModel(
 
     val query = MutableStateFlow("")
     val searchActive = MutableStateFlow(false)
+
+    /** Source-search counterparts of [query]/[searchActive]; kept per scope so switching
+     *  between In-library and All-sources never throws either text away. */
+    val sourceQuery = MutableStateFlow("")
+    val searchScope = MutableStateFlow(MangaSearchScope.LIBRARY)
+
     val sortBy = MutableStateFlow(MangaSortBy.RECENT)
     val activeFilters = MutableStateFlow<Set<MangaLibFilter>>(emptySet())
     val selectedIds = MutableStateFlow<Set<String>>(emptySet())
@@ -85,9 +91,9 @@ class MangaLibraryViewModel(
     val selectedCategoryId = MutableStateFlow<String?>(null)
 
     private val baseList: StateFlow<List<MangaEntry>> =
-        combine(library, query, categoryMembership) { list, q, membership ->
+        combine(library, query, searchActive, categoryMembership) { list, q, searching, membership ->
             list.filter { manga ->
-                (q.isBlank() || manga.title.contains(q, ignoreCase = true)) &&
+                ((!searching || q.isBlank()) || manga.title.contains(q, ignoreCase = true)) &&
                     (membership == null || manga.id in membership)
             }
         }.stateIn(scope, SharingStarted.Lazily, emptyList())
@@ -117,10 +123,29 @@ class MangaLibraryViewModel(
             }
         }.stateIn(scope, SharingStarted.Lazily, emptyList())
 
-    fun selectCategory(categoryId: String?) {
+    /** No virtual All bucket: the library always shows one real category, defaulting to Main. */
+    fun selectCategory(categoryId: String) {
         selectedCategoryId.value = categoryId
-        if (categoryId == null) categoryMembership.value = null
-        else scope.launch { categoryMembership.value = categoryRepo.mangaIdsInCategory(categoryId) }
+        scope.launch { categoryMembership.value = categoryRepo.mangaIdsInCategory(categoryId) }
+    }
+
+    /** Selects Main when present, otherwise the first category; used at startup and after deletes. */
+    fun selectDefaultCategory() {
+        scope.launch {
+            val target = categoryRepo.defaultCategory() ?: return@launch
+            if (selectedCategoryId.value != target.id) selectCategory(target.id)
+        }
+    }
+
+    init {
+        // Follow the category list so a fresh default selection lands as soon as Main
+        // exists, and a deleted selection falls back to the default instead of nothing.
+        scope.launch {
+            categories.collect { list ->
+                val current = selectedCategoryId.value
+                if (list.none { it.id == current }) selectDefaultCategory()
+            }
+        }
     }
 
     fun toggleFilter(filter: MangaLibFilter) {
@@ -131,9 +156,8 @@ class MangaLibraryViewModel(
         activeFilters.value = if (filter == null) emptySet() else setOf(filter)
     }
 
-    fun addCollection(name: String) {
-        scope.launch { categoryRepo.create(name) }
-    }
+    suspend fun createCategory(name: String): String? =
+        runCatching { categoryRepo.create(name).id }.getOrNull()
 
     fun renameCategory(id: String, name: String) {
         scope.launch { categoryRepo.rename(id, name) }
@@ -141,8 +165,42 @@ class MangaLibraryViewModel(
 
     fun deleteCategory(id: String) {
         scope.launch {
-            categoryRepo.delete(id)
-            if (selectedCategoryId.value == id) selectCategory(null)
+            if (categoryRepo.delete(id) && selectedCategoryId.value == id) selectDefaultCategory()
+        }
+    }
+
+    suspend fun categoriesFor(mangaId: String): Set<String> = categoryRepo.categoriesFor(mangaId)
+
+    /** Picker save for one manga (library item overflow menu). */
+    fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
+        scope.launch { categoryRepo.assign(mangaId, categoryIds) }
+    }
+
+    /**
+     * Bulk category picker, opened from the selection top bar. The initial selection is
+     * the categories shared by every selected manga; saving replaces each one's set.
+     */
+    val bulkPickerInitial = MutableStateFlow<Set<String>?>(null)
+
+    fun requestBulkCategories() {
+        val ids = selectedIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            val lists = ids.map { categoryRepo.categoriesFor(it) }
+            bulkPickerInitial.value = lists.reduceOrNull { a, b -> a.intersect(b) } ?: emptySet()
+        }
+    }
+
+    fun closeBulkPicker() {
+        bulkPickerInitial.value = null
+    }
+
+    /** Replaces the category set of every given manga (picker save semantics). */
+    fun assignCategories(mangaIds: Set<String>, categoryIds: Set<String>) {
+        scope.launch {
+            mangaIds.forEach { categoryRepo.assign(it, categoryIds) }
+            bulkPickerInitial.value = null
+            clearSelection()
         }
     }
 
@@ -277,6 +335,8 @@ class BrowseViewModel(
     val globalQuery = MutableStateFlow("")
     val globalResults = MutableStateFlow<List<GlobalSourceResult>>(emptyList())
     val searchActive = MutableStateFlow(false)
+    /** True while the installed-source list is still resolving before a search can fan out. */
+    val preparingSources = MutableStateFlow(false)
     private var globalJob: kotlinx.coroutines.Job? = null
     private val searchGate = kotlinx.coroutines.sync.Semaphore(5)
     private val searchArrival = MutableStateFlow<List<Long>>(emptyList())
@@ -289,7 +349,7 @@ class BrowseViewModel(
      */
     val globalResultsOrdered: StateFlow<List<GlobalSourceResult>> =
         combine(globalResults, searchArrival) { list, arrival ->
-            list.filter { it.items.isNotEmpty() || it.loading }
+            list.filter { it.items.isNotEmpty() || it.loading || it.error != null }
                 .sortedWith(
                     compareByDescending<GlobalSourceResult> { it.items.isNotEmpty() }
                         .thenBy {
@@ -302,12 +362,22 @@ class BrowseViewModel(
     fun toggleSearch() {
         val next = !searchActive.value
         searchActive.value = next
-        if (!next) globalSearch("")
+        if (!next) {
+            // Closing the search bar stops the fan-out but keeps the query text, so
+            // reopening resumes where the user left off.
+            globalJob?.cancel()
+            globalResults.value = emptyList()
+            searchArrival.value = emptyList()
+            preparingSources.value = false
+        }
     }
 
     fun exitSearch() {
         searchActive.value = false
-        globalSearch("")
+        globalJob?.cancel()
+        globalResults.value = emptyList()
+        searchArrival.value = emptyList()
+        preparingSources.value = false
     }
 
     fun globalSearch(query: String) {
@@ -316,14 +386,17 @@ class BrowseViewModel(
         if (query.isBlank()) {
             globalResults.value = emptyList()
             searchArrival.value = emptyList()
+            preparingSources.value = false
             return
         }
         globalJob = scope.launch {
+            preparingSources.value = true
             // Sources load asynchronously as extensions unpack; an empty snapshot would
             // silently search nothing. Await the first non-empty list instead.
             val targets = if (sources.value.isNotEmpty()) sources.value else sources.first { it.isNotEmpty() }
             globalResults.value = targets.map { GlobalSourceResult(it) }
             searchArrival.value = emptyList()
+            preparingSources.value = false
             targets.map { source ->
                 launch {
                     searchGate.withPermit {
@@ -435,6 +508,7 @@ class SourceBrowseViewModel(
     val backend: MangaBackend,
     val source: MangaSourceInfo,
     private val mangaRepo: MangaRepository,
+    private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
     initialQuery: String = "",
 ) {
     val scope = mangaVmScope()
@@ -529,6 +603,7 @@ class SourceBrowseViewModel(
         val existing = mangaRepo.findBySourceUrl(source.id, item.url)
         if (existing != null) {
             mangaRepo.setInLibrary(existing.id, true)
+            categoryRepo.ensureMembership(existing.id)
             return existing
         }
         val entry = MangaEntry(
@@ -543,6 +618,7 @@ class SourceBrowseViewModel(
             updatedAt = Clock.System.now(),
         )
         mangaRepo.upsert(entry)
+        categoryRepo.ensureMembership(entry.id)
         return entry
     }
 
@@ -567,6 +643,7 @@ class MangaDetailViewModel(
     private val chapterRepo: MangaChapterRepository,
     private val historyRepo: MangaHistoryRepository,
     private val downloadManager: MangaDownloadManager?,
+    private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
 ) {
     val scope = mangaVmScope()
 
@@ -595,7 +672,20 @@ class MangaDetailViewModel(
                 refresh()
             }
         }
+        scope.launch { categoryRepo.observeCategoriesFor(mangaId).collect { myCategoryIds.value = it } }
     }
+
+    val allCategories = categoryRepo.observeCategories()
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
+    val myCategoryIds = MutableStateFlow<Set<String>>(emptySet())
+
+    fun setCategories(ids: Set<String>) {
+        val id = manga.value?.id ?: return
+        scope.launch { categoryRepo.assign(id, ids) }
+    }
+
+    suspend fun createCategory(name: String): String? =
+        runCatching { categoryRepo.create(name).id }.getOrNull()
 
     fun refresh() {
         scope.launch {
@@ -643,9 +733,11 @@ class MangaDetailViewModel(
     fun toggleInLibrary() {
         scope.launch {
             val m = manga.value ?: return@launch
-            val updated = m.copy(inLibrary = !m.inLibrary)
+            val updated = m.copy(inLibrary = !m.inLibrary, updatedAt = Clock.System.now())
             mangaRepo.upsert(updated)
             manga.value = updated
+            // Adding to the library always lands on a real shelf (Main by default).
+            if (updated.inLibrary) categoryRepo.ensureMembership(updated.id)
         }
     }
 
@@ -792,6 +884,7 @@ class MangaReaderViewModel(
     private val historyRepo: MangaHistoryRepository,
     private val noteRepo: com.folio.reader.manga.MangaNoteRepository,
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
+    private val fileSystem: com.folio.reader.platform.FolioFileSystem,
     private val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
 ) {
     val scope = mangaVmScope()
@@ -936,6 +1029,32 @@ class MangaReaderViewModel(
         } catch (_: Throwable) {
             null
         }
+    }
+
+    /**
+     * Saves one page image into the system Downloads folder (long-press "Save page").
+     * Returns a display location on success, null when the page could not be resolved
+     * or written.
+     */
+    suspend fun savePage(index: Int): String? {
+        val bytes = resolvePageImage(index) ?: return null
+        val mangaTitle = manga.value?.title?.ifBlank { "manga" } ?: "manga"
+        val chapterName = chapter.value?.name?.ifBlank { "chapter" } ?: "chapter"
+        val safe = Regex("[^A-Za-z0-9 ._()-]")
+        val base = "${mangaTitle.take(60)} - ${chapterName.take(40)} - p${index + 1}"
+            .replace(safe, "_").trim()
+        return runCatching {
+            fileSystem.exportToDownloads("$base.${imageExtensionFor(bytes)}", bytes)
+        }.getOrNull()
+    }
+
+    private fun imageExtensionFor(bytes: ByteArray): String = when {
+        bytes.size > 8 && bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() -> "png"
+        bytes.size > 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "jpg"
+        bytes.size > 6 && bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() -> "gif"
+        bytes.size > 12 && bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() &&
+            bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() -> "webp"
+        else -> "img"
     }
 
     fun onPageChanged(index: Int) {

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -105,9 +106,18 @@ fun MangaReaderScreen(
     val chapterState by viewModel.chapter.collectAsState()
     val vmScope = viewModel.scope
 
+    var pageActionIndex by remember { mutableStateOf<Int?>(null) }
     var noteDialogPage by remember { mutableStateOf<Int?>(null) }
     var showNotesList by remember { mutableStateOf(false) }
     var showReaderSettings by remember { mutableStateOf(false) }
+    var pageMessage by remember { mutableStateOf<String?>(null) }
+    val readerScope = rememberCoroutineScope()
+
+    LaunchedEffect(pageMessage) {
+        val message = pageMessage ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(2400)
+        if (pageMessage == message) pageMessage = null
+    }
 
     LaunchedEffect(chapter.id) { viewModel.open(manga, chapter) }
 
@@ -138,7 +148,7 @@ fun MangaReaderScreen(
                     pages = pages,
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { noteDialogPage = it },
+                    onLongPressPage = { pageActionIndex = it },
                     nextChapter = nextChapter,
                     onNextChapter = onNextChapter,
                 )
@@ -148,7 +158,7 @@ fun MangaReaderScreen(
                     rtl = mode == MangaReaderMode.PAGED_RTL,
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { noteDialogPage = it },
+                    onLongPressPage = { pageActionIndex = it },
                     nextChapter = nextChapter,
                     onNextChapter = onNextChapter,
                 )
@@ -157,7 +167,7 @@ fun MangaReaderScreen(
                     pages = pages,
                     onPageChanged = { viewModel.onPageChanged(it) },
                     onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { noteDialogPage = it },
+                    onLongPressPage = { pageActionIndex = it },
                     nextChapter = nextChapter,
                     onNextChapter = onNextChapter,
                 )
@@ -181,6 +191,20 @@ fun MangaReaderScreen(
                 onBack = onBack,
             )
         }
+
+        val message = pageMessage
+        if (message != null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 84.dp)
+                        .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
+                ) {
+                    Text(message, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
     }
 
     if (showReaderSettings) {
@@ -188,6 +212,25 @@ fun MangaReaderScreen(
             mode = mode,
             onModeChange = { viewModel.setMode(it) },
             onDismiss = { showReaderSettings = false },
+        )
+    }
+
+    pageActionIndex?.let { pageIndex ->
+        PageActionsDialog(
+            pageIndex = pageIndex,
+            onNote = {
+                pageActionIndex = null
+                noteDialogPage = pageIndex
+            },
+            onSave = {
+                pageActionIndex = null
+                readerScope.launch {
+                    pageMessage = "Saving page…"
+                    val location = viewModel.savePage(pageIndex)
+                    pageMessage = if (location != null) "Saved to $location" else "Could not save this page"
+                }
+            },
+            onDismiss = { pageActionIndex = null },
         )
     }
 
@@ -619,6 +662,55 @@ private fun ReaderControls(
             )
         }
     }
+}
+
+@Composable
+private fun PageActionsDialog(
+    pageIndex: Int,
+    onNote: () -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Page ${pageIndex + 1}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onNote)
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.EditNote,
+                        contentDescription = null,
+                        tint = FolioTheme.colors.primary,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text("Add a note", style = MaterialTheme.typography.bodyLarge)
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onSave)
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = null,
+                        tint = FolioTheme.colors.primary,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text("Save page to Downloads", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

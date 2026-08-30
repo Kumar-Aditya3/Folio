@@ -380,6 +380,17 @@ data class FsManga(
 )
 
 @Serializable
+data class FsMangaCategory(
+    val id: String,
+    val name: String,
+    val sortOrder: Int = 0,
+    val mangaIds: List<String> = emptyList(),
+    val updatedAt: Long,
+    val deviceId: String = "",
+    val isDeleted: Boolean = false,
+)
+
+@Serializable
 data class FsMangaChapter(
     val id: String,
     val mangaId: String,
@@ -427,6 +438,7 @@ object FirestorePaths {
     val MANGA = "manga"
     val MANGA_CHAPTERS = "mangaChapters"
     val MANGA_NOTES = "mangaNotes"
+    val MANGA_CATEGORIES = "mangaCategories"
 
     fun userBooks(uid: String) = "$USERS/$uid/$BOOKS"
     fun userBook(uid: String, bookId: String) = "$USERS/$uid/$BOOKS/$bookId"
@@ -448,6 +460,7 @@ object FirestorePaths {
     fun userManga(uid: String) = "$USERS/$uid/$MANGA"
     fun userMangaChapters(uid: String) = "$USERS/$uid/$MANGA_CHAPTERS"
     fun userMangaNotes(uid: String) = "$USERS/$uid/$MANGA_NOTES"
+    fun userMangaCategories(uid: String) = "$USERS/$uid/$MANGA_CATEGORIES"
 
     // Storage paths
     const val STORAGE_BOOKS = "books"

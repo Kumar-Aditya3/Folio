@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -252,6 +253,8 @@ fun LibraryScreen(
         val mangaMode = libraryMode == LibraryMode.MANGA && mangaContent != null
         Column(modifier = Modifier.fillMaxSize()) {
             if (mangaMode && mangaSelActive) {
+                // Selection mode swaps the regular chrome for bulk actions in the same
+                // bar — no extra block, no layout shift below.
                 com.folio.reader.ui.components.FolioTopBar(
                     title = "${mangaSelIds.size} selected",
                     navigationIcon = {
@@ -260,6 +263,9 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { mangaLibraryViewModel?.requestBulkCategories() }) {
+                            Icon(Icons.Filled.Label, contentDescription = "Set categories")
+                        }
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(true) }) {
                             Icon(Icons.Filled.Done, contentDescription = "Mark read")
                         }
@@ -267,9 +273,9 @@ fun LibraryScreen(
                             Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
                         }
                         IconButton(onClick = { mangaLibraryViewModel?.removeSelected() }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = FolioTheme.colors.error)
+                            Icon(Icons.Filled.Delete, contentDescription = "Remove from library", tint = FolioTheme.colors.error)
                         }
-                    }
+                    },
                 )
             } else {
             com.folio.reader.ui.components.FolioTopBar(

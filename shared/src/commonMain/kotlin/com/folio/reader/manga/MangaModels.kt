@@ -89,7 +89,17 @@ data class MangaCategory(
     val id: String,
     val name: String,
     val sortOrder: Int = 0,
-)
+    val updatedAt: Instant = Clock.System.now(),
+) {
+    companion object {
+        /**
+         * Stable id of the built-in default category. Every device seeds it with this
+         * same id, so sync merges all devices' defaults into one category.
+         */
+        const val MAIN_ID = "main"
+        const val MAIN_NAME = "Main"
+    }
+}
 
 data class MangaTopEntry(
     val mangaId: String,

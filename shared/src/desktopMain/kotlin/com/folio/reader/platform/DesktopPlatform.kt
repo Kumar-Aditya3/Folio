@@ -77,6 +77,13 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
     override fun getLibrarySize(): Long = dirSize(libraryDir)
 
     override fun getBookSize(bookId: String): Long = dirSize(getBookDir(bookId))
+
+    override suspend fun exportToDownloads(fileName: String, bytes: ByteArray): String = withContext(Dispatchers.IO) {
+        val dir = File(System.getProperty("user.home"), "Downloads").apply { mkdirs() }
+        val unique = uniqueFileName(fileName) { File(dir, it).exists() }
+        File(dir, unique).writeBytes(bytes)
+        File(dir, unique).absolutePath
+    }
 }
 
 

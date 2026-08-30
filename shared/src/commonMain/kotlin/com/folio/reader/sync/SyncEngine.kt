@@ -7,6 +7,7 @@ import com.folio.reader.firebase.FsBookmark
 import com.folio.reader.firebase.FsCollection
 import com.folio.reader.firebase.FsHighlight
 import com.folio.reader.firebase.FsManga
+import com.folio.reader.firebase.FsMangaCategory
 import com.folio.reader.firebase.FsMangaChapter
 import com.folio.reader.firebase.FsMangaNote
 import com.folio.reader.firebase.FsNote
@@ -70,6 +71,7 @@ class SyncEngine(
     private val mangaRepository: com.folio.reader.manga.MangaRepository? = null,
     private val mangaChapterRepository: com.folio.reader.manga.MangaChapterRepository? = null,
     private val mangaNoteRepository: com.folio.reader.manga.MangaNoteRepository? = null,
+    private val mangaCategoryRepository: com.folio.reader.manga.MangaCategoryRepository? = null,
 ) {
     private val _syncState = MutableStateFlow<SyncState>(SyncState())
     val syncState: Flow<SyncState> = _syncState.asStateFlow()
@@ -220,6 +222,7 @@ class SyncEngine(
                     "manga" -> pushManga(item)
                     "manga_chapter" -> pushMangaChapter(item)
                     "manga_note" -> pushMangaNote(item)
+                    "manga_category" -> pushMangaCategory(item)
                 }
                 syncRepository.markSynced(item.id)
             } catch (e: Exception) {
@@ -459,6 +462,13 @@ class SyncEngine(
         firestoreSync.upsertMangaNote(fs.copy(deviceId = fs.deviceId.ifBlank { deviceId }))
     }
 
+    private suspend fun pushMangaCategory(item: SyncQueueItem) {
+        val fs = Json.Default.decodeFromString(FsMangaCategory.serializer(), item.payload)
+        val remote = fetchedMangaCategories.firstOrNull { it.id == fs.id }
+        if (remote != null && remote.updatedAt > fs.updatedAt && !fs.isDeleted) return
+        firestoreSync.upsertMangaCategory(fs.copy(deviceId = fs.deviceId.ifBlank { deviceId }))
+    }
+
     private var fetchedBooks: List<FsBook> = emptyList()
     private var fetchedPositions: List<FsReadingPosition> = emptyList()
     private var fetchedHighlights: List<FsHighlight> = emptyList()
@@ -473,6 +483,7 @@ class SyncEngine(
     private var fetchedManga: List<FsManga> = emptyList()
     private var fetchedMangaChapters: List<FsMangaChapter> = emptyList()
     private var fetchedMangaNotes: List<FsMangaNote> = emptyList()
+    private var fetchedMangaCategories: List<FsMangaCategory> = emptyList()
     private var fetchedSettings: FsSettings? = null
 
     private suspend fun fetchRemoteChanges() {
@@ -500,6 +511,7 @@ class SyncEngine(
         fetchedManga = runCatching { firestoreSync.fetchManga() }.getOrDefault(emptyList())
         fetchedMangaChapters = runCatching { firestoreSync.fetchMangaChapters() }.getOrDefault(emptyList())
         fetchedMangaNotes = runCatching { firestoreSync.fetchMangaNotes() }.getOrDefault(emptyList())
+        fetchedMangaCategories = runCatching { firestoreSync.fetchMangaCategories() }.getOrDefault(emptyList())
         fetchedSettings = runCatching { firestoreSync.fetchSettings() }.getOrNull()
         // Deliberately no pendingDownloadCount publication: remote documents are
         // applied within this same cycle, never queued, so advertising the fetched
@@ -592,6 +604,7 @@ class SyncEngine(
         fetchedManga = emptyList()
         fetchedMangaChapters = emptyList()
         fetchedMangaNotes = emptyList()
+        fetchedMangaCategories = emptyList()
         fetchedSettings = null
     }
 
@@ -854,6 +867,30 @@ class SyncEngine(
                             emitSyncEvent = false
                         )
                     }
+                }
+            }
+        }
+
+        val categoryRepo = mangaCategoryRepository
+        if (categoryRepo != null) {
+            for (remote in fetchedMangaCategories) {
+                if (remote.deviceId == deviceId) continue
+                if (remote.isDeleted) {
+                    runCatching { categoryRepo.delete(remote.id, emitSyncEvent = false) }
+                    continue
+                }
+                val local = runCatching { categoryRepo.get(remote.id) }.getOrNull()
+                if (local != null && local.updatedAt.toEpochMilliseconds() >= remote.updatedAt) continue
+                runCatching {
+                    categoryRepo.applyRemote(
+                        com.folio.reader.manga.MangaCategory(
+                            id = remote.id,
+                            name = remote.name,
+                            sortOrder = remote.sortOrder,
+                            updatedAt = Instant.fromEpochMilliseconds(remote.updatedAt),
+                        ),
+                        remote.mangaIds.toSet(),
+                    )
                 }
             }
         }
@@ -1179,9 +1216,11 @@ interface FirestoreSync {
     fun upsertManga(manga: FsManga)
     fun upsertMangaChapter(chapter: FsMangaChapter)
     fun upsertMangaNote(note: FsMangaNote)
+    fun upsertMangaCategory(category: FsMangaCategory)
     fun fetchManga(): List<FsManga>
     fun fetchMangaChapters(): List<FsMangaChapter>
     fun fetchMangaNotes(): List<FsMangaNote>
+    fun fetchMangaCategories(): List<FsMangaCategory>
 }
 
 interface StorageSync {

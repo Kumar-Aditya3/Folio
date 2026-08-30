@@ -84,6 +84,23 @@ service cloud.firestore {
       match /syncState/{stateId} {
         allow read, write: if isOwner(uid);
       }
+
+      // Manga category (library, chapter states, page notes, categories)
+      match /manga/{mangaId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /mangaChapters/{chapterId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /mangaNotes/{noteId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /mangaCategories/{categoryId} {
+        allow read, write: if isOwner(uid);
+      }
     }
   }
 }

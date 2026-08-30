@@ -139,14 +139,26 @@ class JdbcMangaRepository(private val db: Database) : com.folio.reader.manga.Man
         }
 
     override suspend fun setInLibrary(mangaId: String, inLibrary: Boolean) {
+        // Touch updated_at too: the favorite flag rides the manga document and
+        // last-write-wins needs a fresh stamp or the change loses to stale remotes.
+        val now = Clock.System.now().toEpochMilliseconds()
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE manga_library SET favorite = ? WHERE id = ?").use {
+            conn.prepareStatement("UPDATE manga_library SET favorite = ?, updated_at = ? WHERE id = ?").use {
                 it.setInt(1, if (inLibrary) 1 else 0)
-                it.setString(2, mangaId)
+                it.setLong(2, now)
+                it.setString(3, mangaId)
                 it.executeUpdate()
             }
         }
         db.bumpMangaData()
+        get(mangaId)?.let { manga ->
+            db.onEntityChanged?.invoke(
+                "manga",
+                mangaId,
+                "UPSERT",
+                mangaJson.encodeToString(com.folio.reader.firebase.FsManga.serializer(), manga.toFs())
+            )
+        }
     }
 
     override suspend fun setCoverPath(mangaId: String, coverPath: String?) {
@@ -522,33 +534,34 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
 
 class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.manga.MangaCategoryRepository {
 
-    override suspend fun create(name: String): MangaCategory {
+    override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory {
         val category = MangaCategory(id = UUID.randomUUID().toString(), name = name)
-        db.withConnection { conn ->
-            conn.prepareStatement("INSERT INTO manga_categories (id, name, sort_order) VALUES (?, ?, ?)").use {
-                it.setString(1, category.id)
-                it.setString(2, category.name)
-                it.setInt(3, category.sortOrder)
-                it.executeUpdate()
-            }
-        }
+        insertCategoryRow(category)
         db.bumpMangaData()
+        if (emitSyncEvent) emitCategoryEvent(category, "UPSERT", isDeleted = false)
         return category
     }
 
-    override suspend fun rename(id: String, name: String) {
+    override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) {
+        val now = kotlinx.datetime.Clock.System.now()
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE manga_categories SET name = ? WHERE id = ?").use {
+            conn.prepareStatement("UPDATE manga_categories SET name = ?, updated_at = ? WHERE id = ?").use {
                 it.setString(1, name)
-                it.setString(2, id)
+                it.setLong(2, now.toEpochMilliseconds())
+                it.setString(3, id)
                 it.executeUpdate()
             }
         }
         db.bumpMangaData()
+        if (emitSyncEvent) get(id)?.let { emitCategoryEvent(it, "UPSERT", isDeleted = false) }
     }
 
-    override suspend fun delete(id: String) {
-        db.withConnection { conn ->
+    override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean {
+        val existing = get(id) ?: return false
+        // Main is the guaranteed home shelf: it can only be removed while another
+        // category exists, so the library never loses its last bucket.
+        if (id == MangaCategory.MAIN_ID && countCategories() <= 1) return false
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM manga_category_map WHERE category_id = ?").use {
                 it.setString(1, id); it.executeUpdate()
             }
@@ -557,25 +570,33 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
             }
         }
         db.bumpMangaData()
+        if (emitSyncEvent) {
+            emitCategoryEvent(existing.copy(updatedAt = kotlinx.datetime.Clock.System.now()), "DELETE", isDeleted = true)
+        }
+        return true
     }
 
     override fun observeCategories(): Flow<List<MangaCategory>> =
         db.mangaDataRevision.map {
             db.withConnection { conn ->
                 conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT * FROM manga_categories ORDER BY sort_order, name").use { rs ->
+                    stmt.executeQuery(
+                        "SELECT id, name, sort_order, updated_at FROM manga_categories ORDER BY sort_order, name"
+                    ).use { rs ->
                         val list = mutableListOf<MangaCategory>()
-                        while (rs.next()) {
-                            list += MangaCategory(rs.getString("id"), rs.getString("name"), rs.getInt("sort_order"))
-                        }
+                        while (rs.next()) list += mapCategoryRow(rs)
                         list
                     }
                 }
             }
         }
 
-    override suspend fun assign(mangaId: String, categoryIds: Set<String>) {
-        db.withConnection { conn ->
+    override fun observeCategoriesFor(mangaId: String): Flow<Set<String>> =
+        db.mangaDataRevision.map { categoriesFor(mangaId) }
+
+    override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {
+        val previous = categoriesFor(mangaId)
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM manga_category_map WHERE manga_id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
@@ -589,6 +610,151 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
             }
         }
         db.bumpMangaData()
+        if (emitSyncEvent) {
+            // Membership changed for every category the manga entered AND every one it
+            // left; touch and re-emit all of them or removals never reach other devices.
+            val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val affected = (previous + categoryIds).filter { get(it) != null }
+            if (affected.isNotEmpty()) {
+                db.withConnection { conn ->
+                    val placeholders = affected.joinToString(",") { "?" }
+                    conn.prepareStatement("UPDATE manga_categories SET updated_at = ? WHERE id IN ($placeholders)").use { stmt ->
+                        stmt.setLong(1, now)
+                        affected.forEachIndexed { i, cid -> stmt.setString(i + 2, cid) }
+                        stmt.executeUpdate()
+                    }
+                }
+                db.bumpMangaData()
+                affected.forEach { categoryId ->
+                    get(categoryId)?.let { emitCategoryEvent(it, "UPSERT", isDeleted = false) }
+                }
+            }
+        }
+    }
+
+    override suspend fun applyRemote(category: MangaCategory, mangaIds: Set<String>) {
+        db.withTransaction { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO manga_categories (id, name, sort_order, updated_at) VALUES (?, ?, ?, ?)"
+            ).use {
+                it.setString(1, category.id)
+                it.setString(2, category.name)
+                it.setInt(3, category.sortOrder)
+                it.setLong(4, category.updatedAt.toEpochMilliseconds())
+                it.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM manga_category_map WHERE category_id = ?").use {
+                it.setString(1, category.id); it.executeUpdate()
+            }
+            conn.prepareStatement("INSERT INTO manga_category_map (manga_id, category_id) VALUES (?, ?)").use { stmt ->
+                mangaIds.forEach { mangaId ->
+                    stmt.setString(1, mangaId)
+                    stmt.setString(2, category.id)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpMangaData()
+    }
+
+    override suspend fun get(id: String): MangaCategory? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT id, name, sort_order, updated_at FROM manga_categories WHERE id = ?").use { stmt ->
+            stmt.setString(1, id)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapCategoryRow(rs) else null }
+        }
+    }
+
+    override suspend fun defaultCategory(): MangaCategory? {
+        get(MangaCategory.MAIN_ID)?.let { return it }
+        return db.withConnection { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(
+                    "SELECT id, name, sort_order, updated_at FROM manga_categories ORDER BY sort_order, name LIMIT 1"
+                ).use { rs -> if (rs.next()) mapCategoryRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun ensureMembership(mangaId: String) {
+        if (categoriesFor(mangaId).isNotEmpty()) return
+        val target = defaultCategory() ?: return
+        assign(mangaId, setOf(target.id))
+    }
+
+    override suspend fun ensureSeeded() {
+        if (countCategories() == 0) {
+            val main = MangaCategory(
+                id = MangaCategory.MAIN_ID,
+                name = MangaCategory.MAIN_NAME,
+                sortOrder = 0,
+            )
+            insertCategoryRow(main)
+            db.bumpMangaData()
+            emitCategoryEvent(main, "UPSERT", isDeleted = false)
+        }
+        // Pre-category libraries: give every in-library manga the default shelf so
+        // nothing disappears when the virtual All bucket went away.
+        val orphaned = db.withConnection { conn ->
+            val out = mutableListOf<String>()
+            conn.prepareStatement(
+                "SELECT m.id FROM manga_library m WHERE m.favorite = 1 AND NOT EXISTS " +
+                    "(SELECT 1 FROM manga_category_map cm WHERE cm.manga_id = m.id)"
+            ).use { stmt ->
+                stmt.executeQuery().use { rs -> while (rs.next()) out += rs.getString(1) }
+            }
+            out
+        }
+        orphaned.forEach { ensureMembership(it) }
+    }
+
+    private suspend fun countCategories(): Int = db.withConnection { conn ->
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT COUNT(*) FROM manga_categories").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+
+    private suspend fun insertCategoryRow(category: MangaCategory) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO manga_categories (id, name, sort_order, updated_at) VALUES (?, ?, ?, ?)"
+            ).use {
+                it.setString(1, category.id)
+                it.setString(2, category.name)
+                it.setInt(3, category.sortOrder)
+                it.setLong(4, category.updatedAt.toEpochMilliseconds())
+                it.executeUpdate()
+            }
+        }
+    }
+
+    private fun mapCategoryRow(rs: java.sql.ResultSet): MangaCategory = MangaCategory(
+        id = rs.getString("id"),
+        name = rs.getString("name"),
+        sortOrder = rs.getInt("sort_order"),
+        updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
+    )
+
+    /** Queues the category document with its live membership for sync. */
+    private suspend fun emitCategoryEvent(category: MangaCategory, operation: String, isDeleted: Boolean) {
+        val hook = db.onEntityChanged ?: return
+        val members = if (isDeleted) emptySet() else mangaIdsInCategory(category.id)
+        val fs = com.folio.reader.firebase.FsMangaCategory(
+            id = category.id,
+            name = category.name,
+            sortOrder = category.sortOrder,
+            mangaIds = members.toList(),
+            updatedAt = category.updatedAt.toEpochMilliseconds(),
+            isDeleted = isDeleted,
+        )
+        hook(
+            "manga_category",
+            category.id,
+            operation,
+            mangaJson.encodeToString(com.folio.reader.firebase.FsMangaCategory.serializer(), fs)
+        )
     }
 
     override suspend fun categoriesFor(mangaId: String): Set<String> = db.withConnection { conn ->
@@ -981,10 +1147,18 @@ object MangaSchema {
             CREATE TABLE IF NOT EXISTS manga_categories (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 0
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
+        runCatching {
+            conn.createStatement().executeQuery("SELECT updated_at FROM manga_categories LIMIT 0").close()
+        }.onFailure {
+            conn.createStatement().use {
+                it.execute("ALTER TABLE manga_categories ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+            }
+        }
         exec(
             """
             CREATE TABLE IF NOT EXISTS manga_category_map (

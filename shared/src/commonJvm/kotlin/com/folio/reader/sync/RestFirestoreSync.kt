@@ -5,6 +5,7 @@ import com.folio.reader.firebase.FsBookmark
 import com.folio.reader.firebase.FsCollection
 import com.folio.reader.firebase.FsHighlight
 import com.folio.reader.firebase.FsManga
+import com.folio.reader.firebase.FsMangaCategory
 import com.folio.reader.firebase.FsMangaChapter
 import com.folio.reader.firebase.FsMangaNote
 import com.folio.reader.firebase.FsNote
@@ -422,6 +423,17 @@ class RestFirestoreSync(
     override fun fetchMangaNotes(): List<FsMangaNote> {
         ensureAuth()
         return listCollection(FirestorePaths.userMangaNotes(uid)).mapNotNull { decode<FsMangaNote>(it) }
+    }
+
+    override fun upsertMangaCategory(category: FsMangaCategory) = putPayload(
+        "${FirestorePaths.userMangaCategories(uid)}/${category.id}",
+        category.updatedAt,
+        json.encodeToString(category)
+    )
+
+    override fun fetchMangaCategories(): List<FsMangaCategory> {
+        ensureAuth()
+        return listCollection(FirestorePaths.userMangaCategories(uid)).mapNotNull { decode<FsMangaCategory>(it) }
     }
 
     // ---------- internals ----------
