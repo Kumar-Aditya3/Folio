@@ -36,13 +36,7 @@ class BookDetailViewModel(
     private val noteRepository: NoteRepository,
     private val seriesRepository: SeriesRepository,
     private val collectionRepository: CollectionRepository,
-    private val tagRepository: TagRepository,
-    /**
-     * Platform-provided EPUB upload hook (Firebase Storage), or null when cloud
-     * storage is not configured. The platform resolves the local file path and
-     * updates [CloudState] as the transfer progresses.
-     */
-    private val uploadEpub: (suspend (bookId: String) -> Result<Unit>)? = null
+    private val tagRepository: TagRepository
 ) {
     private val _book = MutableStateFlow<Book?>(null)
     private val _sessions = MutableStateFlow<List<ReadingSession>>(emptyList())
@@ -54,10 +48,6 @@ class BookDetailViewModel(
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
     private val _availableSeries = MutableStateFlow<List<Series>>(emptyList())
     private val _availableCollections = MutableStateFlow<List<Collection>>(emptyList())
-
-    /** True while an EPUB body upload is running (drives progress UI). */
-    private val _isUploading = MutableStateFlow(false)
-    val isUploading: Flow<Boolean> = _isUploading.asStateFlow()
 
     val book: Flow<Book?> = _book.asStateFlow()
     val sessions: Flow<List<ReadingSession>> = _sessions.asStateFlow()
@@ -171,26 +161,4 @@ class BookDetailViewModel(
     }
 
     private fun String.blankToNull(): String? = trim().takeIf { it.isNotEmpty() }
-
-    /** Whether this screen can offer the "back up to cloud" action. */
-    val canUploadToCloud: Boolean get() = uploadEpub != null
-
-    /**
-     * Uploads the book's EPUB body (and cover) to Firebase Storage via the
-     * platform hook and refreshes local state afterwards.
-     */
-    fun uploadToCloud() {
-        val bookId = currentBookId ?: return
-        val uploader = uploadEpub ?: return
-        if (!_isUploading.compareAndSet(expect = false, update = true)) return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                uploader(bookId)
-            } finally {
-                _isUploading.value = false
-                // Reload so cloudState changes from the platform hook show up.
-                _book.value = bookRepository.getBook(bookId)
-            }
-        }
-    }
 }

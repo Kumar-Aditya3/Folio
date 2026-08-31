@@ -1116,12 +1116,6 @@ fun CloudSyncSettingsPanel(
                             checked = settings.syncSettings,
                             onCheckedChange = { onSettingsChange(settings.copy(syncSettings = it)) }
                         )
-                        SyncToggleRow(
-                            label = "EPUB files (cloud storage)",
-                            description = "Upload & download books from cloud (opt-in)",
-                            checked = settings.syncEpubs,
-                            onCheckedChange = { onSettingsChange(settings.copy(syncEpubs = it)) }
-                        )
                     }
                 }
             }

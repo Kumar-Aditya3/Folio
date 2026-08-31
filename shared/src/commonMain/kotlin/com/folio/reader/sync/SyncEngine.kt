@@ -252,7 +252,7 @@ class SyncEngine(
             )
             return
         }
-        // Always sync book metadata; EPUB file body upload is handled separately via uploadBookToCloud (opt-in via syncEpubs setting)
+        // Only book metadata syncs; EPUB bodies stay on-device.
         val book = Json.Default.decodeFromString(Book.serializer(), item.payload)
         // A fresher remote copy wins; uploading this stale payload would clobber it.
         val remote = fetchedBooks.firstOrNull { it.id == book.id }
@@ -266,6 +266,12 @@ class SyncEngine(
         if (settings?.syncPositions == false) return
 
         val position = Json.Default.decodeFromString(ReadingPosition.serializer(), item.payload)
+        // Same guard as the other pushes: a fresher remote row for this book and
+        // device wins, so a stale local snapshot never clobbers it.
+        val remotePosition = fetchedPositions.firstOrNull {
+            it.bookId == position.bookId && it.deviceId == position.deviceId
+        }
+        if (remotePosition != null && remotePosition.updatedAt > position.updatedAt.toEpochMilliseconds()) return
         val fsPosition = FsReadingPosition(
             bookId = position.bookId,
             deviceId = position.deviceId,
@@ -348,7 +354,7 @@ class SyncEngine(
         val current = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
         if (current?.syncSettings == false) return
 
-        val settings = Json.Default.decodeFromString(ReaderSettings.serializer(), item.payload)
+        val settings = com.folio.reader.util.JsonUtils.Compact.decodeFromString(ReaderSettings.serializer(), item.payload)
         // Credentials never leave the device: the payload would otherwise carry the
         // account password and API key into the cloud document (and every restore).
         val shareable = settings.copy(
@@ -624,7 +630,7 @@ class SyncEngine(
             .getOrNull()?.toLongOrNull() ?: 0L
         if (remote.updatedAt <= appliedAt) return
         val incoming = runCatching {
-            Json.Default.decodeFromString(ReaderSettings.serializer(), remote.global)
+            com.folio.reader.util.JsonUtils.Compact.decodeFromString(ReaderSettings.serializer(), remote.global)
         }.getOrNull() ?: return
         val merged = incoming.copy(
             firebaseApiKey = current.firebaseApiKey,
@@ -828,18 +834,23 @@ class SyncEngine(
             for (remote in fetchedMangaChapters) {
                 if (remote.deviceId == deviceId) continue
                 val local = chapterRepo.getChapter(remote.id) ?: continue
-                if (local.updatedAt.toEpochMilliseconds() < remote.updatedAt) {
-                    runCatching {
-                        chapterRepo.applyRemoteState(
-                            remote.id,
-                            read = remote.read,
-                            bookmarked = remote.bookmarked,
-                            lastPageRead = remote.lastPageRead,
-                            updatedAt = Instant.fromEpochMilliseconds(remote.updatedAt),
-                            emitSyncEvent = false,
-                            totalPages = remote.totalPages,
-                        )
-                    }
+                val localHasState = local.read || local.bookmarked || local.lastPageRead > 0
+                // Fresh catalog rows are stamped "now" by replaceChapters but carry
+                // no user intent — remote read-state must win over them regardless
+                // of timestamps. Rows with real user state merge last-write-wins.
+                val remoteHasState = remote.read || remote.bookmarked || remote.lastPageRead > 0
+                if (!localHasState && !remoteHasState) continue
+                if (localHasState && local.updatedAt.toEpochMilliseconds() >= remote.updatedAt) continue
+                runCatching {
+                    chapterRepo.applyRemoteState(
+                        remote.id,
+                        read = remote.read,
+                        bookmarked = remote.bookmarked,
+                        lastPageRead = remote.lastPageRead,
+                        updatedAt = Instant.fromEpochMilliseconds(remote.updatedAt),
+                        emitSyncEvent = false,
+                        totalPages = remote.totalPages,
+                    )
                 }
             }
         }
@@ -894,6 +905,85 @@ class SyncEngine(
                 }
             }
         }
+    }
+
+    /**
+     * Import-time restore: a freshly imported EPUB starts at zero progress and,
+     * if opened before the first sync cycle, would write a zero position that
+     * then wins "latest across devices" everywhere. Seed the local positions
+     * from the cloud book matched by [epubHash] (last-write-wins per device row)
+     * and refresh the book's normalized progress, silently, before the reader
+     * can open it. Returns the number of adopted position rows, 0 when the
+     * cloud has nothing for this book or sync is not configured.
+     */
+    suspend fun adoptCloudProgressForBook(bookId: String, epubHash: String): Int {
+        if (epubHash.isBlank()) return 0
+        val remoteBook = runCatching { firestoreSync.fetchBooks() }.getOrDefault(emptyList())
+            .firstOrNull { !it.isDeleted && it.epubHash == epubHash } ?: return 0
+        val positions = runCatching { firestoreSync.fetchPositions() }.getOrDefault(emptyList())
+            .filter { it.bookId == remoteBook.id }
+        var adopted = 0
+        for (p in positions) {
+            val local = runCatching { positionRepository.getPosition(bookId, p.deviceId) }.getOrNull()
+            if (local != null && local.updatedAt.toEpochMilliseconds() >= p.updatedAt) continue
+            runCatching {
+                positionRepository.upsertPosition(
+                    ReadingPosition(
+                        bookId = bookId,
+                        deviceId = p.deviceId,
+                        chapterId = p.chapterId,
+                        spineIndex = p.spineIndex,
+                        contentLocator = p.contentLocator,
+                        characterOffset = p.characterOffset,
+                        paragraphIndex = p.paragraphIndex,
+                        normalizedProgress = p.normalizedProgress,
+                        chapterProgress = p.chapterProgress,
+                        scrollOffset = p.scrollOffset,
+                        updatedAt = Instant.fromEpochMilliseconds(p.updatedAt)
+                    ),
+                    emitSyncEvent = false
+                )
+                adopted++
+            }
+        }
+        if (adopted > 0) {
+            positionRepository.getLatestPositionAcrossDevices(bookId)
+                ?.let { bookRepository.updateNormalizedProgress(bookId, it.normalizedProgress) }
+        }
+        return adopted
+    }
+
+    /**
+     * Import-time restore for manga: adopt cloud chapter read-state (read,
+     * bookmark, last page) for [mangaId] onto chapters that already exist
+     * locally, last-write-wins, silently. Returns the number of adopted
+     * chapters. The chapter catalog itself is source-owned and never synced.
+     */
+    suspend fun adoptCloudProgressForManga(mangaId: String): Int {
+        val chapterRepo = mangaChapterRepository ?: return 0
+        val remoteChapters = runCatching { firestoreSync.fetchMangaChapters() }.getOrDefault(emptyList())
+        var adopted = 0
+        for (remote in remoteChapters) {
+            if (remote.mangaId != mangaId) continue
+            val local = chapterRepo.getChapter(remote.id) ?: continue
+            val localHasState = local.read || local.bookmarked || local.lastPageRead > 0
+            val remoteHasState = remote.read || remote.bookmarked || remote.lastPageRead > 0
+            if (!localHasState && !remoteHasState) continue
+            if (localHasState && local.updatedAt.toEpochMilliseconds() >= remote.updatedAt) continue
+            runCatching {
+                chapterRepo.applyRemoteState(
+                    remote.id,
+                    read = remote.read,
+                    bookmarked = remote.bookmarked,
+                    lastPageRead = remote.lastPageRead,
+                    updatedAt = Instant.fromEpochMilliseconds(remote.updatedAt),
+                    emitSyncEvent = false,
+                    totalPages = remote.totalPages,
+                )
+                adopted++
+            }
+        }
+        return adopted
     }
 
     private suspend fun resolveLocalBookId(remoteBookId: String): String {
@@ -1225,7 +1315,6 @@ interface FirestoreSync {
 
 interface StorageSync {
     val uid: String
-    suspend fun uploadBook(uid: String, bookId: String, localPath: String, onProgress: ((Float) -> Unit)? = null)
     suspend fun downloadBook(
         uid: String,
         bookId: String,
@@ -1233,6 +1322,5 @@ interface StorageSync {
         onProgress: ((Float) -> Unit)? = null
     )
 
-    suspend fun uploadCover(uid: String, bookId: String, localPath: String, onProgress: ((Float) -> Unit)? = null)
     suspend fun deleteBook(uid: String, bookId: String)
 }

@@ -41,7 +41,6 @@ data class ReaderSettings(
     val syncPositions: Boolean = true,
     val syncAnnotations: Boolean = true,
     val syncSettings: Boolean = true,
-    val syncEpubs: Boolean = false, // Opt-in for EPUB cloud storage
     val autoSyncInterval: Int = 15 // minutes
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
@@ -416,6 +415,71 @@ data class Theme(
                 ),
                 progress = 0xFFFB4934.toInt(), divider = 0xFF3C3836.toInt(),
                 isDark = true
+            ),
+            "synthwave" to Theme(
+                id = "synthwave", name = "Synthwave",
+                background = 0xFF0D0221.toInt(), surface = 0xFF1A0B38.toInt(),
+                primaryText = 0xFFF0E6FF.toInt(), secondaryText = 0xFF9D8BC4.toInt(),
+                headingText = 0xFFFF7BE5.toInt(), link = 0xFF00E5FF.toInt(),
+                selection = 0xFF3D1A6E.toInt(), bookmark = 0xFFFF2FD6.toInt(),
+                highlightColors = listOf(
+                    0xFFFF2FD6.toInt(), 0xFF00E5FF.toInt(), 0xFF7C4DFF.toInt(), 0xFF00FF9F.toInt(),
+                    0xFFFFE600.toInt(), 0xFFFF6B35.toInt(), 0xFF4D9DFF.toInt(), 0xFFFF8AE2.toInt()
+                ),
+                progress = 0xFFFF2FD6.toInt(), divider = 0xFF2A1454.toInt(),
+                isDark = true
+            ),
+            "bubblegum" to Theme(
+                id = "bubblegum", name = "Bubblegum",
+                background = 0xFFFFF0F6.toInt(), surface = 0xFFFFE3EF.toInt(),
+                primaryText = 0xFF4A1033.toInt(), secondaryText = 0xFF9A5A78.toInt(),
+                headingText = 0xFFD8467A.toInt(), link = 0xFF2ECFA0.toInt(),
+                selection = 0xFFFFC6DE.toInt(), bookmark = 0xFFFF4FA3.toInt(),
+                highlightColors = listOf(
+                    0xFFFF4FA3.toInt(), 0xFF2ECFA0.toInt(), 0xFFFFB300.toInt(), 0xFF7A6CFF.toInt(),
+                    0xFF4DC3FF.toInt(), 0xFFFF85B5.toInt(), 0xFF9CE86B.toInt(), 0xFFE88AFF.toInt()
+                ),
+                progress = 0xFFFF4FA3.toInt(), divider = 0xFFF5CCDE.toInt(),
+                isDark = false
+            ),
+            "acid" to Theme(
+                id = "acid", name = "Acid Rave",
+                background = 0xFF060806.toInt(), surface = 0xFF0E120C.toInt(),
+                primaryText = 0xFFE8FFD6.toInt(), secondaryText = 0xFF98B878.toInt(),
+                headingText = 0xFFCCFF00.toInt(), link = 0xFFFF2ED1.toInt(),
+                selection = 0xFF2A3A18.toInt(), bookmark = 0xFFCCFF00.toInt(),
+                highlightColors = listOf(
+                    0xFFCCFF00.toInt(), 0xFFFF2ED1.toInt(), 0xFF00FFAA.toInt(), 0xFF3D8BFF.toInt(),
+                    0xFFFFE600.toInt(), 0xFFFF5C1E.toInt(), 0xFFB04DFF.toInt(), 0xFF6BFF3D.toInt()
+                ),
+                progress = 0xFFCCFF00.toInt(), divider = 0xFF1A2414.toInt(),
+                isDark = true
+            ),
+            "lava" to Theme(
+                id = "lava", name = "Lava",
+                background = 0xFF160504.toInt(), surface = 0xFF240B06.toInt(),
+                primaryText = 0xFFFFE4D4.toInt(), secondaryText = 0xFFC08870.toInt(),
+                headingText = 0xFFFF8A3D.toInt(), link = 0xFFFF2E63.toInt(),
+                selection = 0xFF4A1808.toInt(), bookmark = 0xFFFF5C1E.toInt(),
+                highlightColors = listOf(
+                    0xFFFF5C1E.toInt(), 0xFFFF2E63.toInt(), 0xFFFFB300.toInt(), 0xFFFF8A3D.toInt(),
+                    0xFFD84040.toInt(), 0xFFFF6B6B.toInt(), 0xFFE8960A.toInt(), 0xFFFF3D9A.toInt()
+                ),
+                progress = 0xFFFF5C1E.toInt(), divider = 0xFF38120A.toInt(),
+                isDark = true
+            ),
+            "sherbet" to Theme(
+                id = "sherbet", name = "Sherbet",
+                background = 0xFFFFF7EE.toInt(), surface = 0xFFFFEEDA.toInt(),
+                primaryText = 0xFF4A2E14.toInt(), secondaryText = 0xFF9A7854.toInt(),
+                headingText = 0xFFE05A2B.toInt(), link = 0xFF2ED9A3.toInt(),
+                selection = 0xFFFFDCB8.toInt(), bookmark = 0xFFFF7A4D.toInt(),
+                highlightColors = listOf(
+                    0xFFFF7A4D.toInt(), 0xFF2ED9A3.toInt(), 0xFF4DC3FF.toInt(), 0xFFFFB340.toInt(),
+                    0xFFFF5C8A.toInt(), 0xFF9CE86B.toInt(), 0xFFB085FF.toInt(), 0xFF40D0E8.toInt()
+                ),
+                progress = 0xFFFF7A4D.toInt(), divider = 0xFFF0DCC0.toInt(),
+                isDark = false
             )
         )
 

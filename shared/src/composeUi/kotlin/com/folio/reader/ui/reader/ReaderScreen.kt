@@ -251,7 +251,7 @@ fun ReaderScreen(
             fontFamily = settings.fontFamily,
             fontOptions = quickFontNames,
             themeId = settings.themeId,
-            themes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black").map { id ->
+            themes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black", "synthwave", "bubblegum", "acid", "lava", "sherbet").map { id ->
                 val t = com.folio.reader.settings.Theme.getPreset(id)
                 Triple(id, t.name, t.background.argbHex())
             },
@@ -1145,7 +1145,7 @@ fun ReaderSettingsPanel(
     val availableFonts = (fonts + settings.customFonts.map { it.name }).distinct()
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
-    val quickThemes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black")
+    val quickThemes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black", "synthwave", "bubblegum", "acid", "lava", "sherbet")
     val panelShape = RoundedCornerShape(topStart = 20.dp)
 
     Column(
