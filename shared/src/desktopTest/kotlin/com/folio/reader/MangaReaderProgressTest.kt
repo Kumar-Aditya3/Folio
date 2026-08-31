@@ -436,6 +436,32 @@ class MangaReaderProgressTest {
     // ---------- Continue Reading resume ----------
 
     @Test
+    fun continuePrefersInProgressChapterOverHistory() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3))
+        val (c1, c2, c3) = chapters
+        chapterRepo.chapters[c1.id] = c1.copy(read = true, lastPageRead = 2)
+        chapterRepo.chapters[c2.id] = c2.copy(read = true, lastPageRead = 2)
+        chapterRepo.chapters[c3.id] = c3.copy(read = false, lastPageRead = 1, totalPages = 3)
+        // History lags behind the actual in-progress chapter.
+        historyRepo.recent = listOf(
+            MangaHistoryItem(mangaId = mId, chapterId = c1.id, readAt = Clock.System.now()),
+        )
+        val vm = MangaDetailViewModel(
+            backend = FakeBackend(emptyMap()),
+            mangaRepo = mangaRepo,
+            chapterRepo = chapterRepo,
+            historyRepo = historyRepo,
+            downloadManager = null,
+            categoryRepo = FakeCategoryRepo(),
+            settingsRepo = settingsRepo,
+        )
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.manga.value != null && vm.chapters.value.isNotEmpty() }
+
+        assertEquals(c3.id, vm.nextChapterToRead()?.id, "in-progress chapter wins over stale history")
+    }
+
+    @Test
     fun continueResumesAfterFinishedChapter() = runBlocking {
         val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3))
         val (c1, c2, c3) = chapters

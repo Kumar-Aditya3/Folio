@@ -921,6 +921,12 @@ class MangaDetailViewModel(
     suspend fun nextChapterToRead(): MangaChapter? {
         val id = manga.value?.id ?: return null
         val all = chapterRepo.getChapters(id)
+        if (all.isEmpty()) return null
+
+        // A chapter with a saved, unfinished position is the resume target above all
+        // (order-independent), so Continue lands on the in-progress chapter.
+        all.firstOrNull { !it.read && it.lastPageRead > 0 }?.let { return it }
+
         val lastId = historyRepo.observeRecent(100).first()
             .firstOrNull { it.mangaId == id }?.chapterId
         val last = all.firstOrNull { it.id == lastId }

@@ -84,48 +84,48 @@ val DarkFolioColors = FolioColors(
 )
 
 private val WarmFolioColors = LightFolioColors.copy(
-    background = Color(0xFFFAF7F2),
-    onBackground = Color(0xFF2B2622),
-    surface = Color(0xFFFFFDFA),
-    onSurface = Color(0xFF2B2622),
-    surfaceVariant = Color(0xFFF1EAE1),
-    onSurfaceVariant = Color(0xFF6B6157),
-    surfaceContainerHighest = Color(0xFFE7DED3),
-    outline = Color(0xFFD8CEC2),
-    outlineVariant = Color(0xFFE7DED3),
-    inverseSurface = Color(0xFF2B2622),
-    inverseOnSurface = Color(0xFFFAF7F2),
-    statusBar = Color(0xFF241F1A)
+    background = Color(0xFFF7EEDD),
+    onBackground = Color(0xFF33291C),
+    surface = Color(0xFFFFF9EC),
+    onSurface = Color(0xFF33291C),
+    surfaceVariant = Color(0xFFEEDFC6),
+    onSurfaceVariant = Color(0xFF75603F),
+    surfaceContainerHighest = Color(0xFFE6D3B2),
+    outline = Color(0xFFCDB489),
+    outlineVariant = Color(0xFFE6D3B2),
+    inverseSurface = Color(0xFF33291C),
+    inverseOnSurface = Color(0xFFF7EEDD),
+    statusBar = Color(0xFF241B0E)
 )
 
 private val MatchaFolioColors = LightFolioColors.copy(
-    background = Color(0xFFF5F8F0),
-    onBackground = Color(0xFF252E1F),
-    surface = Color(0xFFFCFEF9),
-    onSurface = Color(0xFF252E1F),
-    surfaceVariant = Color(0xFFE8EFDF),
-    onSurfaceVariant = Color(0xFF5F6D52),
-    surfaceContainerHighest = Color(0xFFDCE7CF),
-    outline = Color(0xFFC4D2B4),
-    outlineVariant = Color(0xFFDCE7CF),
-    inverseSurface = Color(0xFF252E1F),
-    inverseOnSurface = Color(0xFFF5F8F0),
-    statusBar = Color(0xFF1B2415)
+    background = Color(0xFFE9F2DC),
+    onBackground = Color(0xFF26301A),
+    surface = Color(0xFFF7FBEE),
+    onSurface = Color(0xFF26301A),
+    surfaceVariant = Color(0xFFDCEBC8),
+    onSurfaceVariant = Color(0xFF5A6B41),
+    surfaceContainerHighest = Color(0xFFCBDFB0),
+    outline = Color(0xFFA8C487),
+    outlineVariant = Color(0xFFCBDFB0),
+    inverseSurface = Color(0xFF26301A),
+    inverseOnSurface = Color(0xFFE9F2DC),
+    statusBar = Color(0xFF182209)
 )
 
 private val ArcticFolioColors = LightFolioColors.copy(
-    background = Color(0xFFF1F7FA),
-    onBackground = Color(0xFF1E2B33),
-    surface = Color(0xFFFAFDFE),
-    onSurface = Color(0xFF1E2B33),
-    surfaceVariant = Color(0xFFE1EDF3),
-    onSurfaceVariant = Color(0xFF587080),
-    surfaceContainerHighest = Color(0xFFD3E4EC),
-    outline = Color(0xFFB9CFDA),
-    outlineVariant = Color(0xFFD3E4EC),
-    inverseSurface = Color(0xFF1E2B33),
-    inverseOnSurface = Color(0xFFF1F7FA),
-    statusBar = Color(0xFF0F202B)
+    background = Color(0xFFE3F1F8),
+    onBackground = Color(0xFF16293A),
+    surface = Color(0xFFF3FBFF),
+    onSurface = Color(0xFF16293A),
+    surfaceVariant = Color(0xFFD3E8F2),
+    onSurfaceVariant = Color(0xFF41617A),
+    surfaceContainerHighest = Color(0xFFBCDCEA),
+    outline = Color(0xFF93BDD3),
+    outlineVariant = Color(0xFFBCDCEA),
+    inverseSurface = Color(0xFF16293A),
+    inverseOnSurface = Color(0xFFE3F1F8),
+    statusBar = Color(0xFF0A1D2C)
 )
 
 private val SakuraFolioColors = LightFolioColors.copy(
