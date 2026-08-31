@@ -67,6 +67,7 @@ import com.folio.reader.ui.quotes.QuoteBrowserViewModel
 import com.folio.reader.ui.revisit.RevisitItemsScreen
 import com.folio.reader.ui.revisit.RevisitItemsViewModel
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import androidx.compose.animation.togetherWith
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -479,11 +480,10 @@ fun main(args: Array<String>) {
             deps.startSync(appScope)
         }
 
-        // Auto-clear import/sync status after 3 seconds unless it's an error or an in-progress message.
+        // Success statuses auto-clear after 3 seconds; in-progress and error messages
+        // persist until the next status replaces them.
         LaunchedEffect(importStatus) {
-            if (importStatus.isNotEmpty() && !importStatus.contains("Failed", ignoreCase = true) &&
-                !importStatus.contains("...", ignoreCase = false)
-            ) {
+            if (com.folio.reader.ui.components.isTransientStatus(importStatus)) {
                 kotlinx.coroutines.delay(3000)
                 importStatus = ""
             }
@@ -750,14 +750,6 @@ fun main(args: Array<String>) {
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
                 ) {
-                    // Auto-clear import status after 3 seconds
-                    LaunchedEffect(importStatus) {
-                        if (importStatus.isNotEmpty()) {
-                            kotlinx.coroutines.delay(3000)
-                            importStatus = ""
-                        }
-                    }
-
                     androidx.compose.runtime.key(refreshTick) {
                         androidx.compose.animation.AnimatedContent(
                             targetState = navStack.last(),
@@ -1144,13 +1136,11 @@ fun main(args: Array<String>) {
                         }
                     }
 
-                    if (importStatus.isNotBlank()) {
-                        androidx.compose.material3.Text(
-                            text = importStatus,
-                            modifier = Modifier.padding(8.dp),
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant
-                        )
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(FolioTokens.space3),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        com.folio.reader.ui.components.FolioStatusBanner(importStatus)
                     }
                 }
             }

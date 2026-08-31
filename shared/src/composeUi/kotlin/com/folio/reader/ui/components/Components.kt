@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -510,5 +511,79 @@ fun LoadingPlaceholder(modifier: Modifier = Modifier) {
             strokeWidth = 2.dp,
             color = MaterialTheme.colorScheme.primary
         )
+    }
+}
+
+/** In-progress statuses announce ongoing work ("Importing…", trailing ellipsis). */
+fun isStatusInProgress(message: String): Boolean =
+    message.startsWith("Importing") || message.endsWith("...") || message.endsWith("…")
+
+/** Failures persist until replaced; anything containing "fail" reads as an error. */
+fun isStatusError(message: String): Boolean =
+    message.contains("fail", ignoreCase = true)
+
+/** Only plain success messages auto-clear; progress and errors stay until replaced. */
+fun isTransientStatus(message: String): Boolean =
+    message.isNotBlank() && !isStatusInProgress(message) && !isStatusError(message)
+
+/**
+ * Bottom toast for app-wide transient messages (imports, exports, backups). The kind
+ * is derived from the message itself so every entry point gets the same treatment:
+ * a spinner while working, a warning glyph on the error container for failures, and
+ * a check on the inverse surface for successes.
+ */
+@Composable
+fun FolioStatusBanner(message: String, modifier: Modifier = Modifier) {
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val inProgress = isStatusInProgress(message)
+    val isError = isStatusError(message)
+    val container = if (isError) colors.errorContainer else colors.inverseSurface
+    val content = if (isError) colors.onErrorContainer else colors.inverseOnSurface
+    val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusControl)
+
+    androidx.compose.animation.AnimatedVisibility(
+        visible = message.isNotBlank(),
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) +
+            androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(220)) { it / 2 },
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) +
+            androidx.compose.animation.slideOutVertically(androidx.compose.animation.core.tween(200)) { it / 2 },
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .shadow(10.dp, shape)
+                .background(container, shape)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            when {
+                inProgress -> CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = content
+                )
+                isError -> Icon(
+                    Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = content,
+                    modifier = Modifier.size(16.dp)
+                )
+                else -> Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = content,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Text(
+                text = message,
+                color = content,
+                style = com.folio.reader.ui.theme.FolioTheme.typography.labelLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
