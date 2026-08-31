@@ -28,6 +28,7 @@ import com.folio.reader.manga.chapterId
 import com.folio.reader.manga.mangaId
 import com.folio.reader.platform.DesktopPlatform
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.manga.ChapterFilter
 import com.folio.reader.ui.manga.MangaDetailViewModel
 import com.folio.reader.ui.manga.MangaReaderViewModel
 import com.folio.reader.ui.manga.MangaSearchRanker
@@ -485,6 +486,82 @@ class MangaReaderProgressTest {
         // Unfinished chapter resumes in place.
         chapterRepo.chapters[c2.id] = c2.copy(read = false, lastPageRead = 1)
         assertEquals(c2.id, vm.nextChapterToRead()?.id, "an unfinished chapter resumes in place")
+    }
+
+    private fun detailVm() = MangaDetailViewModel(
+        backend = FakeBackend(emptyMap()),
+        mangaRepo = mangaRepo,
+        chapterRepo = chapterRepo,
+        historyRepo = historyRepo,
+        downloadManager = null,
+        categoryRepo = FakeCategoryRepo(),
+        settingsRepo = settingsRepo,
+    )
+
+    @Test
+    fun continueAfterMarkPreviousGoesToFirstUnread() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3, "/c4" to 3, "/c5" to 3))
+        val (c1, c2, c3, _, _) = chapters
+        chapterRepo.chapters[c1.id] = c1.copy(read = true, lastPageRead = 2)
+        // History points at the chapter the reader physically left off in; after
+        // mark-previous it is read, so Continue must skip it for the first unread.
+        historyRepo.recent = listOf(
+            MangaHistoryItem(mangaId = mId, chapterId = c1.id, readAt = Clock.System.now()),
+        )
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.manga.value != null && vm.chapters.value.isNotEmpty() }
+
+        vm.markPreviousAsRead(c3)
+        awaitCondition(message = "previous chapters marked read") {
+            chapterRepo.chapters[c2.id]?.read == true
+        }
+
+        assertEquals(c3.id, vm.nextChapterToRead()?.id,
+            "Continue lands on the first unread, not the stale left-off chapter")
+    }
+
+    @Test
+    fun markPreviousFollowsDescendingSort() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3, "/c4" to 3, "/c5" to 3))
+        val (c1, c2, c3, c4, c5) = chapters
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+        vm.sortAscending.value = false
+
+        vm.markPreviousAsRead(c3)
+        awaitCondition(message = "story-later chapters marked read") {
+            chapterRepo.chapters[c4.id]?.read == true && chapterRepo.chapters[c5.id]?.read == true
+        }
+        assertFalse(chapterRepo.chapters[c1.id]!!.read, "story-earlier chapters stay untouched in descending")
+        assertFalse(chapterRepo.chapters[c2.id]!!.read, "story-earlier chapters stay untouched in descending")
+    }
+
+    @Test
+    fun continueRespectsActiveChapterFilter() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3))
+        val (c1, c2, _) = chapters
+        chapterRepo.chapters[c2.id] = c2.copy(bookmarked = true)
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+        vm.setChapterFilter(ChapterFilter.BOOKMARKED)
+
+        assertEquals(c2.id, vm.nextChapterToRead()?.id,
+            "with a bookmark filter, Continue jumps to the first unread bookmarked chapter")
+    }
+
+    @Test
+    fun continueAllReadGoesToFirstChapter() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3))
+        chapters.forEach { chapterRepo.chapters[it.id] = it.copy(read = true) }
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+
+        assertEquals(chapters.first().id, vm.nextChapterToRead()?.id,
+            "everything read falls back to the first chapter")
     }
 }
 

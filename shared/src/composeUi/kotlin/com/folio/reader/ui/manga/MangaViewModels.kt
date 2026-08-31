@@ -85,10 +85,7 @@ class MangaLibraryViewModel(
 
     val query = MutableStateFlow("")
     val searchActive = MutableStateFlow(false)
-
-    /** Source-search counterparts of [query]/[searchActive]; kept per scope so switching
-     *  between In-library and All-sources never throws either text away. */
-    val sourceQuery = MutableStateFlow("")
+    /** One query shared by both scopes so the text survives library/source switches. */
     val searchScope = MutableStateFlow(MangaSearchScope.LIBRARY)
 
     val sortBy = MutableStateFlow(MangaSortBy.RECENT)
@@ -185,9 +182,14 @@ class MangaLibraryViewModel(
 
     suspend fun categoriesFor(mangaId: String): Set<String> = categoryRepo.categoriesFor(mangaId)
 
-    /** Picker save for one manga (library item overflow menu). */
+    /** Picker apply for one manga (library item overflow menu); empty keeps the default shelf. */
     fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
-        scope.launch { categoryRepo.assign(mangaId, categoryIds) }
+        scope.launch {
+            val target = categoryIds.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
+            }
+            categoryRepo.assign(mangaId, target)
+        }
     }
 
     /**
@@ -209,12 +211,15 @@ class MangaLibraryViewModel(
         bulkPickerInitial.value = null
     }
 
-    /** Replaces the category set of every given manga (picker save semantics). */
-    fun assignCategories(mangaIds: Set<String>, categoryIds: Set<String>) {
+    /** Live-applies the picker's current set to every selected manga; selection stays. */
+    fun applyBulkCategories(categoryIds: Set<String>) {
+        val ids = selectedIds.value
+        if (ids.isEmpty()) return
         scope.launch {
-            mangaIds.forEach { categoryRepo.assign(it, categoryIds) }
-            bulkPickerInitial.value = null
-            clearSelection()
+            val target = categoryIds.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
+            }
+            ids.forEach { categoryRepo.assign(it, target) }
         }
     }
 
@@ -660,10 +665,14 @@ class SourceBrowseViewModel(
     suspend fun createCategoryNamed(name: String): String? =
         runCatching { categoryRepo.create(name).id }.getOrNull()
 
-    /** Replaces the shelf set for a manga; an empty save keeps the default shelf. */
+    /** Replaces the shelf set for a manga; an empty set lands on the default shelf. */
     fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
-        if (categoryIds.isEmpty()) return
-        scope.launch { categoryRepo.assign(mangaId, categoryIds) }
+        scope.launch {
+            val target = categoryIds.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
+            }
+            categoryRepo.assign(mangaId, target)
+        }
     }
 }
 
@@ -748,7 +757,12 @@ class MangaDetailViewModel(
 
     fun setCategories(ids: Set<String>) {
         val id = manga.value?.id ?: return
-        scope.launch { categoryRepo.assign(id, ids) }
+        scope.launch {
+            val target = ids.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: emptySet()
+            }
+            if (target.isNotEmpty()) categoryRepo.assign(id, target)
+        }
     }
 
     suspend fun createCategory(name: String): String? =
@@ -833,11 +847,14 @@ class MangaDetailViewModel(
     fun markPreviousAsRead(chapter: MangaChapter) {
         scope.launch {
             val all = chapterRepo.getChapters(chapter.mangaId)
-            val idx = all.indexOfFirst { it.id == chapter.id }
-            if (idx >= 0) {
-                chapterRepo.markRead(all.take(idx).map { it.id }, true)
-                chapters.value = chapterRepo.getChapters(chapter.mangaId)
+            // "Previous" follows the reader's sort: descending shows story-later
+            // chapters above the tapped one, and those are what the reader means.
+            val previous = all.filter {
+                if (sortAscending.value) it.sortOrder < chapter.sortOrder
+                else it.sortOrder > chapter.sortOrder
             }
+            chapterRepo.markRead(previous.map { it.id }, true)
+            chapters.value = chapterRepo.getChapters(chapter.mangaId)
         }
     }
 
@@ -917,27 +934,20 @@ class MangaDetailViewModel(
         }
     }
 
-    /** Continue = the chapter last actually read: resume it mid-way, or the one after it once finished. */
+    /**
+     * Continue = resume the in-progress chapter; else the first unread chapter in
+     * reading order within the active chapter filter (so bookmark/download filters
+     * jump to the first unread of that shelf); else the first chapter of the pool.
+     * Reading order is always story-ascending, independent of the display sort.
+     */
     suspend fun nextChapterToRead(): MangaChapter? {
         val id = manga.value?.id ?: return null
         val all = chapterRepo.getChapters(id)
         if (all.isEmpty()) return null
-
-        // A chapter with a saved, unfinished position is the resume target above all
-        // (order-independent), so Continue lands on the in-progress chapter.
-        all.firstOrNull { !it.read && it.lastPageRead > 0 }?.let { return it }
-
-        val lastId = historyRepo.observeRecent(100).first()
-            .firstOrNull { it.mangaId == id }?.chapterId
-        val last = all.firstOrNull { it.id == lastId }
-        if (last != null) {
-            if (!last.read) return last
-            val idx = all.indexOfFirst { it.id == last.id }
-            return all.getOrNull(idx + 1) ?: last
-        }
-        return all.firstOrNull { !it.read }
-            ?: all.maxByOrNull { it.updatedAt }
-            ?: all.firstOrNull()
+        val pool = filterChapters(all, chapterFilter.value).ifEmpty { all }
+            .sortedBy { it.sortOrder }
+        pool.firstOrNull { !it.read && it.lastPageRead > 0 }?.let { return it }
+        return pool.firstOrNull { !it.read } ?: pool.firstOrNull()
     }
 
     fun continueFrom(chapter: MangaChapter): MangaChapter? {
@@ -1001,7 +1011,10 @@ class MangaReaderViewModel(
     val zoom = MutableStateFlow(1f)
 
     fun setZoom(level: Float) {
-        zoom.value = level.coerceIn(1f, 3f)
+        // Webtoon may zoom out below fit-width for a thinner, longer stream;
+        // paged modes keep the fit floor so the sheet never shrinks away.
+        val min = if (mode.value == MangaReaderMode.WEBTOON) 0.5f else 1f
+        zoom.value = level.coerceIn(min, 3f)
     }
 
     fun resetZoom() {
