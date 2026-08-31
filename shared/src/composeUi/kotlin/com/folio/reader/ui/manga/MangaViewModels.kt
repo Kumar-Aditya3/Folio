@@ -1193,10 +1193,13 @@ class MangaReaderViewModel(
                 // asynchronously (appending never shifts existing indices).
                 val prevCh = navList.getOrNull(navIdx - 1)
                 val nextCh = navList.getOrNull(navIdx + 1)
-                val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
 
+                // Current is dispatched first so it can never queue behind a neighbour
+                // at the 2-permit gate; prev rides in parallel (both are awaited before
+                // the first publish), next only fills a permit once they release theirs.
                 val currentDeferred = async { pageListGate.withPermit { fetchSlotCached(navList[navIdx]) } }
                 val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
+                val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
                 val currentSlot = currentDeferred.await()
                 if (currentSlot == null) {
                     error.value = "Failed to load pages"

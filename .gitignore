@@ -105,3 +105,7 @@ after_import_fixed.txt
 # Upstream Mihon checkout used only as vendoring reference; the runtime itself
 # lives under shared/src/androidMain/kotlin/{eu,mihon,tachiyomi,logcat}.
 mihon-main/
+
+# Device database pulls (adb) used for local debugging; *.db alone misses the
+# SQLite -shm/-wal companions.
+dbpull/

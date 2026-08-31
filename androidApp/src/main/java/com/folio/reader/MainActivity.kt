@@ -13,10 +13,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -28,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import com.folio.reader.model.Book
@@ -162,9 +160,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Auto-clear import status after 3 seconds
+            // Success statuses auto-clear after 3 seconds; in-progress and error
+            // messages persist until the next status replaces them.
             LaunchedEffect(importStatus) {
-                if (importStatus.isNotEmpty() && !importStatus.endsWith("...")) {
+                if (com.folio.reader.ui.components.isTransientStatus(importStatus)) {
                     kotlinx.coroutines.delay(3000)
                     importStatus = ""
                 }
@@ -805,15 +804,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    if (importStatus.isNotBlank()) {
-                        Text(
-                            text = importStatus,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(top = 96.dp),
-                            color = FolioTheme.colors.onSurfaceVariant,
-                            style = FolioTheme.typography.labelMedium
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(com.folio.reader.ui.theme.FolioTokens.space3)
+                            .navigationBarsPadding(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        com.folio.reader.ui.components.FolioStatusBanner(importStatus)
                     }
                 }
             }

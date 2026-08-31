@@ -144,7 +144,7 @@ data class Theme(
         val PRESETS = mapOf(
             "paper" to Theme(
                 id = "paper", name = "Paper",
-                background = 0xFFFDF6E3.toInt(), surface = 0xFFFFFFFF.toInt(),
+                background = 0xFFF9EDD2.toInt(), surface = 0xFFFFF8E6.toInt(),
                 primaryText = 0xFF333333.toInt(), secondaryText = 0xFF666666.toInt(),
                 headingText = 0xFF1A1A1A.toInt(), link = 0xFF268BD2.toInt(),
                 selection = 0xFFB58900.toInt(), bookmark = 0xFFD33682.toInt(),
@@ -152,7 +152,7 @@ data class Theme(
                     0xFFFFFF00.toInt(), 0xFF007AFF.toInt(), 0xFF34C759.toInt(), 0xFFFF3B30.toInt(),
                     0xFFAF52DE.toInt(), 0xFFFF9F0A.toInt(), 0xFF5AC8FA.toInt(), 0xFFFF2D92.toInt()
                 ),
-                progress = 0xFF268BD2.toInt(), divider = 0xFFE0DCCF.toInt(),
+                progress = 0xFF268BD2.toInt(), divider = 0xFFE3D4B2.toInt(),
                 isDark = false
             ),
             "white" to Theme(
@@ -170,7 +170,7 @@ data class Theme(
             ),
             "sepia" to Theme(
                 id = "sepia", name = "Sepia",
-                background = 0xFFF4ECD8.toInt(), surface = 0xFFEFE8D0.toInt(),
+                background = 0xFFEEDFC0.toInt(), surface = 0xFFE7D7B4.toInt(),
                 primaryText = 0xFF3D3328.toInt(), secondaryText = 0xFF6B5B44.toInt(),
                 headingText = 0xFF2D251E.toInt(), link = 0xFF8B6B3A.toInt(),
                 selection = 0xFFD4A843.toInt(), bookmark = 0xFFC0504D.toInt(),
@@ -178,7 +178,7 @@ data class Theme(
                     0xFFE8C84D.toInt(), 0xFF4D8FC7.toInt(), 0xFF5DAE5D.toInt(), 0xFFD65F5F.toInt(),
                     0xFF9B7BC7.toInt(), 0xFFD4A843.toInt(), 0xFF5DB8B8.toInt(), 0xFFD67AB5.toInt()
                 ),
-                progress = 0xFF8B6B3A.toInt(), divider = 0xFFE0D4B8.toInt(),
+                progress = 0xFF8B6B3A.toInt(), divider = 0xFFD9C69C.toInt(),
                 isDark = false
             ),
             "gray" to Theme(
@@ -339,7 +339,7 @@ data class Theme(
             ),
             "matcha" to Theme(
                 id = "matcha", name = "Matcha",
-                background = 0xFFF3F7EC.toInt(), surface = 0xFFE9F0DC.toInt(),
+                background = 0xFFE4EFD1.toInt(), surface = 0xFFDBE9C4.toInt(),
                 primaryText = 0xFF2B3524.toInt(), secondaryText = 0xFF5D6B50.toInt(),
                 headingText = 0xFF1F2A18.toInt(), link = 0xFF47773B.toInt(),
                 selection = 0xFFC8DFAF.toInt(), bookmark = 0xFFB0563B.toInt(),
@@ -347,12 +347,12 @@ data class Theme(
                     0xFFA3C76D.toInt(), 0xFF5B9AA8.toInt(), 0xFFD9B84A.toInt(), 0xFFC96F5E.toInt(),
                     0xFF9B87C9.toInt(), 0xFF7BAF7A.toInt(), 0xFF6FB5C9.toInt(), 0xFFC97BA8.toInt()
                 ),
-                progress = 0xFF47773B.toInt(), divider = 0xFFDCE7CC.toInt(),
+                progress = 0xFF47773B.toInt(), divider = 0xFFCFE0B6.toInt(),
                 isDark = false
             ),
             "dusk" to Theme(
                 id = "dusk", name = "Dusk",
-                background = 0xFF161325.toInt(), surface = 0xFF1F1B33.toInt(),
+                background = 0xFF1E1839.toInt(), surface = 0xFF2A2249.toInt(),
                 primaryText = 0xFFDCD7EC.toInt(), secondaryText = 0xFF9A93B8.toInt(),
                 headingText = 0xFFF0EDFA.toInt(), link = 0xFFA79DF0.toInt(),
                 selection = 0xFF332C52.toInt(), bookmark = 0xFFE08BB0.toInt(),
@@ -360,12 +360,12 @@ data class Theme(
                     0xFFE5C06B.toInt(), 0xFF7FB4D9.toInt(), 0xFF8FC98F.toInt(), 0xFFD98C8C.toInt(),
                     0xFFB39DE0.toInt(), 0xFFD9B84A.toInt(), 0xFF7FC9C9.toInt(), 0xFFD98BB8.toInt()
                 ),
-                progress = 0xFFA79DF0.toInt(), divider = 0xFF2A2442.toInt(),
+                progress = 0xFFA79DF0.toInt(), divider = 0xFF352C58.toInt(),
                 isDark = true
             ),
             "espresso" to Theme(
                 id = "espresso", name = "Espresso",
-                background = 0xFF181310.toInt(), surface = 0xFF221B16.toInt(),
+                background = 0xFF251B13.toInt(), surface = 0xFF31251A.toInt(),
                 primaryText = 0xFFE9DFD2.toInt(), secondaryText = 0xFFA5978A.toInt(),
                 headingText = 0xFFF6EEE2.toInt(), link = 0xFFD2A878.toInt(),
                 selection = 0xFF3B2E22.toInt(), bookmark = 0xFFC96F5E.toInt(),
@@ -373,12 +373,12 @@ data class Theme(
                     0xFFD9B84A.toInt(), 0xFF8FB4C9.toInt(), 0xFFA8C98F.toInt(), 0xFFD98C7B.toInt(),
                     0xFFB89BC9.toInt(), 0xFFD9A86B.toInt(), 0xFF8FC9BF.toInt(), 0xFFC98FA8.toInt()
                 ),
-                progress = 0xFFD2A878.toInt(), divider = 0xFF2E261E.toInt(),
+                progress = 0xFFD2A878.toInt(), divider = 0xFF3E3023.toInt(),
                 isDark = true
             ),
             "arctic" to Theme(
                 id = "arctic", name = "Arctic",
-                background = 0xFFF2F8FB.toInt(), surface = 0xFFE7F1F6.toInt(),
+                background = 0xFFDEEDF6.toInt(), surface = 0xFFD0E5EF.toInt(),
                 primaryText = 0xFF22313A.toInt(), secondaryText = 0xFF52666F.toInt(),
                 headingText = 0xFF14232B.toInt(), link = 0xFF2277A8.toInt(),
                 selection = 0xFFBBDCEA.toInt(), bookmark = 0xFFB0563B.toInt(),
@@ -386,12 +386,12 @@ data class Theme(
                     0xFFE0C34E.toInt(), 0xFF4E93C0.toInt(), 0xFF63B088.toInt(), 0xFFD07A6B.toInt(),
                     0xFF9C8CC9.toInt(), 0xFFD9A84E.toInt(), 0xFF6BB5CC.toInt(), 0xFFCC7BA3.toInt()
                 ),
-                progress = 0xFF2277A8.toInt(), divider = 0xFFD8E7EE.toInt(),
+                progress = 0xFF2277A8.toInt(), divider = 0xFFC0DAE7.toInt(),
                 isDark = false
             ),
             "moss" to Theme(
                 id = "moss", name = "Moss",
-                background = 0xFFF2F7F4.toInt(), surface = 0xFFFBFEFC.toInt(),
+                background = 0xFFE1EFE6.toInt(), surface = 0xFFEEF7F0.toInt(),
                 primaryText = 0xFF24302A.toInt(), secondaryText = 0xFF5A6B62.toInt(),
                 headingText = 0xFF18241D.toInt(), link = 0xFF2E7D5B.toInt(),
                 selection = 0xFFCFE5D9.toInt(), bookmark = 0xFF3E6B54.toInt(),
@@ -399,12 +399,12 @@ data class Theme(
                     0xFF8FBF9F.toInt(), 0xFF5B9AA8.toInt(), 0xFFD9C34A.toInt(), 0xFFC96F5E.toInt(),
                     0xFF9B87C9.toInt(), 0xFF7BAF7A.toInt(), 0xFF6FB5C9.toInt(), 0xFFC97BA8.toInt()
                 ),
-                progress = 0xFF2E7D5B.toInt(), divider = 0xFFD6E5DC.toInt(),
+                progress = 0xFF2E7D5B.toInt(), divider = 0xFFC4DBCC.toInt(),
                 isDark = false
             ),
             "ember" to Theme(
                 id = "ember", name = "Ember",
-                background = 0xFF1A1210.toInt(), surface = 0xFF241815.toInt(),
+                background = 0xFF2A1712.toInt(), surface = 0xFF39211A.toInt(),
                 primaryText = 0xFFF2E4DC.toInt(), secondaryText = 0xFFBBA196.toInt(),
                 headingText = 0xFFFFF1E8.toInt(), link = 0xFFE08A5B.toInt(),
                 selection = 0xFF3D2A20.toInt(), bookmark = 0xFFE0653B.toInt(),
@@ -412,7 +412,7 @@ data class Theme(
                     0xFFE0A85B.toInt(), 0xFF8FB4C9.toInt(), 0xFFA8C98F.toInt(), 0xFFD98C7B.toInt(),
                     0xFFB89BC9.toInt(), 0xFFD9A86B.toInt(), 0xFF8FC9BF.toInt(), 0xFFC98FA8.toInt()
                 ),
-                progress = 0xFFE08A5B.toInt(), divider = 0xFF392822.toInt(),
+                progress = 0xFFE08A5B.toInt(), divider = 0xFF482C22.toInt(),
                 isDark = true
             )
         )
