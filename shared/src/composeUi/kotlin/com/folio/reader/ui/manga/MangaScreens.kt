@@ -2060,7 +2060,10 @@ fun MangaDetailScreen(
                         }
                     } else {
                         Button(
-                            onClick = { viewModel.toggleInLibrary() },
+                            onClick = {
+                                categoryPrompt = true
+                                viewModel.toggleInLibrary()
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.LibraryAdd, contentDescription = null)
