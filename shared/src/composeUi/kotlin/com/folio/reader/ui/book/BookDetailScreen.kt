@@ -108,7 +108,6 @@ fun BookDetailScreen(
     val tags by viewModel.tags.collectAsState(initial = emptyList())
     val availableSeries by viewModel.availableSeries.collectAsState(initial = emptyList())
     val availableCollections by viewModel.availableCollections.collectAsState(initial = emptyList())
-    val isUploading by viewModel.isUploading.collectAsState(initial = false)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showMetadataEditor by remember { mutableStateOf(false) }
 

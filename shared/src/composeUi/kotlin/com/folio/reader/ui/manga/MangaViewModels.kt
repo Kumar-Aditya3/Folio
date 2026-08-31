@@ -583,6 +583,7 @@ class SourceBrowseViewModel(
     private val mangaRepo: MangaRepository,
     private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
     initialQuery: String = "",
+    private val onAddedToLibrary: (suspend (mangaId: String) -> Unit)? = null,
 ) {
     val scope = mangaVmScope()
 
@@ -677,6 +678,7 @@ class SourceBrowseViewModel(
         if (existing != null) {
             mangaRepo.setInLibrary(existing.id, true)
             categoryRepo.ensureMembership(existing.id)
+            notifyAddedToLibrary(existing.id)
             return existing
         }
         val entry = MangaEntry(
@@ -692,7 +694,13 @@ class SourceBrowseViewModel(
         )
         mangaRepo.upsert(entry)
         categoryRepo.ensureMembership(entry.id)
+        notifyAddedToLibrary(entry.id)
         return entry
+    }
+
+    private fun notifyAddedToLibrary(mangaId: String) {
+        val hook = onAddedToLibrary ?: return
+        scope.launch { runCatching { hook(mangaId) } }
     }
 
     suspend fun removeFromLibrary(item: MangaBrowseItem) {

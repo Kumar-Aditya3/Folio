@@ -287,52 +287,6 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     }
 
     /**
-     * Uploads a book's EPUB body (and cover) to Firebase Storage, tracking the
-     * transfer in [CloudState]. Fails when cloud storage isn't configured or the
-     * local EPUB file is missing (metadata-only sync still applies).
-     */
-    suspend fun uploadBookToCloud(bookId: String): Result<Unit> {
-        val storage = (syncEngine?.storageSync as? com.folio.reader.sync.RestFirebaseStorageSync)
-            ?: return Result.failure(IllegalStateException("Cloud storage not configured"))
-        // The uid only exists after sign-in; authenticate before reading it or the
-        // very first upload always fails with "not signed in".
-        runCatching {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { storage.authenticate() }
-        }.onFailure {
-            return Result.failure(IllegalStateException("Cloud storage sign-in failed: ${it.message}"))
-        }
-        val uid = storage.uid
-        if (uid.isBlank()) return Result.failure(IllegalStateException("Not signed in to cloud storage"))
-        val localPath = platform.fileSystem.getBookEpubPath(bookId)
-        if (!File(localPath).exists()) {
-            return Result.failure(IllegalStateException("EPUB file not found: $localPath"))
-        }
-        val book = bookRepository.getBook(bookId)
-            ?: return Result.failure(IllegalStateException("Book not found: $bookId"))
-        try {
-            bookRepository.setCloudState(bookId, CloudState.UPLOADING_PROGRESS)
-            storage.uploadBook(uid, bookId, localPath)
-            File(platform.fileSystem.getBookCoverPath(bookId)).takeIf { it.exists() }?.let { cover ->
-                runCatching { storage.uploadCover(uid, bookId, cover.absolutePath) }
-            }
-            setCloudState(bookId, CloudState.SYNCED)
-            return Result.success(Unit)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            setCloudState(bookId, CloudState.SYNC_ERROR)
-            return Result.failure(e)
-        }
-    }
-
-    private suspend fun setCloudState(bookId: String, state: CloudState) {
-        try {
-            bookRepository.setCloudState(bookId, state)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
      * Rebuilds the sync engine after the user saves/clears Firebase credentials in
      * Settings > Advanced. Stops any running loop, drops the cached engine so the
      * next access rebuilds from current credentials, then starts fresh. Safe to
@@ -505,6 +459,20 @@ fun main(args: Array<String>) {
             }
         }
 
+        fun adoptBookProgress(book: com.folio.reader.model.Book) {
+            appScope.launch(Dispatchers.IO) {
+                val adopted = runCatching {
+                    deps.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash) ?: 0
+                }.getOrDefault(0)
+                if (adopted > 0) {
+                    appScope.launch(Dispatchers.Main) {
+                        importStatus = "Restored reading progress from cloud"
+                        refreshTick++
+                    }
+                }
+            }
+        }
+
         fun pickAndImportFiles() {
             java.awt.EventQueue.invokeLater {
                 val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose EPUB files", java.awt.FileDialog.LOAD)
@@ -520,7 +488,10 @@ fun main(args: Array<String>) {
                                 importStatus = "Importing ${file.name} (${index + 1}/${files.size})"
                             }
                             deps.bookImporter.importEpub(file.absolutePath)
-                                .onSuccess { ok++ }
+                                .onSuccess { book ->
+                                    ok++
+                                    adoptBookProgress(book)
+                                }
                                 .onFailure { failure ->
                                     val msg = when (failure) {
                                         is DuplicateBookException -> "Already in library"
@@ -546,6 +517,9 @@ fun main(args: Array<String>) {
                 deps.bookImporter.importEpub(file.absolutePath)
                     .fold(
                         onSuccess = { book ->
+                            runCatching {
+                                deps.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash)
+                            }
                             appScope.launch(Dispatchers.Main) {
                                 refreshTick++
                                 pushScreen(Screen.Reader(book))
@@ -617,9 +591,10 @@ fun main(args: Array<String>) {
                         for (file in files) {
                             runCatching {
                                 val seriesName = deps.mangaBackend.localSource.import(file)
+                                val entryId = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName)
                                 deps.mangaRepository.upsert(
                                     com.folio.reader.manga.MangaEntry(
-                                        id = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName),
+                                        id = entryId,
                                         sourceId = com.folio.reader.manga.LOCAL_SOURCE_ID,
                                         sourceName = "Local manga",
                                         url = seriesName,
@@ -628,6 +603,9 @@ fun main(args: Array<String>) {
                                         initialized = true,
                                     )
                                 )
+                                appScope.launch(Dispatchers.IO) {
+                                    runCatching { deps.syncEngine?.adoptCloudProgressForManga(entryId) }
+                                }
                                 ok++
                             }.onFailure { e ->
                                 appScope.launch(Dispatchers.Main) { importStatus = "Manga import failed: ${e.message}" }
@@ -959,8 +937,7 @@ fun main(args: Array<String>) {
                                                     noteRepository = deps.noteRepository,
                                                     seriesRepository = deps.seriesRepository,
                                                     collectionRepository = deps.collectionRepository,
-                                                    tagRepository = deps.tagRepository,
-                                                    uploadEpub = { bookId -> deps.uploadBookToCloud(bookId) }
+                                                    tagRepository = deps.tagRepository
                                                 )
                                             }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
                                             onBackPress = { popScreen() },
@@ -1089,6 +1066,9 @@ fun main(args: Array<String>) {
                                                     mangaRepo = deps.mangaRepository,
                                                     categoryRepo = deps.mangaCategoryRepository,
                                                     initialQuery = current.query,
+                                                    onAddedToLibrary = { id ->
+                                                        deps.syncEngine?.adoptCloudProgressForManga(id)
+                                                    },
                                                 )
                                             },
                                             onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },

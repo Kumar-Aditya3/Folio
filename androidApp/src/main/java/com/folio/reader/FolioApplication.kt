@@ -22,7 +22,6 @@ import com.folio.reader.epub.EpubParser
 import com.folio.reader.epub.JvmChapterContentProvider
 import com.folio.reader.importer.BookImporter
 import com.folio.reader.importer.SearchIndexer
-import com.folio.reader.model.CloudState
 import com.folio.reader.platform.AndroidPlatform
 import com.folio.reader.sync.NoopStorageSync
 import com.folio.reader.sync.RestFirebaseStorageSync
@@ -287,52 +286,6 @@ class AppGraph(private val app: Application) {
     fun startSync(scope: CoroutineScope) {
         val engine = syncEngine ?: return
         scope.launch { engine.start() }
-    }
-
-    /**
-     * Uploads a book's EPUB body (and cover) to Firebase Storage, tracking the
-     * transfer in [CloudState]. No-op failure when cloud storage isn't configured
-     * or the local EPUB file is missing (metadata-only sync still applies).
-     */
-    suspend fun uploadBookToCloud(bookId: String): Result<Unit> {
-        val storage = (syncEngine?.storageSync as? RestFirebaseStorageSync)
-            ?: return Result.failure(IllegalStateException("Cloud storage not configured"))
-        // The uid only exists after sign-in; authenticate before reading it or the
-        // very first upload always fails with "not signed in".
-        runCatching {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { storage.authenticate() }
-        }.onFailure {
-            return Result.failure(IllegalStateException("Cloud storage sign-in failed: ${it.message}"))
-        }
-        val uid = storage.uid
-        if (uid.isBlank()) return Result.failure(IllegalStateException("Not signed in to cloud storage"))
-        val localPath = platform.fileSystem.getBookEpubPath(bookId)
-        if (!File(localPath).exists()) {
-            return Result.failure(IllegalStateException("EPUB file not found: $localPath"))
-        }
-        val book = bookRepository.getBook(bookId)
-            ?: return Result.failure(IllegalStateException("Book not found: $bookId"))
-        try {
-            bookRepository.setCloudState(bookId, CloudState.UPLOADING_PROGRESS)
-            storage.uploadBook(uid, bookId, localPath)
-            File(platform.fileSystem.getBookCoverPath(bookId)).takeIf { it.exists() }?.let { cover ->
-                runCatching { storage.uploadCover(uid, bookId, cover.absolutePath) }
-            }
-            setCloudState(bookId, CloudState.SYNCED)
-            return Result.success(Unit)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            setCloudState(bookId, CloudState.SYNC_ERROR)
-            return Result.failure(e)
-        }
-    }
-
-    private suspend fun setCloudState(bookId: String, state: CloudState) {
-        try {
-            bookRepository.setCloudState(bookId, state)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
     fun shutdown() {

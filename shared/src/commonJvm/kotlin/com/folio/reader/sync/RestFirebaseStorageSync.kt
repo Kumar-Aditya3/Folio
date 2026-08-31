@@ -8,16 +8,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
-import kotlin.math.max
 import kotlin.math.min
 
 class RestFirebaseStorageSync(
@@ -33,7 +29,6 @@ class RestFirebaseStorageSync(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val storageBaseUrl = "https://firebasestorage.googleapis.com/v0/b/$bucket/o"
-    private val uploadBaseUrl = "https://storage.googleapis.com/upload/storage/v1/b/$bucket/o"
 
     @Volatile
     private var idToken: String? = null
@@ -47,10 +42,6 @@ class RestFirebaseStorageSync(
     @Volatile
     override var uid: String = uidOverride ?: ""
         private set
-
-    private val boundary = "----FolioStorageBoundary${System.currentTimeMillis()}"
-    private val twoHyphens = "--"
-    private val lineEnd = "\r\n"
 
     fun authenticate() {
         if (uidOverride != null) {
@@ -177,29 +168,6 @@ class RestFirebaseStorageSync(
     private fun coverPath(uid: String, bookId: String): String =
         "users/$uid/books/$bookId/cover.jpg"
 
-    override suspend fun uploadBook(
-        uid: String,
-        bookId: String,
-        localPath: String,
-        onProgress: ((Float) -> Unit)?
-    ) {
-        withRetry("uploadBook($bookId)") {
-            uploadFile(bookPath(uid, bookId), localPath, "application/epub+zip", onProgress)
-        }
-    }
-
-    override suspend fun uploadCover(
-        uid: String,
-        bookId: String,
-        localPath: String,
-        onProgress: ((Float) -> Unit)?
-    ) {
-        withRetry("uploadCover($bookId)") {
-            val contentType = guessContentType(localPath)
-            uploadFile(coverPath(uid, bookId), localPath, contentType, onProgress)
-        }
-    }
-
     override suspend fun downloadBook(
         uid: String,
         bookId: String,
@@ -217,110 +185,6 @@ class RestFirebaseStorageSync(
                 val encoded = URLEncoder.encode(path, "UTF-8")
                 httpRequest("$storageBaseUrl/$encoded", "DELETE", null, bearer(), readTimeoutMs = 30_000)
             }
-        }
-    }
-
-    private suspend fun uploadFile(
-        objectPath: String,
-        localPath: String,
-        contentType: String,
-        onProgress: ((Float) -> Unit)?
-    ) = withContext(Dispatchers.IO) {
-        ensureAuth()
-        val file = File(localPath)
-        if (!file.exists() || !file.isFile) throw IOException("File not found: $localPath")
-        val fileSize = file.length()
-        onProgress?.invoke(0f)
-
-        val sessionUri = initiateResumableUpload(objectPath, contentType, fileSize)
-
-        var uploadedBytes = 0L
-        val buffer = ByteArray(256 * 1024)
-        FileInputStream(file).use { fis ->
-            while (uploadedBytes < fileSize) {
-                val chunkSize = min(buffer.size.toLong(), fileSize - uploadedBytes).toInt()
-                val bytesRead = fis.read(buffer, 0, chunkSize)
-                if (bytesRead <= 0) break
-
-                val isLast = uploadedBytes + bytesRead >= fileSize
-                uploadChunk(sessionUri, buffer, bytesRead, uploadedBytes, fileSize, isLast)
-                uploadedBytes += bytesRead
-                val progress = if (fileSize > 0) uploadedBytes.toFloat() / fileSize.toFloat() else 1f
-                onProgress?.invoke(progress.coerceIn(0f, 1f))
-            }
-        }
-        onProgress?.invoke(1f)
-    }
-
-    private fun initiateResumableUpload(
-        objectPath: String,
-        contentType: String,
-        fileSize: Long
-    ): String {
-        val encodedPath = URLEncoder.encode(objectPath, "UTF-8")
-        val url = "$uploadBaseUrl?uploadType=resumable&name=$encodedPath"
-        val metadata = buildString {
-            append("{\"name\":\"")
-            append(storageJsonEscape(objectPath))
-            append("\"}")
-        }
-
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            doInput = true
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("X-Goog-Upload-Protocol", "resumable")
-            setRequestProperty("X-Goog-Upload-Content-Type", contentType)
-            setRequestProperty("X-Goog-Upload-Content-Length", fileSize.toString())
-            bearer()?.let { setRequestProperty("Authorization", it) }
-        }
-
-        try {
-            conn.outputStream.use { it.write(metadata.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                val err = conn.errorStream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
-                throw IOException("HTTP $code initiating upload: ${err.take(500)}")
-            }
-            return conn.getHeaderField("Location")
-                ?: throw IOException("No Location header in resumable upload response")
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun uploadChunk(
-        sessionUri: String,
-        buffer: ByteArray,
-        bytesRead: Int,
-        offset: Long,
-        totalSize: Long,
-        isLast: Boolean
-    ) {
-        val conn = (URL(sessionUri).openConnection() as HttpURLConnection).apply {
-            requestMethod = "PUT"
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            doInput = true
-            doOutput = true
-            setRequestProperty("Content-Type", "application/octet-stream")
-            val rangeStart = offset
-            val rangeEnd = offset + bytesRead - 1
-            val total = if (isLast) totalSize.toString() else "*"
-            setRequestProperty("Content-Range", "bytes $rangeStart-$rangeEnd/$total")
-        }
-        try {
-            conn.outputStream.use { it.write(buffer, 0, bytesRead) }
-            val code = conn.responseCode
-            if (code !in 200..399) {
-                val err = conn.errorStream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
-                throw IOException("HTTP $code uploading chunk at offset $offset: ${err.take(500)}")
-            }
-        } finally {
-            conn.disconnect()
         }
     }
 
@@ -400,14 +264,6 @@ class RestFirebaseStorageSync(
         }.getOrNull() ?: return null
         val obj = runCatching { json.parseToJsonElement(response).jsonObject }.getOrNull() ?: return null
         return obj["md5Hash"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
-    }
-
-    private fun guessContentType(path: String): String = when {
-        path.endsWith(".jpg", true) || path.endsWith(".jpeg", true) -> "image/jpeg"
-        path.endsWith(".png", true) -> "image/png"
-        path.endsWith(".gif", true) -> "image/gif"
-        path.endsWith(".webp", true) -> "image/webp"
-        else -> "application/octet-stream"
     }
 
     private suspend fun <T> withRetry(opName: String, block: suspend () -> T): T {

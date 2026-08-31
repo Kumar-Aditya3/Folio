@@ -473,6 +473,146 @@ private val EmberFolioColors = DarkFolioColors.copy(
     statusBar = Color(0xFF100604)
 )
 
+// ── FUN / UNUSUAL THEMES ───────────────────────────────────────────────
+
+private val SynthwaveFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFFF2FD6),
+    onPrimary = Color(0xFF38002E),
+    primaryContainer = Color(0xFF5C0A4E),
+    onPrimaryContainer = Color(0xFFFFD0F2),
+    secondary = Color(0xFF00E5FF),
+    onSecondary = Color(0xFF002A30),
+    secondaryContainer = Color(0xFF084854),
+    onSecondaryContainer = Color(0xFFC4F8FF),
+    tertiary = Color(0xFF7C4DFF),
+    onTertiary = Color(0xFF1A0844),
+    tertiaryContainer = Color(0xFF341678),
+    onTertiaryContainer = Color(0xFFDCD0FF),
+    background = Color(0xFF0D0221),
+    onBackground = Color(0xFFF0E6FF),
+    surface = Color(0xFF150535),
+    onSurface = Color(0xFFF0E6FF),
+    surfaceVariant = Color(0xFF221048),
+    onSurfaceVariant = Color(0xFFA88CD0),
+    surfaceContainerHighest = Color(0xFF2E185C),
+    outline = Color(0xFF44267E),
+    outlineVariant = Color(0xFF2E185C),
+    inverseSurface = Color(0xFFF0E6FF),
+    inverseOnSurface = Color(0xFF150535),
+    inversePrimary = Color(0xFFC0109E),
+    statusBar = Color(0xFF070112)
+)
+
+private val BubblegumFolioColors = LightFolioColors.copy(
+    primary = Color(0xFFFF4FA3),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFD0E6),
+    onPrimaryContainer = Color(0xFF5C0A34),
+    secondary = Color(0xFF2ECFA0),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFC8F6E6),
+    onSecondaryContainer = Color(0xFF0A3A2C),
+    tertiary = Color(0xFFFFB300),
+    onTertiary = Color(0xFF3A2800),
+    tertiaryContainer = Color(0xFFFFE9B8),
+    onTertiaryContainer = Color(0xFF4A3400),
+    background = Color(0xFFFFF0F6),
+    onBackground = Color(0xFF4A1033),
+    surface = Color(0xFFFFF8FB),
+    onSurface = Color(0xFF4A1033),
+    surfaceVariant = Color(0xFFFCE0EE),
+    onSurfaceVariant = Color(0xFF8A4A6E),
+    surfaceContainerHighest = Color(0xFFF4CCE0),
+    outline = Color(0xFFE4A8C8),
+    outlineVariant = Color(0xFFF0C4DA),
+    inverseSurface = Color(0xFF4A1033),
+    inverseOnSurface = Color(0xFFFFF0F6),
+    statusBar = Color(0xFF2E0A20)
+)
+
+private val AcidFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFCCFF00),
+    onPrimary = Color(0xFF1E2800),
+    primaryContainer = Color(0xFF3A4A00),
+    onPrimaryContainer = Color(0xFFECFFB0),
+    secondary = Color(0xFFFF2ED1),
+    onSecondary = Color(0xFF3A002E),
+    secondaryContainer = Color(0xFF58084A),
+    onSecondaryContainer = Color(0xFFFFC8F0),
+    tertiary = Color(0xFF00FFAA),
+    onTertiary = Color(0xFF003824),
+    tertiaryContainer = Color(0xFF0A5238),
+    onTertiaryContainer = Color(0xFFC0FFE6),
+    background = Color(0xFF060806),
+    onBackground = Color(0xFFE8FFD6),
+    surface = Color(0xFF0E120C),
+    onSurface = Color(0xFFE8FFD6),
+    surfaceVariant = Color(0xFF182014),
+    onSurfaceVariant = Color(0xFF98B878),
+    surfaceContainerHighest = Color(0xFF24301C),
+    outline = Color(0xFF3A4C2A),
+    outlineVariant = Color(0xFF24301C),
+    inverseSurface = Color(0xFFE8FFD6),
+    inverseOnSurface = Color(0xFF0E120C),
+    inversePrimary = Color(0xFF5E7A00),
+    statusBar = Color(0xFF020302)
+)
+
+private val LavaFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFFF5C1E),
+    onPrimary = Color(0xFF3E0E00),
+    primaryContainer = Color(0xFF6E2200),
+    onPrimaryContainer = Color(0xFFFFD8C4),
+    secondary = Color(0xFFFF2E63),
+    onSecondary = Color(0xFF3E0014),
+    secondaryContainer = Color(0xFF640A28),
+    onSecondaryContainer = Color(0xFFFFC8D6),
+    tertiary = Color(0xFFFFB300),
+    onTertiary = Color(0xFF3A2800),
+    tertiaryContainer = Color(0xFF5C4200),
+    onTertiaryContainer = Color(0xFFFFE6AE),
+    background = Color(0xFF160504),
+    onBackground = Color(0xFFFFE4D4),
+    surface = Color(0xFF220B06),
+    onSurface = Color(0xFFFFE4D4),
+    surfaceVariant = Color(0xFF321408),
+    onSurfaceVariant = Color(0xFFC89878),
+    surfaceContainerHighest = Color(0xFF46200E),
+    outline = Color(0xFF5E3018),
+    outlineVariant = Color(0xFF46200E),
+    inverseSurface = Color(0xFFFFE4D4),
+    inverseOnSurface = Color(0xFF220B06),
+    inversePrimary = Color(0xFFB03A00),
+    statusBar = Color(0xFF0C0202)
+)
+
+private val SherbetFolioColors = LightFolioColors.copy(
+    primary = Color(0xFFFF7A4D),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFDCC8),
+    onPrimaryContainer = Color(0xFF5C1E00),
+    secondary = Color(0xFF2ED9A3),
+    onSecondary = Color(0xFF003824),
+    secondaryContainer = Color(0xFFC4F8E4),
+    onSecondaryContainer = Color(0xFF0A4430),
+    tertiary = Color(0xFF4DC3FF),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFD4EEFF),
+    onTertiaryContainer = Color(0xFF003A58),
+    background = Color(0xFFFFF7EE),
+    onBackground = Color(0xFF4A2C1A),
+    surface = Color(0xFFFFFBF5),
+    onSurface = Color(0xFF4A2C1A),
+    surfaceVariant = Color(0xFFFFEDD9),
+    onSurfaceVariant = Color(0xFF8A6A4D),
+    surfaceContainerHighest = Color(0xFFF6DFC2),
+    outline = Color(0xFFE4C8A4),
+    outlineVariant = Color(0xFFF0DCC4),
+    inverseSurface = Color(0xFF4A2C1A),
+    inverseOnSurface = Color(0xFFFFF7EE),
+    statusBar = Color(0xFF341C0C)
+)
+
 enum class AppPalette(
     val id: String,
     val label: String,
@@ -486,6 +626,8 @@ enum class AppPalette(
     SAKURA("sakura", "Sakura", false, SakuraFolioColors),
     HONEY("honey", "Honey", false, HoneyFolioColors),
     MOSS("moss", "Moss", false, MossFolioColors),
+    BUBBLEGUM("bubblegum", "Bubblegum", false, BubblegumFolioColors),
+    SHERBET("sherbet", "Sherbet", false, SherbetFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
     DUSK("dusk", "Dusk", true, DuskFolioColors),
@@ -493,6 +635,9 @@ enum class AppPalette(
     OCEAN("ocean", "Ocean", true, OceanFolioColors),
     GRAPE("grape", "Grape", true, GrapeFolioColors),
     EMBER("ember", "Ember", true, EmberFolioColors),
+    SYNTHWAVE("synthwave", "Synthwave", true, SynthwaveFolioColors),
+    ACID("acid", "Acid Rave", true, AcidFolioColors),
+    LAVA("lava", "Lava", true, LavaFolioColors),
     OLED("oled", "Black", true, OledFolioColors);
 
     companion object {
@@ -522,6 +667,11 @@ data class ThemePack(
             ThemePack("grape", "Grape", "grape", "dusk"),
             ThemePack("ember", "Ember", "ember", "ember"),
             ThemePack("obsidian", "Obsidian", "oled", "oled_black"),
+            ThemePack("synthwave", "Synthwave", "synthwave", "synthwave"),
+            ThemePack("bubblegum", "Bubblegum", "bubblegum", "bubblegum"),
+            ThemePack("acid", "Acid Rave", "acid", "acid"),
+            ThemePack("lava", "Lava", "lava", "lava"),
+            ThemePack("sherbet", "Sherbet", "sherbet", "sherbet"),
         )
     }
 }

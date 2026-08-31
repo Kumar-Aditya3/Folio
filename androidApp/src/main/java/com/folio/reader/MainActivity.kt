@@ -649,8 +649,7 @@ class MainActivity : ComponentActivity() {
                                                 noteRepository = graph.noteRepository,
                                                 seriesRepository = graph.seriesRepository,
                                                 collectionRepository = graph.collectionRepository,
-                                                tagRepository = graph.tagRepository,
-                                                uploadEpub = { bookId -> graph.uploadBookToCloud(bookId) }
+                                                tagRepository = graph.tagRepository
                                             )
                                         }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
                                         onBackPress = { popScreen() },
@@ -775,6 +774,9 @@ class MainActivity : ComponentActivity() {
                                                 mangaRepo = graph.mangaRepository,
                                                 categoryRepo = graph.mangaCategoryRepository,
                                                 initialQuery = current.query,
+                                                onAddedToLibrary = { id ->
+                                                    graph.syncEngine?.adoptCloudProgressForManga(id)
+                                                },
                                             )
                                         },
                                         onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
@@ -858,6 +860,7 @@ class MainActivity : ComponentActivity() {
             val graph = (application as FolioApplication).graph
             appScope.launch(Dispatchers.IO) {
                 var imported = 0
+                var restored = 0
                 for ((index, uri) in uris.withIndex()) {
                     withContext(Dispatchers.Main) {
                         importStatus = "Importing ${index + 1}/${uris.size}..."
@@ -870,7 +873,13 @@ class MainActivity : ComponentActivity() {
                         } ?: throw IllegalArgumentException("Unable to open shared EPUB")
 
                         graph.bookImporter.importEpub(tempFile.absolutePath)
-                            .onSuccess { imported++ }
+                            .onSuccess { book ->
+                                imported++
+                                val adopted = runCatching {
+                                    graph.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash) ?: 0
+                                }.getOrDefault(0)
+                                if (adopted > 0) restored++
+                            }
                             .onFailure { failure ->
                                 withContext(Dispatchers.Main) {
                                     importStatus = "Failed: ${failure.message ?: "unknown error"}"
@@ -892,6 +901,7 @@ class MainActivity : ComponentActivity() {
                         importStatus.endsWith("...") -> "Import failed"
                         else -> importStatus
                     }
+                    if (restored > 0) importStatus += " • progress restored from cloud"
                     refreshTick++
                 }
             }
@@ -904,6 +914,7 @@ class MainActivity : ComponentActivity() {
         val graph = (application as FolioApplication).graph
         appScope.launch(Dispatchers.IO) {
             var imported = 0
+            var restored = 0
             for ((index, uri) in uris.withIndex()) {
                 withContext(Dispatchers.Main) {
                     importStatus = "Importing manga ${index + 1}/${uris.size}..."
@@ -919,9 +930,10 @@ class MainActivity : ComponentActivity() {
                     } ?: throw IllegalArgumentException("Unable to open archive")
 
                     val seriesName = graph.mangaBackend.localSource.import(tempFile)
+                    val entryId = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName)
                     graph.mangaRepository.upsert(
                         com.folio.reader.manga.MangaEntry(
-                            id = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName),
+                            id = entryId,
                             sourceId = com.folio.reader.manga.LOCAL_SOURCE_ID,
                             sourceName = "Local manga",
                             url = seriesName,
@@ -930,6 +942,10 @@ class MainActivity : ComponentActivity() {
                             initialized = true,
                         )
                     )
+                    val adopted = runCatching {
+                        graph.syncEngine?.adoptCloudProgressForManga(entryId) ?: 0
+                    }.getOrDefault(0)
+                    if (adopted > 0) restored++
                     imported++
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
@@ -943,6 +959,7 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 if (imported > 0) {
                     importStatus = if (imported == 1) "Imported 1 manga" else "Imported $imported manga"
+                    if (restored > 0) importStatus += " • progress restored from cloud"
                 }
                 refreshTick++
             }

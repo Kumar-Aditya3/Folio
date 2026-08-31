@@ -200,37 +200,37 @@ class RestFirestoreSync(
 
     override fun upsertBook(book: FsBook) =
         putPayload(
-            FirestorePaths.userBook(uid, book.id),
+            FirestorePaths.userBook(uid, fsId(book.id)),
             book.updatedAt,
             json.encodeToString(book)
         )
 
     override fun upsertPosition(position: FsReadingPosition) = putPayload(
-        "${FirestorePaths.userPositions(uid, position.bookId)}/${position.deviceId}",
+        "${FirestorePaths.userPositions(uid, fsId(position.bookId))}/${fsId(position.deviceId)}",
         position.updatedAt,
         json.encodeToString(position)
     )
 
     override fun upsertHighlight(highlight: FsHighlight) = putPayload(
-        "${FirestorePaths.userHighlights(uid, highlight.bookId)}/${highlight.id}",
+        "${FirestorePaths.userHighlights(uid, fsId(highlight.bookId))}/${fsId(highlight.id)}",
         highlight.updatedAt,
         json.encodeToString(highlight)
     )
 
     override fun upsertNote(note: FsNote) = putPayload(
-        "${FirestorePaths.userNotes(uid, note.bookId)}/${note.id}",
+        "${FirestorePaths.userNotes(uid, fsId(note.bookId))}/${fsId(note.id)}",
         note.updatedAt,
         json.encodeToString(note)
     )
 
     override fun upsertBookmark(bookmark: FsBookmark) = putPayload(
-        "${FirestorePaths.userBookmarks(uid, bookmark.bookId)}/${bookmark.id}",
+        "${FirestorePaths.userBookmarks(uid, fsId(bookmark.bookId))}/${fsId(bookmark.id)}",
         bookmark.updatedAt,
         json.encodeToString(bookmark)
     )
 
     override fun upsertSession(session: FsReadingSession) = putPayload(
-        "${FirestorePaths.userSessions(uid)}/${session.id}",
+        "${FirestorePaths.userSessions(uid)}/${fsId(session.id)}",
         session.startedAt,
         json.encodeToString(session)
     )
@@ -239,31 +239,31 @@ class RestFirestoreSync(
         putPayload(FirestorePaths.userSettingsDocument(uid), settings.updatedAt, json.encodeToString(settings))
 
     override fun upsertCollection(collection: FsCollection) = putPayload(
-        "${FirestorePaths.userCollections(uid)}/${collection.id}",
+        "${FirestorePaths.userCollections(uid)}/${fsId(collection.id)}",
         collection.updatedAt,
         json.encodeToString(collection)
     )
 
     override fun upsertSeries(series: FsSeries) = putPayload(
-        "${FirestorePaths.userSeries(uid)}/${series.id}",
+        "${FirestorePaths.userSeries(uid)}/${fsId(series.id)}",
         series.updatedAt,
         json.encodeToString(series)
     )
 
     override fun upsertTag(tag: FsTag) = putPayload(
-        "${FirestorePaths.userTags(uid)}/${tag.id}",
+        "${FirestorePaths.userTags(uid)}/${fsId(tag.id)}",
         tag.updatedAt,
         json.encodeToString(tag)
     )
 
     override fun upsertQuote(quote: FsQuote) = putPayload(
-        "${FirestorePaths.userQuotes(uid)}/${quote.id}",
+        "${FirestorePaths.userQuotes(uid)}/${fsId(quote.id)}",
         quote.createdAt,
         json.encodeToString(quote)
     )
 
     override fun upsertRevisitItem(item: FsRevisitItem) = putPayload(
-        "${FirestorePaths.userRevisit(uid)}/${item.id}",
+        "${FirestorePaths.userRevisit(uid)}/${fsId(item.id)}",
         item.resolvedAt ?: item.createdAt,
         json.encodeToString(item)
     )
@@ -292,7 +292,7 @@ class RestFirestoreSync(
         val out = mutableListOf<FsReadingPosition>()
         for (doc in fetchAllUserBooks()) {
             val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userPositions(uid, book.id)).forEach { sub ->
+            listCollection(FirestorePaths.userPositions(uid, fsId(book.id))).forEach { sub ->
                 runCatching { json.decodeFromString(FsReadingPosition.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
@@ -305,7 +305,7 @@ class RestFirestoreSync(
         val out = mutableListOf<FsHighlight>()
         for (doc in fetchAllUserBooks()) {
             val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userHighlights(uid, book.id)).forEach { sub ->
+            listCollection(FirestorePaths.userHighlights(uid, fsId(book.id))).forEach { sub ->
                 runCatching { json.decodeFromString(FsHighlight.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
@@ -318,7 +318,7 @@ class RestFirestoreSync(
         val out = mutableListOf<FsNote>()
         for (doc in fetchAllUserBooks()) {
             val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userNotes(uid, book.id)).forEach { sub ->
+            listCollection(FirestorePaths.userNotes(uid, fsId(book.id))).forEach { sub ->
                 runCatching { json.decodeFromString(FsNote.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
@@ -331,7 +331,7 @@ class RestFirestoreSync(
         val out = mutableListOf<FsBookmark>()
         for (doc in fetchAllUserBooks()) {
             val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userBookmarks(uid, book.id)).forEach { sub ->
+            listCollection(FirestorePaths.userBookmarks(uid, fsId(book.id))).forEach { sub ->
                 runCatching { json.decodeFromString(FsBookmark.serializer(), sub.payload) }.getOrNull()
                     ?.let { out.add(it) }
             }
@@ -393,19 +393,19 @@ class RestFirestoreSync(
     }
 
     override fun upsertManga(manga: FsManga) = putPayload(
-        "${FirestorePaths.userManga(uid)}/${manga.id}",
+        "${FirestorePaths.userManga(uid)}/${fsId(manga.id)}",
         manga.updatedAt,
         json.encodeToString(manga)
     )
 
     override fun upsertMangaChapter(chapter: FsMangaChapter) = putPayload(
-        "${FirestorePaths.userMangaChapters(uid)}/${chapter.id}",
+        "${FirestorePaths.userMangaChapters(uid)}/${fsId(chapter.id)}",
         chapter.updatedAt,
         json.encodeToString(chapter)
     )
 
     override fun upsertMangaNote(note: FsMangaNote) = putPayload(
-        "${FirestorePaths.userMangaNotes(uid)}/${note.id}",
+        "${FirestorePaths.userMangaNotes(uid)}/${fsId(note.id)}",
         note.updatedAt,
         json.encodeToString(note)
     )
@@ -426,7 +426,7 @@ class RestFirestoreSync(
     }
 
     override fun upsertMangaCategory(category: FsMangaCategory) = putPayload(
-        "${FirestorePaths.userMangaCategories(uid)}/${category.id}",
+        "${FirestorePaths.userMangaCategories(uid)}/${fsId(category.id)}",
         category.updatedAt,
         json.encodeToString(category)
     )
@@ -569,6 +569,17 @@ class RestFirestoreSync(
 
     private fun encodePath(path: String): String =
         path.split("/").joinToString("/") { URLEncoder.encode(it, "UTF-8") }
+
+    /**
+     * Entity ids must occupy exactly one path segment: manga/chapter ids embed
+     * source URLs containing '/', and [encodePath] would split a raw id into
+     * several segments, making Firestore reject the path (400, "lacks a
+     * collection id"). Pre-encoding here keeps the id one opaque segment; the
+     * server stores exactly this encoded form, so [shortKey] returns it verbatim
+     * and the docUpdateTimes keys still match. Safe ids (uuids, hashes) encode to
+     * themselves, leaving existing document ids untouched.
+     */
+    private fun fsId(id: String): String = URLEncoder.encode(id, "UTF-8")
 
     private data class RemoteDoc(val name: String, val payload: String, val updatedAtMs: Long)
 
