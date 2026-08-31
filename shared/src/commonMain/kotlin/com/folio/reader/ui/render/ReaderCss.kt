@@ -81,8 +81,11 @@ object ReaderCss {
         val widthCss = if (capPx > 0)
             "body{max-width:${capPx}px !important;margin-left:auto !important;margin-right:auto !important;}"
         else ""
+        // Paged pages read bottom-heavy at equal padding (nothing anchors the eye
+        // below the last line), so the bottom gap is trimmed there only.
+        val pagedBottom = if (pagedCols > 0) settings.margins.bottom / 2 else settings.margins.bottom
         val pad = if (pagedCols > 0)
-            "${settings.margins.top}px 0 ${settings.margins.bottom}px 0"
+            "${settings.margins.top}px 0 ${pagedBottom.toInt()}px 0"
         else
             "${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px"
 
@@ -93,7 +96,7 @@ object ReaderCss {
                 themeBgCss +
                 "body{padding:$pad$imp;$typography$alignCss$colorCss$hyphenCss}" +
                 (if (pagedCols > 0)
-                    PageEngine.css(pagedCols, settings.margins.top, settings.margins.bottom, "#${theme.background.rgb()}")
+                    PageEngine.css(settings.margins.top, pagedBottom)
                 else continuousCss) +
                 widthCss +
                 paragraphCss +

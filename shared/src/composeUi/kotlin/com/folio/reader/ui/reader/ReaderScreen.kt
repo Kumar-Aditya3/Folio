@@ -35,15 +35,15 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -58,6 +58,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -102,6 +103,7 @@ import com.folio.reader.model.Note
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.locatorFraction
 import com.folio.reader.model.locatorsMatch
+import com.folio.reader.settings.normalized
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.glassPanel
@@ -142,8 +144,6 @@ fun ReaderScreen(
     onSetHighlightNote: (highlightId: String, content: String) -> Unit = { _, _ -> },
     onScrollProgress: (Float) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit = {},
-    settingsScopeBook: Boolean = true,
-    onSettingsScopeChange: (Boolean) -> Unit = {},
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
     onRetryChapter: (() -> Unit)? = null,
     onLinkClick: ((String) -> Unit)? = null,
@@ -253,8 +253,7 @@ fun ReaderScreen(
             fontFamily = settings.fontFamily,
             fontOptions = quickFontNames,
             themeId = settings.themeId,
-            layoutMode = settings.layoutMode.name,
-            scopeBook = settingsScopeBook,
+            layoutMode = settings.layoutMode.normalized.name,
             themes = com.folio.reader.settings.Theme.PICKER.map { t ->
                 Triple(t.id, t.name, t.background.argbHex())
             },
@@ -404,10 +403,6 @@ fun ReaderScreen(
                 if (layout != null) onSettingsChange(settings.copy(layoutMode = layout))
             }
 
-            a == "scope:book" -> onSettingsScopeChange(true)
-
-            a == "scope:all" -> onSettingsScopeChange(false)
-
             a.startsWith("note:") -> {
                 val id = a.substringAfterLast(':')
                 if (highlights.any { it.id == id }) noteDraftFor = id
@@ -510,10 +505,15 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "No chapters found for this book.",
-                    style = FolioTheme.typography.bodyLarge,
-                    color = FolioTheme.colors.onSurfaceVariant
+                com.folio.reader.ui.components.EmptyState(
+                    icon = Icons.Filled.MenuBook,
+                    headline = "No chapters found for this book",
+                    body = "The file may be corrupt or its structure could not be parsed.",
+                    action = {
+                        OutlinedButton(onClick = onBackPress) {
+                            Text("Back to library")
+                        }
+                    }
                 )
             }
         }
@@ -561,7 +561,7 @@ fun ReaderScreen(
                     // Back button
                     IconButton(onClick = onBackPress) {
                         Icon(
-                            imageVector = Icons.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = FolioTheme.colors.onSurface
                         )
@@ -841,8 +841,6 @@ fun ReaderScreen(
                 ReaderSettingsPanel(
                     settings = settings,
                     onSettingsChange = onSettingsChange,
-                    scopeBook = settingsScopeBook,
-                    onScopeChange = onSettingsScopeChange,
                     onDismiss = { showReaderPanel = false },
                     onOpenFullSettings = {
                         showReaderPanel = false
@@ -981,9 +979,7 @@ fun ChapterContent(
         }
     ) {
         when {
-            isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = FolioTheme.colors.primary)
-            }
+            isLoading -> com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
             // Real error from the loader (missing file, parse failure) — not a
             // transient blank, so opening a book no longer flashes this state.
             loadError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1171,8 +1167,6 @@ private const val MAX_FONT_SIZE_SP = 24f
 fun ReaderSettingsPanel(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
-    scopeBook: Boolean,
-    onScopeChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onOpenFullSettings: () -> Unit
 ) {
@@ -1234,11 +1228,9 @@ fun ReaderSettingsPanel(
             label = "Layout",
             options = listOf(
                 "CONTINUOUS" to "Scroll",
-                "PAGINATED" to "Page",
-                "TWO_COLUMN" to "Spread",
-                "FOCUS" to "Focus"
+                "PAGINATED" to "Page"
             ),
-            selected = settings.layoutMode.name,
+            selected = settings.layoutMode.normalized.name,
             onSelect = { name ->
                 val mode = com.folio.reader.settings.LayoutMode.entries.firstOrNull { it.name == name }
                 if (mode != null) onSettingsChange(settings.copy(layoutMode = mode))
@@ -1429,13 +1421,6 @@ fun ReaderSettingsPanel(
                     valueRange = 0f..64f
                 )
             }
-
-            QuickChoiceRow(
-                label = "Apply to",
-                options = listOf("book" to "This book", "all" to "All books"),
-                selected = if (scopeBook) "book" else "all",
-                onSelect = { onScopeChange(it == "book") }
-            )
 
             // All settings — frosted glass pill
             Row(
@@ -1703,6 +1688,8 @@ fun AnnotationsSidebar(
 ) {
     var noteDraftFor by remember { mutableStateOf<String?>(null) }
     var noteContent by remember { mutableStateOf("") }
+    // A dismissed (not cancelled) dialog keeps its unsaved draft for this highlight.
+    var draftKeptFor by remember { mutableStateOf<String?>(null) }
     val noteById = notes.filter { !it.isDeleted }.associateBy { it.id }
     // Notes no highlight owns — everything made before notes lived on highlights.
     val orphanNotes = notes.filter { n -> !n.isDeleted && highlights.none { it.noteId == n.id } }
@@ -1746,7 +1733,8 @@ fun AnnotationsSidebar(
                         accentColor = Color(highlight.effectiveColor),
                         note = linked?.content,
                         onNote = {
-                            noteContent = linked?.content ?: ""
+                            if (draftKeptFor != highlight.id) noteContent = linked?.content ?: ""
+                            draftKeptFor = null
                             noteDraftFor = highlight.id
                         },
                         onClick = { onJump("hl", highlight.id) },
@@ -1782,7 +1770,7 @@ fun AnnotationsSidebar(
     noteDraftFor?.let { highlightId ->
         val passage = highlights.firstOrNull { it.id == highlightId }?.selectedText.orEmpty()
         AlertDialog(
-            onDismissRequest = { noteDraftFor = null },
+            onDismissRequest = { draftKeptFor = noteDraftFor; noteDraftFor = null },
             title = { Text("Note") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1809,13 +1797,14 @@ fun AnnotationsSidebar(
                     onClick = {
                         onSetHighlightNote(highlightId, noteContent.trim())
                         noteContent = ""
+                        draftKeptFor = null
                         noteDraftFor = null
                     },
                     enabled = noteContent.isNotBlank()
                 ) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { noteDraftFor = null }) { Text("Cancel") }
+                TextButton(onClick = { noteContent = ""; draftKeptFor = null; noteDraftFor = null }) { Text("Cancel") }
             }
         )
     }

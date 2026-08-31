@@ -131,25 +131,13 @@ fun BookDetailScreen(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Book") },
-            text = { Text("Are you sure you want to delete '${book?.title}'? This will remove the book and its local files.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDeleteClick?.invoke()
-                    }
-                ) {
-                    Text("Delete", color = FolioTheme.colors.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel")
-                }
-            }
+        com.folio.reader.ui.components.ConfirmDialog(
+            title = "Delete Book",
+            message = "Are you sure you want to delete '${book?.title}'? This will remove the book and its local files.",
+            confirmText = "Delete",
+            destructive = true,
+            onConfirm = { onDeleteClick?.invoke() },
+            onDismiss = { showDeleteConfirm = false }
         )
     }
 

@@ -783,6 +783,7 @@ private fun readerBridgeJs(fraction: Float): String = """
     if(!el){var pi=parts[0]==='h'?parts[2]:parts[1];var ps=document.querySelectorAll('p');if(!ps.length)return;var n=parseInt(pi,10);if(isNaN(n))n=0;el=ps[Math.min(Math.max(0,n),ps.length-1)];}
     if(!el)return;el.scrollIntoView({block:'start'});restorePending=false;schedule();};
   ${PageEngine.selectionWatchJs}
+  ${PageEngine.emptyHideJs}
   var scheduled=false,last=0,lastSig='',maxTotal=1;
   var restorePending=$fraction>0.001;
   function measure(){

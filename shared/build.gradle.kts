@@ -126,6 +126,19 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    lint {
+        // AGP's bundled lint crashes on this machine's JDK 25 ("25.0.1" thrown
+        // from AndroidLintWorkAction, plus UAST MessageBus disposal crashes).
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+}
+
+// checkReleaseBuilds=false alone still leaves lintVitalAnalyzeRelease in the
+// app's release graph for this library module; disable the whole family.
+tasks.configureEach {
+    if (name.contains("lintVital", ignoreCase = true)) enabled = false
 }
 
 tasks.withType<Test> {

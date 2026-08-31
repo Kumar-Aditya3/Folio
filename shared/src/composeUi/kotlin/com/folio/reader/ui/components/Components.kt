@@ -481,8 +481,9 @@ fun HeatmapCell(
 fun ConfirmDialog(
     title: String,
     message: String,
-    confirmText: String,
-    dismissText: String,
+    confirmText: String = "OK",
+    dismissText: String = "Cancel",
+    destructive: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -491,7 +492,15 @@ fun ConfirmDialog(
         title = { Text(text = title, style = MaterialTheme.typography.titleLarge) },
         text = { Text(text = message) },
         confirmButton = {
-            Button(onClick = { onConfirm(); onDismiss() }) {
+            Button(
+                onClick = { onConfirm(); onDismiss() },
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = if (destructive) com.folio.reader.ui.theme.FolioTheme.colors.error
+                    else com.folio.reader.ui.theme.FolioTheme.colors.primary,
+                    contentColor = if (destructive) com.folio.reader.ui.theme.FolioTheme.colors.onError
+                    else com.folio.reader.ui.theme.FolioTheme.colors.onPrimary
+                )
+            ) {
                 Text(confirmText)
             }
         },
@@ -511,6 +520,48 @@ fun LoadingPlaceholder(modifier: Modifier = Modifier) {
             strokeWidth = 2.dp,
             color = MaterialTheme.colorScheme.primary
         )
+    }
+}
+
+/**
+ * The one blank-state layout: icon, headline, optional body, optional action.
+ * Every screen renders its empty condition through this so "nothing here"
+ * always looks and reads the same.
+ */
+@Composable
+fun EmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    headline: String,
+    body: String? = null,
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null
+) {
+    Column(
+        modifier = modifier.fillMaxWidth().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
+            modifier = Modifier.size(44.dp)
+        )
+        Text(
+            headline,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        if (body != null) {
+            Text(
+                body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+        action?.invoke()
     }
 }
 

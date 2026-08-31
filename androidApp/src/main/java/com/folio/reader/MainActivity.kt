@@ -146,6 +146,15 @@ class MainActivity : ComponentActivity() {
                     settingsRepo = graph.settingsRepository,
                 )
             }
+            // Hoisted here (not inside the LibraryScreen call) so system back can
+            // clear an active books selection instead of falling through and exiting.
+            val libraryVM = remember {
+                LibraryViewModel(
+                    bookRepository = graph.bookRepository,
+                    collectionRepository = graph.collectionRepository,
+                    seriesRepository = graph.seriesRepository
+                )
+            }
 
             // Top-level sync state for library screen
             val librarySyncState by remember(graph.syncEngine) {
@@ -156,10 +165,10 @@ class MainActivity : ComponentActivity() {
                 runCatching { globalSettings = graph.settingsRepository.getGlobalSettings() }
             }
 
-            // Gesture/system back pops the previous screen off the stack; at the
-            // Back walks back through states instead of exiting: pushed screens pop
-            // first, then an open manga search closes, then Manga returns to Books,
-            // and only at the Books root does back exit the app.
+            // Back walks back through states instead of exiting: an active bulk
+            // selection (manga or books) clears first, then pushed screens pop,
+            // an open manga search closes, Manga returns to Books, and only at
+            // the Books root does back exit the app.
             val mangaBrowseVM = remember {
                 com.folio.reader.ui.manga.BrowseViewModel(graph.mangaBackend, graph.mangaRepository)
             }
@@ -182,6 +191,7 @@ class MainActivity : ComponentActivity() {
             BackHandler {
                 when {
                     mangaLibVM.isSelectionMode.value -> mangaLibVM.clearSelection()
+                    libraryVM.isSelectionMode.value -> libraryVM.clearSelection()
                     mangaDetailVM?.chapterSelectionMode?.value == true -> mangaDetailVM.clearChapterSelection()
                     navStack.lastOrNull() is Screen.MangaBrowse && mangaBrowseVM.searchActive.value ->
                         mangaBrowseVM.exitSearch()
@@ -474,13 +484,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                viewModel = remember {
-                                    LibraryViewModel(
-                                        bookRepository = graph.bookRepository,
-                                        collectionRepository = graph.collectionRepository,
-                                        seriesRepository = graph.seriesRepository
-                                    )
-                                },
+                                viewModel = libraryVM,
                                 syncState = librarySyncState,
                                 onSyncNow = { graph.syncEngine?.triggerSync(immediate = true) },
                                 libraryMode = libraryMode,
@@ -546,7 +550,8 @@ class MainActivity : ComponentActivity() {
                                 initialSettings = globalSettings,
                                 onBackPress = { popScreen() },
                                 onSearchClick = { pushScreen(Screen.Search) },
-                                onSettingsClick = { pushScreen(Screen.Settings) }
+                                onSettingsClick = { pushScreen(Screen.Settings) },
+                                onSettingsChanged = { globalSettings = it }
                             )
 
                             is Screen.Settings -> {
@@ -1013,7 +1018,8 @@ class MainActivity : ComponentActivity() {
         initialSettings: com.folio.reader.settings.ReaderSettings,
         onBackPress: () -> Unit,
         onSearchClick: () -> Unit,
-        onSettingsClick: () -> Unit
+        onSettingsClick: () -> Unit,
+        onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {}
     ) {
         val viewModel = remember {
             ReaderViewModel(
@@ -1037,7 +1043,6 @@ class MainActivity : ComponentActivity() {
         val loadingContent by viewModel.isLoadingContent.collectAsState(initial = true)
         val position by viewModel.position.collectAsState(initial = null)
         val settings by viewModel.effectiveSettings.collectAsState(initial = initialSettings)
-        val settingsScopeBook by viewModel.settingsScopeBook.collectAsState(initial = true)
         val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
         val highlights by viewModel.highlights.collectAsState(initial = emptyList())
         val notes by viewModel.notes.collectAsState(initial = emptyList())
@@ -1095,9 +1100,10 @@ class MainActivity : ComponentActivity() {
             onSearchClick = { viewModel.closeBook { onSearchClick() } },
             onBookmarkClick = { viewModel.toggleBookmark() },
             onSettingsClick = { viewModel.closeBook { onSettingsClick() } },
-            onSettingsChange = { updated -> viewModel.updateSettings(updated) },
-            settingsScopeBook = settingsScopeBook,
-            onSettingsScopeChange = { viewModel.setSettingsScopeBook(it) },
+            onSettingsChange = { updated ->
+                viewModel.updateSettings(updated)
+                onSettingsChanged(viewModel.global())
+            },
             onToggleControls = { viewModel.toggleControls() },
             onShowControls = { viewModel.showControlsFn() },
             onToggleToc = { viewModel.toggleToc() },

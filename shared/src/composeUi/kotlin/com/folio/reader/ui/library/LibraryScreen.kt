@@ -31,7 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
@@ -126,8 +126,10 @@ fun LibraryScreen(
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(LibraryViewModel.FilterState()) }
-    var selectedBooks by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var isSelectionMode by remember { mutableStateOf(false) }
+    // Selection lives in the view model so the host's system-back handler can
+    // clear it instead of falling through and exiting the app.
+    val selectedBooks by viewModel.selectedBookIds.collectAsState()
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     var overflowOpen by remember { mutableStateOf(false) }
     var mangaOverflowOpen by remember { mutableStateOf(false) }
     var seriesFilterOpen by remember { mutableStateOf(false) }
@@ -146,25 +148,13 @@ fun LibraryScreen(
     }.collectAsState(initial = emptySet<com.folio.reader.ui.manga.MangaLibFilter>())
 
     if (bookToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { bookToDelete = null },
-            title = { Text("Delete Book") },
-            text = { Text("Are you sure you want to delete '${bookToDelete?.title}'? This will remove the book and its local files.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        bookToDelete?.let { onDeleteBooks(setOf(it.id)) }
-                        bookToDelete = null
-                    }
-                ) {
-                    Text("Delete", color = FolioTheme.colors.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { bookToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
+        com.folio.reader.ui.components.ConfirmDialog(
+            title = "Delete Book",
+            message = "Are you sure you want to delete '${bookToDelete?.title}'? This will remove the book and its local files.",
+            confirmText = "Delete",
+            destructive = true,
+            onConfirm = { bookToDelete?.let { onDeleteBooks(setOf(it.id)) } },
+            onDismiss = { bookToDelete = null }
         )
     }
 
@@ -182,77 +172,11 @@ fun LibraryScreen(
         )
     ).collectAsState(initial = null as List<Book>?)
 
-    fun toggleSelection(bookId: String) {
-        selectedBooks = if (bookId in selectedBooks) selectedBooks - bookId else selectedBooks + bookId
-        isSelectionMode = selectedBooks.isNotEmpty()
-    }
+    val mangaMode = libraryMode == LibraryMode.MANGA && mangaContent != null
 
-    if (isSelectionMode) {
-        // Selection top bar with bulk actions
-        Column(modifier = Modifier.fillMaxSize()) {
-            com.folio.reader.ui.components.FolioTopBar(
-                title = "${selectedBooks.size} selected",
-                navigationIcon = {
-                    IconButton(onClick = {
-                        selectedBooks = emptySet()
-                        isSelectionMode = false
-                    }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear selection")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        onSetBookStatus(selectedBooks, BookStatus.READING)
-                        selectedBooks = emptySet(); isSelectionMode = false
-                    }) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = "Mark as Reading")
-                    }
-                    IconButton(onClick = {
-                        onSetBookStatus(selectedBooks, BookStatus.FINISHED)
-                        selectedBooks = emptySet(); isSelectionMode = false
-                    }) {
-                        Icon(Icons.Filled.Done, contentDescription = "Mark as Finished")
-                    }
-                    IconButton(onClick = {
-                        onDeleteBooks(selectedBooks)
-                        selectedBooks = emptySet(); isSelectionMode = false
-                    }) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = "Delete selected",
-                            tint = FolioTheme.colors.error
-                        )
-                    }
-                }
-            )
-            LibraryContent(
-                books = books,
-                viewMode = booksViewMode,
-                sortBy = sortBy,
-                sortAscending = sortAscending,
-                filter = filter,
-                allSeries = allSeries,
-                allCollections = allCollections,
-                selectedBooks = selectedBooks,
-                isSelectionMode = true,
-                onViewMode = onBooksViewModeChange,
-                onSortChange = { sortBy = it },
-                onDirectionChange = { sortAscending = it },
-                onFilterChange = { filter = it },
-                onSeriesFilterOpen = { seriesFilterOpen = it },
-                onCollectionFilterOpen = { collectionFilterOpen = it },
-                seriesFilterOpen = seriesFilterOpen,
-                collectionFilterOpen = collectionFilterOpen,
-                onBookClick = { if (isSelectionMode) toggleSelection(it.id) else onBookDetailClick(it) },
-                onBookLongClick = { toggleSelection(it.id) },
-                onDeleteBook = { bookToDelete = it },
-                onImportClick = onImportClick
-            )
-        }
-    } else {
-        val mangaMode = libraryMode == LibraryMode.MANGA && mangaContent != null
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (mangaMode && mangaSelActive) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        when {
+            mangaMode && mangaSelActive -> {
                 // Selection mode swaps the regular chrome for bulk actions in the same
                 // bar — no extra block, no layout shift below.
                 com.folio.reader.ui.components.FolioTopBar(
@@ -267,7 +191,7 @@ fun LibraryScreen(
                             Icon(Icons.Filled.Label, contentDescription = "Set categories")
                         }
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(true) }) {
-                            Icon(Icons.Filled.Done, contentDescription = "Mark read")
+                            Icon(Icons.Filled.CheckCircle, contentDescription = "Mark read")
                         }
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(false) }) {
                             Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
@@ -277,7 +201,39 @@ fun LibraryScreen(
                         }
                     },
                 )
-            } else {
+            }
+            !mangaMode && isSelectionMode -> {
+                // Books bulk-selection swaps the same bar, so the tab row below never moves.
+                com.folio.reader.ui.components.FolioTopBar(
+                    title = "${selectedBooks.size} selected",
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            onSetBookStatus(selectedBooks, BookStatus.READING)
+                            viewModel.clearSelection()
+                        }) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = "Mark as reading")
+                        }
+                        IconButton(onClick = {
+                            onSetBookStatus(selectedBooks, BookStatus.FINISHED)
+                            viewModel.clearSelection()
+                        }) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = "Mark as finished")
+                        }
+                        IconButton(onClick = {
+                            onDeleteBooks(selectedBooks)
+                            viewModel.clearSelection()
+                        }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete books", tint = FolioTheme.colors.error)
+                        }
+                    },
+                )
+            }
+            else -> {
             com.folio.reader.ui.components.FolioTopBar(
                 title = "Folio",
                 actions = {
@@ -449,6 +405,7 @@ fun LibraryScreen(
                 }
             )
             }
+        }
 
             Row(
                 modifier = Modifier
@@ -486,7 +443,7 @@ fun LibraryScreen(
                     allSeries = allSeries,
                     allCollections = allCollections,
                     selectedBooks = selectedBooks,
-                    isSelectionMode = false,
+                    isSelectionMode = isSelectionMode,
                     onViewMode = onBooksViewModeChange,
                     onSortChange = { sortBy = it },
                     onDirectionChange = { sortAscending = it },
@@ -495,15 +452,14 @@ fun LibraryScreen(
                     onCollectionFilterOpen = { collectionFilterOpen = it },
                     seriesFilterOpen = seriesFilterOpen,
                     collectionFilterOpen = collectionFilterOpen,
-                    onBookClick = { onBookDetailClick(it) },
-                    onBookLongClick = { toggleSelection(it.id) },
+                    onBookClick = { if (isSelectionMode) viewModel.toggleSelection(it.id) else onBookDetailClick(it) },
+                    onBookLongClick = { viewModel.toggleSelection(it.id) },
                     onDeleteBook = { bookToDelete = it },
                     onImportClick = onImportClick
                 )
             }
             }
         }
-    }
 }
 
 @Composable
@@ -645,24 +601,22 @@ private fun LibraryContent(
         }
 
         if (books == null) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                LinearProgressIndicator(modifier = Modifier.width(96.dp))
-            }
+            com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
         } else if (books.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("No books in library", style = FolioTheme.typography.headlineSmall)
-                    Text("Import your first EPUB to get started", color = FolioTheme.colors.onSurfaceVariant)
-                    Button(onClick = onImportClick) {
-                        Text("Import EPUB")
+                com.folio.reader.ui.components.EmptyState(
+                    icon = Icons.Filled.MenuBook,
+                    headline = "No books in library",
+                    body = "Import your first EPUB to get started",
+                    action = {
+                        Button(onClick = onImportClick) {
+                            Text("Import EPUB")
+                        }
                     }
-                }
+                )
             }
         } else {
             when (viewMode) {
@@ -687,6 +641,7 @@ private fun LibraryContent(
                 LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
                     books,
                     onBookClick,
+                    onBookLongClick,
                     onDeleteBook,
                     selectedBooks,
                     isSelectionMode
@@ -849,8 +804,9 @@ fun BookCard(
                 )
             }
 
-            // Status badge
-            if (book.status != BookStatus.UNREAD) {
+            // Status badge: progress already implies reading, so the badge only
+            // flags notable states (paused, finished, abandoned).
+            if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING) {
                 Surface(
                     modifier = Modifier.padding(top = 4.dp),
                     shape = RoundedCornerShape(50),
@@ -961,11 +917,13 @@ fun BookListItem(
                             color = FolioTheme.colors.primary
                         )
                     }
-                    Text(
-                        book.status.name.lowercase().replaceFirstChar { it.uppercase() },
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
+                    if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING) {
+                        Text(
+                            book.status.name.lowercase().replaceFirstChar { it.uppercase() },
+                            style = FolioTheme.typography.labelSmall,
+                            color = FolioTheme.colors.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -992,6 +950,7 @@ fun BookListItem(
 fun BookCompactList(
     books: List<Book>,
     onBookClick: (Book) -> Unit,
+    onBookLongClick: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
     selectedBooks: Set<String>,
     isSelectionMode: Boolean
@@ -1007,25 +966,28 @@ fun BookCompactList(
                 isSelected = book.id in selectedBooks,
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
+                onLongClick = { onBookLongClick(book) },
                 onDeleteBook = { onDeleteBook(book) }
             )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookCompactItem(
     book: Book,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onDeleteBook: (Book) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -1049,8 +1011,12 @@ fun BookCompactItem(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(book.title, style = FolioTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val subtitle = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
+                "${book.displayAuthor} · ${book.progressPercent}% · ${book.toCardData().statusLabel}"
+            else
+                "${book.displayAuthor} · ${book.progressPercent}%"
             Text(
-                "${book.displayAuthor} · ${book.progressPercent}% · ${book.status.name}",
+                subtitle,
                 style = FolioTheme.typography.bodySmall,
                 color = FolioTheme.colors.onSurfaceVariant,
                 maxLines = 1,

@@ -920,8 +920,7 @@ class SyncEngine(
         if (epubHash.isBlank()) return 0
         val remoteBook = runCatching { firestoreSync.fetchBooks() }.getOrDefault(emptyList())
             .firstOrNull { !it.isDeleted && it.epubHash == epubHash } ?: return 0
-        val positions = runCatching { firestoreSync.fetchPositions() }.getOrDefault(emptyList())
-            .filter { it.bookId == remoteBook.id }
+        val positions = runCatching { firestoreSync.fetchPositionsForBook(remoteBook.id) }.getOrDefault(emptyList())
         var adopted = 0
         for (p in positions) {
             val local = runCatching { positionRepository.getPosition(bookId, p.deviceId) }.getOrNull()
@@ -1293,6 +1292,8 @@ interface FirestoreSync {
     fun upsertRevisitItem(item: FsRevisitItem)
     fun fetchBooks(): List<FsBook>
     fun fetchPositions(): List<FsReadingPosition>
+    /** Single-book variant: one targeted subcollection read instead of the full fan-out. */
+    fun fetchPositionsForBook(bookId: String): List<FsReadingPosition>
     fun fetchHighlights(): List<FsHighlight>
     fun fetchNotes(): List<FsNote>
     fun fetchBookmarks(): List<FsBookmark>

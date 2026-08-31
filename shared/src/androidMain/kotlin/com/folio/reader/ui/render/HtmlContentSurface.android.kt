@@ -125,7 +125,13 @@ actual fun HtmlContentSurface(
     }
     // Hold pending JS so onPageFinished can inject after layout. This fixes the 1/1
     // measurement that happened immediately after loadDataWithBaseURL before layout.
-    var pendingJs by remember { mutableStateOf<String?>(null) }
+    // The JS is tagged with the load token embedded in its base URL: when two loads
+    // overlap (every settings change is a full reload), a stale onPageFinished from
+    // the outgoing document must not eat the JS meant for the document on screen —
+    // in paged modes that left the new document gated at body opacity 0 with no
+    // engine, i.e. a solid blank page.
+    var loadNonce by remember { mutableStateOf(0) }
+    var pendingJs by remember { mutableStateOf<Pair<Int, String>?>(null) }
     // Page bridging must post to main thread — @JavascriptInterface and title
     // callbacks arrive on WebView background threads.
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
@@ -150,11 +156,16 @@ actual fun HtmlContentSurface(
 
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
-                // Inject measurement JS only after the page is laid out, and consume it:
-                // the delayed fallback must not run a second time.
-                pendingJs?.let { js ->
+                // Inject the bridge JS only into the document it was queued for:
+                // the base URL carries the load token (folio-load=N) assigned when
+                // this load was issued. A mismatched finish belongs to an outgoing
+                // document; its JS stays pending for the real finish or the fallback.
+                val finishedToken = url?.substringAfter("folio-load=", "")?.toIntOrNull()
+                val pj = pendingJs
+                android.util.Log.i("FolioLoad", "finished token=$finishedToken pending=${pj?.first} consumed=${pj != null && finishedToken == pj.first}")
+                if (pj != null && finishedToken == pj.first) {
                     pendingJs = null
-                    view.evaluateJavascript(js, null)
+                    view.evaluateJavascript(pj.second, null)
                 }
                 pageState.markReady(view)
             }
@@ -184,6 +195,7 @@ actual fun HtmlContentSurface(
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 super.onReceivedTitle(view, title)
                 val t = title ?: return
+                if (t.startsWith("folio-")) android.util.Log.i("FolioLoad", "title=${t.take(140)}")
                 when {
                     t.startsWith("folio-progress:") -> {
                         val parts = t.split(':')
@@ -235,6 +247,10 @@ actual fun HtmlContentSurface(
     AndroidView<ReaderWebView>(
         modifier = modifier,
         factory = { context ->
+            // DevTools access for on-device diagnosis; debug builds only.
+            if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+            }
             ReaderWebView(context).apply {
                 getSettings().javaScriptEnabled = true
                 getSettings().domStorageEnabled = true
@@ -296,6 +312,7 @@ actual fun HtmlContentSurface(
                             window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
                             window.__folioSeekTo=function(t){var parts=String(t).split(':'),isH=parts[0]==='h';var id=isH?(parts[1]||''):'',para=isH?parts[2]:parts[1],frac=isH?parts[3]:parts[2];function byMark(){if(!id)return null;try{return document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){return null;}}function land(el){el.scrollIntoView({block:'start'});schedule();}function byPara(){if(para===undefined||para==='')return false;var n=parseInt(para,10);if(isNaN(n))return false;var ps=document.querySelectorAll('p');if(!ps.length)return false;land(ps[Math.min(Math.max(0,n),ps.length-1)]);return true;}function byFrac(){if(frac===undefined||frac==='')return false;var f=parseFloat(frac);if(isNaN(f))return false;if(window.__folioSeek)window.__folioSeek(f);return true;}var m=byMark();if(m){land(m);return;}if(!byPara())byFrac();};
                             ${PageEngine.selectionWatchJs}
+                            ${PageEngine.emptyHideJs}
                             function report(){
                                 scheduled=false;
                                 var now=Date.now();
@@ -340,18 +357,34 @@ actual fun HtmlContentSurface(
                 val theme = settings.customTheme
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
                 val js = baseJs + HighlightPaint.js(highlights, theme)
-                pendingJs = js
+                val token = loadNonce + 1
+                loadNonce = token
+                pendingJs = token to js
                 pageState.loading(chapterHref)
-                webView.loadDataWithBaseURL("file:///folio/$chapterHref", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
-                // Only for a WebView that never fires onPageFinished: re-running the
+                webView.loadDataWithBaseURL("file:///folio/$chapterHref?folio-load=$token", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
+                android.util.Log.i("FolioLoad", "issued token=$token key=$contentKey")
+                // Only for a WebView whose onPageFinished never fires: re-running the
                 // bridge is not idempotent, it restores scrollTop from the saved
-                // fraction and re-registers listeners.
-                webView.postDelayed({
-                    if (pendingJs != null && webView.tag == contentKey) {
-                        webView.evaluateJavascript(js, null)
+                // fraction and re-registers listeners. Inject only once THIS load's
+                // document has committed (webView.url carries the token) — evaluating
+                // earlier would run the JS against the outgoing document and the new
+                // one would never get its engine.
+                fun tryInject(attempt: Int) {
+                    val pj = pendingJs
+                    if (pj == null || pj.first != token || webView.tag != contentKey) return
+                    val committed = webView.url?.substringAfter("folio-load=", "")?.toIntOrNull()
+                    if (committed == token) {
+                        android.util.Log.i("FolioLoad", "fallback inject token=$token")
+                        pendingJs = null
+                        webView.evaluateJavascript(pj.second, null)
                         pageState.markReady(webView)
+                    } else if (attempt < 10) {
+                        webView.postDelayed({ tryInject(attempt + 1) }, 200)
+                    } else {
+                        android.util.Log.i("FolioLoad", "fallback gave up token=$token committed=$committed")
                     }
-                }, 400)
+                }
+                webView.postDelayed({ tryInject(0) }, 400)
             } else if (resourcesReady) {
                 // Content already loaded but position may have changed (scroll restore without reload).
                 // Re-trigger report with updated fraction if needed.

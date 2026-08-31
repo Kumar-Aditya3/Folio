@@ -3,6 +3,7 @@ package com.folio.reader.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,11 +24,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
@@ -58,10 +60,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,14 +78,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.BookCover
+import com.folio.reader.ui.components.onVerticalWheel
 import com.folio.reader.model.FormattingMode
 import com.folio.reader.settings.Theme
-import com.folio.reader.settings.LayoutMode
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.TextAlignment
 import com.folio.reader.settings.TextWidth
@@ -112,7 +117,7 @@ fun SettingsScreen(
             title = "Settings",
             navigationIcon = {
                 IconButton(onClick = onBackPress) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
         )
@@ -308,13 +313,32 @@ fun GeneralSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // FlowRow, not LazyRow: on desktop a horizontal LazyRow cannot be
-            // mouse-scrolled, so off-screen packs read as missing (user report).
-            FlowRow(
+            // Horizontal scrollable bar of live mini previews, the in-reader
+            // theme slider turned sideways: opens on the active pack, tap applies.
+            // A bare LazyRow is not wheel-scrollable on desktop (the old FlowRow
+            // complaint), so vertical wheel deltas are mapped to horizontal scrolls.
+            val packs = com.folio.reader.ui.theme.ThemePack.ALL
+            val packListState = rememberLazyListState()
+            val packScrollScope = rememberCoroutineScope()
+            val selectedPackIndex = packs.indexOfFirst { pack ->
+                settings.appThemeId == pack.appPaletteId &&
+                    settings.themeId == pack.readerThemeId &&
+                    settings.customTheme == null
+            }.coerceAtLeast(0)
+            LaunchedEffect(Unit) {
+                packListState.scrollToItem(index = selectedPackIndex)
+            }
+            LazyRow(
+                state = packListState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onVerticalWheel { delta ->
+                        packScrollScope.launch { packListState.scrollBy(delta * 60f) }
+                    },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
             ) {
-                com.folio.reader.ui.theme.ThemePack.ALL.forEach { pack ->
+                items(packs, key = { it.id }) { pack ->
                     ThemePackCard(
                         pack = pack,
                         selected = settings.appThemeId == pack.appPaletteId &&
@@ -401,7 +425,7 @@ private fun ThemePackCard(
     )
     androidx.compose.foundation.layout.Column(
         modifier = Modifier
-            .width(132.dp)
+            .width(148.dp)
             .background(colors.surface.copy(alpha = 0.55f), shape)
             .border(
                 1.dp,
@@ -409,23 +433,54 @@ private fun ThemePackCard(
                 shape
             )
             .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .clip(shape),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Mini app chrome: palette dot plus a title-bar line.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(chrome.background)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             Box(
                 modifier = Modifier
-                    .size(22.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
-                    .background(chrome.background)
-                    .border(1.dp, colors.outline.copy(alpha = 0.5f), androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .size(9.dp)
+                    .background(chrome.primary, CircleShape)
             )
             Box(
                 modifier = Modifier
-                    .size(22.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
-                    .background(androidx.compose.ui.graphics.Color(page.background))
-                    .border(1.dp, colors.outline.copy(alpha = 0.5f), androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .weight(1f)
+                    .height(4.dp)
+                    .background(chrome.onBackground.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+            )
+        }
+        // Mini page: heading and body lines in the reader theme's own ink.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(page.background))
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .height(6.dp)
+                    .background(Color(page.headingText), RoundedCornerShape(3.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color(page.secondaryText).copy(alpha = 0.75f), RoundedCornerShape(3.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(4.dp)
+                    .background(Color(page.secondaryText).copy(alpha = 0.55f), RoundedCornerShape(3.dp))
             )
         }
         Text(
@@ -434,6 +489,7 @@ private fun ThemePackCard(
             color = if (selected) colors.primary else colors.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
         )
     }
 }
@@ -646,6 +702,29 @@ fun TypographySettingsPanel(
                 valueRange = 0.5f..3.0f
             )
         }
+
+        OutlinedButton(
+            onClick = {
+                val d = ReaderSettings()
+                onSettingsChange(
+                    settings.copy(
+                        fontFamily = d.fontFamily,
+                        fontSize = d.fontSize,
+                        fontWeight = d.fontWeight,
+                        lineHeight = d.lineHeight,
+                        letterSpacing = d.letterSpacing,
+                        wordSpacing = d.wordSpacing,
+                        paragraphSpacing = d.paragraphSpacing,
+                        margins = d.margins,
+                        textWidth = d.textWidth,
+                        alignment = d.alignment,
+                        hyphenation = d.hyphenation
+                    )
+                )
+            }
+        ) {
+            Text("Reset to defaults")
+        }
     }
 }
 
@@ -660,24 +739,13 @@ fun LayoutSettingsPanel(
     ) {
         Text("Layout Settings", style = MaterialTheme.typography.titleLarge)
 
-        // Layout mode dropdown
-        DropdownMenuButton(
-            label = "Layout mode",
-            selected = settings.layoutMode.name,
-            options = LayoutMode.entries.map { it.name },
-            onChange = { name ->
-                val mode = LayoutMode.entries.first { it.name == name }
-                onSettingsChange(settings.copy(layoutMode = mode))
-            }
-        )
-
         // Text width dropdown
         DropdownMenuButton(
             label = "Text width",
-            selected = settings.textWidth.name,
-            options = TextWidth.entries.map { it.name },
+            selected = settings.textWidth.label(),
+            options = TextWidth.entries.map { it.label() },
             onChange = { name ->
-                val width = TextWidth.entries.first { it.name == name }
+                val width = TextWidth.entries.first { it.label() == name }
                 onSettingsChange(settings.copy(textWidth = width))
             }
         )
@@ -719,20 +787,20 @@ fun FormattingSettingsPanel(
         // Formatting mode dropdown
         DropdownMenuButton(
             label = "Formatting mode",
-            selected = settings.formattingMode.name,
-            options = FormattingMode.entries.map { it.name },
+            selected = settings.formattingMode.label(),
+            options = FormattingMode.entries.map { it.label() },
             onChange = { name ->
-                val mode = FormattingMode.entries.first { it.name == name }
+                val mode = FormattingMode.entries.first { it.label() == name }
                 onSettingsChange(settings.copy(formattingMode = mode))
             }
         )
 
         DropdownMenuButton(
             label = "Default text alignment",
-            selected = settings.alignment.name,
-            options = TextAlignment.entries.map { it.name },
+            selected = settings.alignment.label(),
+            options = TextAlignment.entries.map { it.label() },
             onChange = { name ->
-                val alignment = TextAlignment.entries.first { it.name == name }
+                val alignment = TextAlignment.entries.first { it.label() == name }
                 onSettingsChange(settings.copy(alignment = alignment))
             }
         )
@@ -1211,3 +1279,7 @@ fun SettingsLivePreview(settings: ReaderSettings) {
         )
     }
 }
+
+/** Renders an enum as a readable word for dropdowns without touching the persisted name. */
+private fun Enum<*>.label(): String =
+    name.lowercase().replaceFirstChar { it.uppercaseChar() }

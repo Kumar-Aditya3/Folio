@@ -135,7 +135,7 @@ object OverlayUi {
     fun settings(
         fontSize: Float, lineHeight: Float, margin: Float, fontFamily: String,
         fontOptions: List<String>, themeId: String, themes: List<Triple<String, String, String>>, // id, name, bg
-        layoutMode: String, scopeBook: Boolean,
+        layoutMode: String,
         highlightColors: List<String>, highlightIndex: Int,
         c: OverlayColors
     ): String {
@@ -177,19 +177,14 @@ object OverlayUi {
         }
         val layoutRow = segment(
             "Layout", "set:layout",
-            listOf("CONTINUOUS" to "Scroll", "PAGINATED" to "Page", "TWO_COLUMN" to "Spread", "FOCUS" to "Focus"),
+            listOf("CONTINUOUS" to "Scroll", "PAGINATED" to "Page"),
             layoutMode
-        )
-        val scopeRow = segment(
-            "Apply to", "scope",
-            listOf("book" to "This book", "all" to "All books"),
-            if (scopeBook) "book" else "all"
         )
         val body =
             slider("Text size", "size", 12.0, 26.0, 0.5, fontSize.toDouble(), "%.1f".format(fontSize)) +
                     slider("Line spacing", "lh", 1.0, 3.0, 0.1, lineHeight.toDouble(), "%.1f".format(lineHeight)) +
                     slider("Margins", "mg", 0.0, 64.0, 1.0, margin.toDouble(), "${margin.toInt()} px") +
-                    layoutRow + fontSel + themeRow + highlightRow + scopeRow +
+                    layoutRow + fontSel + themeRow + highlightRow +
                     "<button data-act='allsettings' style='$itemCss text-align:center;background:${c.accent};color:#fff;font-weight:600;margin-top:8px;border-radius:12px;padding:12px;'>All settings</button>"
         return shell("Reading settings", body, c, kind = "settings")
     }

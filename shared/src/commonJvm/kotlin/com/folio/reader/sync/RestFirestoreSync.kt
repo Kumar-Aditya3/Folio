@@ -272,71 +272,37 @@ class RestFirestoreSync(
         ensureAuth()
         // Cycle boundary: preconditions must reflect only this cycle's fetches.
         docUpdateTimes.clear()
-        val docs = listCollection(FirestorePaths.userBooks(uid))
-        // The engine fetches books first every cycle; the annotation fan-out below
-        // reuses this listing instead of re-listing the collection four more times.
-        booksCache = docs
-        return docs.mapNotNull { decode<FsBook>(it) }
+        return listCollection(FirestorePaths.userBooks(uid)).mapNotNull { decode<FsBook>(it) }
     }
 
-    private var booksCache: List<RemoteDoc>? = null
-
-    private fun fetchAllUserBooks(): List<RemoteDoc> {
-        ensureAuth()
-        booksCache?.let { return it }
-        return listCollection(FirestorePaths.userBooks(uid)).also { booksCache = it }
-    }
+    /** One structured query across every book's subcollection named [collectionId]. */
+    private fun listDescendants(collectionId: String): List<RemoteDoc> =
+        runStructuredQuery(FirestorePaths.USERS + "/" + uid, collectionId, allDescendants = true)
 
     override fun fetchPositions(): List<FsReadingPosition> {
         ensureAuth()
-        val out = mutableListOf<FsReadingPosition>()
-        for (doc in fetchAllUserBooks()) {
-            val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userPositions(uid, fsId(book.id))).forEach { sub ->
-                runCatching { json.decodeFromString(FsReadingPosition.serializer(), sub.payload) }.getOrNull()
-                    ?.let { out.add(it) }
-            }
-        }
-        return out
+        return listDescendants(FirestorePaths.POSITIONS).mapNotNull { decode<FsReadingPosition>(it) }
     }
 
     override fun fetchHighlights(): List<FsHighlight> {
         ensureAuth()
-        val out = mutableListOf<FsHighlight>()
-        for (doc in fetchAllUserBooks()) {
-            val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userHighlights(uid, fsId(book.id))).forEach { sub ->
-                runCatching { json.decodeFromString(FsHighlight.serializer(), sub.payload) }.getOrNull()
-                    ?.let { out.add(it) }
-            }
-        }
-        return out
+        return listDescendants(FirestorePaths.HIGHLIGHTS).mapNotNull { decode<FsHighlight>(it) }
     }
 
     override fun fetchNotes(): List<FsNote> {
         ensureAuth()
-        val out = mutableListOf<FsNote>()
-        for (doc in fetchAllUserBooks()) {
-            val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userNotes(uid, fsId(book.id))).forEach { sub ->
-                runCatching { json.decodeFromString(FsNote.serializer(), sub.payload) }.getOrNull()
-                    ?.let { out.add(it) }
-            }
-        }
-        return out
+        return listDescendants(FirestorePaths.NOTES).mapNotNull { decode<FsNote>(it) }
     }
 
     override fun fetchBookmarks(): List<FsBookmark> {
         ensureAuth()
-        val out = mutableListOf<FsBookmark>()
-        for (doc in fetchAllUserBooks()) {
-            val book = decode<FsBook>(doc) ?: continue
-            listCollection(FirestorePaths.userBookmarks(uid, fsId(book.id))).forEach { sub ->
-                runCatching { json.decodeFromString(FsBookmark.serializer(), sub.payload) }.getOrNull()
-                    ?.let { out.add(it) }
-            }
-        }
-        return out
+        return listDescendants(FirestorePaths.BOOKMARKS).mapNotNull { decode<FsBookmark>(it) }
+    }
+
+    override fun fetchPositionsForBook(bookId: String): List<FsReadingPosition> {
+        ensureAuth()
+        return listCollection(FirestorePaths.userPositions(uid, fsId(bookId)))
+            .mapNotNull { decode<FsReadingPosition>(it) }
     }
 
     override fun fetchSessions(sinceStartedAtMs: Long): List<FsReadingSession> {
@@ -493,51 +459,59 @@ class RestFirestoreSync(
     }
 
     /**
-     * Runs a scoped structured query (inequality on a numeric field) against one
-     * collection under [parentPath]. Used for incremental fetches of append-only
-     * collections. Inequality filters require ordering by the same field.
+     * Runs a scoped structured query under [parentPath]. With [allDescendants]
+     * it spans every nested subcollection named [collectionId] (e.g. positions
+     * under every book) in one request instead of one listing per book. The
+     * inequality filter is optional; when present, ordering by the same field
+     * is required.
      */
     private fun runStructuredQuery(
         parentPath: String,
         collectionId: String,
-        filterField: String,
-        greaterThan: Double
+        filterField: String? = null,
+        greaterThan: Double? = null,
+        allDescendants: Boolean = false
     ): List<RemoteDoc> {
-        val body = buildJsonObject {
+        val query = buildJsonObject {
             put(
-                "structuredQuery",
-                buildJsonObject {
-                    put(
-                        "from",
-                        JsonArray(listOf(buildJsonObject { put("collectionId", collectionId) }))
-                    )
-                    put(
-                        "where",
+                "from",
+                JsonArray(
+                    listOf(
                         buildJsonObject {
-                            put(
-                                "fieldFilter",
-                                buildJsonObject {
-                                    put("field", buildJsonObject { put("fieldPath", filterField) })
-                                    put("op", "GREATER_THAN")
-                                    put("value", buildJsonObject { put("doubleValue", greaterThan) })
-                                }
-                            )
+                            put("collectionId", collectionId)
+                            if (allDescendants) put("allDescendants", true)
                         }
                     )
-                    put(
-                        "orderBy",
-                        JsonArray(
-                            listOf(
-                                buildJsonObject {
-                                    put("field", buildJsonObject { put("fieldPath", filterField) })
-                                    put("direction", "ASCENDING")
-                                }
-                            )
+                )
+            )
+            if (filterField != null) {
+                put(
+                    "where",
+                    buildJsonObject {
+                        put(
+                            "fieldFilter",
+                            buildJsonObject {
+                                put("field", buildJsonObject { put("fieldPath", filterField) })
+                                put("op", "GREATER_THAN")
+                                put("value", buildJsonObject { put("doubleValue", greaterThan) })
+                            }
+                        )
+                    }
+                )
+                put(
+                    "orderBy",
+                    JsonArray(
+                        listOf(
+                            buildJsonObject {
+                                put("field", buildJsonObject { put("fieldPath", filterField) })
+                                put("direction", "ASCENDING")
+                            }
                         )
                     )
-                }
-            )
-        }.toString()
+                )
+            }
+        }
+        val body = JsonObject(mapOf("structuredQuery" to query)).toString()
         val response = httpJson("$baseUrl/${encodePath(parentPath)}:runQuery", "POST", body, bearer())
         val out = mutableListOf<RemoteDoc>()
         for (element in (json.parseToJsonElement(response) as? JsonArray) ?: return out) {
