@@ -1,6 +1,7 @@
 package com.folio.reader.ui.manga
 
 import com.folio.reader.manga.BrowseMode
+import com.folio.reader.manga.ChapterNumberParser
 import com.folio.reader.manga.ExtensionEntry
 import com.folio.reader.manga.ExtensionInstallStep
 import com.folio.reader.manga.MangaBackend
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -62,11 +64,43 @@ enum class MangaLibFilter(val label: String) {
     DOWNLOADED("Downloaded"),
 }
 
+private const val KEY_LIBRARY_CATEGORY = "manga.library.category"
+
+/**
+ * Story position of a chapter. Sources disagree on list direction (some fetch
+ * newest-first, so sortOrder 0 is the LATEST chapter) and many leave
+ * chapter_number unset, so the number is recovered from the title when needed.
+ * Chapters without any recognizable number sort after numbered ones by source
+ * list position.
+ */
+private fun storyNumber(chapter: MangaChapter): Float =
+    if (chapter.chapterNumber >= 0f) chapter.chapterNumber else ChapterNumberParser.parse(chapter.name)
+
+/**
+ * The reading order of the story, independent of how the source lists chapters
+ * or how the detail screen displays them. Continue, mark-previous-as-read and
+ * reader navigation follow this; the display sort toggle only arranges the list.
+ */
+private val STORY_ORDER = Comparator<MangaChapter> { a, b ->
+    val an = storyNumber(a)
+    val bn = storyNumber(b)
+    when {
+        an >= 0f && bn >= 0f -> {
+            val byNumber = an.compareTo(bn)
+            if (byNumber != 0) byNumber else a.sortOrder.compareTo(b.sortOrder)
+        }
+        an >= 0f -> -1
+        bn >= 0f -> 1
+        else -> a.sortOrder.compareTo(b.sortOrder)
+    }
+}
+
 class MangaLibraryViewModel(
     private val backend: MangaBackend,
     private val mangaRepo: MangaRepository,
     private val categoryRepo: MangaCategoryRepository,
     private val chapterRepo: MangaChapterRepository,
+    private val settingsRepo: com.folio.reader.database.SettingsRepository,
 ) {
     val scope = mangaVmScope()
 
@@ -135,9 +169,10 @@ class MangaLibraryViewModel(
             }
         }.stateIn(scope, SharingStarted.Lazily, emptyList())
 
-    /** No virtual All bucket: the library always shows one real category, defaulting to Main. */
+    /** No virtual All bucket: the library always shows one real category. */
     fun selectCategory(categoryId: String) {
         selectedCategoryId.value = categoryId
+        scope.launch { settingsRepo.setRaw(KEY_LIBRARY_CATEGORY, categoryId) }
     }
 
     /** Selects Main when present, otherwise the first category; used at startup and after deletes. */
@@ -154,7 +189,14 @@ class MangaLibraryViewModel(
         scope.launch {
             categories.collect { list ->
                 val current = selectedCategoryId.value
-                if (list.none { it.id == current }) selectDefaultCategory()
+                if (list.none { it.id == current }) {
+                    // First selection of the session: reopen the shelf the reader left,
+                    // but only while it still exists; a gone/dirty remembered id degrades
+                    // to the default rather than resurrecting a deleted category.
+                    val remembered = if (current == null) settingsRepo.getRaw(KEY_LIBRARY_CATEGORY) else null
+                    if (remembered != null && list.any { it.id == remembered }) selectCategory(remembered)
+                    else selectDefaultCategory()
+                }
             }
         }
     }
@@ -297,7 +339,9 @@ class MangaLibraryViewModel(
                                 url = ref.url,
                                 name = ref.name,
                                 scanlator = ref.scanlator,
-                                chapterNumber = ref.chapterNumber,
+                                chapterNumber =
+                                    if (ref.chapterNumber >= 0f) ref.chapterNumber
+                                    else ChapterNumberParser.parse(ref.name),
                                 dateUpload = ref.dateUpload,
                                 sortOrder = index,
                             )
@@ -783,7 +827,9 @@ class MangaDetailViewModel(
                         url = ref.url,
                         name = ref.name,
                         scanlator = ref.scanlator,
-                        chapterNumber = ref.chapterNumber,
+                        chapterNumber =
+                            if (ref.chapterNumber >= 0f) ref.chapterNumber
+                            else ChapterNumberParser.parse(ref.name),
                         dateUpload = ref.dateUpload,
                         sortOrder = index,
                     )
@@ -847,12 +893,9 @@ class MangaDetailViewModel(
     fun markPreviousAsRead(chapter: MangaChapter) {
         scope.launch {
             val all = chapterRepo.getChapters(chapter.mangaId)
-            // "Previous" follows the reader's sort: descending shows story-later
-            // chapters above the tapped one, and those are what the reader means.
-            val previous = all.filter {
-                if (sortAscending.value) it.sortOrder < chapter.sortOrder
-                else it.sortOrder > chapter.sortOrder
-            }
+            // "Previous" is story order (chapter numbers, recovered from titles when
+            // the source leaves them unset); the display sort only arranges the list.
+            val previous = all.filter { STORY_ORDER.compare(it, chapter) < 0 }
             chapterRepo.markRead(previous.map { it.id }, true)
             chapters.value = chapterRepo.getChapters(chapter.mangaId)
         }
@@ -935,25 +978,20 @@ class MangaDetailViewModel(
     }
 
     /**
-     * Continue = resume the in-progress chapter; else the first unread chapter in
-     * reading order within the active chapter filter (so bookmark/download filters
-     * jump to the first unread of that shelf); else the first chapter of the pool.
-     * Reading order is always story-ascending, independent of the display sort.
+     * Continue = the first unread chapter in STORY order within the active chapter
+     * filter (so bookmark/download filters jump to the first unread of that shelf);
+     * else the first chapter of the pool. Story order comes from chapter numbers
+     * (recovered from titles when the source leaves them unset), so it holds even
+     * for sources that list chapters newest-first; the display sort toggle only
+     * arranges the chapter list and never changes which chapter comes next.
      */
     suspend fun nextChapterToRead(): MangaChapter? {
         val id = manga.value?.id ?: return null
         val all = chapterRepo.getChapters(id)
         if (all.isEmpty()) return null
         val pool = filterChapters(all, chapterFilter.value).ifEmpty { all }
-            .sortedBy { it.sortOrder }
-        pool.firstOrNull { !it.read && it.lastPageRead > 0 }?.let { return it }
+            .sortedWith(STORY_ORDER)
         return pool.firstOrNull { !it.read } ?: pool.firstOrNull()
-    }
-
-    fun continueFrom(chapter: MangaChapter): MangaChapter? {
-        val all = chapters.value
-        val idx = all.indexOfFirst { it.id == chapter.id }
-        return if (idx >= 0 && idx + 1 < all.size) all[idx + 1] else null
     }
 
     fun recordHistory(chapterId: String?) {
@@ -1006,6 +1044,15 @@ class MangaReaderViewModel(
     val localPage = MutableStateFlow(0)
     val localCount = MutableStateFlow(0)
     val extendingForward = MutableStateFlow(false)
+
+    /**
+     * Explicit one-shot seeks (resume on open, slider). [currentIndex] is the reading
+     * position tracker only — driving scrolls from it feeds back into itself, because
+     * visible-page tracking writes it during normal scrolling, and chapter prepends
+     * shift it. That loop snapped the webtoon viewport mid-scroll (visible page jumps).
+     */
+    private val seekChannel = Channel<Int>(Channel.CONFLATED)
+    val seekRequests = seekChannel.receiveAsFlow()
 
     /** Reader zoom shared by the whole flow: webtoon widens every page, paged modes scale the sheet. */
     val zoom = MutableStateFlow(1f)
@@ -1089,6 +1136,7 @@ class MangaReaderViewModel(
         val activeSlot = activeSlot() ?: return
         val combined = activeSlot.startIndex + local
         onPageChanged(combined)
+        seekChannel.trySend(combined)
     }
 
     fun previousBeyond(): MangaChapter? {
@@ -1183,13 +1231,12 @@ class MangaReaderViewModel(
                 val allChapters = chapterRepo.getChapters(manga.id)
                 val savedFilterName = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.${manga.id}")
                 val filter = ChapterFilter.entries.firstOrNull { it.name == savedFilterName } ?: ChapterFilter.ALL
-                val savedSort = settingsRepo.getRaw("$KEY_CHAPTER_SORT.${manga.id}")
-                val ascending = savedSort == "ASC"
-                val filtered = filterChapters(allChapters, filter)
-                val sorted = if (ascending) filtered.sortedBy { it.sortOrder } else filtered.sortedByDescending { it.sortOrder }
-                navList = if (sorted.any { it.id == chapter.id }) sorted
-                    else if (ascending) allChapters.sortedBy { it.sortOrder }
-                    else allChapters.sortedByDescending { it.sortOrder }
+                // Navigation always runs in story order (chapter numbers, recovered
+                // from titles when unset); the detail screen's display sort and the
+                // source's own list direction (some list newest-first) never change it.
+                val filtered = filterChapters(allChapters, filter).sortedWith(STORY_ORDER)
+                navList = if (filtered.any { it.id == chapter.id }) filtered
+                    else allChapters.sortedWith(STORY_ORDER)
 
                 val navIdx = navList.indexOfFirst { it.id == chapter.id }
                 withSlots {
@@ -1199,26 +1246,21 @@ class MangaReaderViewModel(
                 finalizedChapters.clear()
                 isAtEndOfNav = false
 
-                // The current chapter and the one before it are assembled BEFORE the first
-                // publish so the webtoon layout is final when it first renders — splicing the
-                // previous chapter in afterwards would shift indices under the seeded scroll
-                // position and bounce the reader back a chapter. The NEXT chapter appends
-                // asynchronously (appending never shifts existing indices).
+                // Current fetches alone first so the opened chapter can never queue behind
+                // a neighbour at the 2-permit gate; prev and next then share the permits —
+                // prev is awaited before the first publish, next appends asynchronously
+                // (appending never shifts existing indices).
                 val prevCh = navList.getOrNull(navIdx - 1)
                 val nextCh = navList.getOrNull(navIdx + 1)
 
-                // Current is dispatched first so it can never queue behind a neighbour
-                // at the 2-permit gate; prev rides in parallel (both are awaited before
-                // the first publish), next only fills a permit once they release theirs.
-                val currentDeferred = async { pageListGate.withPermit { fetchSlotCached(navList[navIdx]) } }
-                val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
-                val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
-                val currentSlot = currentDeferred.await()
+                val currentSlot = pageListGate.withPermit { fetchSlotCached(navList[navIdx]) }
                 if (currentSlot == null) {
                     error.value = "Failed to load pages"
                     loading.value = false
                     return@launch
                 }
+                val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
+                val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
                 val prevSlot = prevDeferred?.await()
 
                 var offset = 0
@@ -1235,6 +1277,7 @@ class MangaReaderViewModel(
                 val resumeLocal =
                     if (chapter.lastPageRead in 1 until currentSlot.pages.size) chapter.lastPageRead else 0
                 currentIndex.value = offset + resumeLocal
+                seekChannel.trySend(offset + resumeLocal)
                 publishPages()
                 updateActiveChapter()
                 historyRepo.record(manga.id, chapter.id)

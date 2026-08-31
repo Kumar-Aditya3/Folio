@@ -120,6 +120,21 @@ class MainActivity : ComponentActivity() {
             }
             var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
             var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
+            var libraryModeLoaded by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                runCatching {
+                    val raw = graph.settingsRepository.getRaw("library.mode")
+                    com.folio.reader.ui.library.LibraryMode.entries
+                        .firstOrNull { it.name == raw }
+                        ?.let { libraryMode = it }
+                }
+                libraryModeLoaded = true
+            }
+            LaunchedEffect(libraryMode, libraryModeLoaded) {
+                if (libraryModeLoaded) {
+                    runCatching { graph.settingsRepository.setRaw("library.mode", libraryMode.name) }
+                }
+            }
             var sharedViewIndex by remember { mutableStateOf(0) }
             var mangaSearchActive by remember { mutableStateOf(false) }
             val mangaLibVM = remember {
@@ -128,6 +143,7 @@ class MainActivity : ComponentActivity() {
                     mangaRepo = graph.mangaRepository,
                     categoryRepo = graph.mangaCategoryRepository,
                     chapterRepo = graph.mangaChapterRepository,
+                    settingsRepo = graph.settingsRepository,
                 )
             }
 
@@ -147,9 +163,26 @@ class MainActivity : ComponentActivity() {
             val mangaBrowseVM = remember {
                 com.folio.reader.ui.manga.BrowseViewModel(graph.mangaBackend, graph.mangaRepository)
             }
+            // Hoisted so system back can clear an active chapter selection instead of
+            // popping straight out of the detail screen.
+            val detailScreen = navStack.lastOrNull() as? Screen.MangaDetail
+            val mangaDetailVM = if (detailScreen != null) {
+                remember(detailScreen.mangaId) {
+                    com.folio.reader.ui.manga.MangaDetailViewModel(
+                        backend = graph.mangaBackend,
+                        mangaRepo = graph.mangaRepository,
+                        chapterRepo = graph.mangaChapterRepository,
+                        historyRepo = graph.mangaHistoryRepository,
+                        downloadManager = graph.mangaDownloadManager,
+                        categoryRepo = graph.mangaCategoryRepository,
+                        settingsRepo = graph.settingsRepository,
+                    )
+                }
+            } else null
             BackHandler {
                 when {
                     mangaLibVM.isSelectionMode.value -> mangaLibVM.clearSelection()
+                    mangaDetailVM?.chapterSelectionMode?.value == true -> mangaDetailVM.clearChapterSelection()
                     navStack.lastOrNull() is Screen.MangaBrowse && mangaBrowseVM.searchActive.value ->
                         mangaBrowseVM.exitSearch()
                     navStack.size > 1 -> popScreen()
@@ -773,17 +806,8 @@ class MainActivity : ComponentActivity() {
                             )
 
                             is Screen.MangaDetail -> com.folio.reader.ui.manga.MangaDetailScreen(
-                                viewModel = remember(current.mangaId) {
-                                    com.folio.reader.ui.manga.MangaDetailViewModel(
-                                        backend = graph.mangaBackend,
-                                        mangaRepo = graph.mangaRepository,
-                                        chapterRepo = graph.mangaChapterRepository,
-                                        historyRepo = graph.mangaHistoryRepository,
-                                        downloadManager = graph.mangaDownloadManager,
-                                        categoryRepo = graph.mangaCategoryRepository,
-                                        settingsRepo = graph.settingsRepository,
-                                    )
-                                }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
+                                viewModel = mangaDetailVM!!
+                                    .also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                 backend = graph.mangaBackend,
                                 downloadsAvailable = graph.mangaBackend.supportsExtensions,
                                 onRead = { manga, chapter ->

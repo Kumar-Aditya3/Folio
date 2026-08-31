@@ -2,6 +2,7 @@ package com.folio.reader
 
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.manga.BrowseMode
+import com.folio.reader.manga.ChapterNumberParser
 import com.folio.reader.manga.ExtensionEntry
 import com.folio.reader.manga.ExtensionInstallStep
 import com.folio.reader.manga.MangaBackend
@@ -30,6 +31,7 @@ import com.folio.reader.platform.DesktopPlatform
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.manga.ChapterFilter
 import com.folio.reader.ui.manga.MangaDetailViewModel
+import com.folio.reader.ui.manga.MangaLibraryViewModel
 import com.folio.reader.ui.manga.MangaReaderViewModel
 import com.folio.reader.ui.manga.MangaSearchRanker
 import kotlinx.coroutines.CompletableDeferred
@@ -152,12 +154,14 @@ class MangaReaderProgressTest {
     }
 
     class FakeCategoryRepo : MangaCategoryRepository {
+        var categoriesList: List<MangaCategory> = emptyList()
+
         override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory =
             MangaCategory(id = name, name = name)
 
         override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) {}
         override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean = true
-        override fun observeCategories(): Flow<List<MangaCategory>> = flowOf(emptyList())
+        override fun observeCategories(): Flow<List<MangaCategory>> = flowOf(categoriesList)
         override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {}
         override suspend fun categoriesFor(mangaId: String): Set<String> = emptySet()
         override suspend fun get(id: String): MangaCategory? = null
@@ -337,6 +341,23 @@ class MangaReaderProgressTest {
         assertEquals(c2.url, backend.pageListFetches.first(), "current chapter's page list is fetched first")
         assertEquals(setOf("/c1", "/c2", "/c3"), backend.pageListFetches.toSet(), "the window fully loads")
         assertEquals(3, vm.currentIndex.value)
+        assertEquals(c2.id, vm.chapter.value?.id)
+        vm.close()
+    }
+
+    @Test
+    fun readerNavigatesStoryOrderWhenDisplaySortDescending() = runBlocking {
+        // The detail screen's descending display toggle must not bend reader
+        // navigation: forward scrolling still advances through the story.
+        settingsRepo.values["manga.chapter.sort.$mId"] = "DESC"
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3))
+        val (_, c2, _) = chapters
+        val backend = FakeBackend(pageListsFor(chapters))
+        val vm = newReaderVm(backend)
+
+        vm.open(manga, c2)
+        awaitCondition(message = "window assembles in story order") { vm.pages.value.size == 9 }
+        assertEquals(3, vm.currentIndex.value, "the prepended slot is the story-earlier chapter")
         assertEquals(c2.id, vm.chapter.value?.id)
         vm.close()
     }
@@ -522,7 +543,7 @@ class MangaReaderProgressTest {
     }
 
     @Test
-    fun markPreviousFollowsDescendingSort() = runBlocking {
+    fun markPreviousIsStoryOrderRegardlessOfDisplaySort() = runBlocking {
         val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3, "/c4" to 3, "/c5" to 3))
         val (c1, c2, c3, c4, c5) = chapters
         val vm = detailVm()
@@ -531,11 +552,11 @@ class MangaReaderProgressTest {
         vm.sortAscending.value = false
 
         vm.markPreviousAsRead(c3)
-        awaitCondition(message = "story-later chapters marked read") {
-            chapterRepo.chapters[c4.id]?.read == true && chapterRepo.chapters[c5.id]?.read == true
+        awaitCondition(message = "story-earlier chapters marked read") {
+            chapterRepo.chapters[c1.id]?.read == true && chapterRepo.chapters[c2.id]?.read == true
         }
-        assertFalse(chapterRepo.chapters[c1.id]!!.read, "story-earlier chapters stay untouched in descending")
-        assertFalse(chapterRepo.chapters[c2.id]!!.read, "story-earlier chapters stay untouched in descending")
+        assertFalse(chapterRepo.chapters[c4.id]!!.read, "the display sort never changes which chapters count as previous")
+        assertFalse(chapterRepo.chapters[c5.id]!!.read, "the display sort never changes which chapters count as previous")
     }
 
     @Test
@@ -562,6 +583,134 @@ class MangaReaderProgressTest {
 
         assertEquals(chapters.first().id, vm.nextChapterToRead()?.id,
             "everything read falls back to the first chapter")
+    }
+
+    // ---------- Newest-first sources (JJK repro) ----------
+
+    private fun seedNewestFirst(names: List<String>): List<MangaChapter> {
+        // sortOrder 0 is the LATEST chapter, mirroring sources that list newest-first;
+        // chapterNumber stays unset (-1), so story order must come from the titles.
+        val list = names.mapIndexed { index, name ->
+            MangaChapter(
+                id = chapterId(mId, "/n$index"),
+                mangaId = mId,
+                url = "/n$index",
+                name = name,
+                sortOrder = index,
+                totalPages = 3,
+            )
+        }
+        list.forEach { chapterRepo.chapters[it.id] = it }
+        return list
+    }
+
+    @Test
+    fun continueFollowsStoryOrderForNewestFirstSource() = runBlocking {
+        val list = seedNewestFirst(listOf("Chapter 6", "Chapter 5", "Chapter 4", "Chapter 3", "Chapter 2", "Chapter 1"))
+        list.filter { it.name in setOf("Chapter 1", "Chapter 2", "Chapter 3", "Chapter 4") }
+            .forEach { chapterRepo.chapters[it.id] = it.copy(read = true) }
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+
+        assertEquals("Chapter 5", vm.nextChapterToRead()?.name,
+            "Continue lands on the first story-unread chapter, not the newest one")
+    }
+
+    @Test
+    fun markPreviousIsStoryOrderForNewestFirstSource() = runBlocking {
+        val list = seedNewestFirst(listOf("Chapter 5", "Chapter 4", "Chapter 3", "Chapter 2", "Chapter 1"))
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+
+        vm.markPreviousAsRead(list.first { it.name == "Chapter 3" })
+        val byName = { name: String -> chapterRepo.chapters[list.first { it.name == name }.id]!! }
+        awaitCondition(message = "story-earlier chapters marked read") {
+            byName("Chapter 1").read && byName("Chapter 2").read
+        }
+        assertFalse(byName("Chapter 4").read, "story-later chapters are never 'previous'")
+        assertFalse(byName("Chapter 5").read, "story-later chapters are never 'previous'")
+    }
+
+    @Test
+    fun readerNavigatesStoryOrderForNewestFirstSource() = runBlocking {
+        val list = seedNewestFirst(listOf("Chapter 4", "Chapter 3", "Chapter 2", "Chapter 1"))
+        val backend = FakeBackend(pageListsFor(list))
+        val vm = newReaderVm(backend)
+
+        vm.open(manga, list.first { it.name == "Chapter 2" })
+        awaitCondition(message = "window assembles in story order") { vm.pages.value.size == 9 }
+        assertEquals(3, vm.currentIndex.value, "the prepended slot is the story-earlier chapter")
+        vm.close()
+    }
+
+    @Test
+    fun chapterNumberParserRecoversNumbersFromTitles() {
+        assertEquals(272f, ChapterNumberParser.parse("Chapter 272"))
+        assertEquals(262.5f, ChapterNumberParser.parse("Ch. 262.5"))
+        assertEquals(12f, ChapterNumberParser.parse("Vol.3 Ch.12"))
+        assertEquals(100f, ChapterNumberParser.parse("One Piece 100"))
+        assertEquals(-1f, ChapterNumberParser.parse("Oneshot"))
+    }
+
+    @Test
+    fun staleProgressOnLaterChapterDoesNotHijackContinue() = runBlocking {
+        // JJK repro: chapters 1-4 read, chapter 5 never opened, but the last chapter
+        // carries leftover partial progress from an old session. Continue must land on
+        // chapter 5, not jump to the chapter with stale progress.
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3, "/c4" to 3, "/c5" to 3, "/c6" to 3))
+        val c5 = chapters[4]
+        chapters.take(4).forEach { chapterRepo.chapters[it.id] = it.copy(read = true, lastPageRead = 2) }
+        chapterRepo.chapters[chapters[5].id] = chapters[5].copy(read = false, lastPageRead = 1)
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+
+        assertEquals(c5.id, vm.nextChapterToRead()?.id,
+            "Continue lands on the first untouched unread chapter, ignoring stale later progress")
+    }
+
+    @Test
+    fun continueIsStoryOrderRegardlessOfDisplaySort() = runBlocking {
+        // The display sort toggle only arranges the chapter list; Continue must keep
+        // resolving through the story (source list order) in either direction.
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 3, "/c3" to 3, "/c4" to 3, "/c5" to 3))
+        val (c1, c2, c3, c4, c5) = chapters
+        listOf(c1, c2, c3, c4).forEach { chapterRepo.chapters[it.id] = it.copy(read = true, lastPageRead = 2) }
+        val vm = detailVm()
+        vm.open(mId)
+        awaitCondition(message = "detail loads") { vm.chapters.value.isNotEmpty() }
+        vm.sortAscending.value = false
+
+        assertEquals(c5.id, vm.nextChapterToRead()?.id,
+            "Continue stays in story order even under a descending display toggle")
+    }
+
+    @Test
+    fun libraryRestoresLastViewedCategoryAndPersistsSelections() = runBlocking {
+        val catRepo = FakeCategoryRepo()
+        catRepo.categoriesList = listOf(
+            MangaCategory(id = "main", name = "Main"),
+            MangaCategory(id = "reading", name = "Reading"),
+        )
+        val settings = FakeSettingsRepo(mutableMapOf("manga.library.category" to "reading"))
+        val vm = MangaLibraryViewModel(
+            backend = FakeBackend(emptyMap()),
+            mangaRepo = mangaRepo,
+            categoryRepo = catRepo,
+            chapterRepo = chapterRepo,
+            settingsRepo = settings,
+        )
+
+        awaitCondition(message = "remembered category restored on startup") {
+            vm.selectedCategoryId.value == "reading"
+        }
+
+        vm.selectCategory("main")
+        awaitCondition(message = "new selection persisted") {
+            settings.values["manga.library.category"] == "main"
+        }
     }
 }
 
