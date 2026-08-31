@@ -230,7 +230,6 @@ fun MangaLibraryScreen(
     val categories by viewModel.categories.collectAsState()
     val selectedCategory by viewModel.selectedCategoryId.collectAsState()
     val query by viewModel.query.collectAsState()
-    val sourceQuery by viewModel.sourceQuery.collectAsState()
     val searchScope by viewModel.searchScope.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
@@ -248,16 +247,17 @@ fun MangaLibraryScreen(
         if (!searchActive) browseViewModel?.exitSearch()
     }
 
-    // Drive the global source search from the persisted source-scope text. Re-keyed on
-    // scope and visibility too, so returning to All sources resumes the saved query.
-    LaunchedEffect(searchingSources, sourceQuery) {
+    // Drive the global source search from the shared query text. Re-keyed on scope and
+    // visibility too, so switching to All sources resumes the same query the library
+    // scope was showing.
+    LaunchedEffect(searchingSources, query) {
         val browseVm = browseViewModel ?: return@LaunchedEffect
         if (!searchingSources) {
             browseVm.exitSearch()
             return@LaunchedEffect
         }
         kotlinx.coroutines.delay(350)
-        val trimmed = sourceQuery.trim()
+        val trimmed = query.trim()
         browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
     }
 
@@ -268,10 +268,8 @@ fun MangaLibraryScreen(
                 onScopeChange = { next ->
                     if (next != searchScope) viewModel.searchScope.value = next
                 },
-                libraryQuery = query,
-                onLibraryQueryChange = { viewModel.query.value = it },
-                sourceQuery = sourceQuery,
-                onSourceQueryChange = { viewModel.sourceQuery.value = it },
+                query = query,
+                onQueryChange = { viewModel.query.value = it },
                 sourcesAvailable = browseViewModel != null,
                 onClose = { onSearchActiveChange(false) },
             )
@@ -304,7 +302,7 @@ fun MangaLibraryScreen(
             SourceSearchResults(
                 viewModel = browseVm,
                 onOpenManga = onOpenManga,
-                onOpenSource = { source -> onOpenSource(source, sourceQuery.trim()) },
+                onOpenSource = { source -> onOpenSource(source, query.trim()) },
             )
         } else if (visible.isEmpty() && !isSelectionMode) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -482,11 +480,7 @@ fun MangaLibraryScreen(
             categories = categories,
             initialSelected = pickerInitial,
             onCreate = { name -> viewModel.createCategory(name) },
-            onSave = { set ->
-                viewModel.setCategoriesFor(pickerManga.id, set)
-                singlePickerManga = null
-                singlePickerInitial = null
-            },
+            onApply = { viewModel.setCategoriesFor(pickerManga.id, it) },
             onDismiss = {
                 singlePickerManga = null
                 singlePickerInitial = null
@@ -499,7 +493,7 @@ fun MangaLibraryScreen(
             categories = categories,
             initialSelected = bulkCategoryInitial ?: emptySet(),
             onCreate = { name -> viewModel.createCategory(name) },
-            onSave = { set -> viewModel.assignCategories(selectedIds, set) },
+            onApply = { viewModel.applyBulkCategories(it) },
             onDismiss = { viewModel.closeBulkPicker() },
         )
     }
@@ -509,10 +503,8 @@ fun MangaLibraryScreen(
 private fun MangaSearchHeader(
     scope: MangaSearchScope,
     onScopeChange: (MangaSearchScope) -> Unit,
-    libraryQuery: String,
-    onLibraryQueryChange: (String) -> Unit,
-    sourceQuery: String,
-    onSourceQueryChange: (String) -> Unit,
+    query: String,
+    onQueryChange: (String) -> Unit,
     sourcesAvailable: Boolean,
     onClose: () -> Unit,
 ) {
@@ -523,33 +515,19 @@ private fun MangaSearchHeader(
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Separate fields per scope: each keeps its own text, so switching scopes
-            // mid-session never throws either query away.
-            if (scope == MangaSearchScope.LIBRARY) {
-                OutlinedTextField(
-                    value = libraryQuery,
-                    onValueChange = onLibraryQueryChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search your library") },
-                    singleLine = true,
-                )
-                if (libraryQuery.isNotBlank()) {
-                    IconButton(onClick = { onLibraryQueryChange("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear library search")
-                    }
-                }
-            } else {
-                OutlinedTextField(
-                    value = sourceQuery,
-                    onValueChange = onSourceQueryChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search all sources") },
-                    singleLine = true,
-                )
-                if (sourceQuery.isNotBlank()) {
-                    IconButton(onClick = { onSourceQueryChange("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear source search")
-                    }
+            // One field for both scopes: the typed text survives scope switches.
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(if (scope == MangaSearchScope.LIBRARY) "Search your library" else "Search all sources")
+                },
+                singleLine = true,
+            )
+            if (query.isNotBlank()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
                 }
             }
             IconButton(onClick = onClose) {
@@ -1228,13 +1206,20 @@ private fun CategoryPickerDialog(
     categories: List<com.folio.reader.manga.MangaCategory>,
     initialSelected: Set<String>,
     onCreate: suspend (String) -> String?,
-    onSave: (Set<String>) -> Unit,
+    onApply: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = FolioTheme.colors
     val scope = rememberCoroutineScope()
     var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
     var newName by remember { mutableStateOf("") }
+
+    // Taps apply immediately — membership is written on every change, no confirm step.
+    fun apply(next: Set<String>) {
+        selected = next
+        onApply(next)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Categories") },
@@ -1252,8 +1237,10 @@ private fun CategoryPickerDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                selected = if (category.id in selected) selected - category.id
-                                else selected + category.id
+                                apply(
+                                    if (category.id in selected) selected - category.id
+                                    else selected + category.id,
+                                )
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1261,7 +1248,7 @@ private fun CategoryPickerDialog(
                         Checkbox(
                             checked = category.id in selected,
                             onCheckedChange = {
-                                selected = if (it) selected + category.id else selected - category.id
+                                apply(if (it) selected + category.id else selected - category.id)
                             },
                         )
                         Spacer(Modifier.width(8.dp))
@@ -1287,7 +1274,7 @@ private fun CategoryPickerDialog(
                             val name = newName.trim()
                             if (name.isNotBlank()) {
                                 scope.launch {
-                                    onCreate(name)?.let { selected = selected + it }
+                                    onCreate(name)?.let { apply(selected + it) }
                                 }
                                 newName = ""
                             }
@@ -1300,10 +1287,7 @@ private fun CategoryPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(selected) }) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text("Done") }
         },
     )
 }
@@ -1661,10 +1645,7 @@ private fun BrowseGridItem(
             categories = categories,
             initialSelected = pickInitial,
             onCreate = { viewModel.createCategoryNamed(it) },
-            onSave = { ids ->
-                viewModel.setCategoriesFor(mangaId, ids)
-                pickMangaId = null
-            },
+            onApply = { viewModel.setCategoriesFor(mangaId, it) },
             onDismiss = { pickMangaId = null },
         )
     }
@@ -1974,10 +1955,7 @@ fun MangaDetailScreen(
                 categories = allCategories,
                 initialSelected = myCategoryIds,
                 onCreate = { name -> viewModel.createCategory(name) },
-                onSave = { set ->
-                    if (set.isNotEmpty()) viewModel.setCategories(set)
-                    categoryPickerOpen = false
-                },
+                onApply = { viewModel.setCategories(it) },
                 onDismiss = { categoryPickerOpen = false },
             )
         }
@@ -1989,10 +1967,7 @@ fun MangaDetailScreen(
                 categories = allCategories,
                 initialSelected = myCategoryIds,
                 onCreate = { name -> viewModel.createCategory(name) },
-                onSave = { set ->
-                    if (set.isNotEmpty()) viewModel.setCategories(set)
-                    categoryPrompt = false
-                },
+                onApply = { viewModel.setCategories(it) },
                 onDismiss = { categoryPrompt = false },
             )
         }
