@@ -1175,6 +1175,7 @@ private fun ReaderRoute(
     val html by viewModel.chapterHtml.collectAsState(initial = "")
     val loadingContent by viewModel.isLoadingContent.collectAsState(initial = true)
     val settings by viewModel.effectiveSettings.collectAsState(initial = initialSettings)
+    val settingsScopeBook by viewModel.settingsScopeBook.collectAsState(initial = true)
     val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
     val highlights by viewModel.highlights.collectAsState(initial = emptyList())
     val notes by viewModel.notes.collectAsState(initial = emptyList())
@@ -1258,7 +1259,12 @@ private fun ReaderRoute(
         onSettingsClick = {
             viewModel.closeBook { onSettingsClick() }
         },
-        onSettingsChange = { updated -> onSettingsChanged(updated); viewModel.updateSettings(updated) },
+        onSettingsChange = { updated ->
+            viewModel.updateSettings(updated)
+            onSettingsChanged(viewModel.global())
+        },
+        settingsScopeBook = settingsScopeBook,
+        onSettingsScopeChange = { viewModel.setSettingsScopeBook(it) },
         onToggleControls = { viewModel.toggleControls() },
         onShowControls = { viewModel.showControlsFn() },
         onToggleToc = { viewModel.toggleToc() },

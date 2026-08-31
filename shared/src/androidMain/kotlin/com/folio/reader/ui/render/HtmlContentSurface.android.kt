@@ -220,7 +220,15 @@ actual fun HtmlContentSurface(
                         val text = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
                         mainHandler.post { latestSelection?.invoke(idx, text?.takeIf { it.isNotBlank() }) }
                     }
+
+                    t.startsWith("folio-engdiag:") ->
+                        android.util.Log.i("FolioPage", "engine report: ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
                 }
+            }
+
+            override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                android.util.Log.d("FolioPage", "${message.message()} @${message.sourceId()?.substringAfterLast('/').orEmpty()}:${message.lineNumber()}")
+                return true
             }
         }
     }
@@ -275,9 +283,7 @@ actual fun HtmlContentSurface(
                     "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:${font.weight};font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
-                // Engine gated off on phone (see injectReaderCss): WebView paints
-                // paged modes blank; keep the continuous measurement script.
-                val pagedCols = 0
+                val pagedCols = PageEngine.colsFor(settings.layoutMode)
                 // Paged modes run the shared book engine (discrete pages + leaf
                 // flip, progress via the title protocol); continuous keeps the
                 // layout-aware scrolling measurement below.
@@ -468,53 +474,14 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
 
 private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
     val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
-    val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
-    val align = when (settings.alignment) {
-        com.folio.reader.settings.TextAlignment.CENTER -> "center"
-        com.folio.reader.settings.TextAlignment.JUSTIFIED -> "justify"
-        else -> "left"
-    }
-    // The JS page engine currently paints blank inside Android WebView; keep the
-    // proven continuous scroll on phone (paged modes degrade to scrolling) while
-    // desktop uses the full book engine. Follow-up: debug the engine on WebView.
-    val pagedCols = 0
-    val columns = if (pagedCols > 0) {
-        PageEngine.css(
-            pagedCols, settings.margins.top, settings.margins.bottom,
-            "#${theme.background.toUInt().toString(16).padStart(8, '0').drop(2)}"
-        )
-    } else {
-        "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;} html{overflow-y:auto !important;}"
-    }
-    val fontFamily = settings.customFonts.firstOrNull { it.name == settings.fontFamily }?.familyName ?: settings.fontFamily
-    fun Int.rgb(): String = toUInt().toString(16).padStart(8, '0').drop(2)
-    val original = settings.formattingMode == com.folio.reader.model.FormattingMode.ORIGINAL
-    // Publisher CSS can otherwise leave black text on dark themes or wipe the
-    // reader typography; outside ORIGINAL the reader owns these properties.
-    val themeBgCss = if (original) "" else
-        "body,body div,body section,body article,body figure{background-color:transparent !important;}"
-    val imp = if (original) "" else " !important"
-    val typographyCss = if (original) "" else
-        "font-family:'$fontFamily',serif$imp;font-size:${settings.fontSize}px$imp;" +
-                "font-weight:${settings.fontWeight}$imp;line-height:${settings.lineHeight}$imp;" +
-                "letter-spacing:${settings.letterSpacing}px$imp;"
-    val alignCss = if (original) "" else "text-align:$align$imp;"
-    val colorCss = if (original) "" else "color:#${theme.primaryText.rgb()}$imp;"
-    val hyphenCss = if (!original && settings.hyphenation) "-webkit-hyphens:auto;hyphens:auto;" else ""
-    // Publisher color/font rules declared on elements (e.g. .calibre p{color:#000})
-    // outrank an inherited body rule even with !important — force them on the
-    // elements themselves so the theme's text is always readable.
-    val elementForceCss = if (original) "" else
-        "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:'$fontFamily',serif !important;}" +
-                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:'$fontFamily',serif !important;}" +
-                "body,body p,body div,body li,body blockquote{text-indent:0 !important;}"
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
-            "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
-            themeBgCss +
-            "body{padding:${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px$imp;" +
-            "$typographyCss$alignCss$colorCss$hyphenCss}" +
-            elementForceCss +
-            HighlightPaint.css +
-            "$columns img{max-width:100%;height:auto;break-inside:avoid;}a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()};}</style>"
+            ReaderCss.styleSheet(
+                settings,
+                PageEngine.colsFor(settings.layoutMode),
+                fontStack = { "'$it',serif" },
+                // Scrolling mode: publisher height rules otherwise clamp the document
+                // box and the page cannot grow.
+                continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}"
+            ) + "</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }

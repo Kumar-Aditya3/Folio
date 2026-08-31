@@ -1090,7 +1090,7 @@ class JdbcSearchRepository(private val db: Database) : SearchRepository {
 class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
     companion object {
         private const val KEY_GLOBAL = "global_reader_settings"
-        private fun keyForBook(bookId: String) = "book_reader_settings:$bookId"
+        private fun keyForBook(bookId: String) = Database.bookSettingsKey(bookId)
     }
 
     override suspend fun getGlobalSettings(): ReaderSettings =

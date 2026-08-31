@@ -23,12 +23,21 @@ object PageEngine {
         com.folio.reader.settings.TextWidth.FULL -> 0
     }
 
+    /** Pages per screen for a layout mode; 0 = continuous scroll (engine off). */
+    fun colsFor(layoutMode: com.folio.reader.settings.LayoutMode): Int = when (layoutMode) {
+        com.folio.reader.settings.LayoutMode.PAGINATED -> 1
+        com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
+        else -> 0
+    }
+
     /** Layout CSS for paged modes. [cols] = pages per screen (1 or 2). */
     fun css(cols: Int, marginTop: Float, marginBottom: Float, themeBg: String): String {
-        return "html{height:100%;overflow:hidden;overflow-anchor:none;}" +
+        // !important on geometry: publisher sheets set html/body heights that
+        // collapse the page box, and the whole engine measures off clientHeight.
+        return "html{height:100%!important;overflow:hidden!important;overflow-anchor:none;}" +
                 "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}" +
                 "#folio-stage{position:fixed;inset:0;perspective:1600px;pointer-events:none;z-index:2147483000;}" +
-                "body{height:100vh;overflow-x:auto;overflow-y:hidden;position:relative;opacity:0;transition:opacity .15s ease;" +
+                "body{height:100vh!important;overflow-x:auto!important;overflow-y:hidden!important;position:relative;opacity:0;transition:opacity .15s ease;" +
                 "padding:${marginTop.toInt()}px 0 ${marginBottom.toInt()}px 0 !important;}" +
                 "body img{max-width:100%;height:auto;}" +
                 ".folio-sheet{position:absolute;inset:0;pointer-events:none;will-change:transform;" +
@@ -113,8 +122,17 @@ function flatten(el,out,cw,H){
     out.push(el);
   }
 }
+var layoutTries=0;
 function layout(){
   var cw=colW(),H=pageH();
+  if(H<50||cw<50){
+    // A collapsed page box means every block would land in its own off-screen
+    // column — the historical "blank page". Retry, then reveal + report.
+    if(layoutTries++<25){setTimeout(function(){dirty=true;relayout();},150);return;}
+    document.title='folio-engdiag:collapse:'+H+':'+cw+':'+(++nonce);
+    body.style.opacity='1';
+    return;
+  }
   strip.style.position='relative';
   strip.style.height=H+'px';
   if(!kids.length){
@@ -279,15 +297,22 @@ document.addEventListener('mouseup',function(e){
   if(sel&&!sel.isCollapsed)return;
   handleTap(e.clientX,e.clientY,0,0);
 });
+try{
 layout();
 $selectionWatchJs
 page=Math.round(posFrac*maxPage());
 setScroll();
 body.style.opacity='1';
+document.title='folio-engdiag:ok:'+pageH()+':'+vw()+':'+totalCols+':'+kids.length+':'+(++nonce);
 setTimeout(function(){dirty=true;relayout();},250);
 setTimeout(function(){dirty=true;relayout();},700);
 setTimeout(function(){dirty=true;relayout();},1500);
 report();
+}catch(e){
+body.style.opacity='1';
+var m=e&&e.message?String(e.message).replace(/[:;,]/g,' ').slice(0,90):'err';
+document.title='folio-engdiag:throw:'+m+':'+(++nonce);
+}
 })();
 """
 }
