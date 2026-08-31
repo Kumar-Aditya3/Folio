@@ -216,6 +216,7 @@ fun MangaReaderScreen(
                 pageCount = localCountVal,
                 currentPage = localPageVal,
                 mode = mode,
+                rtl = mode == MangaReaderMode.PAGED_RTL,
                 bookmarked = chapterState?.bookmarked == true,
                 onToggleBookmark = { viewModel.toggleBookmark() },
                 onShowNotes = { showNotesList = true },
@@ -300,7 +301,6 @@ private fun WebtoonReader(
     // Seed from the saved position so the flow opens exactly where the reader left off
     // instead of reporting page 0 and clobbering the resume index.
     val initialIndex = remember { viewModel.currentIndex.value }
-    val seekIndex by viewModel.currentIndex.collectAsState()
     val zoom by viewModel.zoom.collectAsState()
     val listState = rememberLazyListState(initialIndex)
     val hState = rememberScrollState()
@@ -317,9 +317,12 @@ private fun WebtoonReader(
             if (key != null) onPageKeyVisible(key)
         }
     }
-    LaunchedEffect(seekIndex) {
-        if (seekIndex != listState.firstVisibleItemIndex) {
-            listState.scrollToItem(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+    // Only explicit seeks (resume, slider) scroll the list. Scrolling off the position
+    // tracker itself snapped the viewport whenever a prepend shifted every index or the
+    // loading item churned — the visible page jumps while reading.
+    LaunchedEffect(Unit) {
+        viewModel.seekRequests.collect { target ->
+            listState.scrollToItem(target.coerceIn(0, (viewModel.pages.value.size - 1).coerceAtLeast(0)))
         }
     }
 
@@ -385,7 +388,6 @@ private fun PagedReader(
         pageCount = { pages.size },
     )
     val scope = rememberCoroutineScope()
-    val seekIndex by viewModel.currentIndex.collectAsState()
     val zoom by viewModel.zoom.collectAsState()
 
     fun goNext() {
@@ -405,10 +407,11 @@ private fun PagedReader(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { onPageChanged(it) }
     }
-    // Slider / external seeks drive the pager.
-    LaunchedEffect(seekIndex) {
-        if (seekIndex != pagerState.currentPage) {
-            pagerState.scrollToPage(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+    // Explicit seeks (resume, slider) drive the pager; the position tracker itself
+    // never scrolls, so natural page turns cannot fight back.
+    LaunchedEffect(Unit) {
+        viewModel.seekRequests.collect { target ->
+            pagerState.scrollToPage(target.coerceIn(0, (viewModel.pages.value.size - 1).coerceAtLeast(0)))
         }
     }
 
@@ -457,15 +460,16 @@ private fun VerticalReader(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
         pageCount = { pages.size },
     )
-    val seekIndex by viewModel.currentIndex.collectAsState()
     val zoom by viewModel.zoom.collectAsState()
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { onPageChanged(it) }
     }
-    LaunchedEffect(seekIndex) {
-        if (seekIndex != pagerState.currentPage) {
-            pagerState.scrollToPage(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+    // Explicit seeks (resume, slider) drive the pager; the position tracker itself
+    // never scrolls, so natural page turns cannot fight back.
+    LaunchedEffect(Unit) {
+        viewModel.seekRequests.collect { target ->
+            pagerState.scrollToPage(target.coerceIn(0, (viewModel.pages.value.size - 1).coerceAtLeast(0)))
         }
     }
 
@@ -650,12 +654,14 @@ private fun ReaderPage(
     var pinchActive by remember { mutableStateOf(false) }
 
     // Zooming back toward fit must recenter: stale pan offsets from a deeper zoom
-    // otherwise leave the page translated partly or fully off-screen.
+    // otherwise leave the page translated partly or fully off-screen. An axis with
+    // no pan room (content smaller than the viewport, e.g. webtoon zoomed below
+    // fit-width) has an inverted clamp range and must recenter outright.
     LaunchedEffect(zoom, viewSize) {
         val maxTx = ((zoom - 1f) * viewSize.width) / 2f
         val maxTy = ((zoom - 1f) * viewSize.height) / 2f
-        offsetX = offsetX.coerceIn(-maxTx, maxTx)
-        offsetY = offsetY.coerceIn(-maxTy, maxTy)
+        offsetX = if (maxTx <= 0f) 0f else offsetX.coerceIn(-maxTx, maxTx)
+        offsetY = if (maxTy <= 0f) 0f else offsetY.coerceIn(-maxTy, maxTy)
     }
 
     Box(
@@ -734,6 +740,7 @@ private fun ReaderControls(
     pageCount: Int,
     currentPage: Int,
     mode: MangaReaderMode,
+    rtl: Boolean,
     bookmarked: Boolean,
     onToggleBookmark: () -> Unit,
     onShowNotes: () -> Unit,
@@ -803,19 +810,22 @@ private fun ReaderControls(
                 .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val lastPage = (pageCount - 1).coerceAtLeast(0)
+            // Progress runs in the reading direction: RTL mirrors the slider and
+            // swaps the end labels so the filled side is where the reader is going.
             Text(
-                "${currentPage + 1}",
+                if (rtl) "$pageCount" else "${currentPage + 1}",
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
             )
             Slider(
-                value = currentPage.toFloat(),
-                onValueChange = { onSeek(it.toInt()) },
-                valueRange = 0f..((pageCount - 1).coerceAtLeast(0)).toFloat(),
+                value = if (rtl) (lastPage - currentPage).toFloat() else currentPage.toFloat(),
+                onValueChange = { onSeek(if (rtl) lastPage - it.toInt() else it.toInt()) },
+                valueRange = 0f..lastPage.toFloat(),
                 modifier = Modifier.weight(1f).padding(horizontal = FolioTokens.space2),
             )
             Text(
-                "$pageCount",
+                if (rtl) "${currentPage + 1}" else "$pageCount",
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
             )

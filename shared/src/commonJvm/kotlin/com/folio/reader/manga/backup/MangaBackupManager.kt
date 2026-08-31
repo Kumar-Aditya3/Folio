@@ -1,5 +1,6 @@
 package com.folio.reader.manga.backup
 
+import com.folio.reader.manga.ChapterNumberParser
 import com.folio.reader.manga.MangaCategory
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
@@ -87,7 +88,9 @@ class MangaBackupManager(
                     url = bc.url,
                     name = bc.name,
                     scanlator = bc.scanlator,
-                    chapterNumber = bc.chapterNumber,
+                    chapterNumber =
+                        if (bc.chapterNumber >= 0f) bc.chapterNumber
+                        else ChapterNumberParser.parse(bc.name),
                     dateUpload = bc.dateUpload,
                     sortOrder = bc.sourceOrder.toInt().takeIf { it != 0 } ?: index,
                     read = bc.read,

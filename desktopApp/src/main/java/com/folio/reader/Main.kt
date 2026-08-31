@@ -456,6 +456,21 @@ fun main(args: Array<String>) {
         var refreshTick by remember { mutableStateOf(0) }
         var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
         var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
+        var libraryModeLoaded by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            runCatching {
+                val raw = deps.settingsRepository.getRaw("library.mode")
+                com.folio.reader.ui.library.LibraryMode.entries
+                    .firstOrNull { it.name == raw }
+                    ?.let { libraryMode = it }
+            }
+            libraryModeLoaded = true
+        }
+        LaunchedEffect(libraryMode, libraryModeLoaded) {
+            if (libraryModeLoaded) {
+                runCatching { deps.settingsRepository.setRaw("library.mode", libraryMode.name) }
+            }
+        }
         var mangaSearchActive by remember { mutableStateOf(false) }
         val mangaLibVM = remember {
             com.folio.reader.ui.manga.MangaLibraryViewModel(
@@ -463,6 +478,7 @@ fun main(args: Array<String>) {
                 mangaRepo = deps.mangaRepository,
                 categoryRepo = deps.mangaCategoryRepository,
                 chapterRepo = deps.mangaChapterRepository,
+                settingsRepo = deps.settingsRepository,
             )
         }
         val mangaLibBrowseVM = remember {
