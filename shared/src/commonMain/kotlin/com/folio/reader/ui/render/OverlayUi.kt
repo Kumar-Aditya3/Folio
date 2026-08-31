@@ -29,13 +29,21 @@ object OverlayUi {
         .replace('\r', ' ')
 
     private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300, kind: String = ""): String {
-        val tint = if (c.isDark) "rgba(16,16,22,0.48)" else "rgba(250,248,242,0.45)"
+        // Near-opaque fill, mirroring the Compose glassPanel: a see-through tint let
+        // the page bleed through at full contrast and labels dissolved into it.
+        val fill = c.bg + if (c.isDark) "DB" else "E3"
+        val sheen = if (c.isDark)
+            "linear-gradient(rgba(255,255,255,0.14),rgba(255,255,255,0.04) 50%,rgba(255,255,255,0.08))"
+        else
+            "linear-gradient(rgba(255,255,255,0.26),rgba(255,255,255,0.08) 50%,rgba(255,255,255,0.17))"
         val hairline = if (c.isDark) "rgba(255,255,255,0.26)" else "rgba(0,0,0,0.16)"
         val hi = if (c.isDark) "rgba(255,255,255,0.13)" else "rgba(255,255,255,0.60)"
+        // Near-opaque fill, no backdrop-filter blur: over an almost solid tint there
+        // is nothing left to blur, and the sheen + rim + shadow carry the glassy look.
         return """
 <div data-act="close" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483500;"></div>
 <div data-kind="$kind" style="position:fixed;top:0;right:0;bottom:0;width:${width}px;max-width:88vw;z-index:2147483501;
- background:$tint;backdrop-filter:blur(32px) saturate(2.0);-webkit-backdrop-filter:blur(32px) saturate(2.0);
+ background-color:$fill;background-image:$sheen;
  border-left:1px solid $hairline;color:${c.fg};font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;
  box-shadow:-18px 0 60px rgba(0,0,0,0.45), inset 1px 1px 0 $hi;
  display:flex;flex-direction:column;">
@@ -70,6 +78,8 @@ object OverlayUi {
         val sub: String,
         /** Note attached to this row (highlights own their notes). */
         val note: String? = null,
+        /** Id of the attached note, when deletable. */
+        val noteId: String? = null,
         /** Whether this row offers the note action. */
         val canNote: Boolean = false
     )
@@ -84,7 +94,10 @@ object OverlayUi {
                             "<button data-act=\"note:${r.kind}:${r.id}\" title=\"${if (r.note.isNullOrBlank()) "Add note" else "Edit note"}\" style=\"all:unset;cursor:pointer;color:${c.accent};padding:4px 8px;font-size:12px;font-weight:600;\">${if (r.note.isNullOrBlank()) "＋note" else "note"}</button>"
                         else ""
                         val nested = if (!r.note.isNullOrBlank())
-                            "<div style=\"margin-top:6px;padding:8px 10px;border-left:2px solid ${c.accent};border-radius:0 8px 8px 0;background:$rest;font-size:12.5px;line-height:1.45;white-space:pre-wrap;\">${esc(r.note)}</div>"
+                            "<div style=\"display:flex;gap:6px;align-items:flex-start;margin-top:6px;padding:8px 10px;border-left:2px solid ${c.accent};border-radius:0 8px 8px 0;background:$rest;\">" +
+                                    "<div style=\"flex:1;min-width:0;font-size:12.5px;line-height:1.45;white-space:pre-wrap;\">${esc(r.note)}</div>" +
+                                    (if (r.noteId != null) "<button data-act=\"del:nt:${r.noteId}\" title=\"Delete note\" style=\"all:unset;cursor:pointer;color:${c.accent};font-size:12px;padding:0 2px;\">&#10005;</button>" else "") +
+                                    "</div>"
                         else ""
                         "<div style=\"display:flex;flex-direction:column;$itemCss background:$rest;\">" +
                                 "<div style=\"display:flex;gap:8px;align-items:center;\" data-act=\"ann:${r.kind}:${r.id}\" " +
@@ -107,9 +120,9 @@ object OverlayUi {
      * heavyweight window that paints over any Compose dialog on desktop.
      */
     fun noteComposer(highlightId: String, quote: String, existing: String, c: OverlayColors): String {
-        val field = "<textarea data-note-input spellcheck='false' rows='6' style='width:100%;box-sizing:border-box;resize:none;" +
+        val field = "<textarea data-note-input spellcheck='false' rows='6' style=\"width:100%;box-sizing:border-box;resize:none;" +
                 "padding:12px;border-radius:12px;background:${if (c.isDark) "rgba(255,255,255,0.06)" else "rgba(0,0,0,0.04)"};" +
-                "color:${c.fg};border:1px solid ${if (c.isDark) "#444" else "#ccc"};font:14px/1.5 " + "\"'Segoe UI',system-ui,sans-serif;\" " +
+                "color:${c.fg};border:1px solid ${if (c.isDark) "#444" else "#ccc"};font:14px/1.5 'Segoe UI',system-ui,sans-serif;\" " +
                 "placeholder='Write a note about this passage…'>${esc(existing)}</textarea>"
         val body =
                 "<div style='font-size:13px;opacity:0.75;line-height:1.5;padding:10px 12px;border-left:2px solid ${c.accent};" +
@@ -127,27 +140,30 @@ object OverlayUi {
     ): String {
         val slider = { label: String, key: String, min: Double, max: Double, step: Double, value: Double, fmt: String ->
             "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>$label</span><span>$fmt</span></div>" +
-                    "<input type='range' min='$min' max='$max' step='$step' value='$value' data-act='set:$key' style='width:100%;accent-color:${c.accent};' />"
+                    // Wrapped in a div: as a direct flex-column item Chromium's range
+                    // input leaks +4px into the scroll container's overflow, spawning a
+                    // phantom horizontal scrollbar.
+                    "<div><input type='range' min='$min' max='$max' step='$step' value='$value' data-act='set:$key' style='width:100%;accent-color:${c.accent};' /></div>"
         }
         val fontSel = "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Typeface</span></div>" +
-                "<select data-act='set:font' style='width:100%;padding:8px;border-radius:8px;background:${if (c.isDark) "#222" else "#fff"};color:${c.fg};border:1px solid ${if (c.isDark) "#444" else "#ccc"};'>" +
+                "<select data-act='set:font' style='width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:${if (c.isDark) "#222" else "#fff"};color:${c.fg};border:1px solid ${if (c.isDark) "#444" else "#ccc"};'>" +
                 fontOptions.joinToString("") { o -> "<option value='${esc(o)}' ${if (o == fontFamily) "selected" else ""}>${esc(o)}</option>" } +
                 "</select>"
         val themeRow = "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Theme</span></div>" +
-                "<div style='display:flex;gap:8px;flex-wrap:wrap;'>" +
+                "<div style='display:flex;gap:6px;flex-wrap:wrap;'>" +
                 themes.joinToString("") { t ->
                     val sel = t.first == themeId
-                    "<button data-act='set:theme:${t.first}' title='${esc(t.second)}' style='all:unset;cursor:pointer;width:40px;height:40px;border-radius:10px;background:${t.third};border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
+                    "<button data-act='set:theme:${t.first}' title='${esc(t.second)}' style='all:unset;cursor:pointer;width:38px;height:38px;border-radius:10px;background:${t.third};border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
                             (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
                 } + "</div>"
         val highlightRow = if (highlightColors.isEmpty()) "" else
             "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Highlight</span></div>" +
-                    "<div style='display:flex;gap:8px;flex-wrap:wrap;'>" +
+                    "<div style='display:flex;gap:6px;flex-wrap:wrap;'>" +
                     highlightColors.mapIndexed { idx, hex ->
                         val sel = idx == highlightIndex
-                        "<button data-act='set:hlcolor:$idx' title='Highlight colour' style='all:unset;cursor:pointer;width:30px;height:30px;border-radius:8px;background:$hex;border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
+                        "<button data-act='set:hlcolor:$idx' title='Highlight colour' style='all:unset;cursor:pointer;width:28px;height:28px;border-radius:8px;background:$hex;border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
                                 (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
-                    } + "</div>"
+                    }.joinToString("") + "</div>"
         val body =
             slider("Text size", "size", 12.0, 26.0, 0.5, fontSize.toDouble(), "%.1f".format(fontSize)) +
                     slider("Line spacing", "lh", 1.0, 3.0, 0.1, lineHeight.toDouble(), "%.1f".format(lineHeight)) +
