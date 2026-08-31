@@ -725,9 +725,6 @@ fun ReaderScreen(
                             tint = if (isBookmarked) Color(0xFFFBC02D) else FolioTheme.colors.onSurface
                         )
                     }
-                    IconButton(onClick = { showReaderPanel = !showReaderPanel }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Reading settings", tint = FolioTheme.colors.onSurface)
-                    }
                 }
             }
         }
