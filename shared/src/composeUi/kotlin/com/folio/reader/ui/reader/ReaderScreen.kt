@@ -220,7 +220,7 @@ fun ReaderScreen(
     val readerThemePreset = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
 
     fun Int.argbHex(): String = "#" + toUInt().toString(16).padStart(8, '0').drop(2)
-    fun Color.hex(): String = "#" + toArgb().toString(16).padStart(8, '0').drop(2)
+    fun Color.hex(): String = "#" + toArgb().toUInt().toString(16).padStart(8, '0').drop(2)
     val appColors = FolioTheme.colors
     val appIsDark = appColors.background.red * 0.2126f +
             appColors.background.green * 0.7152f +
@@ -284,6 +284,7 @@ fun ReaderScreen(
                     title = h.selectedText.take(80).ifBlank { "(highlight)" },
                     sub = chapterLabel(h.spineIndex, h.chapterId),
                     note = h.noteId?.let { nid -> notes.firstOrNull { it.id == nid && !it.isDeleted }?.content },
+                    noteId = h.noteId,
                     canNote = true
                 )
             },
@@ -595,10 +596,18 @@ fun ReaderScreen(
                                     else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
                                 )
                             }
-                            IconButton(onClick = onToggleToc) {
+                            IconButton(onClick = {
+                                val opening = !showToc
+                                onToggleToc()
+                                if (opening) showReaderPanel = false
+                            }) {
                                 Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                             }
-                            IconButton(onClick = onToggleAnnotations) {
+                            IconButton(onClick = {
+                                val opening = !showAnnotations
+                                onToggleAnnotations()
+                                if (opening) showReaderPanel = false
+                            }) {
                                 Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                             }
                         }
@@ -619,7 +628,14 @@ fun ReaderScreen(
                                 tint = if (isBookmarked) FolioTheme.colors.primary else FolioTheme.colors.onSurface
                             )
                         }
-                        IconButton(onClick = { showReaderPanel = !showReaderPanel }) {
+                        IconButton(onClick = {
+                            val opening = !showReaderPanel
+                            showReaderPanel = opening
+                            if (opening) {
+                                if (showToc) onToggleToc()
+                                if (showAnnotations) onToggleAnnotations()
+                            }
+                        }) {
                             Icon(
                                 imageVector = Icons.Filled.Settings,
                                 contentDescription = "Settings",
@@ -712,10 +728,18 @@ fun ReaderScreen(
                         )
                     }
                     HorizontalDivider(modifier = Modifier.width(32.dp), color = FolioTheme.colors.onSurface.copy(alpha = 0.2f))
-                    IconButton(onClick = onToggleToc) {
+                    IconButton(onClick = {
+                        val opening = !showToc
+                        onToggleToc()
+                        if (opening) showReaderPanel = false
+                    }) {
                         Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                     }
-                    IconButton(onClick = onToggleAnnotations) {
+                    IconButton(onClick = {
+                        val opening = !showAnnotations
+                        onToggleAnnotations()
+                        if (opening) showReaderPanel = false
+                    }) {
                         Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onBookmarkClick) {

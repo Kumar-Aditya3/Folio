@@ -281,6 +281,7 @@ enum class SettingsCategory(val displayName: String) {
 // Placeholder composables for settings panels
 // These will render basic settings until proper implementation
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GeneralSettingsPanel(
     settings: ReaderSettings,
@@ -307,8 +308,13 @@ fun GeneralSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(com.folio.reader.ui.theme.ThemePack.ALL) { pack ->
+            // FlowRow, not LazyRow: on desktop a horizontal LazyRow cannot be
+            // mouse-scrolled, so off-screen packs read as missing (user report).
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                com.folio.reader.ui.theme.ThemePack.ALL.forEach { pack ->
                     ThemePackCard(
                         pack = pack,
                         selected = settings.appThemeId == pack.appPaletteId &&

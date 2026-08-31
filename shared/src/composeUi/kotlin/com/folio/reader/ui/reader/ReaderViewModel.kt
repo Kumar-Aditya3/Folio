@@ -509,11 +509,15 @@ class ReaderViewModel(
     }
 
     fun toggleToc() {
-        _showToc.value = !_showToc.value
+        val next = !_showToc.value
+        _showToc.value = next
+        if (next) _showAnnotations.value = false
     }
 
     fun toggleAnnotations() {
-        _showAnnotations.value = !_showAnnotations.value
+        val next = !_showAnnotations.value
+        _showAnnotations.value = next
+        if (next) _showToc.value = false
     }
 
     fun addBookmark(label: String? = null) {
