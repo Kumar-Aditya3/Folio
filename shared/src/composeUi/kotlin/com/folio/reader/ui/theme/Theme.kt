@@ -256,6 +256,38 @@ private val OledFolioColors = DarkFolioColors.copy(
     statusBar = Color(0xFF000000)
 )
 
+private val MossFolioColors = LightFolioColors.copy(
+    background = Color(0xFFF2F7F4),
+    onBackground = Color(0xFF212B26),
+    surface = Color(0xFFFBFEFC),
+    onSurface = Color(0xFF212B26),
+    surfaceVariant = Color(0xFFE3EEE7),
+    onSurfaceVariant = Color(0xFF5A6B62),
+    surfaceContainerHighest = Color(0xFFD6E5DC),
+    outline = Color(0xFFBBD0C4),
+    outlineVariant = Color(0xFFD6E5DC),
+    inverseSurface = Color(0xFF212B26),
+    inverseOnSurface = Color(0xFFF2F7F4),
+    statusBar = Color(0xFF16211B)
+)
+
+private val EmberFolioColors = DarkFolioColors.copy(
+    background = Color(0xFF1A1210),
+    onBackground = Color(0xFFF2E4DC),
+    surface = Color(0xFF241815),
+    onSurface = Color(0xFFF2E4DC),
+    surfaceVariant = Color(0xFF2E201B),
+    onSurfaceVariant = Color(0xFFBBA196),
+    surfaceContainerHighest = Color(0xFF392822),
+    primaryContainer = Color(0xFF3D2A20),
+    secondaryContainer = Color(0xFF2E201B),
+    outline = Color(0xFF4A362C),
+    outlineVariant = Color(0xFF392822),
+    inverseSurface = Color(0xFFF2E4DC),
+    inverseOnSurface = Color(0xFF241815),
+    statusBar = Color(0xFF100A08)
+)
+
 enum class AppPalette(
     val id: String,
     val label: String,
@@ -268,12 +300,14 @@ enum class AppPalette(
     ARCTIC("arctic", "Arctic", false, ArcticFolioColors),
     SAKURA("sakura", "Sakura", false, SakuraFolioColors),
     HONEY("honey", "Honey", false, HoneyFolioColors),
+    MOSS("moss", "Moss", false, MossFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
     DUSK("dusk", "Dusk", true, DuskFolioColors),
     ESPRESSO("espresso", "Espresso", true, EspressoFolioColors),
     OCEAN("ocean", "Ocean", true, OceanFolioColors),
     GRAPE("grape", "Grape", true, GrapeFolioColors),
+    EMBER("ember", "Ember", true, EmberFolioColors),
     OLED("oled", "Black", true, OledFolioColors);
 
     companion object {
@@ -295,11 +329,13 @@ data class ThemePack(
             ThemePack("arctic", "Arctic", "arctic", "arctic"),
             ThemePack("sakura", "Sakura", "sakura", "paper"),
             ThemePack("honey", "Honey", "honey", "sepia"),
+            ThemePack("moss", "Moss", "moss", "moss"),
             ThemePack("nocturne", "Nocturne", "midnight", "dark"),
             ThemePack("dusk", "Dusk", "dusk", "dusk"),
             ThemePack("espresso", "Espresso", "espresso", "espresso"),
             ThemePack("ocean", "Ocean", "ocean", "dark"),
             ThemePack("grape", "Grape", "grape", "dusk"),
+            ThemePack("ember", "Ember", "ember", "ember"),
             ThemePack("obsidian", "Obsidian", "oled", "oled_black"),
         )
     }

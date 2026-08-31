@@ -388,6 +388,32 @@ data class Theme(
                 ),
                 progress = 0xFF2277A8.toInt(), divider = 0xFFD8E7EE.toInt(),
                 isDark = false
+            ),
+            "moss" to Theme(
+                id = "moss", name = "Moss",
+                background = 0xFFF2F7F4.toInt(), surface = 0xFFFBFEFC.toInt(),
+                primaryText = 0xFF24302A.toInt(), secondaryText = 0xFF5A6B62.toInt(),
+                headingText = 0xFF18241D.toInt(), link = 0xFF2E7D5B.toInt(),
+                selection = 0xFFCFE5D9.toInt(), bookmark = 0xFF3E6B54.toInt(),
+                highlightColors = listOf(
+                    0xFF8FBF9F.toInt(), 0xFF5B9AA8.toInt(), 0xFFD9C34A.toInt(), 0xFFC96F5E.toInt(),
+                    0xFF9B87C9.toInt(), 0xFF7BAF7A.toInt(), 0xFF6FB5C9.toInt(), 0xFFC97BA8.toInt()
+                ),
+                progress = 0xFF2E7D5B.toInt(), divider = 0xFFD6E5DC.toInt(),
+                isDark = false
+            ),
+            "ember" to Theme(
+                id = "ember", name = "Ember",
+                background = 0xFF1A1210.toInt(), surface = 0xFF241815.toInt(),
+                primaryText = 0xFFF2E4DC.toInt(), secondaryText = 0xFFBBA196.toInt(),
+                headingText = 0xFFFFF1E8.toInt(), link = 0xFFE08A5B.toInt(),
+                selection = 0xFF3D2A20.toInt(), bookmark = 0xFFE0653B.toInt(),
+                highlightColors = listOf(
+                    0xFFE0A85B.toInt(), 0xFF8FB4C9.toInt(), 0xFFA8C98F.toInt(), 0xFFD98C7B.toInt(),
+                    0xFFB89BC9.toInt(), 0xFFD9A86B.toInt(), 0xFF8FC9BF.toInt(), 0xFFC98FA8.toInt()
+                ),
+                progress = 0xFFE08A5B.toInt(), divider = 0xFF392822.toInt(),
+                isDark = true
             )
         )
 

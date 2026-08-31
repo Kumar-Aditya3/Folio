@@ -75,28 +75,42 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaPageRef
-import com.folio.reader.ui.components.decodeCoverImage
+import com.folio.reader.ui.components.decodePageImage
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Decoded page bitmaps, bounded by pixel memory rather than entry count. A fixed
+ * entry cap evicted full-size pages after a handful of scrolls, forcing a network
+ * re-fetch and re-decode every time the reader revisited a page.
+ */
+private const val BITMAP_CACHE_MAX_BYTES = 96L * 1024 * 1024
 private val pageBitmapCache = LinkedHashMap<String, ImageBitmap>(16, 0.75f, true)
-private const val PAGE_CACHE_MAX = 10
+private var bitmapCacheBytes = 0L
+
+private fun bitmapByteSize(bitmap: ImageBitmap): Long =
+    bitmap.width.toLong() * bitmap.height.toLong() * 4L
 
 private fun pageCacheGet(key: String): ImageBitmap? = synchronized(pageBitmapCache) { pageBitmapCache[key] }
 
 private fun pageCachePut(key: String, bitmap: ImageBitmap) = synchronized(pageBitmapCache) {
+    pageBitmapCache[key]?.let { bitmapCacheBytes -= bitmapByteSize(it) }
     pageBitmapCache[key] = bitmap
-    while (pageBitmapCache.size > PAGE_CACHE_MAX) {
-        pageBitmapCache.keys.firstOrNull()?.let { pageBitmapCache.remove(it) }
+    bitmapCacheBytes += bitmapByteSize(bitmap)
+    while (bitmapCacheBytes > BITMAP_CACHE_MAX_BYTES && pageBitmapCache.isNotEmpty()) {
+        val eldest = pageBitmapCache.entries.firstOrNull() ?: break
+        pageBitmapCache.remove(eldest.key)
+        bitmapCacheBytes -= bitmapByteSize(eldest.value)
     }
 }
 
@@ -155,32 +169,41 @@ fun MangaReaderScreen(
             pages.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No pages", color = Color.White)
             }
-            else -> when (mode) {
-                MangaReaderMode.WEBTOON -> WebtoonReader(
-                    viewModel = viewModel,
-                    pages = pages,
-                    onPageChanged = { viewModel.onPageChanged(it) },
-                    onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { pageActionIndex = it },
-                    extendingForward = extendingForward,
-                )
-                MangaReaderMode.PAGED_LTR, MangaReaderMode.PAGED_RTL -> PagedReader(
-                    viewModel = viewModel,
-                    pages = pages,
-                    rtl = mode == MangaReaderMode.PAGED_RTL,
-                    onPageChanged = { viewModel.onPageChanged(it) },
-                    onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { pageActionIndex = it },
-                    onOpenChapter = onOpenChapter,
-                )
-                MangaReaderMode.PAGED_VERTICAL -> VerticalReader(
-                    viewModel = viewModel,
-                    pages = pages,
-                    onPageChanged = { viewModel.onPageChanged(it) },
-                    onTap = { viewModel.toggleControls() },
-                    onLongPressPage = { pageActionIndex = it },
-                    onOpenChapter = onOpenChapter,
-                )
+            else -> BoxWithConstraints(Modifier.fillMaxSize()) {
+                // Decode budget: ~3x the viewport keeps zoom sharp without paying for
+                // source-resolution bitmaps (webtoon strips can be tens of thousands of
+                // pixels tall and dominate memory/GC when decoded raw).
+                val targetWidthPx = with(LocalDensity.current) { maxWidth.roundToPx() } * 3
+                when (mode) {
+                    MangaReaderMode.WEBTOON -> WebtoonReader(
+                        viewModel = viewModel,
+                        pages = pages,
+                        onPageKeyVisible = { viewModel.onPageKeyVisible(it) },
+                        onTap = { viewModel.toggleControls() },
+                        onLongPressPage = { pageActionIndex = it },
+                        extendingForward = extendingForward,
+                        targetWidthPx = targetWidthPx,
+                    )
+                    MangaReaderMode.PAGED_LTR, MangaReaderMode.PAGED_RTL -> PagedReader(
+                        viewModel = viewModel,
+                        pages = pages,
+                        rtl = mode == MangaReaderMode.PAGED_RTL,
+                        onPageChanged = { viewModel.onPageChanged(it) },
+                        onTap = { viewModel.toggleControls() },
+                        onLongPressPage = { pageActionIndex = it },
+                        onOpenChapter = onOpenChapter,
+                        targetWidthPx = targetWidthPx,
+                    )
+                    MangaReaderMode.PAGED_VERTICAL -> VerticalReader(
+                        viewModel = viewModel,
+                        pages = pages,
+                        onPageChanged = { viewModel.onPageChanged(it) },
+                        onTap = { viewModel.toggleControls() },
+                        onLongPressPage = { pageActionIndex = it },
+                        onOpenChapter = onOpenChapter,
+                        targetWidthPx = targetWidthPx,
+                    )
+                }
             }
         }
 
@@ -268,23 +291,36 @@ fun MangaReaderScreen(
 private fun WebtoonReader(
     viewModel: MangaReaderViewModel,
     pages: List<MangaPageRef>,
-    onPageChanged: (Int) -> Unit,
+    onPageKeyVisible: (String) -> Unit,
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
     extendingForward: Boolean,
+    targetWidthPx: Int,
 ) {
     // Seed from the saved position so the flow opens exactly where the reader left off
     // instead of reporting page 0 and clobbering the resume index.
     val initialIndex = remember { viewModel.currentIndex.value }
-    var visibleIndex by remember { mutableStateOf(initialIndex) }
     val seekIndex by viewModel.currentIndex.collectAsState()
     val zoom by viewModel.zoom.collectAsState()
     val listState = rememberLazyListState(initialIndex)
     val hState = rememberScrollState()
 
-    LaunchedEffect(visibleIndex) { onPageChanged(visibleIndex) }
+    // The reading position is the page at the top edge of the viewport, tracked by its
+    // stable key. Composition/prefetch used to report pages the reader had not reached
+    // yet, which crossed chapter boundaries early and stranded chapters as unread.
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { item -> item.key is String && (item.key as String).lastIndexOf(':') > 0 }
+                ?.key as? String
+        }.collect { key ->
+            if (key != null) onPageKeyVisible(key)
+        }
+    }
     LaunchedEffect(seekIndex) {
-        if (seekIndex != visibleIndex) listState.scrollToItem(seekIndex)
+        if (seekIndex != listState.firstVisibleItemIndex) {
+            listState.scrollToItem(seekIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -303,10 +339,10 @@ private fun WebtoonReader(
                             index = index,
                             modifier = Modifier.width(imageWidth),
                             zoomable = false,
+                            targetWidthPx = targetWidthPx,
                             onTap = { onTap() },
                             onDoubleTap = { viewModel.resetZoom() },
                             onLongPress = { onLongPressPage(index) },
-                            onVisible = { visibleIndex = index },
                         )
                     }
                 }
@@ -342,6 +378,7 @@ private fun PagedReader(
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
     onOpenChapter: (MangaChapter) -> Unit,
+    targetWidthPx: Int,
 ) {
     val pagerState = rememberPagerState(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
@@ -391,6 +428,7 @@ private fun PagedReader(
             zoomable = true,
             tapZones = true,
             rtl = rtl,
+            targetWidthPx = targetWidthPx,
             onTap = { zone ->
                 when (zone) {
                     -1 -> if (rtl) goNext() else goPrev()
@@ -413,6 +451,7 @@ private fun VerticalReader(
     onTap: () -> Unit,
     onLongPressPage: (Int) -> Unit,
     onOpenChapter: (MangaChapter) -> Unit,
+    targetWidthPx: Int,
 ) {
     val pagerState = rememberPagerState(
         initialPage = viewModel.currentIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
@@ -442,6 +481,7 @@ private fun VerticalReader(
             modifier = Modifier.fillMaxSize(),
             fit = true,
             zoomable = true,
+            targetWidthPx = targetWidthPx,
             onTap = { onTap() },
             onDoubleTap = { viewModel.resetZoom() },
             onLongPress = { onLongPressPage(index) },
@@ -575,17 +615,16 @@ private fun ReaderPage(
     zoomable: Boolean = true,
     tapZones: Boolean = false,
     rtl: Boolean = false,
+    targetWidthPx: Int = 0,
     onTap: (Int) -> Unit = {},
     onDoubleTap: () -> Unit = {},
     onLongPress: () -> Unit = {},
-    onVisible: () -> Unit = {},
 ) {
     var bitmap by remember(index) { mutableStateOf<ImageBitmap?>(null) }
     var failed by remember(index) { mutableStateOf(false) }
     val cacheKey = viewModel.pageKey(index)
 
     LaunchedEffect(index) {
-        onVisible()
         pageCacheGet(cacheKey)?.let {
             bitmap = it
             return@LaunchedEffect
@@ -594,7 +633,7 @@ private fun ReaderPage(
         if (bytes == null) {
             failed = true
         } else {
-            val decoded = withContext(Dispatchers.IO) { decodeCoverImage(bytes) }
+            val decoded = withContext(Dispatchers.IO) { decodePageImage(bytes, targetWidthPx) }
             if (decoded == null) {
                 failed = true
             } else {
@@ -609,6 +648,15 @@ private fun ReaderPage(
     var offsetY by remember(index) { mutableFloatStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var pinchActive by remember { mutableStateOf(false) }
+
+    // Zooming back toward fit must recenter: stale pan offsets from a deeper zoom
+    // otherwise leave the page translated partly or fully off-screen.
+    LaunchedEffect(zoom, viewSize) {
+        val maxTx = ((zoom - 1f) * viewSize.width) / 2f
+        val maxTy = ((zoom - 1f) * viewSize.height) / 2f
+        offsetX = offsetX.coerceIn(-maxTx, maxTx)
+        offsetY = offsetY.coerceIn(-maxTy, maxTy)
+    }
 
     Box(
         modifier = modifier

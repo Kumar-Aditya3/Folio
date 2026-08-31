@@ -14,6 +14,31 @@ actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
     }
 }
 
+/** Never decode taller than this: it sits under common GL max-texture limits. */
+private const val MAX_DECODE_HEIGHT = 16384
+
+actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val srcW = bounds.outWidth
+        val srcH = bounds.outHeight
+        var sample = 1
+        if (srcW > 0 && srcH > 0 && targetWidthPx > 0) {
+            // Subsample while the decoded width would still cover the target.
+            while (srcW / (sample * 2) >= targetWidthPx) sample *= 2
+            // Extremely tall strips: keep the decoded height sane without shrinking
+            // the width further than the height cap forces.
+            while (srcH / sample > MAX_DECODE_HEIGHT) sample *= 2
+        }
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+    } catch (_: Exception) {
+        // Fall back to a plain decode rather than failing the page outright.
+        decodeCoverImage(bytes)
+    }
+}
+
 /**
  * Android ships Roboto + serif/monospace system families. Named families like
  * Georgia/Literata aren't installed, so map to the closest system family the

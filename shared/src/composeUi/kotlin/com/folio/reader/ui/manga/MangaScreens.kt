@@ -1601,6 +1601,8 @@ private fun BrowseGridItem(
     LaunchedEffect(item.url) { inLibrary = viewModel.isInLibrary(item) }
     val backend = viewModel.backend
     val itemScope = rememberCoroutineScope()
+    var pickMangaId by remember { mutableStateOf<String?>(null) }
+    var pickInitial by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     Column(
         modifier = Modifier
@@ -1613,8 +1615,10 @@ private fun BrowseGridItem(
                             viewModel.removeFromLibrary(item)
                             inLibrary = false
                         } else {
-                            viewModel.addToLibrary(item)
+                            val entry = viewModel.addToLibrary(item)
                             inLibrary = true
+                            pickInitial = viewModel.categoriesFor(entry.id)
+                            pickMangaId = entry.id
                         }
                     }
                 },
@@ -1648,6 +1652,20 @@ private fun BrowseGridItem(
             color = FolioTheme.colors.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+
+    pickMangaId?.let { mangaId ->
+        val categories by viewModel.allCategories.collectAsState()
+        CategoryPickerDialog(
+            categories = categories,
+            initialSelected = pickInitial,
+            onCreate = { viewModel.createCategoryNamed(it) },
+            onSave = { ids ->
+                viewModel.setCategoriesFor(mangaId, ids)
+                pickMangaId = null
+            },
+            onDismiss = { pickMangaId = null },
         )
     }
 }
@@ -1812,13 +1830,11 @@ fun MangaDetailScreen(
     val chapterSelectionMode by viewModel.chapterSelectionMode.collectAsState()
     val selectedChapterIds by viewModel.selectedChapterIds.collectAsState()
     val scope = rememberCoroutineScope()
-    var startChapter by remember { mutableStateOf<MangaChapter?>(null) }
     var filterOpen by remember { mutableStateOf(false) }
     val allCategories by viewModel.allCategories.collectAsState()
     val myCategoryIds by viewModel.myCategoryIds.collectAsState()
     var categoryPickerOpen by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) { startChapter = viewModel.nextChapterToRead() }
+    var categoryPrompt by remember { mutableStateOf(false) }
 
     val displayChapters = remember(chapters, sortAscending, chapterFilter) {
         val filtered = viewModel.applyFilter(chapters)
@@ -1871,7 +1887,10 @@ fun MangaDetailScreen(
                 IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
-                IconButton(onClick = { viewModel.toggleInLibrary() }) {
+                IconButton(onClick = {
+                    if (!m.inLibrary) categoryPrompt = true
+                    viewModel.toggleInLibrary()
+                }) {
                     Icon(
                         imageVector = if (m.inLibrary) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
                         contentDescription = if (m.inLibrary) "In library — tap to remove" else "Add to library",
@@ -1956,10 +1975,25 @@ fun MangaDetailScreen(
                 initialSelected = myCategoryIds,
                 onCreate = { name -> viewModel.createCategory(name) },
                 onSave = { set ->
-                    viewModel.setCategories(set)
+                    if (set.isNotEmpty()) viewModel.setCategories(set)
                     categoryPickerOpen = false
                 },
                 onDismiss = { categoryPickerOpen = false },
+            )
+        }
+
+        // Adding to the library asks for the shelf right away; dismissing keeps the
+        // default shelf so a manga is never left without a home.
+        if (categoryPrompt) {
+            CategoryPickerDialog(
+                categories = allCategories,
+                initialSelected = myCategoryIds,
+                onCreate = { name -> viewModel.createCategory(name) },
+                onSave = { set ->
+                    if (set.isNotEmpty()) viewModel.setCategories(set)
+                    categoryPrompt = false
+                },
+                onDismiss = { categoryPrompt = false },
             )
         }
 
@@ -2037,10 +2071,13 @@ fun MangaDetailScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
                         Button(
                             onClick = {
-                                val target = startChapter ?: displayChapters.firstOrNull()
-                                if (target != null) {
-                                    viewModel.recordHistory(target.id)
-                                    onRead(m, target)
+                                scope.launch {
+                                    val target = viewModel.nextChapterToRead()
+                                        ?: displayChapters.firstOrNull()
+                                    if (target != null) {
+                                        viewModel.recordHistory(target.id)
+                                        onRead(m, target)
+                                    }
                                 }
                             },
                             enabled = displayChapters.isNotEmpty(),

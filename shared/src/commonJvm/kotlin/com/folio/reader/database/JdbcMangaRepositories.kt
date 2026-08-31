@@ -768,6 +768,9 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
         }
     }
 
+    override fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>> =
+        db.mangaDataRevision.map { mangaIdsInCategory(categoryId) }
+
     override suspend fun mangaIdsInCategory(categoryId: String): Set<String> = db.withConnection { conn ->
         conn.prepareStatement("SELECT manga_id FROM manga_category_map WHERE category_id = ?").use { stmt ->
             stmt.setString(1, categoryId)

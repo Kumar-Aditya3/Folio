@@ -18,6 +18,33 @@ actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
     }
 }
 
+actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
+    return try {
+        val buffered = ImageIO.read(ByteArrayInputStream(bytes)) ?: return null
+        if (targetWidthPx <= 0 || buffered.width <= targetWidthPx) {
+            return buffered.toComposeImageBitmap()
+        }
+        val scale = targetWidthPx.toDouble() / buffered.width
+        val newHeight = maxOf(1, (buffered.height * scale).toInt())
+        val scaled = java.awt.image.BufferedImage(
+            targetWidthPx, newHeight, java.awt.image.BufferedImage.TYPE_INT_ARGB
+        )
+        val g = scaled.createGraphics()
+        try {
+            g.setRenderingHint(
+                java.awt.RenderingHints.KEY_INTERPOLATION,
+                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+            )
+            g.drawImage(buffered, 0, 0, targetWidthPx, newHeight, null)
+        } finally {
+            g.dispose()
+        }
+        scaled.toComposeImageBitmap()
+    } catch (_: Exception) {
+        decodeCoverImage(bytes)
+    }
+}
+
 /**
  * Desktop: query skia's FontMgr for an installed system font (Windows fonts dir,
  * user fonts). "Georgia", "Times New Roman", "Segoe UI", user-installed Literata
