@@ -20,6 +20,7 @@ import com.folio.reader.firebase.FsBookmark
 import com.folio.reader.firebase.FsCollection
 import com.folio.reader.firebase.FsHighlight
 import com.folio.reader.firebase.FsManga
+import com.folio.reader.firebase.FsMangaCategory
 import com.folio.reader.firebase.FsMangaChapter
 import com.folio.reader.firebase.FsMangaNote
 import com.folio.reader.firebase.FsNote
@@ -197,6 +198,7 @@ class SyncEngineTest {
         val manga = mutableListOf<FsManga>()
         val mangaChapters = mutableListOf<FsMangaChapter>()
         val mangaNotes = mutableListOf<FsMangaNote>()
+        val mangaCategories = mutableListOf<FsMangaCategory>()
 
         override fun upsertManga(m: FsManga) {
             manga.removeAll { it.id == m.id }
@@ -213,11 +215,18 @@ class SyncEngineTest {
             mangaNotes.add(note)
         }
 
+        override fun upsertMangaCategory(category: FsMangaCategory) {
+            mangaCategories.removeAll { it.id == category.id }
+            mangaCategories.add(category)
+        }
+
         override fun fetchManga(): List<FsManga> = manga.toList()
 
         override fun fetchMangaChapters(): List<FsMangaChapter> = mangaChapters.toList()
 
         override fun fetchMangaNotes(): List<FsMangaNote> = mangaNotes.toList()
+
+        override fun fetchMangaCategories(): List<FsMangaCategory> = mangaCategories.toList()
 
         /** Settings document served by fetchSettings (null = none in the cloud). */
         var remoteSettings: FsSettings? = null

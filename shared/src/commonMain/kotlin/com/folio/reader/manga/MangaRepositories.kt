@@ -62,6 +62,7 @@ interface MangaCategoryRepository {
     suspend fun categoriesFor(mangaId: String): Set<String>
     suspend fun get(id: String): MangaCategory?
     fun observeCategoriesFor(mangaId: String): Flow<Set<String>>
+    fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>>
     suspend fun mangaIdsInCategory(categoryId: String): Set<String>
 
     /** Applies a remote category document (membership included) without re-emitting sync events. */
