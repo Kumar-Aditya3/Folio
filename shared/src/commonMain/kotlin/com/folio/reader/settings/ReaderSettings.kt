@@ -68,6 +68,33 @@ data class ReaderSettings(
             customTheme = bookSettings.customTheme ?: customTheme
         )
     }
+
+    /**
+     * A full copy of every per-book field, used when the current global
+     * defaults are snapshotted onto a book so it owns its settings from that
+     * moment on. Later edits to the global defaults never leak into it.
+     */
+    fun toBookSettings(): BookReaderSettings = BookReaderSettings(
+        fontFamily = fontFamily,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        lineHeight = lineHeight,
+        letterSpacing = letterSpacing,
+        wordSpacing = wordSpacing,
+        paragraphSpacing = paragraphSpacing,
+        margins = margins,
+        textWidth = textWidth,
+        alignment = alignment,
+        hyphenation = hyphenation,
+        themeId = themeId,
+        layoutMode = layoutMode,
+        formattingMode = formattingMode,
+        showChapterTitle = showChapterTitle,
+        showProgress = showProgress,
+        showClock = showClock,
+        highlightColorIndex = highlightColorIndex,
+        customTheme = customTheme
+    )
 }
 
 @Serializable
@@ -121,10 +148,18 @@ enum class TextAlignment {
 
 enum class LayoutMode {
     CONTINUOUS,     // Vertical scrolling
-    PAGINATED,      // Page-based (horizontal or vertical)
-    TWO_COLUMN,     // Two columns side by side
-    FOCUS           // Distraction-free, minimal UI
+    PAGINATED,      // Page-based horizontal flips
+    TWO_COLUMN,     // Retired: normalizes to PAGINATED (kept for old persisted settings)
+    FOCUS           // Retired: normalizes to CONTINUOUS (kept for old persisted settings)
 }
+
+/** Spread and Focus were retired; persisted values from older installs render as their nearest living mode. */
+val LayoutMode.normalized: LayoutMode
+    get() = when (this) {
+        LayoutMode.TWO_COLUMN -> LayoutMode.PAGINATED
+        LayoutMode.FOCUS -> LayoutMode.CONTINUOUS
+        else -> this
+    }
 
 @Serializable
 data class Theme(

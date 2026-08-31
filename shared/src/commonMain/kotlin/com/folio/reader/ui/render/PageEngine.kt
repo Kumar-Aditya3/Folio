@@ -1,12 +1,13 @@
 package com.folio.reader.ui.render
 
+import com.folio.reader.settings.normalized
+
 /**
  * Book-like pagination engine shared by the Android WebView and desktop JCEF
- * surfaces. Lays the chapter out as discrete viewport pages (one per screen in
- * PAGINATED, a two-page spread in TWO_COLUMN) by absolutely positioning content
- * blocks into page columns — deliberately NOT CSS multicol, whose overflow
- * painting is unreliable in embedded Chromium (JCEF 132). Pages turn with a
- * lightweight sheet sweep instead of scrolling, the way a physical book behaves.
+ * surfaces. Lays the chapter out as discrete viewport pages by absolutely
+ * positioning content blocks into page columns — deliberately NOT CSS multicol,
+ * whose overflow painting is unreliable in embedded Chromium (JCEF 132). Pages
+ * turn by sliding the strip horizontally, the way a manga viewer moves panels.
  *
  * The engine talks to the app through the same document.title protocol as the
  * continuous bridge: folio-progress:<fraction>:<current>:<total>:<crossed> and
@@ -23,27 +24,21 @@ object PageEngine {
         com.folio.reader.settings.TextWidth.FULL -> 0
     }
 
-    /** Pages per screen for a layout mode; 0 = continuous scroll (engine off). */
-    fun colsFor(layoutMode: com.folio.reader.settings.LayoutMode): Int = when (layoutMode) {
+    /** Pages per screen for a layout mode; 0 = continuous scroll (engine off). Retired modes map onto their nearest living one. */
+    fun colsFor(layoutMode: com.folio.reader.settings.LayoutMode): Int = when (layoutMode.normalized) {
         com.folio.reader.settings.LayoutMode.PAGINATED -> 1
-        com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
         else -> 0
     }
 
-    /** Layout CSS for paged modes. [cols] = pages per screen (1 or 2). */
-    fun css(cols: Int, marginTop: Float, marginBottom: Float, themeBg: String): String {
+    /** Layout CSS for paged modes. */
+    fun css(marginTop: Float, marginBottom: Float): String {
         // !important on geometry: publisher sheets set html/body heights that
         // collapse the page box, and the whole engine measures off clientHeight.
         return "html{height:100%!important;overflow:hidden!important;overflow-anchor:none;}" +
                 "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}" +
-                "#folio-stage{position:fixed;inset:0;perspective:1600px;pointer-events:none;z-index:2147483000;}" +
-                "body{height:100vh!important;overflow-x:auto!important;overflow-y:hidden!important;position:relative;opacity:0;transition:opacity .15s ease;" +
+                "body{height:100vh!important;overflow-x:hidden!important;overflow-y:hidden!important;position:relative;transition:opacity .15s ease;" +
                 "padding:${marginTop.toInt()}px 0 ${marginBottom.toInt()}px 0 !important;}" +
-                "body img{max-width:100%;height:auto;}" +
-                ".folio-sheet{position:absolute;inset:0;pointer-events:none;will-change:transform;" +
-                "transition:transform .38s cubic-bezier(.4,.1,.2,1);" +
-                "background:linear-gradient(to right,rgba(0,0,0,.28),rgba(0,0,0,0) 12%,rgba(0,0,0,0) 88%,rgba(0,0,0,.28));" +
-                "background-color:$themeBg;}"
+                "body img{max-width:100%;height:auto;}"
     }
 
     /**
@@ -77,21 +72,39 @@ window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}c
 document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioReportSel,220);});
 """
 
-    /** Pager + block layout + flip + input JS. [fraction] = saved 0..1 position, [cols] = pages per screen, [measure] = readable line width cap (0 = none). */
+    /**
+     * Publisher filler blocks — `<p><span>&nbsp;</span></p>` spacers and the like —
+     * read as holes once the reader owns spacing. Hidden in every bridge, paged and
+     * continuous alike.
+     */
+    val emptyHideJs: String = """
+document.querySelectorAll('p,div,section,blockquote').forEach(function(el){if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length)el.style.display='none';});
+"""
     fun js(fraction: Float, cols: Int, gutter: Float, measure: Int): String = """
 (function(){
 if(window.__folioEngine)return;window.__folioEngine=true;
 var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction;
 var body=document.body,docEl=document.documentElement;
+// Hide here, not in CSS: a document whose engine JS never lands must still paint
+// text instead of staying a solid blank page under a CSS opacity:0 gate.
+body.style.opacity='0';
 var page=0,animating=false,userActed=false,nonce=0,posFrac=frac;
 var totalCols=1,kids=[],dirty=true;
 function vw(){return Math.max(1, body.clientWidth || window.innerWidth);}
 function colW(){return vw()/COLS;}
-function pageH(){return Math.max(1, body.clientHeight);}
+function padY(){var cs=getComputedStyle(body);return (parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0);}
+function pageH(){return Math.max(1, window.innerHeight - padY());}
+// Some WebViews zero the vh/percent page box after a resume, collapsing body to
+// its padding and clipping the strip to a top sliver. Pin pixel heights instead.
+function pinBox(){
+  var VH=Math.max(1,window.innerHeight);
+  docEl.style.setProperty('height',VH+'px','important');
+  body.style.setProperty('height',Math.max(50,VH-padY())+'px','important');
+}
 function maxPage(){return Math.max(0,Math.ceil(totalCols/COLS)-1);}
 var strip=document.getElementById('folio-strip');
 if(!strip){
-  strip=document.createElement('div');strip.id='folio-strip';
+  strip=document.createElement('div');strip.id='folio-strip';strip.style.willChange='transform';
   while(body.firstChild)strip.appendChild(body.firstChild);
   body.appendChild(strip);
 }
@@ -109,6 +122,9 @@ function widthize(el,cw){
   el.style.top='0px';
 }
 function flatten(el,out,cw,H){
+  // Publisher markup littered with empty <p>/<br> blocks reads as huge holes
+  // once absolute positioning stops margin collapsing; drop them in paged mode.
+  if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length){el.style.display='none';return;}
   widthize(el,cw);
   if(el.offsetHeight>H*1.5&&el.children.length>0){
     var par=el.parentNode,child;
@@ -123,7 +139,56 @@ function flatten(el,out,cw,H){
   }
 }
 var layoutTries=0;
+function lineH(el){var v=parseFloat(getComputedStyle(el).lineHeight);return isFinite(v)&&v>4?v:0;}
+function addSlice(el,off,sh,c,top,cw){
+  var w=document.createElement('div');w.className='folio-slice';
+  w.style.position='absolute';
+  w.style.left=Math.round(c*cw)+'px';
+  w.style.top=Math.round(top)+'px';
+  w.style.width=cw+'px';
+  w.style.height=Math.ceil(sh)+'px';
+  w.style.overflow='hidden';
+  var inner=el;
+  if(off>0){
+    inner=document.createElement(el.tagName==='P'?'div':el.tagName);
+    inner.innerHTML=el.innerHTML;
+    inner.style.position='absolute';
+    inner.style.boxSizing='border-box';
+    inner.style.width=el.style.width;
+    inner.style.paddingLeft=el.style.paddingLeft;
+    inner.style.paddingRight=el.style.paddingRight;
+    inner.style.margin='0';
+  } else {
+    w.setAttribute('data-origin','1');
+  }
+  inner.style.left='0px';
+  inner.style.top=(-off)+'px';
+  w.appendChild(inner);
+  strip.appendChild(w);
+}
+// A block that cannot fit in the column's remaining space is sliced at line
+// boundaries instead of leaving a hole at the page bottom. Returns the column
+// and y where the next block should continue: below the last slice.
+function trySplit(el,col,y,cw,H){
+  if(el.querySelector('img,svg,canvas,video,hr,iframe,table'))return null;
+  var lh=lineH(el);if(!lh)return null;
+  var ch=el.offsetHeight,rem=H-y;
+  if(ch<=rem)return null;
+  var first=Math.floor(rem/lh)*lh;
+  if(first<lh*2)return null;
+  var off=0,c=col,top=y,lastSh=0;
+  while(off<ch){
+    var maxH=(off===0?rem:H);
+    var sh=Math.min(ch-off,Math.floor(maxH/lh)*lh);
+    if(sh<lh)sh=Math.min(ch-off,maxH);
+    addSlice(el,off,sh,c,top,cw);
+    off+=sh;lastSh=sh;
+    if(off<ch){c++;top=0;}
+  }
+  return [c,lastSh];
+}
 function layout(){
+  pinBox();
   var cw=colW(),H=pageH();
   if(H<50||cw<50){
     // A collapsed page box means every block would land in its own off-screen
@@ -135,6 +200,11 @@ function layout(){
   }
   strip.style.position='relative';
   strip.style.height=H+'px';
+  var j,oldSlices=strip.querySelectorAll('.folio-slice');
+  for(j=0;j<oldSlices.length;j++){
+    if(oldSlices[j].getAttribute('data-origin'))strip.appendChild(oldSlices[j].firstChild);
+    oldSlices[j].parentNode.removeChild(oldSlices[j]);
+  }
   if(!kids.length){
     var seed=[].slice.call(strip.children);
     for(var s=0;s<seed.length;s++)flatten(seed[s],kids,cw,H);
@@ -149,7 +219,11 @@ function layout(){
   }
   var col=0,y=0;
   for(i=0;i<kids.length;i++){
-    if(y>0&&y+hs[i]>H){col++;y=0;}
+    if(y>0&&y+hs[i]>H){
+      var after=trySplit(kids[i],col,y,cw,H);
+      if(after){col=after[0];y=after[1];continue;}
+      col++;y=0;
+    }
     kids[i].style.left=Math.round(col*cw)+'px';
     kids[i].style.top=Math.round(y)+'px';
     y+=hs[i];
@@ -163,7 +237,12 @@ function report(){
   var p=maxPage()>0?page/maxPage():0;
   document.title='folio-progress:'+p.toFixed(4)+':'+(page+1)+':'+total+':false';
 }
-function setScroll(){body.scrollLeft=page*vw();}
+function setScroll(animate){
+  strip.style.transition=animate?'transform .3s cubic-bezier(.3,.1,.2,1)':'none';
+  strip.style.transform='translateX('+(-(page*vw()))+'px)';
+}
+var settleT=null;
+function settle(){if(settleT)clearTimeout(settleT);settleT=setTimeout(function(){animating=false;settleT=null;report();},380);}
 // Both edges work identically: pushing past the page you are on emits a token from
 // the gesture itself. The forward hop used to ride on the progress report, which only
 // reached the host if a scroll event happened to follow — and scrolling past the last
@@ -179,42 +258,25 @@ function goTo(p,instant){
   if(p<0&&page<=0){edge('start');return;}
   if(p>maxPage()&&page>=maxPage()){edge('end');return;}
   p=Math.max(0,Math.min(maxPage(),p));
-  if(p===page){setScroll();report();return;}
+  if(p===page){setScroll(false);report();return;}
   if(animating)return;
-  var dir=p>page?1:-1;
   page=p;
   posFrac=maxPage()>0?page/maxPage():0;
-  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll();report();return;}
-  flip(dir);
-}
-var stage=document.getElementById('folio-stage');
-if(!stage){stage=document.createElement('div');stage.id='folio-stage';docEl.appendChild(stage);}
-function flip(dir){
+  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);report();return;}
   animating=true;
-  var sheet=document.createElement('div');sheet.className='folio-sheet';
-  sheet.style.transform='translateX('+(dir>0?104:-104)+'%)';
-  stage.appendChild(sheet);
-  var switched=false,done=false;
-  function mid(){if(switched)return;switched=true;setScroll();}
-  function finish(){if(done)return;done=true;sheet.parentNode&&sheet.parentNode.removeChild(sheet);animating=false;report();}
-  sheet.addEventListener('transitionend',finish);
-  setTimeout(finish,650);
-  requestAnimationFrame(function(){requestAnimationFrame(function(){
-    sheet.style.transform='translateX(0%)';
-    setTimeout(mid,180);
-    setTimeout(function(){sheet.style.transform='translateX('+(dir>0?-104:104)+'%)';},200);
-  });});
+  setScroll(true);
+  settle();
   report();
 }
 function relayout(){
   if(dirty)layout();
   page=Math.round(posFrac*maxPage());
-  setScroll();
+  setScroll(false);
   body.style.opacity='1';
   report();
 }
 window.__folioRelayout=function(){dirty=true;relayout();};
-window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll();body.style.opacity='1';report();};
+window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll(false);body.style.opacity='1';report();};
 // Target grammar: "h:<markId>[:<paragraph>[:<fraction>]]" lands on a painted
 // highlight, "p:<paragraph>" on the Nth paragraph. A missing mark must never
 // degrade to paragraph 0 — that reads as "the jump took me to the chapter top".
@@ -233,12 +295,12 @@ function folioTargetEl(t){
 }
 function folioLandEl(el){
   if(dirty)layout();
-  var x=el.getBoundingClientRect().left+(body.scrollLeft||0);
+  var x=el.getBoundingClientRect().left+page*vw();
   var col=Math.floor((x+8)/colW());
   var y=el.getBoundingClientRect().top;
   if(y<0||y>pageH())col+=Math.floor(Math.abs(y)/pageH())*(y<0?-1:1);
   var tt=Math.min(maxPage(),Math.floor(col/COLS));
-  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll();body.style.opacity='1';report();
+  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
 }
 window.__folioSeekTo=function(t){
   var parts=String(t).split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
@@ -250,6 +312,7 @@ window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 
 window.addEventListener('resize',function(){dirty=true;relayout();});
 window.addEventListener('load',function(){dirty=true;relayout();});
+document.addEventListener('visibilitychange',function(){dirty=true;relayout();});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});
 document.querySelectorAll('img').forEach(function(i){i.addEventListener('load',function(){dirty=true;relayout();});i.addEventListener('error',function(){dirty=true;relayout();});});
 window.addEventListener('wheel',function(e){
@@ -264,9 +327,10 @@ document.addEventListener('keydown',function(e){
   if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='ArrowDown'){e.preventDefault();userActed=true;goTo(page+1);}
   else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();userActed=true;goTo(page-1);}
 },true);
-var tX=0,tY=0,tT=0;
+var tX=0,tY=0,tT=0,lastTouchEnd=0;
 document.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY=t.clientY;tT=Date.now();},{passive:true});
 document.addEventListener('touchend',function(e){
+  lastTouchEnd=Date.now();
   if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
   var t=e.changedTouches[0];
   var dx=t.clientX-tX,dy=t.clientY-tY;
@@ -298,15 +362,20 @@ document.addEventListener('mouseup',function(e){
   handleTap(e.clientX,e.clientY,0,0);
 });
 try{
+$emptyHideJs
 layout();
+console.log('folio-geom:H='+pageH()+' vw='+vw()+' cols='+totalCols+' kids='+kids.length+' stripW='+strip.style.width+' stripH='+strip.style.height+' bodyH='+body.clientHeight+' innerH='+window.innerHeight+' op='+getComputedStyle(body).opacity);
 $selectionWatchJs
 page=Math.round(posFrac*maxPage());
-setScroll();
+setScroll(false);
 body.style.opacity='1';
 document.title='folio-engdiag:ok:'+pageH()+':'+vw()+':'+totalCols+':'+kids.length+':'+(++nonce);
 setTimeout(function(){dirty=true;relayout();},250);
 setTimeout(function(){dirty=true;relayout();},700);
-setTimeout(function(){dirty=true;relayout();},1500);
+setTimeout(function(){dirty=true;relayout();var r=strip.getBoundingClientRect();var k=kids&&kids.length?kids[0].getBoundingClientRect():null;var k2=kids&&kids.length>1?kids[1].getBoundingClientRect():null;console.log('folio-geom2:page='+page+' tx='+strip.style.transform+' strip='+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+' kid0='+(k?Math.round(k.left)+','+Math.round(k.top)+','+Math.round(k.width)+','+Math.round(k.height):'none')+' kid1='+(k2?Math.round(k2.left)+','+Math.round(k2.top)+','+Math.round(k2.width)+','+Math.round(k2.height):'none')+' vv='+(window.visualViewport?window.visualViewport.scale.toFixed(2)+'/'+window.visualViewport.offsetTop:'na'));
+if(String(navigator.userAgent).indexOf('Android')>=0){
+  console.log('folio-exp:android');
+}},1500);
 report();
 }catch(e){
 body.style.opacity='1';

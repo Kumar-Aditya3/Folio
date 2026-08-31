@@ -174,6 +174,8 @@ class SyncEngineTest {
 
         override fun fetchPositions(): List<FsReadingPosition> = positions.toList()
 
+        override fun fetchPositionsForBook(bookId: String): List<FsReadingPosition> = positions.filter { it.bookId == bookId }
+
         override fun fetchHighlights(): List<FsHighlight> = highlights.toList()
 
         override fun fetchNotes(): List<FsNote> = notes.toList()

@@ -137,6 +137,10 @@ class ReaderViewModel(
         currentBookId = bookId
         closeStarted = false
         _settings.value = initialSettings
+        // Per-book isolation: start from a clean overlay so nothing from the
+        // previously opened book leaks into this one; this book's stored
+        // overlay (if any) is layered back on below.
+        _bookSettings.value = null
 
         viewModelScope.launch {
             // Load settings + book
@@ -246,13 +250,16 @@ class ReaderViewModel(
                 noteRepository.getNotesForBook(bookId).collect { _notes.value = it }
             }
 
-            // Book-specific overrides
-            settingsRepository.getBookSettings(bookId)?.let { _bookSettings.value = it }
-
-            // Focus mode is distraction-free: open with the chrome hidden.
-            val eff = effective()
-            if (eff.layoutMode == com.folio.reader.settings.LayoutMode.FOCUS) {
-                _showControls.value = false
+            // This book's own settings. A book that doesn't have any yet gets the
+            // current global defaults snapshotted onto it, so from then on it owns
+            // its settings and later changes to the defaults don't leak in.
+            val stored = runCatching { settingsRepository.getBookSettings(bookId) }.getOrNull()
+            if (stored != null) {
+                _bookSettings.value = stored
+            } else {
+                val snapshot = _settings.value.toBookSettings()
+                _bookSettings.value = snapshot
+                runCatching { settingsRepository.saveBookSettings(bookId, snapshot) }
             }
 
             // Content of the initial chapter
@@ -685,124 +692,26 @@ class ReaderViewModel(
         }
     }
 
-    /**
-     * Where in-reader setting changes land: only this book (default) or every book.
-     * Book scope persists through [SettingsRepository.saveBookSettings], which never
-     * raises a sync event — per-book looks stay on this device by design.
-     */
-    private val _settingsScopeBook = MutableStateFlow(true)
-    val settingsScopeBook: Flow<Boolean> = _settingsScopeBook
-
-    fun setSettingsScopeBook(book: Boolean) {
-        _settingsScopeBook.value = book
-    }
-
-    /** Global settings with this book's overrides layered on — what the reader paints. */
+    /** This book's own settings — what the reader paints. */
     fun effective(): ReaderSettings =
         _bookSettings.value?.toReaderSettings(_settings.value) ?: _settings.value
 
-    /** Settings shared by every book — what a host may cache or show in the app settings screen. */
+    /** Global defaults: applied to books as they join the library; edited from the app's Settings screen. */
     fun global(): ReaderSettings = _settings.value
 
+    /**
+     * In-reader setting changes belong to this book alone. The book owns a full
+     * snapshot of its settings (seeded from the global defaults when it joined
+     * the library), so a change here rewrites that snapshot and never touches
+     * the defaults or any other book.
+     */
     fun updateSettings(newSettings: ReaderSettings) {
         val eff = effective()
-        val prevBook = _bookSettings.value ?: BookReaderSettings()
-        if (_settingsScopeBook.value && currentBookId != null) {
-            val next = prevBook.withChangedFieldsFrom(eff, newSettings)
-            if (next != prevBook) updateBookSettings(next)
-        } else {
-            val cleared = prevBook.withChangedFieldsCleared(eff, newSettings)
-            if (cleared != prevBook) {
-                _bookSettings.value = cleared
-                currentBookId?.let { id ->
-                    viewModelScope.launch { runCatching { settingsRepository.saveBookSettings(id, cleared) } }
-                }
-            }
-            val nextGlobal = _settings.value.withChangedFieldsFrom(eff, newSettings)
-            if (nextGlobal != _settings.value) {
-                _settings.value = nextGlobal
-                viewModelScope.launch { runCatching { settingsRepository.saveGlobalSettings(nextGlobal) } }
-            }
-        }
-        // Focus means distraction-free now, not next time the book is opened.
-        if (effective().layoutMode == com.folio.reader.settings.LayoutMode.FOCUS) {
-            _showControls.value = false
-        }
-    }
-
-    /** Keeps the previous value for every field the UI did not actually change. */
-    private fun ReaderSettings.withChangedFieldsFrom(eff: ReaderSettings, u: ReaderSettings): ReaderSettings = copy(
-        fontFamily = if (u.fontFamily != eff.fontFamily) u.fontFamily else fontFamily,
-        fontSize = if (u.fontSize != eff.fontSize) u.fontSize else fontSize,
-        fontWeight = if (u.fontWeight != eff.fontWeight) u.fontWeight else fontWeight,
-        lineHeight = if (u.lineHeight != eff.lineHeight) u.lineHeight else lineHeight,
-        letterSpacing = if (u.letterSpacing != eff.letterSpacing) u.letterSpacing else letterSpacing,
-        wordSpacing = if (u.wordSpacing != eff.wordSpacing) u.wordSpacing else wordSpacing,
-        paragraphSpacing = if (u.paragraphSpacing != eff.paragraphSpacing) u.paragraphSpacing else paragraphSpacing,
-        margins = if (u.margins != eff.margins) u.margins else margins,
-        textWidth = if (u.textWidth != eff.textWidth) u.textWidth else textWidth,
-        alignment = if (u.alignment != eff.alignment) u.alignment else alignment,
-        hyphenation = if (u.hyphenation != eff.hyphenation) u.hyphenation else hyphenation,
-        themeId = if (u.themeId != eff.themeId) u.themeId else themeId,
-        layoutMode = if (u.layoutMode != eff.layoutMode) u.layoutMode else layoutMode,
-        formattingMode = if (u.formattingMode != eff.formattingMode) u.formattingMode else formattingMode,
-        showChapterTitle = if (u.showChapterTitle != eff.showChapterTitle) u.showChapterTitle else showChapterTitle,
-        showProgress = if (u.showProgress != eff.showProgress) u.showProgress else showProgress,
-        showClock = if (u.showClock != eff.showClock) u.showClock else showClock,
-        highlightColorIndex = if (u.highlightColorIndex != eff.highlightColorIndex) u.highlightColorIndex else highlightColorIndex,
-        customTheme = if (u.customTheme != eff.customTheme) u.customTheme else customTheme,
-    )
-
-    /** Layers the changed fields in as this book's overrides. */
-    private fun BookReaderSettings.withChangedFieldsFrom(eff: ReaderSettings, u: ReaderSettings): BookReaderSettings = copy(
-        fontFamily = if (u.fontFamily != eff.fontFamily) u.fontFamily else fontFamily,
-        fontSize = if (u.fontSize != eff.fontSize) u.fontSize else fontSize,
-        fontWeight = if (u.fontWeight != eff.fontWeight) u.fontWeight else fontWeight,
-        lineHeight = if (u.lineHeight != eff.lineHeight) u.lineHeight else lineHeight,
-        letterSpacing = if (u.letterSpacing != eff.letterSpacing) u.letterSpacing else letterSpacing,
-        wordSpacing = if (u.wordSpacing != eff.wordSpacing) u.wordSpacing else wordSpacing,
-        paragraphSpacing = if (u.paragraphSpacing != eff.paragraphSpacing) u.paragraphSpacing else paragraphSpacing,
-        margins = if (u.margins != eff.margins) u.margins else margins,
-        textWidth = if (u.textWidth != eff.textWidth) u.textWidth else textWidth,
-        alignment = if (u.alignment != eff.alignment) u.alignment else alignment,
-        hyphenation = if (u.hyphenation != eff.hyphenation) u.hyphenation else hyphenation,
-        themeId = if (u.themeId != eff.themeId) u.themeId else themeId,
-        layoutMode = if (u.layoutMode != eff.layoutMode) u.layoutMode else layoutMode,
-        formattingMode = if (u.formattingMode != eff.formattingMode) u.formattingMode else formattingMode,
-        showChapterTitle = if (u.showChapterTitle != eff.showChapterTitle) u.showChapterTitle else showChapterTitle,
-        showProgress = if (u.showProgress != eff.showProgress) u.showProgress else showProgress,
-        showClock = if (u.showClock != eff.showClock) u.showClock else showClock,
-        highlightColorIndex = if (u.highlightColorIndex != eff.highlightColorIndex) u.highlightColorIndex else highlightColorIndex,
-        customTheme = if (u.customTheme != eff.customTheme) u.customTheme else customTheme,
-    )
-
-    /** A global-scoped change supersedes the book's override for exactly that field. */
-    private fun BookReaderSettings.withChangedFieldsCleared(eff: ReaderSettings, u: ReaderSettings): BookReaderSettings = copy(
-        fontFamily = if (u.fontFamily != eff.fontFamily) null else fontFamily,
-        fontSize = if (u.fontSize != eff.fontSize) null else fontSize,
-        fontWeight = if (u.fontWeight != eff.fontWeight) null else fontWeight,
-        lineHeight = if (u.lineHeight != eff.lineHeight) null else lineHeight,
-        letterSpacing = if (u.letterSpacing != eff.letterSpacing) null else letterSpacing,
-        wordSpacing = if (u.wordSpacing != eff.wordSpacing) null else wordSpacing,
-        paragraphSpacing = if (u.paragraphSpacing != eff.paragraphSpacing) null else paragraphSpacing,
-        margins = if (u.margins != eff.margins) null else margins,
-        textWidth = if (u.textWidth != eff.textWidth) null else textWidth,
-        alignment = if (u.alignment != eff.alignment) null else alignment,
-        hyphenation = if (u.hyphenation != eff.hyphenation) null else hyphenation,
-        themeId = if (u.themeId != eff.themeId) null else themeId,
-        layoutMode = if (u.layoutMode != eff.layoutMode) null else layoutMode,
-        formattingMode = if (u.formattingMode != eff.formattingMode) null else formattingMode,
-        showChapterTitle = if (u.showChapterTitle != eff.showChapterTitle) null else showChapterTitle,
-        showProgress = if (u.showProgress != eff.showProgress) null else showProgress,
-        showClock = if (u.showClock != eff.showClock) null else showClock,
-        highlightColorIndex = if (u.highlightColorIndex != eff.highlightColorIndex) null else highlightColorIndex,
-        customTheme = if (u.customTheme != eff.customTheme) null else customTheme,
-    )
-
-    fun updateBookSettings(newSettings: BookReaderSettings) {
-        _bookSettings.value = newSettings
-        currentBookId?.let { bookId ->
-            viewModelScope.launch { runCatching { settingsRepository.saveBookSettings(bookId, newSettings) } }
+        if (newSettings == eff) return
+        val snapshot = newSettings.toBookSettings()
+        _bookSettings.value = snapshot
+        currentBookId?.let { id ->
+            viewModelScope.launch { runCatching { settingsRepository.saveBookSettings(id, snapshot) } }
         }
     }
 

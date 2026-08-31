@@ -89,6 +89,7 @@ fun SearchScreen(
     var results by remember { mutableStateOf<List<BookHit>>(emptyList()) }
     var annotationResults by remember { mutableStateOf<List<AnnotationHit>>(emptyList()) }
     var titleMatches by remember { mutableStateOf<List<Book>>(emptyList()) }
+    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     /** Renders FTS5 snippets: <<term>> becomes bold + accent instead of raw markers. */
@@ -116,13 +117,17 @@ fun SearchScreen(
 
     fun runSearch(q: String, activeScope: SearchScope) {
         query = q
+        searchJob?.cancel()
         if (q.isBlank()) {
             results = emptyList()
             titleMatches = emptyList()
             annotationResults = emptyList()
             return
         }
-        coroutineScope.launch {
+        searchJob = coroutineScope.launch {
+            // Debounce: a search fans out across every book, so it only runs
+            // once typing pauses instead of on every keystroke.
+            kotlinx.coroutines.delay(250)
             when (activeScope) {
                 SearchScope.TITLES -> {
                     titleMatches = books.filter {

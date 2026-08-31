@@ -34,13 +34,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Download
@@ -307,44 +307,17 @@ fun MangaLibraryScreen(
         } else if (visible.isEmpty() && !isSelectionMode) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (searchActive && query.isNotBlank()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = FolioTheme.colors.onSurfaceVariant,
-                            modifier = Modifier.size(40.dp),
-                        )
-                        Spacer(Modifier.height(FolioTokens.space2))
-                        Text(
-                            "No matches in your library",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = FolioTheme.colors.onSurface,
-                        )
-                    }
+                    com.folio.reader.ui.components.EmptyState(
+                        icon = Icons.Filled.Search,
+                        headline = "No matches in your library"
+                    )
                 } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Filled.MenuBook,
-                        contentDescription = null,
-                        tint = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.size(48.dp),
+                    com.folio.reader.ui.components.EmptyState(
+                        icon = Icons.Filled.MenuBook,
+                        headline = "Your manga library is empty",
+                        body = "Browse sources or import CBZ files to get started.",
+                        action = { Button(onClick = onOpenBrowse) { Text("Browse") } }
                     )
-                    Spacer(Modifier.height(FolioTokens.space2))
-                    Text(
-                        "Your manga library is empty",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = FolioTheme.colors.onSurface,
-                    )
-                    Spacer(Modifier.height(FolioTokens.space1))
-                    Text(
-                        "Browse sources or import CBZ files to get started.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(FolioTokens.space3))
-                    Button(onClick = onOpenBrowse) { Text("Browse") }
-                }
                 }
             }
         } else if (viewMode == MangaViewMode.LIST || viewMode == MangaViewMode.COMPACT) {
@@ -531,7 +504,7 @@ private fun MangaSearchHeader(
                 }
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Close search")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -612,13 +585,10 @@ private fun SourceSearchResults(
         }
         if (!preparing && finished == globalResults.size && totalItems == 0) {
             item {
-                Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No results across your sources.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                    )
-                }
+                com.folio.reader.ui.components.EmptyState(
+                    icon = Icons.Filled.Search,
+                    headline = "No results across your sources"
+                )
             }
         }
     }
@@ -781,7 +751,7 @@ private fun MangaGridItem(
                     )
                     DropdownMenuItem(
                         text = { Text("Mark all as read") },
-                        leadingIcon = { Icon(Icons.Filled.Done, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
                         onClick = { menuOpen = false; onMarkRead(true) },
                     )
                     DropdownMenuItem(
@@ -975,7 +945,7 @@ private fun MangaRowOptions(
             )
             DropdownMenuItem(
                 text = { Text("Mark all as read") },
-                leadingIcon = { Icon(Icons.Filled.Done, contentDescription = null) },
+                leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
                 onClick = { open = false; onMarkRead(true) },
             )
             DropdownMenuItem(
@@ -1017,7 +987,7 @@ fun MangaBrowseScreen(
         FolioTopBar(
             title = "Browse",
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
                 IconButton(onClick = { viewModel.toggleSearch() }) {
@@ -1453,7 +1423,7 @@ fun SourceBrowseScreen(
         FolioTopBar(
             title = viewModel.source.name,
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
                 IconButton(onClick = { searchActive = !searchActive }) {
@@ -1824,7 +1794,7 @@ fun MangaDetailScreen(
 
     val m = manga
     if (m == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
         return
     }
 
@@ -1844,7 +1814,7 @@ fun MangaDetailScreen(
                         Icon(Icons.Filled.SelectAll, contentDescription = "Select all")
                     }
                     IconButton(onClick = { viewModel.bulkMarkRead(true) }) {
-                        Icon(Icons.Filled.Done, contentDescription = "Mark read")
+                        Icon(Icons.Filled.CheckCircle, contentDescription = "Mark read")
                     }
                     IconButton(onClick = { viewModel.bulkMarkRead(false) }) {
                         Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
@@ -1865,7 +1835,7 @@ fun MangaDetailScreen(
             // title just repeats it.
             title = "",
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
                 IconButton(onClick = {
@@ -1920,7 +1890,7 @@ fun MangaDetailScreen(
                     DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("Mark all as read") },
-                            leadingIcon = { Icon(Icons.Filled.Done, contentDescription = null) },
+                            leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
                             onClick = { moreOpen = false; viewModel.markAllRead(true) },
                         )
                         DropdownMenuItem(
@@ -2292,7 +2262,7 @@ fun ExtensionsScreen(
         FolioTopBar(
             title = "Extensions",
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
                 IconButton(onClick = { viewModel.refreshIndex() }) {
@@ -2584,7 +2554,7 @@ fun DownloadsScreen(
         FolioTopBar(
             title = "Downloads",
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
                 IconButton(onClick = { viewModel.clearFinished() }) {

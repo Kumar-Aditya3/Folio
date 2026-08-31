@@ -82,6 +82,7 @@ class AdoptCloudProgressTest {
         override fun upsertRevisitItem(item: FsRevisitItem) {}
         override fun fetchBooks(): List<FsBook> = books.toList()
         override fun fetchPositions(): List<FsReadingPosition> = positions.toList()
+        override fun fetchPositionsForBook(bookId: String): List<FsReadingPosition> = positions.filter { it.bookId == bookId }
         override fun fetchHighlights(): List<FsHighlight> = emptyList()
         override fun fetchNotes(): List<FsNote> = emptyList()
         override fun fetchBookmarks(): List<FsBookmark> = emptyList()

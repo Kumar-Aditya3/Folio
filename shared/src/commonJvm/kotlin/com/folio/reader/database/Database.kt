@@ -136,6 +136,8 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_series ON books(series_id)")
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_hash ON books(epub_hash)")
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_isbn ON books(isbn)")
+            // Backfill: progress implies Reading (see updateNormalizedProgress).
+            conn.createStatementExec("UPDATE books SET status = 1 WHERE status = 0 AND normalized_progress > 0")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS reading_positions (
                     book_id TEXT NOT NULL,
@@ -665,9 +667,15 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     suspend fun updateNormalizedProgress(bookId: String, progress: Double): Unit = withContext(dispatcher) {
         writeMutex.withLock {
             val conn = driverDelegate.getConnection()
-            conn.prepareStatement("UPDATE books SET normalized_progress = ? WHERE id = ?").use { stmt ->
-                stmt.setDouble(1, progress.coerceIn(0.0, 1.0))
-                stmt.setString(2, bookId)
+            // Any measurable progress makes a book Reading by definition; only UNREAD
+            // is promoted so an explicit Paused/Finished choice is never overridden.
+            val p = progress.coerceIn(0.0, 1.0)
+            conn.prepareStatement(
+                "UPDATE books SET normalized_progress = ?, status = CASE WHEN status = 0 AND ? > 0 THEN 1 ELSE status END WHERE id = ?"
+            ).use { stmt ->
+                stmt.setDouble(1, p)
+                stmt.setDouble(2, p)
+                stmt.setString(3, bookId)
                 stmt.executeUpdate()
             }
         }

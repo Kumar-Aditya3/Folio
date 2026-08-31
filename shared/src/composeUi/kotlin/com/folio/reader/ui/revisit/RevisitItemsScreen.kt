@@ -17,10 +17,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Highlight
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -134,16 +136,16 @@ private data class TypeBadge(
 
 private fun RevisitType.toBadge(): TypeBadge = when (this) {
     RevisitType.HIGHLIGHT -> TypeBadge(
-        this, "Highlight", Icons.Filled.Create, Color(0xFFFFC107)
+        this, "Highlight", Icons.Filled.Highlight, Color(0xFFFFC107)
     )
     RevisitType.BOOKMARK -> TypeBadge(
-        this, "Bookmark", Icons.Filled.Star, Color(0xFF2196F3)
+        this, "Bookmark", Icons.Filled.Bookmark, Color(0xFF2196F3)
     )
     RevisitType.NOTE -> TypeBadge(
-        this, "Note", Icons.Filled.Star, Color(0xFF4CAF50)
+        this, "Note", Icons.Filled.Notes, Color(0xFF4CAF50)
     )
     RevisitType.CHAPTER -> TypeBadge(
-        this, "Chapter", Icons.Filled.Star, Color(0xFF9C27B0)
+        this, "Chapter", Icons.Filled.MenuBook, Color(0xFF9C27B0)
     )
 }
 
@@ -177,7 +179,7 @@ fun RevisitItemsScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -334,7 +336,7 @@ private fun RevisitCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            Icons.Filled.Star,
+                            Icons.Filled.Notes,
                             contentDescription = null,
                             tint = FolioTheme.colors.onSecondaryContainer,
                             modifier = Modifier.width(18.dp).height(18.dp)

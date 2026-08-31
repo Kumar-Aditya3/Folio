@@ -13,6 +13,11 @@ kotlin {
     }
 }
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
 dependencies {
     // compose.desktop.currentOs pulls the platform skiko natives
     // (skiko-windows-x64 runtime) that the catalog alias misses.

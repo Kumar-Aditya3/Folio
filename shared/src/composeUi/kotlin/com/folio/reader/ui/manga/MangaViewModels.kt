@@ -1230,10 +1230,17 @@ class MangaReaderViewModel(
         prefetchJob?.cancel()
         imagePrefetchJob?.cancel()
         openJob = scope.launch {
-            val savedName = settingsRepo.getRaw(readerModeKey(manga.id))
-                ?: settingsRepo.getRaw(KEY_READER_MODE)
-            mode.value = MangaReaderMode.entries.firstOrNull { it.name == savedName }
+            // The manga owns its reading mode; the first open snapshots the
+            // current default onto it so later default changes don't reach back.
+            val modeKey = readerModeKey(manga.id)
+            val savedName = settingsRepo.getRaw(modeKey)
+            val resolved = savedName?.let { name -> MangaReaderMode.entries.firstOrNull { it.name == name } }
+                ?: MangaReaderMode.entries.firstOrNull { it.name == settingsRepo.getRaw(KEY_READER_MODE) }
                 ?: MangaReaderMode.WEBTOON
+            mode.value = resolved
+            if (savedName == null) {
+                runCatching { settingsRepo.setRaw(modeKey, resolved.name) }
+            }
             loading.value = true
             try {
                 val allChapters = chapterRepo.getChapters(manga.id)

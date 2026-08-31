@@ -8,6 +8,7 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection
 import com.folio.reader.model.Series
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Instant
@@ -17,6 +18,21 @@ class LibraryViewModel(
     private val collectionRepository: CollectionRepository,
     private val seriesRepository: SeriesRepository
 ) {
+    /** Books bulk-selection; hoisted so system back can clear it instead of exiting. */
+    val selectedBookIds = MutableStateFlow<Set<String>>(emptySet())
+    val isSelectionMode = MutableStateFlow(false)
+
+    fun toggleSelection(bookId: String) {
+        val next = if (bookId in selectedBookIds.value) selectedBookIds.value - bookId else selectedBookIds.value + bookId
+        selectedBookIds.value = next
+        isSelectionMode.value = next.isNotEmpty()
+    }
+
+    fun clearSelection() {
+        selectedBookIds.value = emptySet()
+        isSelectionMode.value = false
+    }
+
     enum class ViewMode {
         GRID, LIST, COMPACT
     }
