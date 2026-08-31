@@ -129,33 +129,33 @@ private val ArcticFolioColors = LightFolioColors.copy(
 )
 
 private val SakuraFolioColors = LightFolioColors.copy(
-    background = Color(0xFFFBF5F6),
-    onBackground = Color(0xFF2E2024),
-    surface = Color(0xFFFFF9FA),
-    onSurface = Color(0xFF2E2024),
-    surfaceVariant = Color(0xFFF5E8EB),
-    onSurfaceVariant = Color(0xFF705A60),
-    surfaceContainerHighest = Color(0xFFECDDE1),
-    outline = Color(0xFFDBCACF),
-    outlineVariant = Color(0xFFECDDE1),
-    inverseSurface = Color(0xFF2E2024),
-    inverseOnSurface = Color(0xFFFBF5F6),
-    statusBar = Color(0xFF24181C)
+    background = Color(0xFFFAE8EC),
+    onBackground = Color(0xFF3A2028),
+    surface = Color(0xFFFFF4F7),
+    onSurface = Color(0xFF3A2028),
+    surfaceVariant = Color(0xFFF4D8DF),
+    onSurfaceVariant = Color(0xFF8A5262),
+    surfaceContainerHighest = Color(0xFFECC3CE),
+    outline = Color(0xFFD9A3B1),
+    outlineVariant = Color(0xFFECC3CE),
+    inverseSurface = Color(0xFF3A2028),
+    inverseOnSurface = Color(0xFFFAE8EC),
+    statusBar = Color(0xFF2A141B)
 )
 
 private val HoneyFolioColors = LightFolioColors.copy(
-    background = Color(0xFFFAF6EE),
-    onBackground = Color(0xFF2C2517),
-    surface = Color(0xFFFFFCF5),
-    onSurface = Color(0xFF2C2517),
-    surfaceVariant = Color(0xFFF2EADB),
-    onSurfaceVariant = Color(0xFF6D6049),
-    surfaceContainerHighest = Color(0xFFE8DDC9),
-    outline = Color(0xFFD9CCB4),
-    outlineVariant = Color(0xFFE8DDC9),
-    inverseSurface = Color(0xFF2C2517),
-    inverseOnSurface = Color(0xFFFAF6EE),
-    statusBar = Color(0xFF221C0F)
+    background = Color(0xFFFAEFD8),
+    onBackground = Color(0xFF3A2E14),
+    surface = Color(0xFFFFF9E9),
+    onSurface = Color(0xFF3A2E14),
+    surfaceVariant = Color(0xFFF3E3C0),
+    onSurfaceVariant = Color(0xFF7D6837),
+    surfaceContainerHighest = Color(0xFFEBD6A4),
+    outline = Color(0xFFD6BC7F),
+    outlineVariant = Color(0xFFEBD6A4),
+    inverseSurface = Color(0xFF3A2E14),
+    inverseOnSurface = Color(0xFFFAEFD8),
+    statusBar = Color(0xFF2A2008)
 )
 
 private val DuskFolioColors = DarkFolioColors.copy(

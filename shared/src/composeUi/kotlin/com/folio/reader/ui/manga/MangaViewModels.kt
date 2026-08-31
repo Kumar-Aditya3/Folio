@@ -1186,39 +1186,45 @@ class MangaReaderViewModel(
                 finalizedChapters.clear()
                 isAtEndOfNav = false
 
-                // Position-aware: the chapter being opened loads first and renders as soon
-                // as its pages arrive; the neighbours load concurrently and splice in when
-                // ready instead of holding the current chapter hostage.
+                // The current chapter and the one before it are assembled BEFORE the first
+                // publish so the webtoon layout is final when it first renders — splicing the
+                // previous chapter in afterwards would shift indices under the seeded scroll
+                // position and bounce the reader back a chapter. The NEXT chapter appends
+                // asynchronously (appending never shifts existing indices).
                 val prevCh = navList.getOrNull(navIdx - 1)
                 val nextCh = navList.getOrNull(navIdx + 1)
-                val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
                 val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
-                val currentSlot = pageListGate.withPermit { fetchSlotCached(navList[navIdx]) }
+
+                val currentDeferred = async { pageListGate.withPermit { fetchSlotCached(navList[navIdx]) } }
+                val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
+                val currentSlot = currentDeferred.await()
                 if (currentSlot == null) {
                     error.value = "Failed to load pages"
                     loading.value = false
                     return@launch
                 }
+                val prevSlot = prevDeferred?.await()
 
-                withSlots { add(currentSlot.copy(startIndex = 0)) }
-                lastSlotIdx = 0
-                // Restore the saved page BEFORE publishing so the first composition
-                // already points at the resume position (no page-0 flash, no clobber save).
-                currentIndex.value =
+                var offset = 0
+                if (prevSlot != null) {
+                    withSlots { add(prevSlot.copy(startIndex = 0)) }
+                    offset = prevSlot.pages.size
+                    lastSlotIdx = 1
+                } else {
+                    lastSlotIdx = 0
+                }
+                withSlots { add(currentSlot.copy(startIndex = offset)) }
+                // Restore the saved page (offset by the prepended chapter) BEFORE publishing
+                // so the first composition already points at the resume position.
+                val resumeLocal =
                     if (chapter.lastPageRead in 1 until currentSlot.pages.size) chapter.lastPageRead else 0
+                currentIndex.value = offset + resumeLocal
                 publishPages()
                 updateActiveChapter()
                 historyRepo.record(manga.id, chapter.id)
                 loading.value = false
                 scheduleImagePrefetch()
 
-                if (prevCh != null) {
-                    launch {
-                        val slot = prevDeferred?.await() ?: return@launch
-                        prependSlot(slot)
-                        scheduleImagePrefetch()
-                    }
-                }
                 launch {
                     val slot = nextDeferred?.await()
                     if (slot != null) {
