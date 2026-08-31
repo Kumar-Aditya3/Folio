@@ -142,6 +142,8 @@ fun ReaderScreen(
     onSetHighlightNote: (highlightId: String, content: String) -> Unit = { _, _ -> },
     onScrollProgress: (Float) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit = {},
+    settingsScopeBook: Boolean = true,
+    onSettingsScopeChange: (Boolean) -> Unit = {},
     onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
     onRetryChapter: (() -> Unit)? = null,
     onLinkClick: ((String) -> Unit)? = null,
@@ -251,9 +253,10 @@ fun ReaderScreen(
             fontFamily = settings.fontFamily,
             fontOptions = quickFontNames,
             themeId = settings.themeId,
-            themes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black", "synthwave", "bubblegum", "acid", "lava", "sherbet").map { id ->
-                val t = com.folio.reader.settings.Theme.getPreset(id)
-                Triple(id, t.name, t.background.argbHex())
+            layoutMode = settings.layoutMode.name,
+            scopeBook = settingsScopeBook,
+            themes = com.folio.reader.settings.Theme.PICKER.map { t ->
+                Triple(t.id, t.name, t.background.argbHex())
             },
             highlightColors = readerThemePreset.highlightColors.map { it.argbHex() },
             highlightIndex = settings.highlightColorIndex,
@@ -394,6 +397,16 @@ fun ReaderScreen(
                 val idx = a.substringAfterLast(':').toIntOrNull() ?: return
                 onSettingsChange(settings.copy(highlightColorIndex = idx))
             }
+
+            a.startsWith("set:layout:") -> {
+                val mode = a.substringAfterLast(':')
+                val layout = com.folio.reader.settings.LayoutMode.entries.firstOrNull { it.name == mode }
+                if (layout != null) onSettingsChange(settings.copy(layoutMode = layout))
+            }
+
+            a == "scope:book" -> onSettingsScopeChange(true)
+
+            a == "scope:all" -> onSettingsScopeChange(false)
 
             a.startsWith("note:") -> {
                 val id = a.substringAfterLast(':')
@@ -625,7 +638,7 @@ fun ReaderScreen(
                             Icon(
                                 imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                                 contentDescription = "Bookmark",
-                                tint = if (isBookmarked) FolioTheme.colors.primary else FolioTheme.colors.onSurface
+                                tint = if (isBookmarked) Color(readerThemePreset.bookmark) else FolioTheme.colors.onSurface
                             )
                         }
                         IconButton(onClick = {
@@ -656,7 +669,7 @@ fun ReaderScreen(
             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it }
         ) {
             BottomProgressBar(
-                chapterTitle = currentChapter?.title ?: "",
+                chapterTitle = if (settings.showChapterTitle) currentChapter?.title ?: "" else "",
                 currentPage = currentPage,
                 totalPages = totalPages,
                 onSeek = { f ->
@@ -746,7 +759,7 @@ fun ReaderScreen(
                         Icon(
                             imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                             contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark this spot",
-                            tint = if (isBookmarked) Color(0xFFFBC02D) else FolioTheme.colors.onSurface
+                            tint = if (isBookmarked) Color(readerThemePreset.bookmark) else FolioTheme.colors.onSurface
                         )
                     }
                 }
@@ -828,6 +841,8 @@ fun ReaderScreen(
                 ReaderSettingsPanel(
                     settings = settings,
                     onSettingsChange = onSettingsChange,
+                    scopeBook = settingsScopeBook,
+                    onScopeChange = onSettingsScopeChange,
                     onDismiss = { showReaderPanel = false },
                     onOpenFullSettings = {
                         showReaderPanel = false
@@ -1156,6 +1171,8 @@ private const val MAX_FONT_SIZE_SP = 24f
 fun ReaderSettingsPanel(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
+    scopeBook: Boolean,
+    onScopeChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onOpenFullSettings: () -> Unit
 ) {
@@ -1169,7 +1186,7 @@ fun ReaderSettingsPanel(
     val availableFonts = (fonts + settings.customFonts.map { it.name }).distinct()
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
-    val quickThemes = listOf("paper", "white", "sepia", "arctic", "matcha", "moss", "gray", "dark", "dusk", "espresso", "ember", "oled_black", "synthwave", "bubblegum", "acid", "lava", "sherbet")
+    val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
     val panelShape = RoundedCornerShape(topStart = 20.dp)
 
     Column(
@@ -1212,6 +1229,21 @@ fun ReaderSettingsPanel(
                 ) { Text("A+", style = FolioTheme.typography.titleMedium) }
             }
         }
+
+        QuickChoiceRow(
+            label = "Layout",
+            options = listOf(
+                "CONTINUOUS" to "Scroll",
+                "PAGINATED" to "Page",
+                "TWO_COLUMN" to "Spread",
+                "FOCUS" to "Focus"
+            ),
+            selected = settings.layoutMode.name,
+            onSelect = { name ->
+                val mode = com.folio.reader.settings.LayoutMode.entries.firstOrNull { it.name == name }
+                if (mode != null) onSettingsChange(settings.copy(layoutMode = mode))
+            }
+        )
 
         // Font family dropdown
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1398,6 +1430,13 @@ fun ReaderSettingsPanel(
                 )
             }
 
+            QuickChoiceRow(
+                label = "Apply to",
+                options = listOf("book" to "This book", "all" to "All books"),
+                selected = if (scopeBook) "book" else "all",
+                onSelect = { onScopeChange(it == "book") }
+            )
+
             // All settings — frosted glass pill
             Row(
                 modifier = Modifier
@@ -1416,6 +1455,44 @@ fun ReaderSettingsPanel(
             }
         }
     }
+
+/** A label with equal-width tappable options; the current one is accent-filled. */
+@Composable
+private fun QuickChoiceRow(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            options.forEach { (value, title) ->
+                val isSel = value == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (isSel) FolioTheme.colors.primary else FolioTheme.colors.surfaceVariant
+                        )
+                        .clickable { onSelect(value) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = title,
+                        style = FolioTheme.typography.labelMedium,
+                        color = if (isSel) FolioTheme.colors.onPrimary else FolioTheme.colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * A miniature "page" rendered in the theme's own colors — heading, body lines
@@ -1508,13 +1585,29 @@ fun BottomProgressBar(
                 color = FolioTheme.colors.primary
             )
         }
-        Text(
-            text = "$currentPage / $totalPages",
-            style = FolioTheme.typography.labelMedium,
-            color = FolioTheme.colors.primary,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.End
-        )
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (chapterTitle.isNotBlank()) {
+                Text(
+                    text = chapterTitle,
+                    style = FolioTheme.typography.labelMedium,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+            Text(
+                text = "$currentPage / $totalPages",
+                style = FolioTheme.typography.labelMedium,
+                color = FolioTheme.colors.primary
+            )
+        }
     }
 }
 

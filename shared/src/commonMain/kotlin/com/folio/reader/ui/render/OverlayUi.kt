@@ -135,6 +135,7 @@ object OverlayUi {
     fun settings(
         fontSize: Float, lineHeight: Float, margin: Float, fontFamily: String,
         fontOptions: List<String>, themeId: String, themes: List<Triple<String, String, String>>, // id, name, bg
+        layoutMode: String, scopeBook: Boolean,
         highlightColors: List<String>, highlightIndex: Int,
         c: OverlayColors
     ): String {
@@ -164,11 +165,31 @@ object OverlayUi {
                         "<button data-act='set:hlcolor:$idx' title='Highlight colour' style='all:unset;cursor:pointer;width:28px;height:28px;border-radius:8px;background:$hex;border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
                                 (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
                     }.joinToString("") + "</div>"
+        val segment = { label: String, act: String, options: List<Pair<String, String>>, selected: String ->
+            "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>$label</span></div>" +
+                    "<div style='display:flex;gap:6px;'>" +
+                    options.joinToString("") { (value, title) ->
+                        val sel = value == selected
+                        "<button data-act='$act:$value' style='all:unset;cursor:pointer;flex:1;box-sizing:border-box;text-align:center;padding:8px 4px;border-radius:9px;font-size:12.5px;" +
+                                "background:${if (sel) c.accent else "transparent"};color:${if (sel) "#fff" else c.fg};" +
+                                "border:1px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};${if (sel) "font-weight:600;" else ""}'>${esc(title)}</button>"
+                    } + "</div>"
+        }
+        val layoutRow = segment(
+            "Layout", "set:layout",
+            listOf("CONTINUOUS" to "Scroll", "PAGINATED" to "Page", "TWO_COLUMN" to "Spread", "FOCUS" to "Focus"),
+            layoutMode
+        )
+        val scopeRow = segment(
+            "Apply to", "scope",
+            listOf("book" to "This book", "all" to "All books"),
+            if (scopeBook) "book" else "all"
+        )
         val body =
             slider("Text size", "size", 12.0, 26.0, 0.5, fontSize.toDouble(), "%.1f".format(fontSize)) +
                     slider("Line spacing", "lh", 1.0, 3.0, 0.1, lineHeight.toDouble(), "%.1f".format(lineHeight)) +
                     slider("Margins", "mg", 0.0, 64.0, 1.0, margin.toDouble(), "${margin.toInt()} px") +
-                    fontSel + themeRow + highlightRow +
+                    layoutRow + fontSel + themeRow + highlightRow + scopeRow +
                     "<button data-act='allsettings' style='$itemCss text-align:center;background:${c.accent};color:#fff;font-weight:600;margin-top:8px;border-radius:12px;padding:12px;'>All settings</button>"
         return shell("Reading settings", body, c, kind = "settings")
     }

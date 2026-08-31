@@ -704,6 +704,14 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         runCatching {
             conn.prepareStatement("DELETE FROM highlight_tags WHERE highlight_id NOT IN (SELECT id FROM highlights)").use { it.executeUpdate() }
         }
+        // Per-book reader overrides live in the settings KV table keyed by book id,
+        // so the books DELETE above would leave the row behind permanently.
+        runCatching {
+            conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->
+                stmt.setString(1, bookSettingsKey(bookId))
+                stmt.executeUpdate()
+            }
+        }
         }
     }
 
@@ -1051,6 +1059,9 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
 
     companion object {
         const val KEY_GLOBAL_SETTINGS = "global_reader_settings"
+
+        /** Settings KV row holding one book's local-only reader overrides. */
+        fun bookSettingsKey(bookId: String) = "book_reader_settings:$bookId"
     }
 }
 

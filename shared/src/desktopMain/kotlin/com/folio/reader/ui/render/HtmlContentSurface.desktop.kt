@@ -148,11 +148,7 @@ actual fun HtmlContentSurface(
         if (!hasLoadedOnce) preparing = true
         val s = settingsState
         val fraction = (positionState?.scrollOffset ?: 0.0).toFloat().coerceIn(0f, 1f)
-        val pagedCols = when (s.layoutMode) {
-            com.folio.reader.settings.LayoutMode.PAGINATED -> 1
-            com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
-            else -> 0
-        }
+        val pagedCols = PageEngine.colsFor(s.layoutMode)
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val styled = injectReaderCss(source, s)
@@ -385,6 +381,9 @@ private class JcefSession private constructor(
                         val v = t.removePrefix("folio-ovlscroll:").substringBefore(':').toIntOrNull()
                         if (v != null) lastOverlayScrollVal = v
                     }
+
+                    t.startsWith("folio-engdiag:") ->
+                        System.err.println("[FolioPage] ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
                 }
             }
         })
@@ -730,10 +729,8 @@ private fun fontStackFor(requested: String): String {
 }
 
 /**
- * Injects the reader stylesheet. Mirrors the Android surface's rules and adds the
- * pieces a desktop window needs: reading-mode layout (continuous / paginated /
- * two-column), a text-width cap, formatting-mode override strength, word spacing
- * and hyphenation.
+ * @font-face rules for fonts the user imported, pointed at their extracted file.
+ * The reader stylesheet itself is shared — see [ReaderCss].
  */
 private fun fontFaceCss(settings: ReaderSettings): String =
     settings.customFonts.mapNotNull { font ->
@@ -743,86 +740,19 @@ private fun fontFaceCss(settings: ReaderSettings): String =
                 "font-weight:${font.weight};font-style:normal;font-display:swap;}"
     }.joinToString("")
 
-private fun readerStyleCss(settings: ReaderSettings): String {
-    val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
-
-    fun Int.rgb(): String = toUInt().toString(16).padStart(8, '0').drop(2)
-
-    val align = when (settings.alignment) {
-        com.folio.reader.settings.TextAlignment.CENTER -> "center"
-        com.folio.reader.settings.TextAlignment.JUSTIFIED -> "justify"
-        else -> "left"
-    }
-    val paginated = settings.layoutMode == com.folio.reader.settings.LayoutMode.PAGINATED
-    val pagedCols = when (settings.layoutMode) {
-        com.folio.reader.settings.LayoutMode.PAGINATED -> 1
-        com.folio.reader.settings.LayoutMode.TWO_COLUMN -> 2
-        else -> 0
-    }
-
-    // Paged modes use the shared book engine: discrete viewport pages (or a
-    // two-page spread) turned with a leaf flip, never free scrolling.
-    val layoutCss = if (pagedCols > 0) {
-        PageEngine.css(pagedCols, settings.margins.top, settings.margins.bottom, "#${theme.background.rgb()}")
-    } else "body{opacity:0;transition:opacity .15s ease;}"
-
-    // Line-length cap for scrolling modes, mirroring the phone reader's readerWidth.
-    val widthCss = if (pagedCols == 0) {
-        when (settings.textWidth) {
-            com.folio.reader.settings.TextWidth.NARROW -> "body{max-width:560px;margin-left:auto;margin-right:auto;}"
-            com.folio.reader.settings.TextWidth.MEDIUM -> "body{max-width:720px;margin-left:auto;margin-right:auto;}"
-            com.folio.reader.settings.TextWidth.WIDE -> "body{max-width:960px;margin-left:auto;margin-right:auto;}"
-            com.folio.reader.settings.TextWidth.CUSTOM -> "body{max-width:1200px;margin-left:auto;margin-right:auto;}"
-            com.folio.reader.settings.TextWidth.FULL -> ""
-        }
-    } else ""
-
-    val original = settings.formattingMode == com.folio.reader.model.FormattingMode.ORIGINAL
-    val normalized = settings.formattingMode == com.folio.reader.model.FormattingMode.NORMALIZED
-
-    val themeBgCss = if (original) "" else
-        "body,body div,body section,body article,body figure{background-color:transparent !important;}"
-
-    val requested = settings.customFonts.firstOrNull { it.name == settings.fontFamily }?.familyName
-        ?: settings.fontFamily
-    val family = fontStackFor(requested)
-
-    val typographyCss = if (original) "" else
-        "font-family:$family !important;font-size:${settings.fontSize}px !important;" +
-                "font-weight:${settings.fontWeight} !important;line-height:${settings.lineHeight} !important;" +
-                "letter-spacing:${settings.letterSpacing}px !important;" +
-                (if (settings.wordSpacing != 0f) "word-spacing:${settings.wordSpacing}em !important;" else "")
-    val alignCss = when {
-        original -> ""
-        else -> "text-align:$align !important;"
-    }
-    val colorCss = if (original) "" else "color:#${theme.primaryText.rgb()} !important;"
-    val hyphenCss = if (!original && settings.hyphenation) "-webkit-hyphens:auto;hyphens:auto;" else ""
-    val normalizedExtra = if (normalized) {
-        "body p,body div,body h1,body h2,body h3,body h4,body h5,body h6,body li,body blockquote" +
-                "{text-align:$align !important;font-family:$family !important;}"
-    } else ""
-    val elementForceCss = if (original) "" else
-        "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;font-family:$family !important;}" +
-                "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}" +
-                "body,body p,body div,body li,body blockquote{text-indent:0 !important;}"
-
-    return "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
-            themeBgCss +
-            // Paged modes need zero horizontal body padding: columns must be
-            // exactly 100vw wide or the pager's per-page steps drift out of
-            // alignment. Gutters come from the engine's per-block margins.
-            "body{padding:${if (pagedCols > 0) "${settings.margins.top}px 0 ${settings.margins.bottom}px 0" else "${settings.margins.top}px ${settings.margins.right}px ${settings.margins.bottom}px ${settings.margins.left}px"} !important;" +
-            "$typographyCss$alignCss$colorCss$hyphenCss}" +
-            layoutCss +
-            widthCss.replace("margin-left:auto;margin-right:auto;", "margin-left:auto !important;margin-right:auto !important;") +
-            normalizedExtra +
-            elementForceCss +
-            "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()};}" +
-            HighlightPaint.css +
-            "img{max-width:100%;height:auto;break-inside:avoid;}" +
-            "a{color:inherit;text-decoration:none;}a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
-}
+/**
+ * The desktop sheet is the shared reader stylesheet; only the font stack (real
+ * installed and bundled faces) and the continuous-mode reveal belong here. The
+ * bridge sets `body.style.opacity` once the document is painted, and that inline
+ * style outranks the `opacity:0` rule below, so an in-place style swap mid-read
+ * never blanks the page.
+ */
+private fun readerStyleCss(settings: ReaderSettings): String = ReaderCss.styleSheet(
+    settings,
+    PageEngine.colsFor(settings.layoutMode),
+    fontStack = ::fontStackFor,
+    continuousCss = "body{opacity:0;transition:opacity .15s ease;}"
+)
 
 private fun injectReaderCss(html: String, settings: ReaderSettings): String {
     val safeHtml = com.folio.reader.epub.ChapterSanitizer.sanitize(html)

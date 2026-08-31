@@ -1037,6 +1037,7 @@ class MainActivity : ComponentActivity() {
         val loadingContent by viewModel.isLoadingContent.collectAsState(initial = true)
         val position by viewModel.position.collectAsState(initial = null)
         val settings by viewModel.effectiveSettings.collectAsState(initial = initialSettings)
+        val settingsScopeBook by viewModel.settingsScopeBook.collectAsState(initial = true)
         val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
         val highlights by viewModel.highlights.collectAsState(initial = emptyList())
         val notes by viewModel.notes.collectAsState(initial = emptyList())
@@ -1095,6 +1096,8 @@ class MainActivity : ComponentActivity() {
             onBookmarkClick = { viewModel.toggleBookmark() },
             onSettingsClick = { viewModel.closeBook { onSettingsClick() } },
             onSettingsChange = { updated -> viewModel.updateSettings(updated) },
+            settingsScopeBook = settingsScopeBook,
+            onSettingsScopeChange = { viewModel.setSettingsScopeBook(it) },
             onToggleControls = { viewModel.toggleControls() },
             onShowControls = { viewModel.showControlsFn() },
             onToggleToc = { viewModel.toggleToc() },
