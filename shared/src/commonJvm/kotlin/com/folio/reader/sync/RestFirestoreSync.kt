@@ -581,7 +581,13 @@ class RestFirestoreSync(
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
             if (code !in 200..299) {
-                throw IOException("HTTP $code from $method ${url.substringBefore('?')}: ${text.take(500)}")
+                val snippet = text.take(500)
+                if (code == 429 || snippet.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
+                    snippet.contains("quota exceeded", ignoreCase = true)
+                ) {
+                    throw QuotaExhaustedException("Quota exhausted: $snippet")
+                }
+                throw IOException("HTTP $code from $method ${url.substringBefore('?')}: $snippet")
             }
             return text.ifEmpty { "{}" }
         } finally {

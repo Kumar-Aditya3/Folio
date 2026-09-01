@@ -26,6 +26,7 @@ object PageEngine {
 
     /** Pages per screen for a layout mode; 0 = continuous scroll (engine off). Retired modes map onto their nearest living one. */
     fun colsFor(layoutMode: com.folio.reader.settings.LayoutMode): Int = when (layoutMode.normalized) {
+        com.folio.reader.settings.LayoutMode.SPREAD -> 2
         com.folio.reader.settings.LayoutMode.PAGINATED -> 1
         else -> 0
     }
@@ -34,9 +35,13 @@ object PageEngine {
     fun css(marginTop: Float, marginBottom: Float): String {
         // !important on geometry: publisher sheets set html/body heights that
         // collapse the page box, and the whole engine measures off clientHeight.
-        return "html{height:100%!important;overflow:hidden!important;overflow-anchor:none;}" +
+        // Widths get pinned for the same reason: the engine splits body.clientWidth
+        // into columns and the spread's centre rule sits at 50vw, so a publisher
+        // body{width|max-width|margin} would push the pages off-centre — reading
+        // as one page larger than the other.
+        return "html{height:100%!important;width:100%!important;margin:0!important;overflow:hidden!important;overflow-anchor:none;}" +
                 "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}" +
-                "body{height:100vh!important;overflow-x:hidden!important;overflow-y:hidden!important;position:relative;transition:opacity .15s ease;" +
+                "body{height:100vh!important;width:100%!important;max-width:none!important;min-width:0!important;margin:0!important;overflow-x:hidden!important;overflow-y:hidden!important;position:relative;left:0;transition:opacity .15s ease;" +
                 "padding:${marginTop.toInt()}px 0 ${marginBottom.toInt()}px 0 !important;}" +
                 "body img{max-width:100%;height:auto;}"
     }

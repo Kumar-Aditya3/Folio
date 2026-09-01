@@ -43,7 +43,9 @@ data class ReaderSettings(
     val syncPositions: Boolean = true,
     val syncAnnotations: Boolean = true,
     val syncSettings: Boolean = true,
-    val autoSyncInterval: Int = 15 // minutes
+    val autoSyncInterval: Int = 15, // minutes
+    /** Daily reading goal in minutes, shown as a ring on the Stats tab. */
+    val dailyGoalMinutes: Int = 60
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(
@@ -56,11 +58,8 @@ data class ReaderSettings(
             paragraphSpacing = bookSettings.paragraphSpacing ?: paragraphSpacing,
             margins = bookSettings.margins ?: margins,
             textWidth = bookSettings.textWidth ?: textWidth,
-            alignment = bookSettings.alignment ?: alignment,
-            hyphenation = bookSettings.hyphenation ?: hyphenation,
             themeId = bookSettings.themeId ?: themeId,
             layoutMode = bookSettings.layoutMode ?: layoutMode,
-            formattingMode = bookSettings.formattingMode ?: formattingMode,
             showChapterTitle = bookSettings.showChapterTitle ?: showChapterTitle,
             showProgress = bookSettings.showProgress ?: showProgress,
             showClock = bookSettings.showClock ?: showClock,
@@ -70,9 +69,17 @@ data class ReaderSettings(
     }
 
     /**
-     * A full copy of every per-book field, used when the current global
-     * defaults are snapshotted onto a book so it owns its settings from that
-     * moment on. Later edits to the global defaults never leak into it.
+     * A copy of the per-book fields, used when the current global defaults are
+     * snapshotted onto a book so it owns its settings from that moment on.
+     * Later edits to the global defaults never leak into the snapshot.
+     *
+     * The Main Settings → Formatting panel fields ([alignment], [formattingMode]
+     * and [hyphenation]) are deliberately NOT snapshotted: no in-reader UI can
+     * change them, so freezing them at first-open time made the panel look dead —
+     * a book opened before the change kept the old values while a freshly opened
+     * book picked the new ones up (the "justify works on Windows but not on
+     * Android" asymmetry, which was per-device data, not code). They always
+     * follow the global defaults now.
      */
     fun toBookSettings(): BookReaderSettings = BookReaderSettings(
         fontFamily = fontFamily,
@@ -84,11 +91,8 @@ data class ReaderSettings(
         paragraphSpacing = paragraphSpacing,
         margins = margins,
         textWidth = textWidth,
-        alignment = alignment,
-        hyphenation = hyphenation,
         themeId = themeId,
         layoutMode = layoutMode,
-        formattingMode = formattingMode,
         showChapterTitle = showChapterTitle,
         showProgress = showProgress,
         showClock = showClock,
@@ -97,6 +101,13 @@ data class ReaderSettings(
     )
 }
 
+/**
+ * Fields a single book may override from the global defaults. [alignment],
+ * [formattingMode] and [hyphenation] remain declared only for JSON schema
+ * stability (older snapshots and backups still decode) — [ReaderSettings.copyWith]
+ * deliberately ignores them so the Main Settings → Formatting panel governs
+ * those on every book.
+ */
 @Serializable
 data class BookReaderSettings(
     val fontFamily: String? = null,
@@ -149,11 +160,12 @@ enum class TextAlignment {
 enum class LayoutMode {
     CONTINUOUS,     // Vertical scrolling
     PAGINATED,      // Page-based horizontal flips
+    SPREAD,         // Desktop-only: two-page spread (side-by-side paginated columns)
     TWO_COLUMN,     // Retired: normalizes to PAGINATED (kept for old persisted settings)
     FOCUS           // Retired: normalizes to CONTINUOUS (kept for old persisted settings)
 }
 
-/** Spread and Focus were retired; persisted values from older installs render as their nearest living mode. */
+/** Retired modes map onto their nearest living equivalent; SPREAD passes through (platform gating happens at the UI layer). */
 val LayoutMode.normalized: LayoutMode
     get() = when (this) {
         LayoutMode.TWO_COLUMN -> LayoutMode.PAGINATED

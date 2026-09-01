@@ -177,7 +177,7 @@ object OverlayUi {
         }
         val layoutRow = segment(
             "Layout", "set:layout",
-            listOf("CONTINUOUS" to "Scroll", "PAGINATED" to "Page"),
+            listOf("CONTINUOUS" to "Scroll", "PAGINATED" to "Page", "SPREAD" to "Double Page"),
             layoutMode
         )
         val body =

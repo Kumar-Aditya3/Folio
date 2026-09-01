@@ -19,6 +19,12 @@ fun chapterId(mangaId: String, url: String): String = "$mangaId|$url"
 
 const val LOCAL_SOURCE_ID: Long = 0L
 
+/**
+ * Settings key for the user-picked manga downloads location. Blank = app default dir.
+ * Android stores a SAF tree URI string, desktop stores an absolute directory path.
+ */
+const val KEY_MANGA_DOWNLOADS_LOCATION = "manga.downloads.location"
+
 data class MangaEntry(
     val id: String,
     val sourceId: Long,
@@ -116,6 +122,8 @@ data class MangaStatistics(
     val bookmarkedChapters: Int = 0,
     val notesCount: Int = 0,
     val totalReadMinutes: Long = 0L,
+    /** Distinct local days on which at least one chapter was marked read. */
+    val readActiveDays: Int = 0,
     val weekReadChapters: List<Int> = List(7) { 0 },
     val weekLabels: List<String> = List(7) { "" },
     val topManga: List<MangaTopEntry> = emptyList(),
@@ -135,6 +143,19 @@ data class MangaHistoryItem(
     val readAt: Instant,
     val manga: MangaEntry? = null,
     val chapterName: String? = null,
+)
+
+/** One row per manga remembering its last-read chapter; local-only, never synced. */
+data class MangaHistoryEntry(
+    val mangaId: String,
+    val title: String,
+    val coverUrl: String? = null,
+    val coverPath: String? = null,
+    val sourceId: Long = 0L,
+    val sourceName: String? = null,
+    val chapterName: String,
+    val updatedAt: Long,
+    val inLibrary: Boolean = false,
 )
 
 data class MangaSourceInfo(
@@ -285,4 +306,6 @@ data class MangaDownload(
     val totalPages: Int = 0,
     val downloadedPages: Int = 0,
     val queuedAt: Instant = Clock.System.now(),
+    /** Why the download failed; null unless status is ERROR. */
+    val error: String? = null,
 )

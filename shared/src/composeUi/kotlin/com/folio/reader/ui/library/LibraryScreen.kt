@@ -96,7 +96,6 @@ fun LibraryScreen(
     onImportClick: () -> Unit,
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onStatsClick: () -> Unit = {},
     onTagManagerClick: () -> Unit = {},
     onQuoteBrowserClick: () -> Unit = {},
     onRevisitClick: () -> Unit = {},
@@ -113,15 +112,15 @@ fun LibraryScreen(
     mangaExtensionsAvailable: Boolean = false,
     onMangaBrowseClick: () -> Unit = {},
     onMangaExtensionsClick: () -> Unit = {},
-    onMangaDownloadsClick: () -> Unit = {},
+    onMangaHistoryClick: () -> Unit = {},
     onMangaImportClick: () -> Unit = {},
     onMangaSearchClick: () -> Unit = {},
-    onMangaStatsClick: () -> Unit = {},
     onMangaBackupImport: () -> Unit = {},
     onMangaBackupExport: () -> Unit = {},
     mangaViewMode: com.folio.reader.ui.manga.MangaViewMode = com.folio.reader.ui.manga.MangaViewMode.GRID,
     onMangaViewModeChange: (com.folio.reader.ui.manga.MangaViewMode) -> Unit = {},
-    mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null
+    mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null,
+    statsContent: (@Composable () -> Unit)? = null
 ) {
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
@@ -135,6 +134,7 @@ fun LibraryScreen(
     var seriesFilterOpen by remember { mutableStateOf(false) }
     var collectionFilterOpen by remember { mutableStateOf(false) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
+    val showStats by viewModel.statsVisible.collectAsState()
 
     val mangaSelActive by remember {
         mangaLibraryViewModel?.isSelectionMode ?: kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -243,20 +243,20 @@ fun LibraryScreen(
                             onClick = onSyncNow
                         )
                     }
-                    IconButton(onClick = { if (mangaMode) onMangaSearchClick() else onSearchClick() }) {
+                    IconButton(onClick = { if (mangaMode && !showStats) onMangaSearchClick() else onSearchClick() }) {
                         Icon(Icons.Filled.Search, contentDescription = "Search")
                     }
-                    IconButton(onClick = { if (mangaMode) onMangaImportClick() else onImportClick() }) {
+                    IconButton(onClick = { if (mangaMode && !showStats) onMangaImportClick() else onImportClick() }) {
                         Icon(Icons.Filled.Add, contentDescription = "Import")
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                     Box {
-                        IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
+                        IconButton(onClick = { if (mangaMode && !showStats) mangaOverflowOpen = true else overflowOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
-                        if (mangaMode) {
+                        if (mangaMode && !showStats) {
                             DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
                                 DropdownMenuItem(
                                     text = { Text("Grid view") },
@@ -304,9 +304,11 @@ fun LibraryScreen(
                                     text = { Text("Browse sources") },
                                     onClick = { mangaOverflowOpen = false; onMangaBrowseClick() },
                                 )
+                                // Downloads moved to the chip row on the manga shelf (with a
+                                // live queue count) — the overflow item was redundant.
                                 DropdownMenuItem(
-                                    text = { Text("Downloads") },
-                                    onClick = { mangaOverflowOpen = false; onMangaDownloadsClick() },
+                                    text = { Text("Reading history") },
+                                    onClick = { mangaOverflowOpen = false; onMangaHistoryClick() },
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Check for new chapters") },
@@ -319,10 +321,6 @@ fun LibraryScreen(
                                     )
                                 }
                                 HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("Statistics") },
-                                    onClick = { mangaOverflowOpen = false; onMangaStatsClick() },
-                                )
                                 DropdownMenuItem(
                                     text = { Text("Import Mihon backup") },
                                     onClick = { mangaOverflowOpen = false; onMangaBackupImport() },
@@ -387,11 +385,6 @@ fun LibraryScreen(
                                 )
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Statistics") },
-                                    onClick = { overflowOpen = false; onStatsClick() }
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
                                     text = { Text("Tags") },
                                     onClick = { overflowOpen = false; onTagManagerClick() }
                                 )
@@ -416,17 +409,27 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 com.folio.reader.ui.components.FolioChip(
-                    selected = !mangaMode,
-                    onClick = { if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS) },
+                    selected = !mangaMode && !showStats,
+                    onClick = { viewModel.statsVisible.value = false; if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS) },
                     label = "Books",
                 )
                 com.folio.reader.ui.components.FolioChip(
-                    selected = mangaMode,
-                    onClick = { if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA) },
+                    selected = mangaMode && !showStats,
+                    onClick = { viewModel.statsVisible.value = false; if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA) },
                     label = "Manga",
                 )
+                if (statsContent != null) {
+                    com.folio.reader.ui.components.FolioChip(
+                        selected = showStats,
+                        onClick = { viewModel.statsVisible.value = true },
+                        label = "Stats",
+                    )
+                }
             }
 
+            if (showStats && statsContent != null) {
+                statsContent.invoke()
+            } else {
             androidx.compose.animation.Crossfade(
                 targetState = libraryMode,
                 modifier = Modifier.fillMaxSize(),
@@ -457,6 +460,7 @@ fun LibraryScreen(
                     onDeleteBook = { bookToDelete = it },
                     onImportClick = onImportClick
                 )
+            }
             }
             }
         }

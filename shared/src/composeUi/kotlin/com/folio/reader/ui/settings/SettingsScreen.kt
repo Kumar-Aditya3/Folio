@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -107,7 +108,9 @@ fun SettingsScreen(
     onImportFont: () -> Unit = {},
     onExportBackup: () -> Unit = {},
     onImportBackup: () -> Unit = {},
-    onExportAnnotations: (String) -> Unit = {}
+    onExportAnnotations: (String) -> Unit = {},
+    mangaDownloadsLocation: String? = null,
+    onPickMangaDownloadsLocation: () -> Unit = {}
 ) {
     var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
     var showPreview by remember { mutableStateOf(true) }
@@ -158,7 +161,9 @@ fun SettingsScreen(
                                     SettingsCategory.GENERAL -> GeneralSettingsPanel(
                                         settings,
                                         onSettingsChange,
-                                        onImportFont
+                                        onImportFont,
+                                        mangaDownloadsLocation,
+                                        onPickMangaDownloadsLocation
                                     )
 
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
@@ -236,7 +241,9 @@ fun SettingsScreen(
                                     SettingsCategory.GENERAL -> GeneralSettingsPanel(
                                         settings,
                                         onSettingsChange,
-                                        onImportFont
+                                        onImportFont,
+                                        mangaDownloadsLocation,
+                                        onPickMangaDownloadsLocation
                                     )
 
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
@@ -291,7 +298,9 @@ enum class SettingsCategory(val displayName: String) {
 fun GeneralSettingsPanel(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
-    onImportFont: () -> Unit
+    onImportFont: () -> Unit,
+    mangaDownloadsLocation: String? = null,
+    onPickMangaDownloadsLocation: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -407,6 +416,41 @@ fun GeneralSettingsPanel(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Import custom font")
+        }
+
+        // Where downloaded manga chapters live — same control as the Downloads
+        // screen's location card, surfaced here so it is findable from Settings.
+        if (mangaDownloadsLocation != null) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Manga downloads", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Where downloaded chapters are stored.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Folder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    mangaDownloadsLocation,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onPickMangaDownloadsLocation) {
+                    Text("Change", style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
     }
 }
@@ -807,7 +851,8 @@ fun FormattingSettingsPanel(
 
         Text(
             "Hybrid keeps explicit EPUB alignment for title pages and special paragraphs. " +
-                "Normalized uses this default everywhere.",
+                "Normalized uses this default everywhere. Changes here apply to every book, " +
+                "including ones you have already opened.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

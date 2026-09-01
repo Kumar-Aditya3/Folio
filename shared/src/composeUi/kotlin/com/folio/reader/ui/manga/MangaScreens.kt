@@ -24,8 +24,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -40,11 +42,14 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.LibraryAddCheck
@@ -57,9 +62,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -233,12 +240,44 @@ fun MangaLibraryScreen(
     val searchScope by viewModel.searchScope.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val activeDownloads by viewModel.activeDownloadCount.collectAsState()
+    val updatingLibrary by viewModel.updating.collectAsState()
+    val newChapters by viewModel.lastNewChapters.collectAsState()
+    val updatedSeriesCount by viewModel.recentlyUpdated.collectAsState()
     var manageCollectionsOpen by remember { mutableStateOf(false) }
     val bulkCategoryInitial by viewModel.bulkPickerInitial.collectAsState()
     var singlePickerManga by remember { mutableStateOf<MangaEntry?>(null) }
     var singlePickerInitial by remember { mutableStateOf<Set<String>?>(null) }
     val libraryScope = rememberCoroutineScope()
     val searchingSources = searchActive && searchScope == MangaSearchScope.SOURCES && browseViewModel != null
+
+    // The periodic library update is otherwise invisible; when it lands new chapters,
+    // show the count for a few seconds, then fold the strip away again.
+    var showNewChaptersNotice by remember { mutableStateOf(false) }
+    LaunchedEffect(newChapters, updatedSeriesCount) {
+        if (newChapters > 0) {
+            showNewChaptersNotice = true
+            kotlinx.coroutines.delay(5000)
+            showNewChaptersNotice = false
+        }
+    }
+
+    // Restore scroll positions from the hoisted ViewModel; save on dispose so navigating
+    // to a detail screen and back lands exactly where the reader left off.
+    val safeListIndex = viewModel.listScrollIndex.coerceAtLeast(0)
+    val safeListOffset = viewModel.listScrollOffset.coerceAtLeast(0)
+    val listState = remember(viewModel) { LazyListState(safeListIndex, safeListOffset) }
+    val safeGridIndex = viewModel.gridScrollIndex.coerceAtLeast(0)
+    val safeGridOffset = viewModel.gridScrollOffset.coerceAtLeast(0)
+    val gridState = remember(viewModel) { LazyGridState(safeGridIndex, safeGridOffset) }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.listScrollIndex = listState.firstVisibleItemIndex
+            viewModel.listScrollOffset = listState.firstVisibleItemScrollOffset
+            viewModel.gridScrollIndex = gridState.firstVisibleItemIndex
+            viewModel.gridScrollOffset = gridState.firstVisibleItemScrollOffset
+        }
+    }
 
     // The host owns the search bar's visibility; the ViewModel mirrors it so the
     // library filter is only applied while search is actually open.
@@ -249,13 +288,12 @@ fun MangaLibraryScreen(
 
     // Drive the global source search from the shared query text. Re-keyed on scope and
     // visibility too, so switching to All sources resumes the same query the library
-    // scope was showing.
+    // scope was showing. When the scope switches away from SOURCES we simply stop;
+    // exitSearch() is only called when the search bar itself closes (above) so cached
+    // results survive scope toggles.
     LaunchedEffect(searchingSources, query) {
         val browseVm = browseViewModel ?: return@LaunchedEffect
-        if (!searchingSources) {
-            browseVm.exitSearch()
-            return@LaunchedEffect
-        }
+        if (!searchingSources) return@LaunchedEffect
         kotlinx.coroutines.delay(350)
         val trimmed = query.trim()
         browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
@@ -293,8 +331,65 @@ fun MangaLibraryScreen(
                         label = "Edit",
                     )
                 }
+                item {
+                    // Queue entry point for the whole manga side (it replaced the
+                    // overflow-menu item): a live count while anything is queued or
+                    // downloading, plain otherwise so storage settings stay reachable.
+                    FolioChip(
+                        selected = false,
+                        onClick = onOpenDownloads,
+                        label = if (activeDownloads > 0) "Downloads · $activeDownloads" else "Downloads",
+                    )
+                }
             }
             Spacer(Modifier.height(4.dp))
+        }
+
+        if (!searchActive) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = updatingLibrary || showNewChaptersNotice,
+                enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(tween(200)),
+                exit = androidx.compose.animation.fadeOut(tween(300)),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = FolioTokens.space3)
+                        .glassPanel(RoundedCornerShape(FolioTokens.radiusChip))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (updatingLibrary) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = FolioTheme.colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Checking for new chapters…",
+                            style = FolioTheme.typography.labelMedium,
+                            color = FolioTheme.colors.onSurfaceVariant,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Filled.LibraryAddCheck,
+                            contentDescription = null,
+                            tint = FolioTheme.colors.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        val chapterWord = if (newChapters == 1) "chapter" else "chapters"
+                        Text(
+                            if (updatedSeriesCount.size == 1) "$newChapters new $chapterWord"
+                            else "$newChapters new $chapterWord in ${updatedSeriesCount.size} series",
+                            style = FolioTheme.typography.labelMedium,
+                            color = FolioTheme.colors.onSurface,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
         }
 
         val browseVm = browseViewModel
@@ -322,6 +417,7 @@ fun MangaLibraryScreen(
             }
         } else if (viewMode == MangaViewMode.LIST || viewMode == MangaViewMode.COMPACT) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
@@ -355,6 +451,7 @@ fun MangaLibraryScreen(
             }
         } else {
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(minSize = 110.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(FolioTokens.space3),
@@ -536,6 +633,16 @@ private fun SourceSearchResults(
     val preparing by viewModel.preparingSources.collectAsState()
     val scope = rememberCoroutineScope()
 
+    val safeIndex = viewModel.globalListScrollIndex.coerceAtLeast(0)
+    val safeOffset = viewModel.globalListScrollOffset.coerceAtLeast(0)
+    val listState = remember(viewModel) { LazyListState(safeIndex, safeOffset) }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.globalListScrollIndex = listState.firstVisibleItemIndex
+            viewModel.globalListScrollOffset = listState.firstVisibleItemScrollOffset
+        }
+    }
+
     if (query.isBlank()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -551,6 +658,7 @@ private fun SourceSearchResults(
     val finished = globalResults.count { !it.loading }
     val totalItems = globalResults.sumOf { it.items.size }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
@@ -1419,6 +1527,16 @@ fun SourceBrowseScreen(
     var showFilters by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    val safeGridIndex = viewModel.gridScrollIndex.coerceAtLeast(0)
+    val safeGridOffset = viewModel.gridScrollOffset.coerceAtLeast(0)
+    val gridState = remember(viewModel) { LazyGridState(safeGridIndex, safeGridOffset) }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.gridScrollIndex = gridState.firstVisibleItemIndex
+            viewModel.gridScrollOffset = gridState.firstVisibleItemScrollOffset
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
         FolioTopBar(
             title = viewModel.source.name,
@@ -1486,7 +1604,7 @@ fun SourceBrowseScreen(
         Spacer(Modifier.height(FolioTokens.space2))
 
         when {
-            state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            state.loading && state.items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
             state.error != null && state.items.isEmpty() ->
@@ -1502,6 +1620,7 @@ fun SourceBrowseScreen(
                     }
                 }
             else -> LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(minSize = 110.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(FolioTokens.space3),
@@ -1780,6 +1899,17 @@ fun MangaDetailScreen(
     val chapterFilter by viewModel.chapterFilter.collectAsState()
     val chapterSelectionMode by viewModel.chapterSelectionMode.collectAsState()
     val selectedChapterIds by viewModel.selectedChapterIds.collectAsState()
+    val downloadStates by viewModel.downloadStates.collectAsState()
+    val refreshNotice by viewModel.refreshNotice.collectAsState()
+    var refreshNoticeVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshNotice) {
+        if (refreshNotice != null) {
+            refreshNoticeVisible = true
+            kotlinx.coroutines.delay(2700)
+            refreshNoticeVisible = false
+            viewModel.refreshNotice.value = null
+        }
+    }
     val scope = rememberCoroutineScope()
     var filterOpen by remember { mutableStateOf(false) }
     val allCategories by viewModel.allCategories.collectAsState()
@@ -1942,6 +2072,28 @@ fun MangaDetailScreen(
             )
         }
 
+        androidx.compose.animation.AnimatedVisibility(
+            visible = refreshNoticeVisible && refreshNotice != null,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Text(
+                    text = refreshNotice.orEmpty(),
+                    style = FolioTheme.typography.labelLarge,
+                    color = FolioTheme.colors.onSurface,
+                    modifier = Modifier
+                        .padding(top = FolioTokens.space2)
+                        .glassPanel(RoundedCornerShape(FolioTokens.radiusChip))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(FolioTokens.space3),
@@ -2038,10 +2190,20 @@ fun MangaDetailScreen(
                                 maxLines = 1,
                             )
                         }
-                        OutlinedButton(onClick = { viewModel.downloadUnread() }) {
-                            Icon(Icons.Filled.Download, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Download", maxLines = 1)
+                        // Downloads only make sense for online sources: a local series is
+                        // already on disk in full, and queueing it would just extract the
+                        // archive into duplicate per-page files.
+                        if (downloadsAvailable && !m.isLocal) {
+                            // Queues every unread chapter; disabled when everything is read
+                            // so a fully-caught-up series doesn't dead-click.
+                            OutlinedButton(
+                                onClick = { viewModel.downloadUnread() },
+                                enabled = chapters.any { !it.read },
+                            ) {
+                                Icon(Icons.Filled.Download, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Download unread", maxLines = 1)
+                            }
                         }
                     }
                 }
@@ -2083,6 +2245,38 @@ fun MangaDetailScreen(
                 }
             }
 
+            // Compact per-manga stats — derived from the chapter list already in scope.
+            if (chapters.isNotEmpty()) {
+                item {
+                    val readCount = chapters.count { it.read }
+                    val totalCount = chapters.size
+                    val progress = if (totalCount > 0) readCount.toFloat() / totalCount else 0f
+                    com.folio.reader.ui.components.FolioSectionCard(title = "Progress") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "$readCount of $totalCount chapters",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = FolioTheme.colors.onSurface,
+                            )
+                            Text(
+                                "${(progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = FolioTheme.colors.primary,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        com.folio.reader.ui.components.FolioProgressBar(
+                            progress = progress,
+                            color = FolioTheme.colors.primary,
+                        )
+                    }
+                }
+            }
+
             item {
                 Text(
                     "${chapters.size} CHAPTERS",
@@ -2102,7 +2296,7 @@ fun MangaDetailScreen(
             items(displayChapters, key = { it.id }) { chapter ->
                 ChapterRow(
                     chapter = chapter,
-                    isQueued = chapter.downloadedPages > 0,
+                    download = downloadStates[chapter.id],
                     downloadsAvailable = downloadsAvailable && !m.isLocal,
                     selected = chapter.id in selectedChapterIds,
                     inSelectionMode = chapterSelectionMode,
@@ -2115,6 +2309,8 @@ fun MangaDetailScreen(
                     onMarkPrevious = { viewModel.markPreviousAsRead(chapter) },
                     onToggleBookmark = { viewModel.toggleBookmark(chapter) },
                     onDownload = { viewModel.download(chapter) },
+                    onCancelDownload = { viewModel.cancelDownload(chapter) },
+                    onDeleteDownload = { viewModel.deleteDownload(chapter) },
                 )
             }
         }
@@ -2125,7 +2321,7 @@ fun MangaDetailScreen(
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun ChapterRow(
     chapter: MangaChapter,
-    isQueued: Boolean,
+    download: com.folio.reader.manga.MangaDownload?,
     downloadsAvailable: Boolean,
     selected: Boolean,
     inSelectionMode: Boolean,
@@ -2135,9 +2331,18 @@ private fun ChapterRow(
     onMarkPrevious: () -> Unit,
     onToggleBookmark: () -> Unit,
     onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onDeleteDownload: () -> Unit,
 ) {
     val colors = FolioTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
+    val status = download?.status
+    val dlTotal = download?.totalPages ?: 0
+    val dlDone = download?.downloadedPages ?: 0
+    val isDownloaded = chapter.downloadedPages > 0 || status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADED
+    val inFlight = status == com.folio.reader.manga.MangaDownloadStatus.QUEUED ||
+        status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING ||
+        status == com.folio.reader.manga.MangaDownloadStatus.ERROR
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2164,20 +2369,47 @@ private fun ChapterRow(
                 if (!chapter.read && chapter.lastPageRead > 0)
                     if (chapter.totalPages > 0) "p.${chapter.lastPageRead + 1}/${chapter.totalPages}" else "p.${chapter.lastPageRead + 1}"
                 else null,
-                if (chapter.downloadedPages > 0) "DL ${chapter.downloadedPages}" else null,
+                when (status) {
+                    com.folio.reader.manga.MangaDownloadStatus.QUEUED -> "Queued"
+                    com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING ->
+                        if (dlTotal > 0) "Downloading $dlDone/$dlTotal" else "Downloading"
+                    com.folio.reader.manga.MangaDownloadStatus.ERROR ->
+                        download?.error?.takeIf { it.isNotBlank() }?.let { "Download failed · $it" } ?: "Download failed"
+                    else -> if (isDownloaded && chapter.downloadedPages > 0) "Downloaded" else null
+                },
             ).joinToString(" • ")
             if (sub.isNotBlank()) {
                 Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             }
+            if (status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING && dlTotal > 0) {
+                LinearProgressIndicator(
+                    progress = (dlDone.toFloat() / dlTotal).coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(3.dp),
+                )
+            }
         }
-        if (isQueued || chapter.downloadedPages > 0) {
-            Icon(
-                Icons.Filled.Check,
-                contentDescription = "Downloaded",
-                tint = colors.primary,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(6.dp))
+        when {
+            isDownloaded -> {
+                Icon(
+                    Icons.Filled.DownloadDone,
+                    contentDescription = "Downloaded",
+                    tint = colors.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+
+            status == com.folio.reader.manga.MangaDownloadStatus.QUEUED -> {
+                Icon(
+                    Icons.Outlined.HourglassEmpty,
+                    contentDescription = "Queued for download",
+                    tint = colors.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+
+            else -> Unit
         }
         IconButton(onClick = onToggleBookmark) {
             Icon(
@@ -2187,8 +2419,18 @@ private fun ChapterRow(
             )
         }
         if (downloadsAvailable) {
-            IconButton(onClick = onDownload) {
-                Icon(Icons.Filled.Download, contentDescription = "Download", tint = colors.onSurfaceVariant)
+            if (inFlight) {
+                IconButton(onClick = onCancelDownload) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Cancel download",
+                        tint = if (status == com.folio.reader.manga.MangaDownloadStatus.ERROR) colors.error else colors.onSurfaceVariant,
+                    )
+                }
+            } else if (!isDownloaded) {
+                IconButton(onClick = onDownload) {
+                    Icon(Icons.Filled.Download, contentDescription = "Download", tint = colors.onSurfaceVariant)
+                }
             }
         }
         Box {
@@ -2210,6 +2452,24 @@ private fun ChapterRow(
                         onMarkPrevious()
                     },
                 )
+                if (inFlight && downloadsAvailable) {
+                    DropdownMenuItem(
+                        text = { Text("Cancel download") },
+                        onClick = {
+                            menuOpen = false
+                            onCancelDownload()
+                        },
+                    )
+                }
+                if (isDownloaded && downloadsAvailable) {
+                    DropdownMenuItem(
+                        text = { Text("Delete download") },
+                        onClick = {
+                            menuOpen = false
+                            onDeleteDownload()
+                        },
+                    )
+                }
             }
         }
     }
@@ -2546,9 +2806,12 @@ private fun AddRepoDialog(onAdd: (name: String, baseUrl: String, indexUrl: Strin
 fun DownloadsScreen(
     viewModel: DownloadsViewModel,
     onBack: () -> Unit,
+    onPickLocation: () -> Unit = {},
 ) {
     val queue by viewModel.queue.collectAsState()
     val titles by viewModel.mangaTitles.collectAsState()
+    val chapterNames by viewModel.chapterNames.collectAsState()
+    val storageDescription by viewModel.storageDescription.collectAsState()
 
     Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
         FolioTopBar(
@@ -2557,13 +2820,47 @@ fun DownloadsScreen(
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
+                // A sweep icon reads as "clean up"; the previous ✕ looked like "close screen".
                 IconButton(onClick = { viewModel.clearFinished() }) {
-                    Icon(Icons.Filled.Close, contentDescription = "Clear finished")
+                    Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear finished")
                 }
             },
         )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2)
+                .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Folder,
+                contentDescription = null,
+                tint = FolioTheme.colors.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(FolioTokens.space3))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Download location",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                )
+                Text(
+                    storageDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TextButton(onClick = onPickLocation) {
+                Text("Change", style = MaterialTheme.typography.labelMedium)
+            }
+        }
         if (queue.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
                     "No downloads in the queue.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -2572,6 +2869,7 @@ fun DownloadsScreen(
             }
         } else {
             LazyColumn(
+                modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
@@ -2591,17 +2889,44 @@ fun DownloadsScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            chapterNames[download.chapterId]?.takeIf { it.isNotBlank() }?.let { name ->
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = FolioTheme.colors.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Text(
                                 when (download.status) {
                                     com.folio.reader.manga.MangaDownloadStatus.QUEUED -> "Queued"
                                     com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING ->
                                         "Downloading ${download.downloadedPages}/${download.totalPages}"
                                     com.folio.reader.manga.MangaDownloadStatus.DOWNLOADED -> "Downloaded"
-                                    com.folio.reader.manga.MangaDownloadStatus.ERROR -> "Failed"
+                                    com.folio.reader.manga.MangaDownloadStatus.ERROR ->
+                                        download.error?.takeIf { it.isNotBlank() }?.let { "Failed · $it" } ?: "Failed"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = FolioTheme.colors.onSurfaceVariant,
+                                color = if (download.status == com.folio.reader.manga.MangaDownloadStatus.ERROR) {
+                                    FolioTheme.colors.error
+                                } else {
+                                    FolioTheme.colors.onSurfaceVariant
+                                },
                             )
+                            if (download.status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING &&
+                                download.totalPages > 0
+                            ) {
+                                LinearProgressIndicator(
+                                    progress = (download.downloadedPages.toFloat() / download.totalPages).coerceIn(0f, 1f),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp),
+                                )
+                            }
+                        }
+                        if (download.status == com.folio.reader.manga.MangaDownloadStatus.ERROR) {
+                            TextButton(onClick = { viewModel.retry(download.id) }) {
+                                Text("Retry", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                         if (download.status != com.folio.reader.manga.MangaDownloadStatus.DOWNLOADED) {
                             IconButton(onClick = { viewModel.cancel(download.id) }) {

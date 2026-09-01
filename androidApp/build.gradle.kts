@@ -22,8 +22,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.0.13"
+        versionCode = 24
+        versionName = "1.0.24"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -102,6 +102,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.activity.compose)
+    implementation("androidx.documentfile:documentfile:1.0.1")
     // Required when Android code constructs shared SyncState values containing Instant fields.
     implementation(libs.kotlinx.datetime)
 

@@ -15,6 +15,7 @@ import com.folio.reader.manga.MangaChapterRepository
 import com.folio.reader.manga.MangaDetail
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaFilter
+import com.folio.reader.manga.MangaHistoryEntry
 import com.folio.reader.manga.MangaHistoryItem
 import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.manga.MangaImageData
@@ -135,7 +136,15 @@ class MangaReaderProgressTest {
     class FakeHistoryRepo : MangaHistoryRepository {
         val records = mutableListOf<Pair<String, String?>>()
 
-        override suspend fun record(mangaId: String, chapterId: String?) {
+        override suspend fun record(
+            mangaId: String,
+            chapterId: String?,
+            title: String,
+            coverUrl: String?,
+            coverPath: String?,
+            sourceName: String?,
+            chapterName: String?,
+        ) {
             records += mangaId to chapterId
         }
 
@@ -143,6 +152,9 @@ class MangaReaderProgressTest {
 
         override fun observeRecent(limit: Int): Flow<List<MangaHistoryItem>> = flowOf(recent)
         override suspend fun clear() {}
+
+        override fun observeHistory(): Flow<List<MangaHistoryEntry>> = flowOf(emptyList())
+        override suspend fun clearHistory() {}
     }
 
     class FakeNoteRepo : MangaNoteRepository {
@@ -472,6 +484,7 @@ class MangaReaderProgressTest {
             chapterRepo = chapterRepo,
             historyRepo = historyRepo,
             downloadManager = null,
+            downloadRepo = null,
             categoryRepo = FakeCategoryRepo(),
             settingsRepo = settingsRepo,
         )
@@ -496,6 +509,7 @@ class MangaReaderProgressTest {
             chapterRepo = chapterRepo,
             historyRepo = historyRepo,
             downloadManager = null,
+            downloadRepo = null,
             categoryRepo = FakeCategoryRepo(),
             settingsRepo = settingsRepo,
         )
@@ -515,6 +529,7 @@ class MangaReaderProgressTest {
         chapterRepo = chapterRepo,
         historyRepo = historyRepo,
         downloadManager = null,
+        downloadRepo = null,
         categoryRepo = FakeCategoryRepo(),
         settingsRepo = settingsRepo,
     )

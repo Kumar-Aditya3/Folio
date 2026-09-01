@@ -7,8 +7,14 @@ import androidx.compose.ui.text.font.FontFamily
 
 actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
     return try {
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        bitmap.asImageBitmap()
+        // A local CBZ's first page can be a giant strip; covers render at thumbnail
+        // size, so cap the long edge instead of decoding (and drawing) hundreds of MB.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2048) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
     } catch (_: Exception) {
         null
     }
@@ -16,6 +22,17 @@ actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
 
 /** Never decode taller than this: it sits under common GL max-texture limits. */
 private const val MAX_DECODE_HEIGHT = 16384
+
+/** Same reason as the height cap, for wide pages. */
+private const val MAX_DECODE_WIDTH = 8192
+
+/**
+ * Total-pixel budget per page (~64MB as ARGB_8888). hwui refuses to draw bitmaps
+ * over ~100MB ("Canvas: trying to draw too large bitmap") — a page that is both
+ * wide and tall (e.g. 6000×9000 = 216MB) passed the single-axis caps and crashed
+ * the reader as soon as it was drawn.
+ */
+private const val MAX_DECODE_PIXELS = 16_777_216L // 4096²
 
 actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
     return try {
@@ -30,12 +47,15 @@ actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
             // Extremely tall strips: keep the decoded height sane without shrinking
             // the width further than the height cap forces.
             while (srcH / sample > MAX_DECODE_HEIGHT) sample *= 2
+            while (srcW / sample > MAX_DECODE_WIDTH) sample *= 2
+            while ((srcW.toLong() / sample) * (srcH.toLong() / sample) > MAX_DECODE_PIXELS) sample *= 2
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
     } catch (_: Exception) {
-        // Fall back to a plain decode rather than failing the page outright.
-        decodeCoverImage(bytes)
+        // No unsampled fallback: full-decoding a huge page is exactly what hwui
+        // cannot draw. A null shows "Page failed to load" instead of crashing.
+        null
     }
 }
 

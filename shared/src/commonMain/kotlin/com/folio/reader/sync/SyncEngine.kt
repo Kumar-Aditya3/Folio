@@ -171,20 +171,26 @@ class SyncEngine(
                     lastIncrementalSyncAt = Clock.System.now(),
                     isSyncing = false,
                     pendingUploadCount = remainingPending,
-                    pendingDownloadCount = 0
+                    pendingDownloadCount = 0,
+                    quotaLimited = false
                 )
             }
 
         } catch (e: Exception) {
+            val isQuota = e is QuotaExhaustedException
             println("❌ Sync engine error: ${e.message}")
             e.printStackTrace()
             val remainingPending = runCatching { syncRepository.getPendingSyncCount() }.getOrDefault(0)
             _syncState.update {
                 it.copy(
                     isSyncing = false,
-                    lastError = e.message ?: e.toString(),
-                    pendingUploadCount = remainingPending
+                    lastError = if (isQuota) null else (e.message ?: e.toString()),
+                    pendingUploadCount = remainingPending,
+                    quotaLimited = isQuota
                 )
+            }
+            if (isQuota) {
+                delay(config.retryDelaySeconds * 1000L * 2)
             }
         }
     }
