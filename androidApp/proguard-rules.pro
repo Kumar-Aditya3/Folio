@@ -56,3 +56,18 @@
 -dontwarn org.graalvm.nativeimage.**
 -dontwarn java.lang.Module
 -dontwarn org.jspecify.annotations.**
+
+# okhttp 5's CompressionInterceptor decodes zstd/br responses (many manga sources
+# send them). libzstd-kmp.so resolves these classes through JNI FindClass, which R8
+# cannot see, so shrinking them turned the first zstd response into an uncatchable
+# native abort:
+#   Abort message: 'No pending exception expected:
+#   java.lang.ClassNotFoundException: com.squareup.zstd.ZstdCompressor
+#     at com.squareup.zstd.JniZstdKt.createJniZstd()
+# It only reproduced in release builds (R8 on) and only once a source was browsed —
+# i.e. immediately at launch for anyone who already had extensions installed.
+-keep class com.squareup.zstd.** { *; }
+-keepclasseswithmembernames,includedescriptorclasses class com.squareup.zstd.** {
+    native <methods>;
+}
+-keep class org.brotli.** { *; }
