@@ -81,6 +81,14 @@ object ReaderCss {
         val widthCss = if (capPx > 0)
             "body{max-width:${capPx}px !important;margin-left:auto !important;margin-right:auto !important;}"
         else ""
+        // Spread mode (two-page side-by-side): a hairline centre rule gives each
+        // page its own visual frame without stealing reading space. The rule sits
+        // at exactly 50vw — the boundary between the two engine columns.
+        val spreadCss = if (pagedCols == 2)
+            "body::after{content:'';position:fixed;top:0;bottom:0;left:50%;width:1px;" +
+                    "background:${if (theme.isDark) "rgba(255,255,255,0.10)" else "rgba(0,0,0,0.08)"};" +
+                    "pointer-events:none;z-index:0;}"
+        else ""
         // Paged pages read bottom-heavy at equal padding (nothing anchors the eye
         // below the last line), so the bottom gap is trimmed there only.
         val pagedBottom = if (pagedCols > 0) settings.margins.bottom / 2 else settings.margins.bottom
@@ -99,6 +107,7 @@ object ReaderCss {
                     PageEngine.css(settings.margins.top, pagedBottom)
                 else continuousCss) +
                 widthCss +
+                spreadCss +
                 paragraphCss +
                 normalizedExtra +
                 elementForceCss +

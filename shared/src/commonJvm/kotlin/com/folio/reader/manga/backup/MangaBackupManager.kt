@@ -113,7 +113,16 @@ class MangaBackupManager(
             }
 
             for (bh in bm.history) {
-                chapters.firstOrNull { it.url == bh.url }?.let { historyRepo.record(id, it.id) }
+                chapters.firstOrNull { it.url == bh.url }?.let { ch ->
+                    historyRepo.record(
+                        mangaId = id,
+                        chapterId = ch.id,
+                        title = bm.title,
+                        coverUrl = bm.thumbnailUrl,
+                        sourceName = backup.backupSources.firstOrNull { it.sourceId == bm.source }?.name,
+                        chapterName = ch.name,
+                    )
+                }
             }
         }
         return ImportResult(mangaCount, chapterCount, created)

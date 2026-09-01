@@ -82,6 +82,7 @@ import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.components.StatCard
+import com.folio.reader.ui.components.finishEstimate
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -190,6 +191,7 @@ fun BookDetailScreen(
                 LoadingPlaceholder()
             }
         } else {
+            val estimate = finishEstimate(b.totalWords, b.normalizedProgress, sessions)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -212,6 +214,17 @@ fun BookDetailScreen(
                         onCollectionClick = onCollectionClick,
                         onCoverClick = onStartReading
                     )
+                }
+
+                if (estimate != null) {
+                    item {
+                        Text(
+                            estimate,
+                            style = FolioTheme.typography.bodySmall,
+                            color = FolioTheme.colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                    }
                 }
 
                 if (b.cloudState != CloudState.LOCAL_ONLY) {

@@ -252,7 +252,10 @@ class ReaderViewModel(
 
             // This book's own settings. A book that doesn't have any yet gets the
             // current global defaults snapshotted onto it, so from then on it owns
-            // its settings and later changes to the defaults don't leak in.
+            // its settings and later changes to the defaults don't leak in — except
+            // the Main Settings → Formatting fields (alignment, formatting mode,
+            // hyphenation), which no in-reader control can change and therefore
+            // always follow the global defaults (see ReaderSettings.toBookSettings).
             val stored = runCatching { settingsRepository.getBookSettings(bookId) }.getOrNull()
             if (stored != null) {
                 _bookSettings.value = stored

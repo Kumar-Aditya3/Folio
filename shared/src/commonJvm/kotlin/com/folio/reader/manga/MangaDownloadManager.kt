@@ -7,21 +7,74 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.withContext
 
 /**
  * Sequential chapter download worker (Mihon-style download queue). Pages are stored on
- * disk under downloadsDir/&lt;mangaId&gt;/&lt;chapterId&gt;/ and served back to the reader by
- * [resolvePage] before falling through to the network backend.
+ * disk under "<mangaId>/<chapterId>/" inside the active [MangaDownloadStorage] and served
+ * back to the reader by [readDownloadedPage] before falling through to the network backend.
+ * The storage location can be changed at runtime via [switchStorage], which migrates
+ * existing chapters to the new home.
  */
 class MangaDownloadManager(
     private val backend: MangaBackend,
     private val downloadsRepo: MangaDownloadRepository,
     private val chapterRepo: MangaChapterRepository,
-    private val downloadsDir: File,
+    initialStorage: MangaDownloadStorage,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var storage: MangaDownloadStorage = initialStorage
+
+    fun storageDescription(): String = storage.describe()
+
+    /**
+     * Moves manga downloads to [newStorage]: every existing chapter is copied over and
+     * verified before the sources are deleted, and the active storage flips only after
+     * the whole migration succeeds. Returns false (leaving everything as-is) when the
+     * target cannot be used, so callers must not persist the new location in that case.
+     */
+    suspend fun switchStorage(
+        newStorage: MangaDownloadStorage,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Boolean = withContext(Dispatchers.IO) {
+        val old = storage
+        if (old === newStorage || old.describe() == newStorage.describe()) return@withContext true
+        runCatching { migrate(old, newStorage, onProgress) }
+            .onSuccess { storage = newStorage }
+            .isSuccess
+    }
+
+    private suspend fun migrate(
+        from: MangaDownloadStorage,
+        to: MangaDownloadStorage,
+        onProgress: suspend (Int, Int) -> Unit,
+    ) {
+        val chapters = from.listSubDirs("").flatMap { mangaDir ->
+            from.listSubDirs(mangaDir).map { chapterDir -> "$mangaDir/$chapterDir" }
+        }
+        val copied = mutableListOf<String>()
+        try {
+            chapters.forEachIndexed { index, path ->
+                if (!to.ensureDir(path)) throw IllegalStateException("Cannot create folder in new location")
+                val names = from.listFiles(path)
+                names.forEach { name ->
+                    val bytes = from.readFirst(path, name)
+                        ?: throw IllegalStateException("Cannot read $path/$name from old location")
+                    if (!to.write(path, name, bytes)) throw IllegalStateException("Cannot write $path/$name to new location")
+                }
+                if (to.listFiles(path).size < names.size) throw IllegalStateException("Copy of $path is incomplete")
+                copied.add(path)
+                onProgress(index + 1, chapters.size)
+            }
+        } catch (e: Exception) {
+            copied.forEach { to.deleteDir(it) }
+            throw e
+        }
+        chapters.forEach { from.deleteDir(it) }
+    }
 
     fun start() {
         scope.launch {
@@ -38,6 +91,9 @@ class MangaDownloadManager(
     }
 
     suspend fun queueChapter(mangaId: String, chapter: MangaChapter) {
+        // Local-source chapters are already fully on disk; queueing one would extract
+        // the archive page-by-page into duplicate files with zero offline benefit.
+        if (mangaId.substringBefore(":").toLongOrNull() == LOCAL_SOURCE_ID) return
         if (downloadsRepo.isChapterDownloaded(chapter.id)) return
         downloadsRepo.enqueue(
             MangaDownload(
@@ -51,7 +107,7 @@ class MangaDownloadManager(
     suspend fun cancel(downloadId: String) {
         val item = downloadsRepo.observeQueue().first().firstOrNull { it.id == downloadId } ?: return
         downloadsRepo.remove(downloadId)
-        chapterDir(item.mangaId, item.chapterId)?.deleteRecursively()
+        deleteChapterDownload(item.mangaId, item.chapterId)
     }
 
     private suspend fun process(item: MangaDownload) {
@@ -61,18 +117,27 @@ class MangaDownloadManager(
             return
         }
         val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
-        downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADING))
+        val path = chapterPath(item.mangaId, item.chapterId)
+        if (path == null) {
+            downloadsRepo.remove(item.id)
+            return
+        }
+        downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADING, error = null))
 
         try {
             val pages = backend.fetchPageList(item.mangaId.substringBefore(":").toLong(), ref)
-            val dir = chapterDir(item.mangaId, item.chapterId)!!.apply { mkdirs() }
+            if (!storage.ensureDir(path)) throw IllegalStateException("Cannot create download folder")
             var done = 0
-            downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size))
+            downloadsRepo.update(
+                item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = 0, error = null)
+            )
 
             for (page in pages) {
                 val image = backend.fetchPageImage(item.mangaId.substringBefore(":").toLong(), ref, page)
                 val ext = extensionFor(image.bytes)
-                File(dir, "%03d.%s".format(page.index + 1, ext)).writeBytes(image.bytes)
+                if (!storage.write(path, "%03d.%s".format(page.index + 1, ext), image.bytes)) {
+                    throw IllegalStateException("Cannot write page ${page.index + 1} to storage")
+                }
                 done++
                 downloadsRepo.update(
                     item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = done)
@@ -80,25 +145,42 @@ class MangaDownloadManager(
             }
 
             chapterRepo.setDownloadedPages(chapter.id, pages.size)
-            downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADED, totalPages = pages.size, downloadedPages = pages.size))
+            downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADED, totalPages = pages.size, downloadedPages = pages.size, error = null))
         } catch (e: Exception) {
-            downloadsRepo.update(item.copy(status = MangaDownloadStatus.ERROR))
+            downloadsRepo.update(
+                item.copy(status = MangaDownloadStatus.ERROR, error = e.message?.takeIf { it.isNotBlank() } ?: "Download failed")
+            )
         }
     }
 
-    fun chapterDir(mangaId: String, chapterId: String): File? {
+    private fun chapterPath(mangaId: String, chapterId: String): String? {
         if (mangaId.isBlank() || chapterId.isBlank()) return null
-        return File(downloadsDir, "${mangaId.sanitize()}/${chapterId.sanitize()}")
+        return "${mangaId.sanitize()}/${chapterId.sanitize()}"
+    }
+
+    /** Removes a chapter's downloaded pages from the active location. */
+    suspend fun deleteChapterDownload(mangaId: String, chapterId: String) {
+        val path = chapterPath(mangaId, chapterId) ?: return
+        withContext(Dispatchers.IO) {
+            storage.deleteDir(path)
+        }
+        downloadsRepo.remove(chapterId)
     }
 
     /** Reads a downloaded page from disk, or null when the chapter is not downloaded. */
-    suspend fun readDownloadedPage(mangaId: String, chapterId: String, pageIndex: Int): ByteArray? {
-        val dir = chapterDir(mangaId, chapterId) ?: return null
-        if (!dir.isDirectory) return null
-        val prefix = "%03d.".format(pageIndex + 1)
-        val file = dir.listFiles().orEmpty().firstOrNull { it.name.startsWith(prefix) } ?: return null
-        return file.readBytes()
-    }
+    suspend fun readDownloadedPage(mangaId: String, chapterId: String, pageIndex: Int): ByteArray? =
+        withContext(Dispatchers.IO) {
+            val path = chapterPath(mangaId, chapterId) ?: return@withContext null
+            val prefix = "%03d.".format(pageIndex + 1)
+            storage.readFirst(path, prefix)
+        }
+
+    /** How many page files a chapter has on disk (0 when not downloaded). */
+    suspend fun downloadedPageCount(mangaId: String, chapterId: String): Int =
+        withContext(Dispatchers.IO) {
+            val path = chapterPath(mangaId, chapterId) ?: return@withContext 0
+            storage.listFiles(path).size
+        }
 
     suspend fun isChapterDownloaded(chapterId: String): Boolean =
         downloadsRepo.isChapterDownloaded(chapterId)

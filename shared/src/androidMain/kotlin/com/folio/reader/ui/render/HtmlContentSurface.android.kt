@@ -299,7 +299,11 @@ actual fun HtmlContentSurface(
                     "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:${font.weight};font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
-                val pagedCols = PageEngine.colsFor(settings.layoutMode)
+                // Android never offers spread; coerce to single-page paginated if a
+                // synced/stored setting lands here with SPREAD selected.
+                val androidLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
+                    com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
+                val pagedCols = PageEngine.colsFor(androidLayoutMode)
                 // Paged modes run the shared book engine (discrete pages + leaf
                 // flip, progress via the title protocol); continuous keeps the
                 // layout-aware scrolling measurement below.
@@ -507,10 +511,13 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
 
 private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
     val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
+    // Coerce SPREAD → PAGINATED on Android: spread is desktop-only.
+    val safeLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
+        com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
             ReaderCss.styleSheet(
                 settings,
-                PageEngine.colsFor(settings.layoutMode),
+                PageEngine.colsFor(safeLayoutMode),
                 fontStack = { "'$it',serif" },
                 // Scrolling mode: publisher height rules otherwise clamp the document
                 // box and the page cannot grow.

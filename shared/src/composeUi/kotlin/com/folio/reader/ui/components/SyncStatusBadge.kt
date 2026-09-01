@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +39,11 @@ fun SyncStatusBadge(
             "Sync error",
             FolioTheme.colors.error
         )
+        syncState.quotaLimited -> Triple(
+            Icons.Outlined.CloudQueue,
+            "Sync resting — Google's free quota reached, it resumes automatically",
+            QuotaAmber
+        )
         else -> Triple(
             Icons.Filled.CheckCircle,
             "Synced",
@@ -53,7 +59,7 @@ fun SyncStatusBadge(
     ) {
         BadgedBox(
             badge = {
-                if (pendingCount > 0 && syncState.isConfigured) {
+                if (pendingCount > 0 && syncState.isConfigured && !syncState.quotaLimited) {
                     Badge(
                         containerColor = FolioTheme.colors.error,
                         contentColor = FolioTheme.colors.onError
@@ -77,13 +83,14 @@ fun SyncStatusBadge(
 }
 
 enum class SyncDisplayState {
-    SYNCED, SYNCING, ERROR, OFFLINE
+    SYNCED, SYNCING, ERROR, OFFLINE, QUOTA_RESTING
 }
 
 fun SyncState.toDisplayState(): SyncDisplayState {
     return when {
         isSyncing -> SyncDisplayState.SYNCING
         lastError != null -> SyncDisplayState.ERROR
+        quotaLimited -> SyncDisplayState.QUOTA_RESTING
         else -> SyncDisplayState.SYNCED
     }
 }

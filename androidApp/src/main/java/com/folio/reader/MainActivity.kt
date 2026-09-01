@@ -37,7 +37,7 @@ import com.folio.reader.ui.reader.ReaderScreen
 import com.folio.reader.ui.reader.ReaderViewModel
 import com.folio.reader.ui.search.SearchScreen
 import com.folio.reader.ui.settings.SettingsScreen
-import com.folio.reader.ui.statistics.StatisticsScreen
+import com.folio.reader.ui.statistics.StatisticsTabContent
 import com.folio.reader.ui.statistics.StatisticsViewModel
 import com.folio.reader.ui.book.BookDetailScreen
 import com.folio.reader.ui.book.BookDetailViewModel
@@ -61,7 +61,6 @@ private sealed interface Screen {
     data object Library : Screen
     data class Reader(val book: Book, val targetSpineIndex: Int? = null) : Screen
     data object Settings : Screen
-    data object Statistics : Screen
     data object Search : Screen
     data class BookDetail(val bookId: String) : Screen
     data object TagManager : Screen
@@ -73,6 +72,7 @@ private sealed interface Screen {
     data class MangaSourceBrowse(val sourceId: Long, val query: String = "") : Screen
     data object MangaExtensions : Screen
     data object MangaDownloads : Screen
+    data object MangaHistory : Screen
     data class MangaDetail(val mangaId: String) : Screen
     data class MangaReader(val mangaId: String, val chapterId: String) : Screen
 }
@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity() {
 
         val graph = (application as FolioApplication).graph
         graph.startSync(appScope)
+        graph.applyStoredMangaDownloadsLocation(appScope)
 
         setContent {
             // Navigation back stack: forward navigation pushes a screen onto the
@@ -144,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     categoryRepo = graph.mangaCategoryRepository,
                     chapterRepo = graph.mangaChapterRepository,
                     settingsRepo = graph.settingsRepository,
+                    downloadRepo = graph.mangaDownloadRepository,
                 )
             }
             // Hoisted here (not inside the LibraryScreen call) so system back can
@@ -155,9 +157,20 @@ class MainActivity : ComponentActivity() {
                     seriesRepository = graph.seriesRepository
                 )
             }
+            val statisticsVM = remember {
+                StatisticsViewModel(
+                    bookRepository = graph.bookRepository,
+                    sessionRepository = graph.sessionRepository,
+                    quoteRepository = graph.quoteRepository,
+                    highlightRepository = graph.highlightRepository
+                )
+            }
+            // Hoisted so returning from an opened result restores the search
+            // screen exactly as it was left (query, results, scroll position).
+            val searchUiState = remember { com.folio.reader.ui.search.SearchUiState() }
 
             // Top-level sync state for library screen
-            val librarySyncState by remember(graph.syncEngine) {
+            val librarySyncState by remember(graph.syncEngineState.value) {
                 graph.syncEngine?.syncState ?: kotlinx.coroutines.flow.flowOf(null)
             }.collectAsState(initial = null)
 
@@ -172,6 +185,9 @@ class MainActivity : ComponentActivity() {
             val mangaBrowseVM = remember {
                 com.folio.reader.ui.manga.BrowseViewModel(graph.mangaBackend, graph.mangaRepository)
             }
+            val sourceBrowseVmCache = remember {
+                mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
+            }
             // Hoisted so system back can clear an active chapter selection instead of
             // popping straight out of the detail screen.
             val detailScreen = navStack.lastOrNull() as? Screen.MangaDetail
@@ -183,6 +199,7 @@ class MainActivity : ComponentActivity() {
                         chapterRepo = graph.mangaChapterRepository,
                         historyRepo = graph.mangaHistoryRepository,
                         downloadManager = graph.mangaDownloadManager,
+                        downloadRepo = graph.mangaDownloadRepository,
                         categoryRepo = graph.mangaCategoryRepository,
                         settingsRepo = graph.settingsRepository,
                     )
@@ -196,6 +213,7 @@ class MainActivity : ComponentActivity() {
                     navStack.lastOrNull() is Screen.MangaBrowse && mangaBrowseVM.searchActive.value ->
                         mangaBrowseVM.exitSearch()
                     navStack.size > 1 -> popScreen()
+                    libraryVM.statsVisible.value -> libraryVM.statsVisible.value = false
                     mangaSearchActive -> mangaSearchActive = false
                     libraryMode == com.folio.reader.ui.library.LibraryMode.MANGA ->
                         libraryMode = com.folio.reader.ui.library.LibraryMode.BOOKS
@@ -222,6 +240,12 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.OpenMultipleDocuments()
             ) { uris ->
                 importMangaUris(uris)
+            }
+
+            val pickMangaFolder = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocumentTree()
+            ) { uri ->
+                if (uri != null) importMangaFolderUri(uri)
             }
 
             val mangaBackupManager = remember {
@@ -453,7 +477,6 @@ class MainActivity : ComponentActivity() {
                                 onImportClick = { pickEpubs.launch(arrayOf("application/epub+zip")) },
                                 onSearchClick = { pushScreen(Screen.Search) },
                                 onSettingsClick = { pushScreen(Screen.Settings) },
-                                onStatsClick = { pushScreen(Screen.Statistics) },
                                 onTagManagerClick = { pushScreen(Screen.TagManager) },
                                 onQuoteBrowserClick = { pushScreen(Screen.QuoteBrowser) },
                                 onRevisitClick = { pushScreen(Screen.RevisitItems) },
@@ -493,8 +516,7 @@ class MainActivity : ComponentActivity() {
                                 mangaExtensionsAvailable = graph.mangaBackend.supportsExtensions,
                                 onMangaBrowseClick = { pushScreen(Screen.MangaBrowse) },
                                 onMangaExtensionsClick = { pushScreen(Screen.MangaExtensions) },
-                                onMangaDownloadsClick = { pushScreen(Screen.MangaDownloads) },
-                                onMangaStatsClick = { pushScreen(Screen.Statistics) },
+                                onMangaHistoryClick = { pushScreen(Screen.MangaHistory) },
                                 onMangaBackupImport = { pickMangaBackup.launch(arrayOf("*/*")) },
                                 onMangaBackupExport = { exportMangaBackup.launch("folio_manga.backup") },
                                 booksViewMode = com.folio.reader.ui.library.LibraryViewModel.ViewMode.entries[sharedViewIndex],
@@ -503,15 +525,23 @@ class MainActivity : ComponentActivity() {
                                 onMangaViewModeChange = { sharedViewIndex = it.ordinal },
                                 onMangaSearchClick = { mangaSearchActive = !mangaSearchActive },
                                 onMangaImportClick = {
-                                    pickMangaArchives.launch(
-                                        arrayOf(
-                                            "application/x-cbz",
-                                            "application/vnd.comicbook+zip",
-                                            "application/zip",
-                                            "application/octet-stream",
-                                            "*/*"
-                                        )
-                                    )
+                                    android.app.AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("Import manga")
+                                        .setItems(arrayOf("Archive files", "Folder")) { _, which ->
+                                            when (which) {
+                                                0 -> pickMangaArchives.launch(
+                                                    arrayOf(
+                                                        "application/x-cbz",
+                                                        "application/vnd.comicbook+zip",
+                                                        "application/zip",
+                                                        "application/octet-stream",
+                                                        "*/*"
+                                                    )
+                                                )
+                                                1 -> pickMangaFolder.launch(null)
+                                            }
+                                        }
+                                        .show()
                                 },
                                 mangaContent = {
                                     com.folio.reader.ui.manga.MangaLibraryScreen(
@@ -529,16 +559,33 @@ class MainActivity : ComponentActivity() {
                                         onSearchActiveChange = { mangaSearchActive = it },
                                         browseViewModel = mangaBrowseVM,
                                         onImportLocal = {
-                                            pickMangaArchives.launch(
-                                                arrayOf(
-                                                    "application/x-cbz",
-                                                    "application/vnd.comicbook+zip",
-                                                    "application/zip",
-                                                    "application/octet-stream",
-                                                    "*/*"
-                                                )
-                                            )
+                                            android.app.AlertDialog.Builder(this@MainActivity)
+                                                .setTitle("Import manga")
+                                                .setItems(arrayOf("Archive files", "Folder")) { _, which ->
+                                                    when (which) {
+                                                        0 -> pickMangaArchives.launch(
+                                                            arrayOf(
+                                                                "application/x-cbz",
+                                                                "application/vnd.comicbook+zip",
+                                                                "application/zip",
+                                                                "application/octet-stream",
+                                                                "*/*"
+                                                            )
+                                                        )
+                                                        1 -> pickMangaFolder.launch(null)
+                                                    }
+                                                }
+                                                .show()
                                         },
+                                    )
+                                },
+                                statsContent = {
+                                    StatisticsTabContent(
+                                        viewModel = statisticsVM,
+                                        onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
+                                        settingsRepository = graph.settingsRepository,
+                                        initialGoalMinutes = globalSettings.dailyGoalMinutes,
+                                        mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
                                     )
                                 }
                             )
@@ -561,6 +608,16 @@ class MainActivity : ComponentActivity() {
                                 LaunchedEffect(Unit) {
                                     runCatching {
                                         globalSettings = graph.settingsRepository.getGlobalSettings()
+                                    }
+                                }
+                                var mangaDlLocation by remember {
+                                    mutableStateOf(graph.mangaDownloadManager.storageDescription())
+                                }
+                                val pickMangaDlDir = rememberLauncherForActivityResult(
+                                    ActivityResultContracts.OpenDocumentTree()
+                                ) { uri ->
+                                    if (uri != null) changeMangaDownloadsLocation(uri) {
+                                        mangaDlLocation = graph.mangaDownloadManager.storageDescription()
                                     }
                                 }
                                 SettingsScreen(
@@ -606,35 +663,17 @@ class MainActivity : ComponentActivity() {
                                     onExportAnnotations = { format ->
                                         annotationFormat = format
                                         annotationsExportLauncher.launch("annotations.$format")
-                                    }
+                                    },
+                                    mangaDownloadsLocation = mangaDlLocation,
+                                    onPickMangaDownloadsLocation = { pickMangaDlDir.launch(null) }
                                 )
                             }
-
-                            is Screen.Statistics -> StatisticsScreen(
-                                viewModel = remember {
-                                    StatisticsViewModel(
-                                        bookRepository = graph.bookRepository,
-                                        sessionRepository = graph.sessionRepository
-                                    )
-                                },
-                                onBackPress = { popScreen() },
-                                onBookClick = { bookId ->
-                                    appScope.launch(Dispatchers.IO) {
-                                        graph.bookRepository.getBook(bookId)?.let { book ->
-                                            appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
-                                        }
-                                    }
-                                },
-                                mangaStatsRepo = remember {
-                                    com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
-                                },
-                                onMangaClick = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) }
-                            )
 
                             is Screen.Search -> SearchRoute(
                                 graph = graph,
                                 onBackPress = { popScreen() },
-                                onOpenBook = { book, target -> pushScreen(Screen.Reader(book, target)) }
+                                onOpenBook = { book, target -> pushScreen(Screen.Reader(book, target)) },
+                                uiState = searchUiState
                             )
 
                             is Screen.BookDetail -> {
@@ -771,19 +810,20 @@ class MainActivity : ComponentActivity() {
                                         androidx.compose.material3.CircularProgressIndicator()
                                     }
                                 } else {
+                                    val sbVm = sourceBrowseVmCache.getOrPut(sourceInfo.id) {
+                                        com.folio.reader.ui.manga.SourceBrowseViewModel(
+                                            backend = graph.mangaBackend,
+                                            source = sourceInfo,
+                                            mangaRepo = graph.mangaRepository,
+                                            categoryRepo = graph.mangaCategoryRepository,
+                                            initialQuery = current.query,
+                                            onAddedToLibrary = { id ->
+                                                graph.syncEngine?.adoptCloudProgressForManga(id)
+                                            },
+                                        )
+                                    }
                                     com.folio.reader.ui.manga.SourceBrowseScreen(
-                                        viewModel = remember(sourceInfo.id, current.query) {
-                                            com.folio.reader.ui.manga.SourceBrowseViewModel(
-                                                backend = graph.mangaBackend,
-                                                source = sourceInfo,
-                                                mangaRepo = graph.mangaRepository,
-                                                categoryRepo = graph.mangaCategoryRepository,
-                                                initialQuery = current.query,
-                                                onAddedToLibrary = { id ->
-                                                    graph.syncEngine?.adoptCloudProgressForManga(id)
-                                                },
-                                            )
-                                        },
+                                        viewModel = sbVm,
                                         onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
                                         onBack = { popScreen() },
                                     )
@@ -800,15 +840,33 @@ class MainActivity : ComponentActivity() {
                                 onBack = { popScreen() },
                             )
 
-                            is Screen.MangaDownloads -> com.folio.reader.ui.manga.DownloadsScreen(
-                                viewModel = remember {
+                            is Screen.MangaDownloads -> {
+                                val downloadsVM = remember {
                                     com.folio.reader.ui.manga.DownloadsViewModel(
                                         downloadRepo = graph.mangaDownloadRepository,
                                         mangaRepo = graph.mangaRepository,
                                         chapterRepo = graph.mangaChapterRepository,
                                         downloadManager = graph.mangaDownloadManager,
                                     )
-                                },
+                                }
+                                val pickDownloadsDir = rememberLauncherForActivityResult(
+                                    ActivityResultContracts.OpenDocumentTree()
+                                ) { uri ->
+                                    if (uri != null) changeMangaDownloadsLocation(uri) {
+                                        downloadsVM.refreshStorageDescription()
+                                    }
+                                }
+                                com.folio.reader.ui.manga.DownloadsScreen(
+                                    viewModel = downloadsVM,
+                                    onBack = { popScreen() },
+                                    onPickLocation = { pickDownloadsDir.launch(null) },
+                                )
+                            }
+
+                            is Screen.MangaHistory -> com.folio.reader.ui.manga.MangaHistoryScreen(
+                                backend = graph.mangaBackend,
+                                historyRepo = graph.mangaHistoryRepository,
+                                onOpenManga = { entry -> pushScreen(Screen.MangaDetail(entry.mangaId)) },
                                 onBack = { popScreen() },
                             )
 
@@ -971,6 +1029,105 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Imports a folder selected via ACTION_OPEN_DOCUMENT_TREE as one manga collection. */
+    private fun importMangaFolderUri(treeUri: Uri) {
+        val graph = (application as FolioApplication).graph
+        appScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) { importStatus = "Reading manga folder..." }
+            try {
+                val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(this@MainActivity, treeUri)
+                    ?: throw IllegalArgumentException("Cannot read selected folder")
+                val folderName = docFile.name ?: "manga_folder"
+                val resolver = contentResolver
+                val archives = docFile.listFiles()
+                    .filter { child ->
+                        child.isFile && child.name?.substringAfterLast('.', "")?.lowercase()
+                            .let { it == "cbz" || it == "zip" }
+                    }
+                    .mapNotNull { child ->
+                        val name = child.name ?: return@mapNotNull null
+                        com.folio.reader.manga.LocalMangaSource.PendingArchive(name) {
+                            resolver.openInputStream(child.uri)
+                                ?: throw java.io.IOException("Cannot open $name")
+                        }
+                    }
+                if (archives.isEmpty()) {
+                    withContext(Dispatchers.Main) { importStatus = "No CBZ/ZIP files found in folder" }
+                    return@launch
+                }
+                val seriesName = graph.mangaBackend.localSource.importFolder(folderName, archives) { done, total ->
+                    withContext(Dispatchers.Main) { importStatus = "Importing manga folder... $done/$total" }
+                }
+                val entryId = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName)
+                graph.mangaRepository.upsert(
+                    com.folio.reader.manga.MangaEntry(
+                        id = entryId,
+                        sourceId = com.folio.reader.manga.LOCAL_SOURCE_ID,
+                        sourceName = "Local manga",
+                        url = seriesName,
+                        title = seriesName,
+                        thumbnailUrl = seriesName,
+                        inLibrary = true,
+                        initialized = true,
+                    )
+                )
+                runCatching {
+                    graph.mangaBackend.localSource.materializeCover(seriesName)?.let { cover ->
+                        graph.mangaRepository.setCoverPath(entryId, cover.absolutePath)
+                    }
+                }
+                runCatching { graph.syncEngine?.adoptCloudProgressForManga(entryId) }
+                withContext(Dispatchers.Main) {
+                    importStatus = "Imported folder '$seriesName' with ${archives.size} chapters"
+                    refreshTick++
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    importStatus = "Folder import failed: ${e.message ?: "unknown error"}"
+                }
+            }
+        }
+    }
+
+    /**
+     * Points manga downloads at a user-picked SAF folder. Takes a persistable
+     * permission, remembers the choice, migrates existing chapters over, and keeps
+     * the old location readable until migration finishes.
+     */
+    private fun changeMangaDownloadsLocation(treeUri: Uri, onDone: () -> Unit = {}) {
+        val graph = (application as FolioApplication).graph
+        try {
+            contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (e: SecurityException) {
+            importStatus = "Folio needs read/write access to that folder"
+            return
+        }
+        appScope.launch(Dispatchers.IO) {
+            runCatching {
+                val storage = com.folio.reader.manga.SafDownloadStorage(applicationContext, treeUri)
+                val ok = graph.mangaDownloadManager.switchStorage(storage) { done, total ->
+                    withContext(Dispatchers.Main) { importStatus = "Moving downloads... $done/$total" }
+                }
+                if (!ok) {
+                    withContext(Dispatchers.Main) {
+                        importStatus = "Couldn't use that folder for downloads; keeping the current location"
+                    }
+                    return@runCatching
+                }
+                graph.settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, treeUri.toString())
+                withContext(Dispatchers.Main) {
+                    importStatus = "Downloads now save to '${storage.describe()}'"
+                    onDone()
+                }
+            }.onFailure { e ->
+                withContext(Dispatchers.Main) { importStatus = "Could not use that folder: ${e.message}" }
+            }
+        }
+    }
+
     private fun handleEpubIntent(intent: Intent) {
             val uri = when (intent.action) {
                 Intent.ACTION_VIEW -> intent.data
@@ -1050,7 +1207,7 @@ class MainActivity : ComponentActivity() {
         val showToc by viewModel.showToc.collectAsState(initial = false)
         val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
         val loadError by viewModel.loadError.collectAsState(initial = null)
-        val syncState: com.folio.reader.sync.SyncState? by remember(graph.syncEngine) {
+        val syncState: com.folio.reader.sync.SyncState? by remember(graph.syncEngineState.value) {
             graph.syncEngine?.syncState ?: kotlinx.coroutines.flow.flowOf(null)
         }.collectAsState(initial = null)
 
@@ -1137,7 +1294,8 @@ class MainActivity : ComponentActivity() {
     private fun SearchRoute(
         graph: AppGraph,
         onBackPress: () -> Unit,
-        onOpenBook: (Book, Int?) -> Unit
+        onOpenBook: (Book, Int?) -> Unit,
+        uiState: com.folio.reader.ui.search.SearchUiState
     ) {
         val books by remember { graph.bookRepository.getAllBooks() }.collectAsState(initial = emptyList())
         SearchScreen(
@@ -1148,6 +1306,7 @@ class MainActivity : ComponentActivity() {
             bookmarkRepository = graph.bookmarkRepository,
             quoteRepository = graph.quoteRepository,
             onBackPress = onBackPress,
+            uiState = uiState,
             onResultClick = { hit ->
                 val target = hit.spineIndex.takeIf { it >= 0 }
                 books.firstOrNull { it.id == hit.book.id }?.let { onOpenBook(it, target) }

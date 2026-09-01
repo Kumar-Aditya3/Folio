@@ -1,5 +1,9 @@
 package com.folio.reader.ui.statistics
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,106 +16,532 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.database.SettingsRepository
+import com.folio.reader.manga.MangaStatistics
+import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioSectionCard
-import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.HeatmapCell
 import com.folio.reader.ui.components.StatCard
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 
+// ---------------------------------------------------------------------------
+// Embeddable Stats Tab — no Scaffold / top bar of its own
+// ---------------------------------------------------------------------------
+
 /**
- * Reading statistics, aggregated from the synced session history of every device on
- * the account rather than just this one.
+ * Embeddable statistics hub rendered inside the library screen's tab area.
+ * No Scaffold or top bar — the host provides those.
  *
- * Every figure is sized for the space it is given: values are formatted compactly and
- * capped to one line, because a card whose number wraps one character per line reads
- * as broken rather than as full.
+ * @param viewModel statistics view model (must outlive this composable)
+ * @param onBookClick navigates to a book detail / reader
+ * @param settingsRepository optional; needed to persist daily-goal edits.
+ *        When null the goal ring still renders but the edit affordance is hidden.
+ * @param initialGoalMinutes the current daily goal from GlobalSettings; used as
+ *        the starting value before any in-session edit. The host should pass
+ *        `settings.dailyGoalMinutes`.
+ * @param mangaStatsRepo optional manga statistics repository. When non-null and
+ *        the repo reports data, a manga section is rendered in the same glassy
+ *        design language as the book stats.
  */
 @Composable
-fun StatisticsScreen(
+fun StatisticsTabContent(
     viewModel: StatisticsViewModel,
-    onBackPress: () -> Unit,
     onBookClick: (String) -> Unit,
-    mangaStatsRepo: com.folio.reader.manga.MangaStatisticsRepository? = null,
-    onMangaClick: (String) -> Unit = {},
+    settingsRepository: SettingsRepository? = null,
+    initialGoalMinutes: Int = 60,
+    mangaStatsRepo: MangaStatisticsRepository? = null,
 ) {
     val stats by viewModel.state.collectAsState(initial = StatisticsUiState())
-    var section by remember { mutableStateOf(0) } // 0 books, 1 manga
+    val recentQuotes by (viewModel.recentQuotes
+        ?: kotlinx.coroutines.flow.flowOf(emptyList()))
+        .collectAsState(initial = emptyList())
 
-    Column(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
-        FolioTopBar(
-            title = "Statistics",
-            navigationIcon = {
-                IconButton(onClick = onBackPress) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    // ── Manga statistics (loaded once when the repo is available) ────────
+    var mangaStats by remember { mutableStateOf<MangaStatistics?>(null) }
+    LaunchedEffect(mangaStatsRepo) {
+        mangaStats = mangaStatsRepo?.getStatistics()
+    }
+
+    var goalMinutes by remember { mutableIntStateOf(initialGoalMinutes) }
+    // Sync when the host pushes a new value (e.g. after external settings change).
+    LaunchedEffect(initialGoalMinutes) { goalMinutes = initialGoalMinutes }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = FolioTokens.space3,
+            end = FolioTokens.space3,
+            top = FolioTokens.space3,
+            bottom = FolioTokens.space4
+        ),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+    ) {
+        // ── a. Daily goal ring ────────────────────────────────────────
+        item {
+            DailyGoalRing(
+                todayMinutes = stats.todayMinutes,
+                goalMinutes = goalMinutes,
+                onGoalChanged = { newGoal ->
+                    goalMinutes = newGoal
+                },
+                settingsRepository = settingsRepository,
+            )
+        }
+
+        // ── b. Finish predictions ─────────────────────────────────────
+        if (stats.currentlyReading.isNotEmpty()) {
+            item {
+                FinishPredictionsCard(
+                    books = stats.currentlyReading.take(5),
+                    onBookClick = onBookClick,
+                )
+            }
+        }
+
+        // ── c. Floating quotes & highlights ───────────────────────────
+        if (recentQuotes.isNotEmpty()) {
+            item {
+                FloatingQuotesCard(quotes = recentQuotes)
+            }
+        }
+
+        // ── c2. Manga statistics (when available) ─────────────────────
+        if (mangaStats != null && mangaStats!!.hasData) {
+            item {
+                MangaStatsSection(mangaStats!!)
+            }
+        }
+
+        // ── d. Deep stats (existing sections) ─────────────────────────
+        item { HeadlineRow(stats) }
+        item { WeekChart(stats.week) }
+        item { ActivityHeatmap(stats.heatmap, stats.heatmapBooks, stats.heatmapManga) }
+        item { PatternsCard(stats, mangaStats) }
+        if (!stats.hasData) {
+            item { EmptyState() }
+        }
+        item { Spacer(Modifier.height(FolioTokens.space1)) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Daily Goal Ring
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun DailyGoalRing(
+    todayMinutes: Long,
+    goalMinutes: Int,
+    onGoalChanged: (Int) -> Unit,
+    settingsRepository: SettingsRepository?,
+) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    val fraction = if (goalMinutes > 0) (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f) else 0f
+    val animatedFraction by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = tween(durationMillis = 800, easing = LinearEasing),
+        label = "goalRing",
+    )
+
+    Column(
+        modifier = Modifier
+            .glassPanel(RoundedCornerShape(FolioTokens.radiusCard))
+            .padding(FolioTokens.space3),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Daily goal",
+                style = FolioTheme.typography.titleSmall,
+                color = FolioTheme.colors.onSurface,
+            )
+            if (settingsRepository != null) {
+                IconButton(onClick = { showEditDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Edit daily goal",
+                        tint = FolioTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
+        }
+
+        Spacer(Modifier.height(FolioTokens.space2))
+
+        val trackColor = FolioTheme.colors.outline.copy(alpha = 0.2f)
+        val progressColor = FolioTheme.colors.primary
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(140.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 12.dp.toPx()
+                val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+                val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                // Track
+                drawArc(
+                    color = trackColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+                // Progress
+                drawArc(
+                    color = progressColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f * animatedFraction,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${todayMinutes.toInt()}",
+                    style = FolioTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = FolioTheme.colors.primary,
+                )
+                Text(
+                    text = "of $goalMinutes min",
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    if (showEditDialog) {
+        GoalEditDialog(
+            currentGoal = goalMinutes,
+            onDismiss = { showEditDialog = false },
+            onSave = { newGoal ->
+                onGoalChanged(newGoal)
+                showEditDialog = false
+            },
+            settingsRepository = settingsRepository,
         )
+    }
+}
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = FolioTokens.space3)
-                .padding(bottom = FolioTokens.space1),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FolioChip(selected = section == 0, onClick = { section = 0 }, label = "Books")
-            FolioChip(selected = section == 1, onClick = { section = 1 }, label = "Manga")
-        }
+@Composable
+private fun GoalEditDialog(
+    currentGoal: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int) -> Unit,
+    settingsRepository: SettingsRepository?,
+) {
+    var sliderValue by remember { mutableFloatStateOf(currentGoal.toFloat()) }
+    val scope = rememberCoroutineScope()
 
-        if (section == 1 && mangaStatsRepo != null) {
-            MangaStatsContent(mangaStatsRepo, onMangaClick)
-            return@Column
-        }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = FolioTokens.space3,
-                end = FolioTokens.space3,
-                top = FolioTokens.space3,
-                bottom = FolioTokens.space4
-            ),
-            verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
-        ) {
-            item { HeadlineRow(stats) }
-            item { WeekChart(stats.week) }
-            item { ActivityHeatmap(stats.heatmap) }
-            item { PatternsCard(stats) }
-            if (stats.currentlyReading.isNotEmpty()) {
-                item { CurrentlyReadingCard(stats.currentlyReading, onBookClick) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Daily reading goal") },
+        text = {
+            Column {
+                Text(
+                    "${sliderValue.toInt()} minutes",
+                    style = FolioTheme.typography.headlineSmall,
+                    color = FolioTheme.colors.primary,
+                )
+                Spacer(Modifier.height(FolioTokens.space2))
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    valueRange = 5f..300f,
+                    steps = 58, // 5-minute increments
+                )
             }
-            if (!stats.hasData) {
-                item { EmptyState() }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val newGoal = sliderValue.toInt()
+                onSave(newGoal)
+                if (settingsRepository != null) {
+                    scope.launch {
+                        val current = settingsRepository.getGlobalSettings()
+                        settingsRepository.saveGlobalSettings(
+                            current.copy(dailyGoalMinutes = newGoal)
+                        )
+                    }
+                }
+            }) {
+                Text("Save")
             }
-            item { Spacer(Modifier.height(FolioTokens.space1)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Finish Predictions
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun FinishPredictionsCard(
+    books: List<ReadingInProgress>,
+    onBookClick: (String) -> Unit,
+) {
+    FolioSectionCard(title = "Finish predictions") {
+        books.forEach { book ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onBookClick(book.id) }
+                    .padding(vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = book.title,
+                        style = FolioTheme.typography.titleSmall,
+                        color = FolioTheme.colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "${(book.progress * 100).toInt()}%",
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.primary,
+                    )
+                }
+                FolioProgressBar(progress = book.progress, color = FolioTheme.colors.primary)
+                if (book.finishEstimate != null) {
+                    Text(
+                        text = book.finishEstimate,
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Floating Quotes
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun FloatingQuotesCard(quotes: List<RecentQuote>) {
+    FolioSectionCard(title = "Recent highlights") {
+        quotes.forEach { quote ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        imageVector = Icons.Filled.FormatQuote,
+                        contentDescription = null,
+                        tint = FolioTheme.colors.primary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp).padding(top = 2.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = quote.text,
+                        style = FolioTheme.typography.bodyMedium,
+                        fontStyle = FontStyle.Italic,
+                        color = FolioTheme.colors.onSurface,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    text = quote.bookTitle,
+                    style = FolioTheme.typography.labelSmall,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 28.dp),
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Manga Statistics Section
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun MangaStatsSection(stats: MangaStatistics) {
+    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+        // ── Section header ────────────────────────────────────────────
+        Text(
+            text = "Manga",
+            style = FolioTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = FolioTheme.colors.onSurface,
+        )
+
+        // ── Headline tiles (mirror the books StatTile grid) ───────────
+        Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                StatTile(
+                    label = "Chapters read",
+                    value = stats.readChapters.toString(),
+                    caption = plural(stats.completedCount, "series completed"),
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "Reading time",
+                    value = formatDuration(stats.totalReadMinutes * 60_000L),
+                    caption = plural(stats.downloadedChapters, "downloaded"),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        // ── Manga weekly activity chart ───────────────────────────────
+        if (stats.weekReadChapters.any { it > 0 }) {
+            MangaWeekChart(
+                chaptersPerDay = stats.weekReadChapters,
+                labels = stats.weekLabels,
+            )
+        }
+
+        // ── Most-read manga (compact, non-clickable) ──────────────────
+        if (stats.topManga.isNotEmpty()) {
+            FolioSectionCard(title = "Most read") {
+                stats.topManga.take(5).forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = entry.title,
+                            style = FolioTheme.typography.bodyMedium,
+                            color = FolioTheme.colors.onSurface,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = plural(entry.readChapters, "chapter"),
+                            style = FolioTheme.typography.labelMedium,
+                            color = FolioTheme.colors.primary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A bar chart of manga chapters read per day over the last 7 days, styled
+ * identically to the books [WeekChart] but with chapter counts instead of minutes.
+ */
+@Composable
+private fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
+    FolioSectionCard(title = "Manga — last 7 days") {
+        val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
+        Row(
+            modifier = Modifier.fillMaxWidth().height(112.dp),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            chaptersPerDay.forEachIndexed { index, chapters ->
+                val label = labels.getOrNull(index)?.take(1) ?: ""
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    Text(
+                        text = if (chapters > 0) chapters.toString() else "",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val fraction = (chapters.toFloat() / peak).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (chapters > 0) (28 + fraction * 48).dp else 6.dp)
+                            .background(
+                                if (chapters > 0) FolioTheme.colors.primary
+                                else FolioTheme.colors.outline.copy(alpha = 0.35f),
+                                RoundedCornerShape(
+                                    topStart = 6.dp, topEnd = 6.dp,
+                                    bottomStart = 2.dp, bottomEnd = 2.dp,
+                                ),
+                            ),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = label,
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Existing private helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 @Composable
 private fun HeadlineRow(stats: StatisticsUiState) {
@@ -212,9 +642,34 @@ private fun WeekChart(week: List<StatDay>) {
     }
 }
 
+private enum class HeatmapMode { ALL, BOOKS, MANGA }
+
 @Composable
-private fun ActivityHeatmap(days: List<StatDay>) {
+private fun ActivityHeatmap(
+    allDays: List<StatDay>,
+    bookDays: List<StatDay>,
+    mangaDays: List<StatDay>,
+) {
+    var mode by remember { mutableStateOf(HeatmapMode.ALL) }
+    val days = when (mode) {
+        HeatmapMode.ALL -> allDays
+        HeatmapMode.BOOKS -> bookDays
+        HeatmapMode.MANGA -> mangaDays
+    }
+
     FolioSectionCard(title = "Activity") {
+        // ── Segmented toggle ──────────────────────────────────────────
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FolioChip(selected = mode == HeatmapMode.ALL, onClick = { mode = HeatmapMode.ALL }, label = "All")
+            FolioChip(selected = mode == HeatmapMode.BOOKS, onClick = { mode = HeatmapMode.BOOKS }, label = "Books")
+            FolioChip(selected = mode == HeatmapMode.MANGA, onClick = { mode = HeatmapMode.MANGA }, label = "Manga")
+        }
+
+        Spacer(Modifier.height(FolioTokens.space2))
+
         if (days.isEmpty()) {
             Text(
                 "No reading recorded yet.",
@@ -276,7 +731,7 @@ private fun intensityFor(minutes: Long, peak: Long): Int {
 }
 
 @Composable
-private fun PatternsCard(stats: StatisticsUiState) {
+private fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?) {
     FolioSectionCard(title = "Reading patterns") {
         if (!stats.hasData) {
             Text(
@@ -286,11 +741,36 @@ private fun PatternsCard(stats: StatisticsUiState) {
             )
             return@FolioSectionCard
         }
+        if (stats.chronotype.isNotBlank()) {
+            Text(
+                text = stats.chronotype.uppercase(),
+                style = FolioTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = FolioTheme.colors.onSurface
+            )
+        }
+        if (stats.peakWindow.isNotBlank()) {
+            Text(
+                text = "You read mostly between ${stats.peakWindow}.",
+                style = FolioTheme.typography.bodyMedium,
+                color = FolioTheme.colors.onSurfaceVariant
+            )
+        }
+        if (stats.chronotype.isNotBlank() || stats.peakWindow.isNotBlank()) {
+            Spacer(Modifier.height(FolioTokens.space1))
+        }
         PatternRow("Average session", shortMinutes(stats.averageSessionMinutes.toLong()))
+        if (mangaStats != null && mangaStats.readActiveDays > 0) {
+            PatternRow(
+                "Average binge",
+                "%.1f chapters".format(mangaStats.readChapters.toDouble() / mangaStats.readActiveDays)
+            )
+        }
+        PatternRow("Current streak", plural(stats.streakDays, "day"))
+        PatternRow("Most active hour", stats.mostReadHour.ifBlank { "—" })
+        PatternRow("Favourite day", stats.mostReadDay.ifBlank { "—" })
         PatternRow("Average speed", "${stats.averageSpeedWpm.toInt()} wpm")
         PatternRow("Longest streak", plural(stats.longestStreakDays, "day"))
-        PatternRow("Most read day", stats.mostReadDay.ifBlank { "—" })
-        PatternRow("Most read hour", stats.mostReadHour.ifBlank { "—" })
         PatternRow("Active days this week", "${stats.activeDaysThisWeek} of 7")
         PatternRow(
             label = "Synced from",
@@ -321,47 +801,6 @@ private fun PatternRow(label: String, value: String) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-    }
-}
-
-@Composable
-private fun CurrentlyReadingCard(books: List<ReadingInProgress>, onBookClick: (String) -> Unit) {
-    FolioSectionCard(title = "Currently reading") {
-        books.forEach { book ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onBookClick(book.id) }
-                    .padding(vertical = 7.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = book.title,
-                        style = FolioTheme.typography.titleSmall,
-                        color = FolioTheme.colors.onSurface,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${(book.progress * 100).toInt()}%",
-                        style = FolioTheme.typography.labelMedium,
-                        color = FolioTheme.colors.primary
-                    )
-                }
-                if (book.author.isNotBlank()) {
-                    Text(
-                        text = book.author,
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                FolioProgressBar(progress = book.progress, color = FolioTheme.colors.primary)
-            }
-        }
     }
 }
 
@@ -403,135 +842,3 @@ private fun plural(count: Int, word: String): String =
     "$count $word" + if (count == 1) "" else "s"
 
 private fun LocalDate.shortLabel(): String = "$dayOfMonth.$monthNumber"
-
-@Composable
-private fun MangaStatsContent(
-    repo: com.folio.reader.manga.MangaStatisticsRepository,
-    onMangaClick: (String) -> Unit,
-) {
-    var stats by remember { mutableStateOf<com.folio.reader.manga.MangaStatistics?>(null) }
-    LaunchedEffect(repo) { stats = repo.getStatistics() }
-
-    val s = stats
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = FolioTokens.space3, end = FolioTokens.space3,
-            top = FolioTokens.space3, bottom = FolioTokens.space4,
-        ),
-        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
-    ) {
-        if (s == null || !s.hasData) {
-            item {
-                Text(
-                    "No manga activity yet. Read a chapter to start tracking.",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = FolioTokens.space4),
-                )
-            }
-        } else {
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                    StatCard("Reading time", formatMinutes(s.totalReadMinutes), modifier = Modifier.weight(1f))
-                    StatCard("Chapters read", s.readChapters.toString(), modifier = Modifier.weight(1f))
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                    StatCard("Downloaded", s.downloadedChapters.toString(), modifier = Modifier.weight(1f))
-                    StatCard("Completed", s.completedCount.toString(), modifier = Modifier.weight(1f))
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                    StatCard("Bookmarked", s.bookmarkedChapters.toString(), modifier = Modifier.weight(1f))
-                    StatCard("Notes", s.notesCount.toString(), modifier = Modifier.weight(1f))
-                }
-            }
-            item { MangaWeekChart(s) }
-            if (s.topManga.isNotEmpty()) {
-                item { MangaTopCard(s.topManga, onMangaClick) }
-            }
-        }
-        item { Spacer(Modifier.height(FolioTokens.space1)) }
-    }
-}
-
-private fun formatMinutes(min: Long): String = when {
-    min < 60 -> "${min}m"
-    else -> "${min / 60}h ${min % 60}m"
-}
-
-@Composable
-private fun MangaWeekChart(s: com.folio.reader.manga.MangaStatistics) {
-    FolioSectionCard(title = "Chapters read this week") {
-        val peak = (s.weekReadChapters.maxOrNull() ?: 0).coerceAtLeast(1)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
-        ) {
-            s.weekReadChapters.forEachIndexed { i, v ->
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp),
-                        contentAlignment = Alignment.BottomCenter,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height((64 * v.toFloat() / peak).dp.coerceAtLeast(if (v > 0) 4.dp else 1.dp))
-                                .background(
-                                    FolioTheme.colors.primary.copy(alpha = if (v > 0) 0.9f else 0.15f),
-                                    RoundedCornerShape(4.dp),
-                                )
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        s.weekLabels[i],
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MangaTopCard(
-    top: List<com.folio.reader.manga.MangaTopEntry>,
-    onMangaClick: (String) -> Unit,
-) {
-    FolioSectionCard(title = "Most read") {
-        top.forEach { entry ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onMangaClick(entry.mangaId) }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    entry.title,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-                    color = FolioTheme.colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "${entry.readChapters} ch",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-                    color = FolioTheme.colors.primary,
-                )
-            }
-        }
-    }
-}

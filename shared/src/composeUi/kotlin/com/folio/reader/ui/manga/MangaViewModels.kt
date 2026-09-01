@@ -9,6 +9,7 @@ import com.folio.reader.manga.MangaBrowseItem
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaChapterRef
 import com.folio.reader.manga.MangaDownloadManager
+import com.folio.reader.manga.MangaDownloadStatus
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaFilter
 import com.folio.reader.manga.MangaPageRef
@@ -66,6 +67,10 @@ enum class MangaLibFilter(val label: String) {
 
 private const val KEY_LIBRARY_CATEGORY = "manga.library.category"
 
+/** Library-level "Downloaded" mode: the shelf stays whole, but detail screens
+ *  narrow their chapter lists to downloaded chapters while this is on. */
+private const val KEY_LIBRARY_DOWNLOADED_FILTER = "manga.library.downloaded.filter"
+
 /**
  * Story position of a chapter. Sources disagree on list direction (some fetch
  * newest-first, so sortOrder 0 is the LATEST chapter) and many leave
@@ -101,6 +106,7 @@ class MangaLibraryViewModel(
     private val categoryRepo: MangaCategoryRepository,
     private val chapterRepo: MangaChapterRepository,
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
+    downloadRepo: com.folio.reader.manga.MangaDownloadRepository? = null,
 ) {
     val scope = mangaVmScope()
 
@@ -117,10 +123,23 @@ class MangaLibraryViewModel(
     val categories = categoryRepo.observeCategories()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
 
+    /** Chapters queued or actively downloading; drives the library Downloads chip count. */
+    val activeDownloadCount: StateFlow<Int> = downloadRepo?.observeQueue()
+        ?.map { list -> list.count { it.status == MangaDownloadStatus.QUEUED || it.status == MangaDownloadStatus.DOWNLOADING } }
+        ?.stateIn(scope, SharingStarted.Lazily, 0)
+        ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+
     val query = MutableStateFlow("")
     val searchActive = MutableStateFlow(false)
     /** One query shared by both scopes so the text survives library/source switches. */
     val searchScope = MutableStateFlow(MangaSearchScope.LIBRARY)
+
+    // Scroll position holders: survive composition loss when navigating to detail and back.
+    // Index + offset for LIST/COMPACT (LazyColumn); index + offset for GRID (LazyVerticalGrid).
+    var listScrollIndex: Int = 0
+    var listScrollOffset: Int = 0
+    var gridScrollIndex: Int = 0
+    var gridScrollOffset: Int = 0
 
     val sortBy = MutableStateFlow(MangaSortBy.RECENT)
     val activeFilters = MutableStateFlow<Set<MangaLibFilter>>(emptySet())
@@ -150,7 +169,7 @@ class MangaLibraryViewModel(
 
     val visible: StateFlow<List<MangaEntry>> =
         combine(baseList, counts, activeFilters, sortBy) { list, c, filters, sort ->
-            val (unread, prog, dl) = c
+            val (unread, prog, _) = c
             val filtered = list.filter { manga ->
                 filters.all { f ->
                     val p = prog[manga.id] ?: 0f
@@ -158,7 +177,9 @@ class MangaLibraryViewModel(
                         MangaLibFilter.UNREAD -> p == 0f && (unread[manga.id] ?: 0) > 0
                         MangaLibFilter.READING -> p > 0f && p < 1f
                         MangaLibFilter.COMPLETED -> p >= 1f
-                        MangaLibFilter.DOWNLOADED -> (dl[manga.id] ?: 0) > 0
+                        // Downloaded is a mode, not a shelf filter: the library stays
+                        // whole and detail screens narrow to downloaded chapters.
+                        MangaLibFilter.DOWNLOADED -> true
                     }
                 }
             }
@@ -199,14 +220,27 @@ class MangaLibraryViewModel(
                 }
             }
         }
+        scope.launch {
+            if (settingsRepo.getRaw(KEY_LIBRARY_DOWNLOADED_FILTER) == "true") {
+                activeFilters.value = activeFilters.value + MangaLibFilter.DOWNLOADED
+            }
+        }
     }
 
     fun toggleFilter(filter: MangaLibFilter) {
         activeFilters.value = if (filter in activeFilters.value) activeFilters.value - filter else activeFilters.value + filter
+        persistDownloadedMode()
     }
 
     fun setQuickFilter(filter: MangaLibFilter?) {
         activeFilters.value = if (filter == null) emptySet() else setOf(filter)
+        persistDownloadedMode()
+    }
+
+    /** The Downloaded toggle is a library-wide mode; detail screens read it back. */
+    private fun persistDownloadedMode() {
+        val on = MangaLibFilter.DOWNLOADED in activeFilters.value
+        scope.launch { settingsRepo.setRaw(KEY_LIBRARY_DOWNLOADED_FILTER, if (on) "true" else "false") }
     }
 
     suspend fun createCategory(name: String): String? =
@@ -405,6 +439,14 @@ class BrowseViewModel(
     private var globalJob: kotlinx.coroutines.Job? = null
     private val searchGate = kotlinx.coroutines.sync.Semaphore(5)
     private val searchArrival = MutableStateFlow<List<Long>>(emptyList())
+    /** Query whose results are currently held — streaming or complete. Set the moment
+     *  the fan-out starts, so re-entering composition with the same query never restarts
+     *  the network round-trip even while slow sources are still answering. Cleared only
+     *  when the search is explicitly closed or blanked. */
+    private var heldGlobalQuery: String? = null
+
+    var globalListScrollIndex: Int = 0
+    var globalListScrollOffset: Int = 0
 
     /**
      * Search sections in display order: sources that already found something come first,
@@ -435,6 +477,7 @@ class BrowseViewModel(
             globalResults.value = emptyList()
             searchArrival.value = emptyList()
             preparingSources.value = false
+            heldGlobalQuery = null
         }
     }
 
@@ -444,17 +487,25 @@ class BrowseViewModel(
         globalResults.value = emptyList()
         searchArrival.value = emptyList()
         preparingSources.value = false
+        heldGlobalQuery = null
     }
 
     fun globalSearch(query: String) {
         globalQuery.value = query
+        // Skip re-search when results for this exact query are already held — or
+        // still streaming in. This is what prevents LaunchedEffect(searchingSources, query)
+        // from re-firing the network fan-out every time the screen re-enters composition;
+        // gating on completion alone re-searched whenever a slow source was still answering.
+        if (query == heldGlobalQuery && (globalResults.value.isNotEmpty() || globalJob?.isActive == true)) return
         globalJob?.cancel()
         if (query.isBlank()) {
             globalResults.value = emptyList()
             searchArrival.value = emptyList()
             preparingSources.value = false
+            heldGlobalQuery = null
             return
         }
+        heldGlobalQuery = query
         globalJob = scope.launch {
             preparingSources.value = true
             // Sources load asynchronously as extensions unpack; an empty snapshot would
@@ -602,23 +653,61 @@ class SourceBrowseViewModel(
     val state = MutableStateFlow(BrowseState(query = initialQuery))
     val filterTemplate = MutableStateFlow<List<MangaFilter>>(emptyList())
 
+    var gridScrollIndex: Int = 0
+    var gridScrollOffset: Int = 0
+
+    private data class CacheKey(val sourceId: Long, val query: String, val mode: BrowseMode)
+    companion object {
+        private const val CACHE_MAX = 8
+        private val resultCache = mutableListOf<Pair<CacheKey, BrowseState>>()
+        private fun getCached(key: CacheKey): BrowseState? {
+            val idx = resultCache.indexOfFirst { it.first == key }
+            if (idx < 0) return null
+            val entry = resultCache.removeAt(idx)
+            resultCache.add(entry)
+            return entry.second
+        }
+        private fun putCached(key: CacheKey, value: BrowseState) {
+            val idx = resultCache.indexOfFirst { it.first == key }
+            if (idx >= 0) resultCache.removeAt(idx)
+            resultCache.add(key to value)
+            while (resultCache.size > CACHE_MAX) resultCache.removeAt(0)
+        }
+    }
+
     init {
         scope.launch { filterTemplate.value = backend.getFilterTemplate(source.id) }
-        reload(BrowseMode.POPULAR, initialQuery, null)
+        val key = CacheKey(source.id, initialQuery, BrowseMode.POPULAR)
+        val cached = getCached(key)
+        if (cached != null && cached.items.isNotEmpty()) {
+            state.value = cached.copy(loading = false, loadingNext = false)
+        } else {
+            reload(BrowseMode.POPULAR, initialQuery, null)
+        }
     }
 
     fun reload(mode: BrowseMode, query: String, filters: List<MangaFilter>?) {
         scope.launch {
+            val cacheKey = CacheKey(source.id, query, mode)
+            val cached = getCached(cacheKey)
+            if (cached != null && cached.items.isNotEmpty() && filters == null) {
+                state.value = cached.copy(loading = false, loadingNext = false)
+                return@launch
+            }
             state.value = BrowseState(mode = mode, query = query, filters = filters, loading = true)
             try {
                 val result = backend.fetchBrowse(source.id, 1, mode, query, filters)
-                state.value = state.value.copy(
+                val newState = state.value.copy(
                     items = MangaSearchRanker.rank(result.items, query),
                     page = 1,
                     hasNextPage = result.hasNextPage,
                     loading = false,
                     error = null,
                 )
+                state.value = newState
+                if (filters == null) {
+                    putCached(cacheKey, newState)
+                }
             } catch (e: Throwable) {
                 state.value = state.value.copy(loading = false, error = e.message ?: "Failed to load")
             }
@@ -756,6 +845,7 @@ class MangaDetailViewModel(
     private val chapterRepo: MangaChapterRepository,
     private val historyRepo: MangaHistoryRepository,
     private val downloadManager: MangaDownloadManager?,
+    private val downloadRepo: com.folio.reader.manga.MangaDownloadRepository?,
     private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
 ) {
@@ -764,10 +854,17 @@ class MangaDetailViewModel(
     val manga = MutableStateFlow<MangaEntry?>(null)
     val chapters = MutableStateFlow<List<MangaChapter>>(emptyList())
     val refreshing = MutableStateFlow(false)
+    val refreshNotice = MutableStateFlow<String?>(null)
     val error = MutableStateFlow<String?>(null)
     val sortAscending = MutableStateFlow(false)
     val chapterFilter = MutableStateFlow(ChapterFilter.ALL)
-    val queuedChapters = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Live download state per chapter id (queued / downloading with progress / done). */
+    val downloadStates: kotlinx.coroutines.flow.StateFlow<Map<String, com.folio.reader.manga.MangaDownload>> =
+        downloadRepo?.observeQueue()
+            ?.map { list -> list.associateBy { it.chapterId } }
+            ?.stateIn(scope, SharingStarted.Lazily, emptyMap())
+            ?: MutableStateFlow(emptyMap())
 
     fun applyFilter(list: List<MangaChapter>): List<MangaChapter> =
         filterChapters(list, chapterFilter.value)
@@ -788,11 +885,14 @@ class MangaDetailViewModel(
         scope.launch {
             manga.value = mangaRepo.get(mangaId)
             chapters.value = chapterRepo.getChapters(mangaId)
+            // The library-wide Downloaded mode wins over the per-manga saved filter:
+            // opening a manga shows only its downloaded chapters while it is on.
+            val downloadedMode = settingsRepo.getRaw(KEY_LIBRARY_DOWNLOADED_FILTER) == "true"
             val savedFilter = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.$mangaId")
-            if (savedFilter != null) {
-                chapterFilter.value = ChapterFilter.entries.firstOrNull { it.name == savedFilter } ?: ChapterFilter.ALL
-            } else {
-                chapterFilter.value = ChapterFilter.ALL
+            chapterFilter.value = when {
+                downloadedMode -> ChapterFilter.DOWNLOADED
+                savedFilter != null -> ChapterFilter.entries.firstOrNull { it.name == savedFilter } ?: ChapterFilter.ALL
+                else -> ChapterFilter.ALL
             }
             val savedSort = settingsRepo.getRaw("$KEY_CHAPTER_SORT.$mangaId")
             sortAscending.value = savedSort == "ASC"
@@ -825,6 +925,8 @@ class MangaDetailViewModel(
             val m = manga.value ?: return@launch
             refreshing.value = true
             error.value = null
+            refreshNotice.value = null
+            val oldIds = chapters.value.map { it.id }.toSet()
             try {
                 val detail = backend.fetchMangaDetail(m.sourceId, m.url)
                 val refs = backend.fetchChapterList(m.sourceId, m.url)
@@ -857,9 +959,15 @@ class MangaDetailViewModel(
                 mangaRepo.upsert(updated)
                 manga.value = updated
                 chapters.value = chapterRepo.getChapters(m.id)
+                val newCount = chapters.value.count { it.id !in oldIds }
+                refreshNotice.value = if (newCount > 0) "$newCount new chapters" else "Already up to date"
             } catch (e: Throwable) {
                 println("MangaDetail refresh failed: " + e.stackTraceToString())
-                error.value = e.message ?: "Failed to load manga"
+                if (chapters.value.isEmpty()) {
+                    error.value = e.message ?: "Failed to load manga"
+                } else {
+                    refreshNotice.value = "Offline — showing saved chapters"
+                }
             }
             refreshing.value = false
         }
@@ -918,9 +1026,24 @@ class MangaDetailViewModel(
 
     fun download(chapter: MangaChapter) {
         val manager = downloadManager ?: return
+        scope.launch { manager.queueChapter(chapter.mangaId, chapter) }
+    }
+
+    /** Cancels a queued or in-flight download (also removes partially written pages). */
+    fun cancelDownload(chapter: MangaChapter) {
+        val manager = downloadManager ?: return
         scope.launch {
-            manager.queueChapter(chapter.mangaId, chapter)
-            queuedChapters.value = queuedChapters.value + chapter.id
+            downloadStates.value[chapter.id]?.let { manager.cancel(it.id) }
+        }
+    }
+
+    /** Deletes a finished download's pages from storage. */
+    fun deleteDownload(chapter: MangaChapter) {
+        val manager = downloadManager ?: return
+        scope.launch {
+            manager.deleteChapterDownload(chapter.mangaId, chapter.id)
+            chapterRepo.setDownloadedPages(chapter.id, 0)
+            chapters.value = chapterRepo.getChapters(chapter.mangaId)
         }
     }
 
@@ -967,7 +1090,7 @@ class MangaDetailViewModel(
         val sel = selectedChapters()
         scope.launch {
             sel.forEach { chapter ->
-                manager.chapterDir(chapter.mangaId, chapter.id)?.deleteRecursively()
+                manager.deleteChapterDownload(chapter.mangaId, chapter.id)
                 chapterRepo.setDownloadedPages(chapter.id, 0)
             }
             chapters.value = chapterRepo.getChapters(sel.firstOrNull()?.mangaId ?: "")
@@ -980,7 +1103,6 @@ class MangaDetailViewModel(
         scope.launch {
             chapters.value.filter { !it.read }.forEach { chapter ->
                 manager.queueChapter(chapter.mangaId, chapter)
-                queuedChapters.value = queuedChapters.value + chapter.id
             }
         }
     }
@@ -1004,13 +1126,17 @@ class MangaDetailViewModel(
 
     fun recordHistory(chapterId: String?) {
         val m = manga.value ?: return
-        scope.launch { historyRepo.record(m.id, chapterId) }
-    }
-
-    fun observeDownloads(): kotlinx.coroutines.flow.Flow<Set<String>>? = downloadManager?.let { manager ->
-        kotlinx.coroutines.flow.flow {
-            // Simple polling-free view: re-emit when queued set changes; downloads screen shows live queue.
-            emit(queuedChapters.value)
+        scope.launch {
+            val name = chapterId?.let { id -> chapterRepo.getChapters(m.id).firstOrNull { it.id == id }?.name }
+            historyRepo.record(
+                mangaId = m.id,
+                chapterId = chapterId,
+                title = m.title,
+                coverUrl = m.thumbnailUrl,
+                coverPath = m.coverPath,
+                sourceName = m.sourceName,
+                chapterName = name,
+            )
         }
     }
 }
@@ -1270,7 +1396,10 @@ class MangaReaderViewModel(
 
                 val currentSlot = pageListGate.withPermit { fetchSlotCached(navList[navIdx]) }
                 if (currentSlot == null) {
-                    error.value = "Failed to load pages"
+                    // The chapter isn't downloaded (downloaded ones never fail here), so
+                    // this is a live source fetch that died — usually no connection. Say
+                    // so instead of a bare failure that retrying offline just repeats.
+                    error.value = "Couldn't reach the source. Downloaded chapters can be read offline."
                     loading.value = false
                     return@launch
                 }
@@ -1295,7 +1424,15 @@ class MangaReaderViewModel(
                 seekChannel.trySend(offset + resumeLocal)
                 publishPages()
                 updateActiveChapter()
-                historyRepo.record(manga.id, chapter.id)
+                historyRepo.record(
+                    mangaId = manga.id,
+                    chapterId = chapter.id,
+                    title = manga.title,
+                    coverUrl = manga.thumbnailUrl,
+                    coverPath = manga.coverPath,
+                    sourceName = manga.sourceName,
+                    chapterName = chapter.name,
+                )
                 loading.value = false
                 scheduleImagePrefetch()
 
@@ -1347,19 +1484,39 @@ class MangaReaderViewModel(
         return fetchSlot(chapter)
     }
 
-    private suspend fun fetchSlot(chapter: MangaChapter): ChapterSlot? = try {
-        val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
-        val pages = backend.fetchPageList(sourceId, ref)
+    private suspend fun fetchSlot(chapter: MangaChapter): ChapterSlot? {
+        // Only a completed download is served from disk: a chapter still downloading has
+        // a partial file set, and trusting the folder would present a truncated chapter
+        // whose short page list then gets cached. Individual already-written pages still
+        // resolve from disk below (resolvePageBytes), so a live download and reading can
+        // coexist without ever shrinking the chapter.
+        val downloadComplete = downloadManager?.isChapterDownloaded(chapter.id) == true
+        val localPages = if (downloadComplete) {
+            downloadManager?.downloadedPageCount(mangaId, chapter.id) ?: 0
+        } else 0
+        if (localPages > 0) {
+            val pages = (0 until localPages).map { MangaPageRef(index = it) }
+            cachePageList(chapter.id, pages)
+            return ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)
+        }
+        return try {
+            val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
+            val pages = backend.fetchPageList(sourceId, ref)
+            cachePageList(chapter.id, pages)
+            ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)
+        } catch (_: Throwable) {
+            failedChapters.add(chapter.id)
+            null
+        }
+    }
+
+    private fun cachePageList(chapterId: String, pages: List<MangaPageRef>) {
         synchronized(pageListCache) {
-            pageListCache[chapter.id] = pages
+            pageListCache[chapterId] = pages
             while (pageListCache.size > PAGE_LIST_CACHE_MAX) {
                 pageListCache.keys.firstOrNull()?.let(pageListCache::remove)
             }
         }
-        ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)
-    } catch (_: Throwable) {
-        failedChapters.add(chapter.id)
-        null
     }
 
     /**
@@ -1679,7 +1836,18 @@ class MangaReaderViewModel(
         lastSlotIdx = slotIdx
         if (chapter.value?.id != slot.chapter.id) {
             chapter.value = slot.chapter
-            scope.launch { historyRepo.record(mangaId, slot.chapter.id) }
+            scope.launch {
+                val m = manga.value
+                historyRepo.record(
+                    mangaId = mangaId,
+                    chapterId = slot.chapter.id,
+                    title = m?.title ?: "",
+                    coverUrl = m?.thumbnailUrl,
+                    coverPath = m?.coverPath,
+                    sourceName = m?.sourceName,
+                    chapterName = slot.chapter.name,
+                )
+            }
             // A chapter crossing is authoritative state; persist it outside the throttle.
             enqueueProgress()
         } else if (changed) {
@@ -1761,7 +1929,16 @@ class DownloadsViewModel(
     val queue = downloadRepo.observeQueue()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
 
+    val storageDescription = MutableStateFlow(downloadManager.storageDescription())
+
+    fun refreshStorageDescription() {
+        storageDescription.value = downloadManager.storageDescription()
+    }
+
     val mangaTitles = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    /** Chapter names for queue rows, resolved as chapters enter the queue. */
+    val chapterNames = MutableStateFlow<Map<String, String>>(emptyMap())
 
     init {
         scope.launch {
@@ -1769,10 +1946,32 @@ class DownloadsViewModel(
                 mangaTitles.value = list.associate { it.id to it.title }
             }
         }
+        scope.launch {
+            queue.collect { q ->
+                val known = chapterNames.value
+                val missing = q.map { it.chapterId }.distinct().filter { it !in known }
+                if (missing.isNotEmpty()) {
+                    val resolved = missing.mapNotNull { id ->
+                        chapterRepo.getChapter(id)?.let { id to it.name }
+                    }
+                    chapterNames.value = known + resolved
+                }
+            }
+        }
     }
 
     fun cancel(downloadId: String) {
         scope.launch { downloadManager.cancel(downloadId) }
+    }
+
+    /** Re-queues a failed download: partial files are cleared and the chapter re-enqueues. */
+    fun retry(downloadId: String) {
+        scope.launch {
+            val item = queue.value.firstOrNull { it.id == downloadId } ?: return@launch
+            downloadManager.cancel(downloadId)
+            val chapter = chapterRepo.getChapter(item.chapterId) ?: return@launch
+            downloadManager.queueChapter(item.mangaId, chapter)
+        }
     }
 
     fun clearFinished() {

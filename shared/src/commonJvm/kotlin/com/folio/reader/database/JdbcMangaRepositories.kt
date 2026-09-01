@@ -12,6 +12,7 @@ import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.manga.MangaStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
@@ -323,6 +324,16 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                 chapterIds.forEachIndexed { i, id -> stmt.setString(i + 3, id) }
                 stmt.executeUpdate()
             }
+            if (read) {
+                chapterIds.forEach { cid ->
+                    conn.prepareStatement("SELECT manga_id, name FROM manga_chapters WHERE id = ?").use { q ->
+                        q.setString(1, cid)
+                        q.executeQuery().use { rs ->
+                            if (rs.next()) upsertHistoryRow(conn, rs.getString("manga_id"), rs.getString("name"))
+                        }
+                    }
+                }
+            }
         }
         if (emitSyncEvent) chapterIds.forEach { emitChapterEvent(it) }
     }
@@ -376,6 +387,14 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                 it.setLong(5, updatedAt.toEpochMilliseconds())
                 it.setString(6, chapterId)
                 it.executeUpdate()
+            }
+            if (read) {
+                conn.prepareStatement("SELECT manga_id, name FROM manga_chapters WHERE id = ?").use { q ->
+                    q.setString(1, chapterId)
+                    q.executeQuery().use { rs ->
+                        if (rs.next()) upsertHistoryRow(conn, rs.getString("manga_id"), rs.getString("name"))
+                    }
+                }
             }
         }
         if (emitSyncEvent) emitChapterEvent(chapterId)
@@ -500,6 +519,14 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                 it.setString(3, mangaId)
                 it.executeUpdate()
             }
+            if (read) {
+                conn.prepareStatement("SELECT name FROM manga_chapters WHERE manga_id = ? ORDER BY sort_order DESC LIMIT 1").use { q ->
+                    q.setString(1, mangaId)
+                    q.executeQuery().use { rs ->
+                        if (rs.next()) upsertHistoryRow(conn, mangaId, rs.getString("name"))
+                    }
+                }
+            }
         }
         val ids = db.withConnection { conn ->
             val out = mutableListOf<String>()
@@ -510,6 +537,49 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
             out
         }
         ids.forEach { emitChapterEvent(it) }
+    }
+
+    private fun upsertHistoryRow(conn: Connection, mangaId: String, chapterName: String) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        var title = ""
+        var coverUrl: String? = null
+        var coverPath: String? = null
+        var sourceName: String? = null
+        conn.prepareStatement("SELECT title, thumbnail_url, cover_path, source_name FROM manga_library WHERE id = ?").use { lib ->
+            lib.setString(1, mangaId)
+            lib.executeQuery().use { rs ->
+                if (rs.next()) {
+                    title = rs.getString("title") ?: ""
+                    coverUrl = rs.getString("thumbnail_url")
+                    coverPath = rs.getString("cover_path")
+                    sourceName = rs.getString("source_name")
+                }
+            }
+        }
+        conn.prepareStatement(
+            """
+            INSERT INTO manga_history (manga_id, title, cover_url, cover_path, source_name, chapter_name, read_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(manga_id) DO UPDATE SET
+                title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE manga_history.title END,
+                cover_url = COALESCE(NULLIF(excluded.cover_url, ''), manga_history.cover_url),
+                cover_path = COALESCE(NULLIF(excluded.cover_path, ''), manga_history.cover_path),
+                source_name = COALESCE(NULLIF(excluded.source_name, ''), manga_history.source_name),
+                chapter_name = CASE WHEN excluded.chapter_name <> '' THEN excluded.chapter_name ELSE manga_history.chapter_name END,
+                read_at = excluded.read_at,
+                updated_at = excluded.updated_at
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, mangaId)
+            stmt.setString(2, title)
+            stmt.setString(3, coverUrl)
+            stmt.setString(4, coverPath)
+            stmt.setString(5, sourceName)
+            stmt.setString(6, chapterName)
+            stmt.setLong(7, now)
+            stmt.setLong(8, now)
+            stmt.executeUpdate()
+        }
     }
 
     private fun mapChapter(rs: ResultSet) = MangaChapter(
@@ -785,17 +855,45 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
 
 class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.manga.MangaHistoryRepository {
 
-    override suspend fun record(mangaId: String, chapterId: String?) {
+    override suspend fun record(
+        mangaId: String,
+        chapterId: String?,
+        title: String,
+        coverUrl: String?,
+        coverPath: String?,
+        sourceName: String?,
+        chapterName: String?,
+    ) {
+        val now = Clock.System.now().toEpochMilliseconds()
         db.withConnection { conn ->
             conn.prepareStatement(
-                "INSERT OR REPLACE INTO manga_history (manga_id, chapter_id, read_at) VALUES (?, ?, ?)"
+                """
+                INSERT INTO manga_history (manga_id, title, cover_url, cover_path, source_name, chapter_id, chapter_name, read_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(manga_id) DO UPDATE SET
+                    title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE manga_history.title END,
+                    cover_url = COALESCE(NULLIF(excluded.cover_url, ''), manga_history.cover_url),
+                    cover_path = COALESCE(NULLIF(excluded.cover_path, ''), manga_history.cover_path),
+                    source_name = COALESCE(NULLIF(excluded.source_name, ''), manga_history.source_name),
+                    chapter_id = COALESCE(excluded.chapter_id, manga_history.chapter_id),
+                    chapter_name = CASE WHEN excluded.chapter_name <> '' THEN excluded.chapter_name ELSE manga_history.chapter_name END,
+                    read_at = excluded.read_at,
+                    updated_at = excluded.updated_at
+                """.trimIndent()
             ).use {
                 it.setString(1, mangaId)
-                it.setString(2, chapterId)
-                it.setLong(3, Clock.System.now().toEpochMilliseconds())
+                it.setString(2, title)
+                it.setString(3, coverUrl)
+                it.setString(4, coverPath)
+                it.setString(5, sourceName)
+                it.setString(6, chapterId)
+                it.setString(7, chapterName ?: "")
+                it.setLong(8, now)
+                it.setLong(9, now)
                 it.executeUpdate()
             }
         }
+        db.bumpMangaData()
     }
 
     override fun observeRecent(limit: Int): Flow<List<MangaHistoryItem>> = flow {
@@ -803,12 +901,12 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
             db.withConnection { conn ->
                 conn.prepareStatement(
                     """
-                    SELECT h.manga_id AS manga_id, h.chapter_id AS chapter_id, h.read_at AS read_at,
+                    SELECT h.manga_id AS manga_id, h.chapter_id AS chapter_id, h.updated_at AS read_at,
                            m.title AS manga_title, c.name AS chapter_name
                     FROM manga_history h
-                    JOIN manga_library m ON m.id = h.manga_id
+                    LEFT JOIN manga_library m ON m.id = h.manga_id
                     LEFT JOIN manga_chapters c ON c.id = h.chapter_id
-                    ORDER BY h.read_at DESC
+                    ORDER BY h.updated_at DESC
                     LIMIT ?
                     """.trimIndent()
                 ).use { stmt ->
@@ -830,22 +928,134 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
         )
     }
 
+    override fun observeHistory(): Flow<List<com.folio.reader.manga.MangaHistoryEntry>> =
+        db.mangaDataRevision.map {
+            db.withConnection { conn ->
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery(
+                        """
+                        SELECT h.manga_id,
+                               COALESCE(NULLIF(h.title, ''), m.title, '') AS title,
+                               COALESCE(NULLIF(h.cover_url, ''), m.thumbnail_url) AS cover_url,
+                               COALESCE(NULLIF(h.cover_path, ''), m.cover_path) AS cover_path,
+                               COALESCE(NULLIF(h.source_name, ''), m.source_name) AS source_name,
+                               h.chapter_name, h.updated_at,
+                               COALESCE(m.favorite, 0) AS in_lib
+                        FROM manga_history h
+                        LEFT JOIN manga_library m ON m.id = h.manga_id
+                        ORDER BY h.updated_at DESC
+                        """.trimIndent()
+                    ).use { rs ->
+                        val list = mutableListOf<com.folio.reader.manga.MangaHistoryEntry>()
+                        while (rs.next()) {
+                            val mangaId = rs.getString("manga_id")
+                            list += com.folio.reader.manga.MangaHistoryEntry(
+                                mangaId = mangaId,
+                                title = rs.getString("title") ?: "",
+                                coverUrl = rs.getString("cover_url"),
+                                coverPath = rs.getString("cover_path"),
+                                sourceId = mangaId.substringBefore(':').toLongOrNull() ?: 0L,
+                                sourceName = rs.getString("source_name"),
+                                chapterName = rs.getString("chapter_name") ?: "",
+                                updatedAt = rs.getLong("updated_at"),
+                                inLibrary = rs.getInt("in_lib") == 1,
+                            )
+                        }
+                        list
+                    }
+                }
+            }
+        }
+
     override suspend fun clear() {
         db.withConnection { conn ->
             conn.createStatement().use { it.executeUpdate("DELETE FROM manga_history") }
+        }
+    }
+
+    override suspend fun clearHistory() {
+        clear()
+        db.bumpMangaData()
+    }
+
+    internal suspend fun upsertFromReadMark(conn: Connection, mangaId: String, chapterName: String) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        conn.prepareStatement(
+            """
+            INSERT INTO manga_history (manga_id, title, cover_url, cover_path, source_name, chapter_name, read_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(manga_id) DO UPDATE SET
+                title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE manga_history.title END,
+                cover_url = COALESCE(NULLIF(excluded.cover_url, ''), manga_history.cover_url),
+                cover_path = COALESCE(NULLIF(excluded.cover_path, ''), manga_history.cover_path),
+                source_name = COALESCE(NULLIF(excluded.source_name, ''), manga_history.source_name),
+                chapter_name = CASE WHEN excluded.chapter_name <> '' THEN excluded.chapter_name ELSE manga_history.chapter_name END,
+                read_at = excluded.read_at,
+                updated_at = excluded.updated_at
+            """.trimIndent()
+        ).use { stmt ->
+            var title = ""
+            var coverUrl: String? = null
+            var coverPath: String? = null
+            var sourceName: String? = null
+            conn.prepareStatement("SELECT title, thumbnail_url, cover_path, source_name FROM manga_library WHERE id = ?").use { lib ->
+                lib.setString(1, mangaId)
+                lib.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        title = rs.getString("title") ?: ""
+                        coverUrl = rs.getString("thumbnail_url")
+                        coverPath = rs.getString("cover_path")
+                        sourceName = rs.getString("source_name")
+                    }
+                }
+            }
+            stmt.setString(1, mangaId)
+            stmt.setString(2, title)
+            stmt.setString(3, coverUrl)
+            stmt.setString(4, coverPath)
+            stmt.setString(5, sourceName)
+            stmt.setString(6, chapterName)
+            stmt.setLong(7, now)
+            stmt.setLong(8, now)
+            stmt.executeUpdate()
         }
     }
 }
 
 class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.manga.MangaDownloadRepository {
 
+    /** Bumped on every queue write; collectors re-query so progress UI stays live. */
+    private val queueRevision = MutableStateFlow(0L)
+    private fun bumpQueue() { queueRevision.value += 1 }
+
+    private suspend fun queryQueue(): List<MangaDownload> = db.withConnection { conn ->
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT * FROM manga_downloads ORDER BY queued_at").use { rs ->
+                val list = mutableListOf<MangaDownload>()
+                while (rs.next()) {
+                    list += MangaDownload(
+                        id = rs.getString("id"),
+                        mangaId = rs.getString("manga_id"),
+                        chapterId = rs.getString("chapter_id"),
+                        status = MangaDownloadStatus.fromValue(rs.getInt("status")),
+                        totalPages = rs.getInt("total_pages"),
+                        downloadedPages = rs.getInt("downloaded_pages"),
+                        queuedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("queued_at")),
+                        error = rs.getString("error"),
+                    )
+                }
+                list
+            }
+        }
+    }
+
     override suspend fun enqueue(download: MangaDownload) {
         db.withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO manga_downloads (
-                    id, manga_id, chapter_id, status, total_pages, downloaded_pages, queued_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    id, manga_id, chapter_id, status, total_pages, downloaded_pages, queued_at, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, download.id)
@@ -855,9 +1065,11 @@ class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.m
                 stmt.setInt(5, download.totalPages)
                 stmt.setInt(6, download.downloadedPages)
                 stmt.setLong(7, download.queuedAt.toEpochMilliseconds())
+                stmt.setString(8, download.error)
                 stmt.executeUpdate()
             }
         }
+        bumpQueue()
     }
 
     override suspend fun update(download: MangaDownload) = enqueue(download)
@@ -868,6 +1080,7 @@ class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.m
                 it.setString(1, id); it.executeUpdate()
             }
         }
+        bumpQueue()
     }
 
     override suspend fun clearFinished() {
@@ -878,30 +1091,11 @@ class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.m
                 it.executeUpdate()
             }
         }
+        bumpQueue()
     }
 
     override fun observeQueue(): Flow<List<MangaDownload>> = flow {
-        emit(
-            db.withConnection { conn ->
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT * FROM manga_downloads ORDER BY queued_at").use { rs ->
-                        val list = mutableListOf<MangaDownload>()
-                        while (rs.next()) {
-                            list += MangaDownload(
-                                id = rs.getString("id"),
-                                mangaId = rs.getString("manga_id"),
-                                chapterId = rs.getString("chapter_id"),
-                                status = MangaDownloadStatus.fromValue(rs.getInt("status")),
-                                totalPages = rs.getInt("total_pages"),
-                                downloadedPages = rs.getInt("downloaded_pages"),
-                                queuedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("queued_at")),
-                            )
-                        }
-                        list
-                    }
-                }
-            }
-        )
+        queueRevision.collect { emit(queryQueue()) }
     }
 
     override suspend fun isChapterDownloaded(chapterId: String): Boolean = db.withConnection { conn ->
@@ -1038,6 +1232,12 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         conn.prepareStatement("SELECT COALESCE(SUM(s.duration_ms),0)/60000 FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id").use { st ->
             st.executeQuery().use { rs -> if (rs.next()) totalReadMinutes = rs.getLong(1) }
         }
+        var readActiveDays = 0
+        conn.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters WHERE read = 1 GROUP BY date(updated_at/1000,'unixepoch','localtime'))"
+            ).use { rs -> if (rs.next()) readActiveDays = rs.getInt(1) }
+        }
         val week = MutableList(7) { 0 }
         val labels = MutableList(7) { "" }
         val fmt = java.time.format.DateTimeFormatter.ofPattern("E")
@@ -1056,7 +1256,8 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         com.folio.reader.manga.MangaStatistics(
             libraryCount = libraryCount, completedCount = completedCount, readChapters = readChapters,
             unreadChapters = unreadChapters, downloadedChapters = downloadedChapters, bookmarkedChapters = bookmarkedChapters,
-            notesCount = notesCount, totalReadMinutes = totalReadMinutes, weekReadChapters = week, weekLabels = labels, topManga = top,
+            notesCount = notesCount, totalReadMinutes = totalReadMinutes, readActiveDays = readActiveDays,
+            weekReadChapters = week, weekLabels = labels, topManga = top,
         )
     }
 }
@@ -1094,6 +1295,12 @@ object MangaSchema {
         )
         exec("CREATE INDEX IF NOT EXISTS idx_manga_library_source ON manga_library(source_id, url)")
         exec("CREATE INDEX IF NOT EXISTS idx_manga_library_favorite ON manga_library(favorite)")
+        // Local series imported before cover resolution have a blank thumbnail_url, which
+        // leaves their covers unresolvable; the url doubles as the local cover key.
+        exec(
+            "UPDATE manga_library SET thumbnail_url = url " +
+                "WHERE source_id = 0 AND (thumbnail_url IS NULL OR thumbnail_url = '')"
+        )
 
         exec(
             """
@@ -1175,11 +1382,55 @@ object MangaSchema {
             """
             CREATE TABLE IF NOT EXISTS manga_history (
                 manga_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                cover_url TEXT,
+                cover_path TEXT,
+                source_name TEXT,
                 chapter_id TEXT,
-                read_at INTEGER NOT NULL
+                chapter_name TEXT,
+                read_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
             )
             """.trimIndent()
         )
+        val historyCols = mutableSetOf<String>()
+        conn.createStatement().use { st ->
+            st.executeQuery("PRAGMA table_info(manga_history)").use { rs ->
+                while (rs.next()) historyCols += rs.getString("name")
+            }
+        }
+        fun addHistoryCol(name: String, ddl: String): Boolean {
+            if (name in historyCols) return false
+            conn.createStatement().use { it.execute(ddl) }
+            return true
+        }
+        addHistoryCol("title", "ALTER TABLE manga_history ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        addHistoryCol("cover_url", "ALTER TABLE manga_history ADD COLUMN cover_url TEXT")
+        addHistoryCol("cover_path", "ALTER TABLE manga_history ADD COLUMN cover_path TEXT")
+        addHistoryCol("source_name", "ALTER TABLE manga_history ADD COLUMN source_name TEXT")
+        addHistoryCol("chapter_name", "ALTER TABLE manga_history ADD COLUMN chapter_name TEXT")
+        addHistoryCol("chapter_id", "ALTER TABLE manga_history ADD COLUMN chapter_id TEXT")
+        addHistoryCol("read_at", "ALTER TABLE manga_history ADD COLUMN read_at INTEGER NOT NULL DEFAULT 0")
+        if ("updated_at" !in historyCols) {
+            conn.createStatement().use {
+                it.execute("ALTER TABLE manga_history ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+            }
+            if ("read_at" in historyCols) {
+                conn.createStatement().use { it.execute("UPDATE manga_history SET updated_at = read_at") }
+            }
+        }
+        if ("title" !in historyCols || "chapter_name" !in historyCols) {
+            conn.createStatement().use {
+                it.execute(
+                    "UPDATE manga_history SET title = (SELECT m.title FROM manga_library m WHERE m.id = manga_id) WHERE (title IS NULL OR title = '') AND manga_id IN (SELECT id FROM manga_library)"
+                )
+            }
+            conn.createStatement().use {
+                it.execute(
+                    "UPDATE manga_history SET chapter_name = (SELECT c.name FROM manga_chapters c WHERE c.id = chapter_id) WHERE (chapter_name IS NULL OR chapter_name = '') AND chapter_id IN (SELECT id FROM manga_chapters)"
+                )
+            }
+        }
         exec(
             """
             CREATE TABLE IF NOT EXISTS manga_downloads (
@@ -1193,5 +1444,13 @@ object MangaSchema {
             )
             """.trimIndent()
         )
+        // Failed downloads carry their reason so the queue UI can say why, not just that.
+        runCatching {
+            conn.createStatement().executeQuery("SELECT error FROM manga_downloads LIMIT 0").close()
+        }.onFailure {
+            conn.createStatement().use {
+                it.execute("ALTER TABLE manga_downloads ADD COLUMN error TEXT")
+            }
+        }
     }
 }

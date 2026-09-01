@@ -17,6 +17,8 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
+class QuotaExhaustedException(message: String) : Exception(message)
+
 enum class SyncOperation(val value: Int) {
     CREATE(0),
     UPDATE(1),
@@ -71,7 +73,8 @@ data class SyncState(
     val isSyncing: Boolean = false,
     val lastError: String? = null,
     val isConfigured: Boolean = true,
-    val storageProgress: Map<String, BookStorageProgress> = emptyMap()
+    val storageProgress: Map<String, BookStorageProgress> = emptyMap(),
+    val quotaLimited: Boolean = false
 )
 
 @Serializable

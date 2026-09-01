@@ -43,9 +43,13 @@ class LocalMangaSource(private val localDir: File) {
         val topLevel = series.dir.listFiles().orEmpty()
         val archives = topLevel.filter { it.isFile && isSupportedArchive(it) }
         val folders = topLevel.filter { it.isDirectory && containsImages(it) }
-        return (archives + folders)
-            .sortedWith(naturalOrder { it.name })
-            .map { LocalChapter(it.nameWithoutExtension, it.name, isArchive = it.isFile) }
+        val sortedArchives = archives.sortedWith(
+            compareBy<java.io.File> { parseChapterNumber(it.nameWithoutExtension) ?: Double.MAX_VALUE }
+                .thenComparator { a, b -> naturalCompare(a.name, b.name) }
+        )
+        val sortedFolders = folders.sortedWith(naturalOrder { it.name })
+        return sortedArchives.map { LocalChapter(cleanDisplayName(it.nameWithoutExtension), it.name, isArchive = true) } +
+            sortedFolders.map { LocalChapter(it.nameWithoutExtension, it.name, isArchive = false) }
     }
 
     /** Ordered entry names (or file names for folder chapters) for a chapter. */
@@ -86,15 +90,37 @@ class LocalMangaSource(private val localDir: File) {
             }
         }
 
-    /** First page of the first chapter, or an explicit cover.jpg next to it. */
-    suspend fun coverBytes(seriesName: String): ByteArray? = withContext(Dispatchers.IO) {
+    private val coverNames = listOf("cover.jpg", "cover.jpeg", "cover.png", "cover.webp")
+
+    private fun existingCoverFile(seriesDir: File): File? =
+        coverNames.firstNotNullOfOrNull { name -> File(seriesDir, name).takeIf { it.isFile } }
+
+    /**
+     * Cover file for a series. On first use it is materialized from the first page of the
+     * first chapter (or copied from an image-folder chapter), so every later cover load is a
+     * plain file read instead of reopening an archive.
+     */
+    suspend fun materializeCover(seriesName: String): File? = withContext(Dispatchers.IO) {
         val series = seriesByName(seriesName) ?: return@withContext null
-        val explicit = File(series.dir, "cover.jpg")
-        if (explicit.isFile) return@withContext explicit.readBytes()
+        existingCoverFile(series.dir)?.let { return@withContext it }
 
         val first = chaptersFor(seriesName).firstOrNull() ?: return@withContext null
-        val entries = pageEntryNames(seriesName, first.relativePath)
-        entries.firstOrNull()?.let { readPage(seriesName, first.relativePath, it) }
+        val entryName = pageEntryNames(seriesName, first.relativePath).firstOrNull()
+            ?: return@withContext null
+        val ext = entryName.substringAfterLast('.', "jpg").lowercase().let {
+            if (it in setOf("jpg", "jpeg", "png", "webp")) it else "jpg"
+        }
+        val cover = File(series.dir, "cover.$ext")
+        runCatching {
+            val bytes = readPage(seriesName, first.relativePath, entryName)
+            cover.writeBytes(bytes)
+        }
+        cover.takeIf { it.isFile }
+    }
+
+    suspend fun coverBytes(seriesName: String): ByteArray? {
+        val file = materializeCover(seriesName) ?: return null
+        return withContext(Dispatchers.IO) { file.readBytes() }
     }
 
     /**
@@ -123,8 +149,49 @@ class LocalMangaSource(private val localDir: File) {
                 }
                 source.copyTo(target, overwrite = true)
             }
+            materializeCover(seriesName)
             seriesName
         }
+
+    /** An archive to import, opened lazily so callers can stream from any source. */
+    class PendingArchive(val name: String, val open: () -> java.io.InputStream)
+
+    /**
+     * Imports a list of archives as one series named after [folderName], streaming each
+     * archive straight into the local source (no intermediate copy). Reports per-file
+     * progress and materializes the series cover. Re-importing the same archive name
+     * overwrites it so the series stays stable.
+     */
+    suspend fun importFolder(
+        folderName: String,
+        archives: List<PendingArchive>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): String = withContext(Dispatchers.IO) {
+        require(archives.isNotEmpty()) { "No archives to import" }
+        val seriesName = folderName.sanitizeFileName()
+        val seriesDir = File(localDir, seriesName).apply { mkdirs() }
+        archives.forEachIndexed { index, archive ->
+            val dest = File(seriesDir, archive.name)
+            archive.open().use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            onProgress(index + 1, archives.size)
+        }
+        materializeCover(seriesName)
+        seriesName
+    }
+
+    /**
+     * Imports a folder as a single manga collection. Every CBZ/ZIP directly inside [folder]
+     * becomes one chapter. The series name is derived from the folder name.
+     */
+    suspend fun importFolder(folder: File): String {
+        require(folder.isDirectory) { "Expected a directory: ${folder.path}" }
+        val archives = folder.listFiles().orEmpty()
+            .filter { it.isFile && isSupportedArchive(it) }
+            .map { PendingArchive(it.name) { it.inputStream() } }
+        return importFolder(folder.name, archives)
+    }
 
     suspend fun deleteSeries(seriesName: String): Unit = withContext(Dispatchers.IO) {
         seriesByName(seriesName)?.dir?.deleteRecursively()
@@ -175,6 +242,30 @@ class LocalMangaSource(private val localDir: File) {
         }
         return (a.length - i) - (b.length - j)
     }
+
+    /**
+     * Extracts a chapter number from a file name. Prefers explicit markers like "ch07",
+     * "chapter 12", "c34.5"; otherwise uses the last numeric token. Returns null when no
+     * number can be parsed so callers can fall back to position order.
+     */
+    private fun parseChapterNumber(name: String): Double? {
+        val cleaned = name.replace('_', ' ').replace('-', ' ')
+        val explicit = Regex("""\b(?:chapter|ch|c)\s*\.?\s*(\d+(?:[._]\d+)?)""", RegexOption.IGNORE_CASE)
+            .find(cleaned)?.groupValues?.get(1)
+        val raw = explicit ?: cleaned.substringAfterLast(' ', cleaned).let { lastToken ->
+            Regex("""(\d+(?:[._]\d+)?)""").findAll(lastToken).lastOrNull()?.value
+                ?: Regex("""(\d+(?:[._]\d+)?)""").findAll(cleaned).lastOrNull()?.value
+        } ?: return null
+        val normalized = raw.replace('_', '.')
+        return normalized.toDoubleOrNull()
+    }
+
+    private fun cleanDisplayName(baseName: String): String =
+        baseName.replace('_', ' ')
+            .replace(Regex("""(?<!\d)\.(?!\d)"""), " ")
+            .replace(Regex(" {2,}"), " ")
+            .trim()
+            .ifEmpty { baseName }
 
     private fun String.sanitizeFileName(): String =
         replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "untitled" }

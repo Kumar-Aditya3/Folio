@@ -101,6 +101,11 @@ ui_*.txt
 ui_*.xml
 ui_after.txt
 after_import_fixed.txt
+crash.txt
+logcat.txt
+
+# Release artifacts are published out of band; the folder stays local.
+/releases/
 
 # Upstream Mihon checkout used only as vendoring reference; the runtime itself
 # lives under shared/src/androidMain/kotlin/{eu,mihon,tachiyomi,logcat}.

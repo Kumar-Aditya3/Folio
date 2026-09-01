@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -27,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +73,23 @@ data class AnnotationHit(
     val spineIndex: Int?
 )
 
+/**
+ * Keeps the search screen's query, results and scroll position outside composition,
+ * so returning from an opened result restores the exact screen the reader left
+ * instead of a blank field.
+ */
+class SearchUiState {
+    val queryState = mutableStateOf("")
+    val scopeState = mutableStateOf(SearchScope.TITLES)
+    val contentBookIdState = mutableStateOf<String?>(null)
+    val resultsState = mutableStateOf<List<BookHit>>(emptyList())
+    val annotationResultsState = mutableStateOf<List<AnnotationHit>>(emptyList())
+    val titleMatchesState = mutableStateOf<List<Book>>(emptyList())
+    val searchJobState = mutableStateOf<kotlinx.coroutines.Job?>(null)
+    val scrollIndexState = mutableStateOf(0)
+    val scrollOffsetState = mutableStateOf(0)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -81,16 +100,41 @@ fun SearchScreen(
     bookmarkRepository: BookmarkRepository,
     quoteRepository: QuoteRepository,
     onBackPress: () -> Unit,
-    onResultClick: (BookHit) -> Unit
+    onResultClick: (BookHit) -> Unit,
+    uiState: SearchUiState = remember { SearchUiState() }
 ) {
-    var query by remember { mutableStateOf("") }
-    var scope by remember { mutableStateOf(SearchScope.TITLES) }
-    var contentBookId by remember { mutableStateOf<String?>(null) }
-    var results by remember { mutableStateOf<List<BookHit>>(emptyList()) }
-    var annotationResults by remember { mutableStateOf<List<AnnotationHit>>(emptyList()) }
-    var titleMatches by remember { mutableStateOf<List<Book>>(emptyList()) }
-    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var query by uiState.queryState
+    var scope by uiState.scopeState
+    var contentBookId by uiState.contentBookIdState
+    var results by uiState.resultsState
+    var annotationResults by uiState.annotationResultsState
+    var titleMatches by uiState.titleMatchesState
+    var searchJob by uiState.searchJobState
     val coroutineScope = rememberCoroutineScope()
+
+    // Compute the total item count across all sections so we can clamp the restored
+    // scroll index. Without this, a stale index that exceeds the current list size
+    // causes LazyListState to silently reset to 0, which the user sees as "lost position".
+    val totalItems = run {
+        var count = 0
+        if (titleMatches.isNotEmpty()) count += 1 + titleMatches.size   // header + items
+        if (results.isNotEmpty()) count += 1 + results.size
+        if (annotationResults.isNotEmpty()) count += 1 + annotationResults.size
+        if (query.isNotBlank() && titleMatches.isEmpty() && results.isEmpty() && annotationResults.isEmpty()) count += 1
+        count += 1 // trailing spacer
+        count
+    }
+    val safeIndex = if (totalItems == 0) 0 else uiState.scrollIndexState.value.coerceIn(0, (totalItems - 1).coerceAtLeast(0))
+    val safeOffset = if (totalItems == 0) 0 else uiState.scrollOffsetState.value
+    val listState = remember(uiState) {
+        LazyListState(safeIndex, safeOffset)
+    }
+    DisposableEffect(uiState) {
+        onDispose {
+            uiState.scrollIndexState.value = listState.firstVisibleItemIndex
+            uiState.scrollOffsetState.value = listState.firstVisibleItemScrollOffset
+        }
+    }
 
     /** Renders FTS5 snippets: <<term>> becomes bold + accent instead of raw markers. */
     @Composable
@@ -256,7 +300,7 @@ fun SearchScreen(
             }
         }
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             if (titleMatches.isNotEmpty()) {
                 item {
                     Text(

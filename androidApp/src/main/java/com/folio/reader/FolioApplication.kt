@@ -28,6 +28,7 @@ import com.folio.reader.sync.RestFirebaseStorageSync
 import com.folio.reader.sync.RestFirestoreSync
 import com.folio.reader.sync.SyncConfig
 import com.folio.reader.sync.SyncEngine
+import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,8 +83,33 @@ class AppGraph(private val app: Application) {
         backend = mangaBackend,
         downloadsRepo = mangaDownloadRepository,
         chapterRepo = mangaChapterRepository,
-        downloadsDir = platform.fileSystem.mangaDownloadsDir,
+        initialStorage = com.folio.reader.manga.FileDownloadStorage(platform.fileSystem.mangaDownloadsDir),
     ).apply { start() }
+
+    /**
+     * Restores a user-picked manga downloads location at startup. The picker persists a
+     * SAF tree URI in settings plus a persistable permission; if the permission was
+     * revoked since, the setting is dropped and the app default stays active.
+     */
+    fun applyStoredMangaDownloadsLocation(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val raw = runCatching { settingsRepository.getRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION) }
+                .getOrNull()
+            if (raw.isNullOrBlank()) return@launch
+            val uri = runCatching { android.net.Uri.parse(raw) }.getOrNull() ?: return@launch
+            val granted = app.contentResolver.persistedUriPermissions.any {
+                it.uri == uri && it.isReadPermission && it.isWritePermission
+            }
+            if (!granted) {
+                runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
+                return@launch
+            }
+            runCatching {
+                val ok = mangaDownloadManager.switchStorage(com.folio.reader.manga.SafDownloadStorage(app, uri))
+                if (!ok) runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
+            }
+        }
+    }
 
     val epubParser = EpubParser(platform)
     val contentProvider = JvmChapterContentProvider(platform, epubParser)
@@ -185,6 +211,13 @@ class AppGraph(private val app: Application) {
     private var cachedSyncEngine: SyncEngine? = null
 
     /**
+     * Compose-observable mirror of [cachedSyncEngine]. Updated every time the
+     * cache is written so `remember(syncEngineState.value)` recomputes and the
+     * UI picks up a rebuilt engine without an app restart.
+     */
+    val syncEngineState = mutableStateOf<SyncEngine?>(null)
+
+    /**
      * Settings snapshot used to build sync credentials. Loaded off-main at startup
      * and refreshed by [restartSync]; [syncEngine] is reached from composition, so
      * building it must never block on the database (runBlocking here parked the UI
@@ -212,7 +245,10 @@ class AppGraph(private val app: Application) {
         get() {
             cachedSyncEngine?.let { return it }
             return synchronized(this) {
-                cachedSyncEngine ?: createSyncEngine()?.also { cachedSyncEngine = it }
+                cachedSyncEngine ?: createSyncEngine()?.also {
+                    cachedSyncEngine = it
+                    syncEngineState.value = it
+                }
             }
         }
 
@@ -274,12 +310,16 @@ class AppGraph(private val app: Application) {
     fun restartSync(appScope: CoroutineScope) {
         val old = syncEngine
         cachedSyncEngine = null // next access rebuilds from current credentials
+        syncEngineState.value = null
         old?.stop()
         appScope.launch(Dispatchers.IO) {
             cachedGlobalSettings =
                 runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
             cachedSyncEngine = null
             startSync(appScope)
+            // Reflect the final state on the observable so Compose picks up
+            // the new engine (or null if credentials were cleared).
+            syncEngineState.value = cachedSyncEngine
         }
     }
 

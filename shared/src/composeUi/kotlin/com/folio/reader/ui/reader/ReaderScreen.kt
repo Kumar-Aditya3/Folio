@@ -1226,10 +1226,11 @@ fun ReaderSettingsPanel(
 
         QuickChoiceRow(
             label = "Layout",
-            options = listOf(
-                "CONTINUOUS" to "Scroll",
-                "PAGINATED" to "Page"
-            ),
+            options = buildList {
+                add("CONTINUOUS" to "Scroll")
+                add("PAGINATED" to "Page")
+                if (com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()) add("SPREAD" to "Double Page")
+            },
             selected = settings.layoutMode.normalized.name,
             onSelect = { name ->
                 val mode = com.folio.reader.settings.LayoutMode.entries.firstOrNull { it.name == name }

@@ -83,9 +83,19 @@ interface MangaCategoryRepository {
 }
 
 interface MangaHistoryRepository {
-    suspend fun record(mangaId: String, chapterId: String?)
+    suspend fun record(
+        mangaId: String,
+        chapterId: String?,
+        title: String = "",
+        coverUrl: String? = null,
+        coverPath: String? = null,
+        sourceName: String? = null,
+        chapterName: String? = null,
+    )
     fun observeRecent(limit: Int = 25): Flow<List<MangaHistoryItem>>
+    fun observeHistory(): Flow<List<MangaHistoryEntry>>
     suspend fun clear()
+    suspend fun clearHistory()
 }
 
 interface MangaDownloadRepository {
