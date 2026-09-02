@@ -22,9 +22,10 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 43
-        versionName = "1.1.12"
+        versionCode = 44
+        versionName = "1.1.13"
         vectorDrawables.useSupportLibrary = true
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -39,6 +40,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Instrumented runs install the debug app over the release-signed install;
+            // matching signatures lets connectedAndroidTest keep the user's data intact.
+            if (keystoreProps.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -118,7 +126,9 @@ dependencies {
     // Pin exact versions to match Compose 1.7.6 baseline; no ranges.
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.7.6")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.2.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")
 
     // ── CRASH REPORTING (§8.4 FOLIO_IMPLEMENTATION_SPEC) ────────────────────

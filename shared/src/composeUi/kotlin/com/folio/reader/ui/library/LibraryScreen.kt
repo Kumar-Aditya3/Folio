@@ -119,7 +119,7 @@ fun LibraryScreen(
     mangaViewMode: com.folio.reader.ui.manga.MangaViewMode = com.folio.reader.ui.manga.MangaViewMode.GRID,
     onMangaViewModeChange: (com.folio.reader.ui.manga.MangaViewMode) -> Unit = {},
     mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null,
-    statsContent: (@Composable () -> Unit)? = null
+    onOpenStats: (() -> Unit)? = null
 ) {
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
@@ -133,7 +133,6 @@ fun LibraryScreen(
     var seriesFilterOpen by remember { mutableStateOf(false) }
     var collectionFilterOpen by remember { mutableStateOf(false) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
-    val showStats by viewModel.statsVisible.collectAsState()
 
     val mangaSelActive by remember {
         mangaLibraryViewModel?.isSelectionMode ?: kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -246,10 +245,10 @@ fun LibraryScreen(
                             onClick = onSyncNow
                         )
                     }
-                    IconButton(onClick = { if (mangaMode && !showStats) onMangaSearchClick() else onSearchClick() }) {
+                    IconButton(onClick = { if (mangaMode) onMangaSearchClick() else onSearchClick() }) {
                         Icon(Icons.Filled.Search, contentDescription = "Search")
                     }
-                    IconButton(onClick = { if (mangaMode && !showStats) onMangaImportClick() else onImportClick() }) {
+                    IconButton(onClick = { if (mangaMode) onMangaImportClick() else onImportClick() }) {
                         Icon(Icons.Filled.Add, contentDescription = "Import")
                     }
                     if (showSettingsAction) {
@@ -258,10 +257,10 @@ fun LibraryScreen(
                         }
                     }
                     Box {
-                        IconButton(onClick = { if (mangaMode && !showStats) mangaOverflowOpen = true else overflowOpen = true }) {
+                        IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
-                        if (mangaMode && !showStats) {
+                        if (mangaMode) {
                             DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
                                 DropdownMenuItem(
                                     text = { Text("Grid view") },
@@ -409,7 +408,7 @@ fun LibraryScreen(
             // so the pair only renders where a manga surface actually exists. Home
             // passes mangaContent = null and used to draw a Manga chip anyway, whose
             // tap hit the default no-op onLibraryModeChange and did nothing at all.
-            if (mangaContent != null || statsContent != null) {
+            if (mangaContent != null || onOpenStats != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -420,35 +419,31 @@ fun LibraryScreen(
                 ) {
                     if (mangaContent != null) {
                         com.folio.reader.ui.components.FolioChip(
-                            selected = !mangaMode && !showStats,
+                            selected = !mangaMode,
                             onClick = {
-                                viewModel.statsVisible.value = false
                                 if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS)
                             },
                             label = "Books",
                         )
                         com.folio.reader.ui.components.FolioChip(
-                            selected = mangaMode && !showStats,
+                            selected = mangaMode,
                             onClick = {
-                                viewModel.statsVisible.value = false
                                 if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA)
                             },
                             label = "Manga",
                         )
                     }
-                    if (statsContent != null) {
+                    // Stats is a destination, not a filter (Rule 4): its chip navigates.
+                    if (onOpenStats != null) {
                         com.folio.reader.ui.components.FolioChip(
-                            selected = showStats,
-                            onClick = { viewModel.statsVisible.value = true },
+                            selected = false,
+                            onClick = onOpenStats,
                             label = "Stats",
                         )
                     }
                 }
             }
 
-            if (showStats && statsContent != null) {
-                statsContent.invoke()
-            } else {
             androidx.compose.animation.Crossfade(
                 targetState = libraryMode,
                 modifier = Modifier.fillMaxSize(),
@@ -480,7 +475,6 @@ fun LibraryScreen(
                     onDeleteBook = { bookToDelete = it },
                     onImportClick = onImportClick
                 )
-            }
             }
             }
         }

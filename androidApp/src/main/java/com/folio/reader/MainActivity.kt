@@ -207,7 +207,6 @@ class MainActivity : ComponentActivity() {
                     currentRoute == FolioRoutes.MANGA_BROWSE && model.mangaBrowseVM.searchActive.value ->
                         model.mangaBrowseVM.exitSearch()
                     navController.popBackStack() -> Unit
-                    model.libraryVM.statsVisible.value -> model.libraryVM.statsVisible.value = false
                     model.mangaSearchActive -> model.mangaSearchActive = false
                     model.libraryMode == LibraryMode.MANGA -> model.libraryMode = LibraryMode.BOOKS
                     else -> finish()
