@@ -1122,6 +1122,8 @@ fun main(args: Array<String>) {
                                             getHighlight = { deps.highlightRepository.getHighlight(it) },
                                             getNote = { deps.noteRepository.getNote(it) },
                                             getTagsForHighlight = { deps.tagRepository.getTagsForHighlight(it) },
+                                            addTagToHighlight = { hl, tag -> deps.tagRepository.addTagToHighlight(hl, tag) },
+                                            removeTagFromHighlight = { hl, tag -> deps.tagRepository.removeTagFromHighlight(hl, tag) },
                                             getAllBooks = { deps.bookRepository.getAllBooks() },
                                             getAllTags = { deps.tagRepository.getAllTags().first() },
                                             observeAllMangaNotes = { deps.mangaNoteRepository.observeAllNotes() },

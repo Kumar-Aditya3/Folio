@@ -13,7 +13,9 @@ import com.folio.reader.model.Tag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class QuoteDisplayItem(
@@ -41,11 +44,17 @@ class QuoteBrowserViewModel(
     private val getTagsForHighlight: suspend (String) -> List<Tag>,
     private val getAllBooks: () -> kotlinx.coroutines.flow.Flow<List<Book>>,
     private val getAllTags: suspend () -> List<Tag>,
+    private val addTagToHighlight: suspend (String, String) -> Unit = { _, _ -> },
+    private val removeTagFromHighlight: suspend (String, String) -> Unit = { _, _ -> },
     // Manga side (§11.5): null deps keep the hub book-only, as on desktop before wiring.
     private val observeAllMangaNotes: (() -> Flow<List<MangaNote>>)? = null,
     private val getManga: suspend (String) -> MangaEntry? = { null },
     private val getMangaChapters: suspend (String) -> List<MangaChapter> = { emptyList() }
 ) {
+    private val editScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Bumped after a tag edit so open hub queries re-resolve highlight tags. */
+    private val tagsRevision = MutableStateFlow(0)
     enum class ViewMode { GRID, LIST }
 
     data class FilterState(
@@ -64,7 +73,7 @@ class QuoteBrowserViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun filteredDisplayItems(filter: FilterState): kotlinx.coroutines.flow.Flow<List<QuoteDisplayItem>> {
         return channelFlow {
-            combine(rawQuotes, allBooksState) { quotes, books ->
+            combine(rawQuotes, allBooksState, tagsRevision) { quotes, books, _ ->
                 Pair(quotes, books)
             }.collect { (quotes, books) ->
                 val items = withContext(Dispatchers.IO) {
@@ -87,7 +96,10 @@ class QuoteBrowserViewModel(
                         val tags = quote.highlightId.takeIf { it.isNotBlank() }?.let { getTagsForHighlight(it) } ?: emptyList()
                         QuoteDisplayItem(quote, book, chapter, highlight, note, tags)
                     }.filter { item ->
-                        filter.bookId?.let { item.book.id == it } ?: true &&
+                        // Parenthesized: elvis binds looser than &&, so the old
+                        // `?: true && ...` shape dropped tag/search filters whenever
+                        // a book filter was active.
+                        (filter.bookId == null || item.book.id == filter.bookId) &&
                         (filter.tagIds.isEmpty() || item.tags.any { it.id in filter.tagIds }) &&
                         (filter.searchQuery.isBlank() ||
                             item.quote.text.contains(filter.searchQuery, ignoreCase = true) ||
@@ -103,6 +115,16 @@ class QuoteBrowserViewModel(
     fun allBooks(): List<Book> = allBooksState.value
 
     suspend fun allTags(): List<Tag> = getAllTags()
+
+    /** Diffs the picker's selection against current highlight tags, then refreshes the hub. */
+    fun updateHighlightTags(highlightId: String, selected: Set<String>) {
+        editScope.launch {
+            val current = getTagsForHighlight(highlightId).map { it.id }.toSet()
+            (current - selected).forEach { removeTagFromHighlight(highlightId, it) }
+            (selected - current).forEach { addTagToHighlight(highlightId, it) }
+            tagsRevision.value += 1
+        }
+    }
 
     /** Manga reader notes rendered as cards; empty when deps are absent or a book/tag filter hides them. */
     fun mangaItems(filter: FilterState): Flow<List<MangaQuoteItem>> {

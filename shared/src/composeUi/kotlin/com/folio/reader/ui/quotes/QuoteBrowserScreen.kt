@@ -72,6 +72,7 @@ fun QuoteBrowserScreen(
     var searchExpanded by remember { mutableStateOf(false) }
     var bookDropdownExpanded by remember { mutableStateOf(false) }
     var tagDropdownExpanded by remember { mutableStateOf(false) }
+    var tagEditorFor by remember { mutableStateOf<QuoteDisplayItem?>(null) }
     val allTags = remember { mutableStateOf<List<Tag>>(emptyList()) }
 
     LaunchedEffect(Unit) {
@@ -246,10 +247,30 @@ fun QuoteBrowserScreen(
             }
         } else {
             when (viewMode) {
-                QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding)
-                QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding)
+                QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
+                    displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
+                    onEditTags = { tagEditorFor = it }
+                )
+                QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
+                    displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
+                    onEditTags = { tagEditorFor = it }
+                )
             }
         }
+    }
+
+    tagEditorFor?.let { editing ->
+        com.folio.reader.ui.tags.TagPickerDialog(
+            tags = allTags.value,
+            assignedTagIds = editing.tags.map { it.id }.toSet(),
+            onDismiss = { tagEditorFor = null },
+            onSave = { selected ->
+                editing.highlight?.id?.let { highlightId ->
+                    viewModel.updateHighlightTags(highlightId, selected)
+                }
+                tagEditorFor = null
+            },
+        )
     }
 }
 
@@ -259,7 +280,8 @@ private fun QuoteGrid(
     mangaItems: List<MangaQuoteItem>,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onMangaNoteClick: (MangaQuoteItem) -> Unit,
-    padding: PaddingValues
+    padding: PaddingValues,
+    onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 280.dp),
@@ -269,7 +291,7 @@ private fun QuoteGrid(
         modifier = Modifier.padding(padding)
     ) {
         items(items) { item ->
-            QuoteCard(item = item, onQuoteClick = onQuoteClick)
+            QuoteCard(item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags)
         }
         items(mangaItems) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
@@ -283,7 +305,8 @@ private fun QuoteList(
     mangaItems: List<MangaQuoteItem>,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onMangaNoteClick: (MangaQuoteItem) -> Unit,
-    padding: PaddingValues
+    padding: PaddingValues,
+    onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -291,7 +314,7 @@ private fun QuoteList(
         modifier = Modifier.padding(padding)
     ) {
         items(items) { item ->
-            QuoteListItem(item = item, onQuoteClick = onQuoteClick)
+            QuoteListItem(item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags)
         }
         items(mangaItems) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
@@ -302,7 +325,8 @@ private fun QuoteList(
 @Composable
 private fun QuoteCard(
     item: QuoteDisplayItem,
-    onQuoteClick: (QuoteDisplayItem) -> Unit
+    onQuoteClick: (QuoteDisplayItem) -> Unit,
+    onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     val highlightColor = item.highlight?.effectiveColor
     val borderColor = highlightColor?.let { androidx.compose.ui.graphics.Color(it) }
@@ -364,10 +388,11 @@ private fun QuoteCard(
                 }
             }
 
-            if (item.tags.isNotEmpty()) {
+            if (item.highlight != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     item.tags.take(3).forEach { tag ->
@@ -377,10 +402,10 @@ private fun QuoteCard(
                         Text(
                             "+${item.tags.size - 3}",
                             style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                            modifier = Modifier.align(Alignment.CenterVertically)
+                            color = FolioTheme.colors.onSurfaceVariant
                         )
                     }
+                    AddTagChip(onClick = { onEditTags(item) })
                 }
             }
         }
@@ -390,7 +415,8 @@ private fun QuoteCard(
 @Composable
 private fun QuoteListItem(
     item: QuoteDisplayItem,
-    onQuoteClick: (QuoteDisplayItem) -> Unit
+    onQuoteClick: (QuoteDisplayItem) -> Unit,
+    onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onQuoteClick(item) },
@@ -436,12 +462,16 @@ private fun QuoteListItem(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (item.tags.isNotEmpty()) {
+                if (item.highlight != null) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         item.tags.take(2).forEach { tag ->
                             TagChip(tag = tag, compact = true)
                         }
+                        AddTagChip(compact = true, onClick = { onEditTags(item) })
                     }
                 }
             }
@@ -461,6 +491,26 @@ private fun TagChip(tag: Tag, compact: Boolean = false) {
             text = tag.name,
             style = if (compact) FolioTheme.typography.labelSmall else FolioTheme.typography.labelMedium,
             color = FolioTheme.colors.onSurface,
+            modifier = Modifier.padding(
+                horizontal = if (compact) 4.dp else 8.dp,
+                vertical = if (compact) 2.dp else 4.dp
+            )
+        )
+    }
+}
+
+/** Inline "+ Tag" affordance on quote cards; opens the shared picker for that highlight. */
+@Composable
+private fun AddTagChip(compact: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        color = FolioTheme.colors.surfaceVariant,
+        shape = RoundedCornerShape(if (compact) 4.dp else 8.dp),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = "+ Tag",
+            style = if (compact) FolioTheme.typography.labelSmall else FolioTheme.typography.labelMedium,
+            color = FolioTheme.colors.onSurfaceVariant,
             modifier = Modifier.padding(
                 horizontal = if (compact) 4.dp else 8.dp,
                 vertical = if (compact) 2.dp else 4.dp

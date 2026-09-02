@@ -58,6 +58,8 @@ fun QuotesRoute(
                 getHighlight = { graph.highlightRepository.getHighlight(it) },
                 getNote = { graph.noteRepository.getNote(it) },
                 getTagsForHighlight = { graph.tagRepository.getTagsForHighlight(it) },
+                addTagToHighlight = { hl, tag -> graph.tagRepository.addTagToHighlight(hl, tag) },
+                removeTagFromHighlight = { hl, tag -> graph.tagRepository.removeTagFromHighlight(hl, tag) },
                 getAllBooks = { graph.bookRepository.getAllBooks() },
                 getAllTags = { graph.tagRepository.getAllTags().first() },
                 observeAllMangaNotes = { graph.mangaNoteRepository.observeAllNotes() },
