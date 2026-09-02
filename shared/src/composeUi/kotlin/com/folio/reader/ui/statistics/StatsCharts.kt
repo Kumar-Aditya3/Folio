@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,11 +20,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioHeroCard
 import com.folio.reader.ui.components.FolioSectionCard
-import com.folio.reader.ui.components.HeatmapCell
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.datetime.LocalDate
@@ -33,13 +37,20 @@ import kotlinx.datetime.LocalDate
 // ---------------------------------------------------------------------------
 
 /**
- * One day-bar in the shared chart idiom: primary fill scaled against [peak],
- * stubbed track when the day is empty. Used by the weekly charts and the
- * book-detail sparkline.
+ * One day-bar in the shared chart idiom: §12.5/Rule 15 fill — a vertical
+ * gradient from `accentProgress` down to it at [FolioTokens.gradientMinAlpha] —
+ * scaled against [peak], stubbed track when the day is empty. The bar at the
+ * window's max carries the Rule 15 peak marker: a brighter `accentStreak` cap.
+ * Used by the weekly charts and the book-detail sparkline.
  */
 @Composable
 internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) {
     val fraction = if (peak > 0f) (value / peak).coerceIn(0f, 1f) else 0f
+    val accent = FolioTheme.colors.accentProgress
+    val barShape = RoundedCornerShape(
+        topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
+        bottomStart = FolioTokens.chartBarRadiusBottom, bottomEnd = FolioTokens.chartBarRadiusBottom,
+    )
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -47,15 +58,33 @@ internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) 
                 if (value > 0f) FolioTokens.chartBarBase + FolioTokens.chartBarSpan * fraction
                 else FolioTokens.chartTrack
             )
-            .background(
-                if (value > 0f) FolioTheme.colors.primary
-                else FolioTheme.colors.outline.copy(alpha = 0.35f),
-                RoundedCornerShape(
-                    topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
-                    bottomStart = FolioTokens.chartBarRadiusBottom, bottomEnd = FolioTokens.chartBarRadiusBottom,
-                ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    if (value > 0f) Brush.verticalGradient(
+                        listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
+                    ) else SolidColor(FolioTheme.colors.outline.copy(alpha = 0.35f)),
+                    barShape,
+                )
+        )
+        if (value > 0f && value >= peak) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(FolioTokens.chartPeakCap)
+                    .background(
+                        FolioTheme.colors.accentStreak,
+                        RoundedCornerShape(
+                            topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
+                            bottomStart = 1.dp, bottomEnd = 1.dp,
+                        ),
+                    )
             )
-    )
+        }
+    }
 }
 
 /**
@@ -160,63 +189,81 @@ internal fun ActivityHeatmap(
         HeatmapMode.MANGA -> mangaDays
     }
 
-    FolioSectionCard(title = "Activity") {
-        // ── Segmented toggle ──────────────────────────────────────────
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FolioChip(selected = mode == HeatmapMode.ALL, onClick = { mode = HeatmapMode.ALL }, label = "All")
-            FolioChip(selected = mode == HeatmapMode.BOOKS, onClick = { mode = HeatmapMode.BOOKS }, label = "Books")
-            FolioChip(selected = mode == HeatmapMode.MANGA, onClick = { mode = HeatmapMode.MANGA }, label = "Manga")
-        }
-
-        Spacer(Modifier.height(FolioTokens.space2))
-
-        if (days.isEmpty()) {
+    // §12.5: the year heatmap is Stats' hero surface (Rule 13) — accent-tinted
+    // gradient panel, cells scaled by intensity in `accentProgress`.
+    FolioHeroCard {
+        Column {
             Text(
-                "No reading recorded yet.",
-                style = FolioTheme.typography.bodyMedium,
-                color = FolioTheme.colors.onSurfaceVariant
+                text = "Activity",
+                style = FolioTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = FolioTheme.colors.onSurface
             )
-            return@FolioSectionCard
-        }
-        val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
-        days.chunked(7).forEach { week ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // A partial trailing week keeps its slot so the grid stays square.
-                (0..6).forEach { index ->
-                    val day = week.getOrNull(index)
-                    if (day == null || day.minutes <= 0L) {
-                        Box(
-                            Modifier.size(14.dp).background(
-                                FolioTheme.colors.outline.copy(alpha = 0.22f),
-                                RoundedCornerShape(3.dp)
+
+            Spacer(Modifier.height(FolioTokens.space2))
+
+            // ── Segmented toggle ──────────────────────────────────────────
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FolioChip(selected = mode == HeatmapMode.ALL, onClick = { mode = HeatmapMode.ALL }, label = "All")
+                FolioChip(selected = mode == HeatmapMode.BOOKS, onClick = { mode = HeatmapMode.BOOKS }, label = "Books")
+                FolioChip(selected = mode == HeatmapMode.MANGA, onClick = { mode = HeatmapMode.MANGA }, label = "Manga")
+            }
+
+            Spacer(Modifier.height(FolioTokens.space2))
+
+            if (days.isEmpty()) {
+                Text(
+                    "No reading recorded yet.",
+                    style = FolioTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.onSurfaceVariant
+                )
+                return@FolioHeroCard
+            }
+            val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+            val cellAccent = FolioTheme.colors.accentProgress
+            days.chunked(7).forEach { week ->
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // A partial trailing week keeps its slot so the grid stays square.
+                    (0..6).forEach { index ->
+                        val day = week.getOrNull(index)
+                        if (day == null || day.minutes <= 0L) {
+                            Box(
+                                Modifier.size(14.dp).background(
+                                    FolioTheme.colors.outline.copy(alpha = 0.22f),
+                                    RoundedCornerShape(3.dp)
+                                )
                             )
-                        )
-                    } else {
-                        HeatmapCell(intensity = intensityFor(day.minutes, peak), size = 14.dp)
+                        } else {
+                            HeatmapCell(
+                                intensity = intensityFor(day.minutes, peak),
+                                size = 14.dp,
+                                accent = cellAccent
+                            )
+                        }
                     }
                 }
             }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = FolioTokens.space1),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${days.first().date.shortLabel()} – ${days.last().date.shortLabel()}",
-                style = FolioTheme.typography.bodySmall,
-                color = FolioTheme.colors.onSurfaceVariant
-            )
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier.fillMaxWidth().padding(top = FolioTokens.space1),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Less", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
-                (1..4).forEach { HeatmapCell(intensity = it, size = 9.dp) }
-                Text("More", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+                Text(
+                    text = "${days.first().date.shortLabel()} – ${days.last().date.shortLabel()}",
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Less", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+                    (1..4).forEach { HeatmapCell(intensity = it, size = 9.dp, accent = cellAccent) }
+                    Text("More", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+                }
             }
         }
     }

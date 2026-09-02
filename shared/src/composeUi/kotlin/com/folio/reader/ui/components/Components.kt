@@ -456,37 +456,6 @@ fun StatCard(
 }
 
 @Composable
-fun HeatmapCell(
-    intensity: Int,
-    size: Dp = 12.dp,
-    onClick: (() -> Unit)? = null
-) {
-    val base = MaterialTheme.colorScheme.surfaceVariant
-    val colors = listOf(
-        base,
-        Color(0xFF4DD0E1),
-        Color(0xFF00BCD4),
-        Color(0xFF0097A7),
-        Color(0xFF006064)
-    )
-
-    Box(
-        modifier = Modifier
-            .size(size)
-            .then(
-                if (onClick != null) {
-                    Modifier.pointerInput(intensity) {
-                        detectTapGestures(onTap = { onClick() })
-                    }
-                } else {
-                    Modifier
-                }
-            )
-            .background(colors[intensity.coerceIn(0, 4)], RoundedCornerShape(2.dp))
-    )
-}
-
-@Composable
 fun ConfirmDialog(
     title: String,
     message: String,

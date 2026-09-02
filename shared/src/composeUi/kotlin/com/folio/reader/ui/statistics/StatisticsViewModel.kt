@@ -50,6 +50,21 @@ data class RecentQuote(
     val sortKey: Long = 0L
 )
 
+/** §12.5 top-books leaderboard row: reading time inside the stats window. */
+data class TopBook(
+    val id: String,
+    val title: String,
+    val author: String,
+    val coverPath: String?,
+    val minutes: Long
+)
+
+/** §12.5 genre-breakdown row: window minutes per tag. */
+data class TagSlice(
+    val label: String,
+    val minutes: Long
+)
+
 /**
  * Every number the statistics screen renders, computed in one pass.
  *
@@ -84,6 +99,10 @@ data class StatisticsUiState(
     /** Heatmap built from manga-only sessions (contentLocator starting with "manga-page"). */
     val heatmapManga: List<StatDay> = emptyList(),
     val currentlyReading: List<ReadingInProgress> = emptyList(),
+    /** §12.5 top-books leaderboard: books ranked by window reading minutes. */
+    val topBooks: List<TopBook> = emptyList(),
+    /** §12.5 genre breakdown: window minutes per tag, largest first. */
+    val genres: List<TagSlice> = emptyList(),
     /** Today's reading minutes, derived from sessions whose local date matches today. */
     val todayMinutes: Long = 0
 )
@@ -109,6 +128,9 @@ class StatisticsViewModel(
         private val dayNames = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
         /** Maximum entries shown in the floating quotes/highlights card. */
         private const val FLOATING_FEED_CAP = 6
+        /** §12.5 leaderboard and genre-breakdown caps. */
+        private const val TOP_BOOKS_CAP = 5
+        private const val GENRE_CAP = 6
     }
 
     private val timeZone: TimeZone get() = TimeZone.currentSystemDefault()
@@ -129,8 +151,13 @@ class StatisticsViewModel(
                 today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
             ),
             bookRepository.getCurrentlyReading(),
-            bookRepository.getFinishedBooks()
-        ) { sessions, inProgress, finished -> buildState(sessions, inProgress, finished) }
+            bookRepository.getFinishedBooks(),
+            // §12.5 top books / genres resolve titles, covers and tags against
+            // the whole library, not just the reading/finished subsets.
+            bookRepository.getAllBooks()
+        ) { sessions, inProgress, finished, books ->
+            buildState(sessions, inProgress, finished, books)
+        }
     } else {
         combine(
             sessionRepository.observeSessionsSince(
@@ -153,7 +180,8 @@ class StatisticsViewModel(
             buildState(
                 sessions.filterNot { it.bookId in excluded || it.bookId in directBooks },
                 inProgress.filterNot { it.id in excluded },
-                finished.filterNot { it.id in excluded }
+                finished.filterNot { it.id in excluded },
+                allBooks
             )
         }
     }
@@ -271,10 +299,11 @@ class StatisticsViewModel(
     private fun capText(text: String, maxChars: Int = 280): String =
         if (text.length <= maxChars) text else text.take(maxChars).trimEnd() + "\u2026"
 
-    private fun buildState(
+    private suspend fun buildState(
         sessions: List<ReadingSession>,
         inProgress: List<Book>,
-        finished: List<Book>
+        finished: List<Book>,
+        books: List<Book> = emptyList()
     ): StatisticsUiState {
         val today = today()
         val weekStart = today.minus(DatePeriod(days = 6))
@@ -306,6 +335,44 @@ class StatisticsViewModel(
         val timed = sessions.filter { it.durationMs > 0 }
         val hourTotals = LongArray(24)
         sessions.forEach { hourTotals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs }
+
+        // §12.5 leaderboard + genre breakdown. Minutes per bookId over the
+        // window; manga sessions carry a manga id that is absent from the book
+        // map and drop out naturally. Sessions arrive exclusion-filtered, so an
+        // excluded title can never appear here (Rule 18).
+        val bookMap = books.associateBy { it.id }
+        val minutesByBook = sessions
+            .groupBy { it.bookId }
+            .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
+        val topBooks = minutesByBook
+            .filterValues { it > 0L }
+            .entries
+            .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })
+            .take(TOP_BOOKS_CAP)
+            .mapNotNull { (bookId, minutes) ->
+                bookMap[bookId]?.let { book ->
+                    TopBook(book.id, book.displayTitle, book.displayAuthor, book.coverPath, minutes)
+                }
+            }
+        val genres = if (tagRepository == null) {
+            emptyList()
+        } else {
+            val tagNamesByBook = HashMap<String, List<String>>()
+            val minutesByTag = LinkedHashMap<String, Long>()
+            for ((bookId, minutes) in minutesByBook) {
+                if (minutes <= 0L) continue
+                val names = tagNamesByBook.getOrPut(bookId) {
+                    tagRepository.getTagsForBook(bookId).map { it.name }
+                }
+                for (name in names) {
+                    minutesByTag[name] = (minutesByTag[name] ?: 0L) + minutes
+                }
+            }
+            minutesByTag.entries
+                .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })
+                .take(GENRE_CAP)
+                .map { (label, minutes) -> TagSlice(label, minutes) }
+        }
 
         return StatisticsUiState(
             hasData = sessions.isNotEmpty(),
@@ -346,6 +413,8 @@ class StatisticsViewModel(
                     )
                 )
             },
+            topBooks = topBooks,
+            genres = genres,
             todayMinutes = minutesByDay[today] ?: 0L
         )
     }

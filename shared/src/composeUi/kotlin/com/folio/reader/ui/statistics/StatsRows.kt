@@ -1,7 +1,9 @@
 package com.folio.reader.ui.statistics
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,11 +20,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaStatistics
+import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.glassPanel
@@ -55,10 +60,10 @@ internal fun FinishPredictionsCard(
                     Text(
                         text = "${(book.progress * 100).toInt()}%",
                         style = FolioTheme.typography.labelMedium,
-                        color = FolioTheme.colors.primary,
+                        color = FolioTheme.colors.accentProgress,
                     )
                 }
-                FolioProgressBar(progress = book.progress, color = FolioTheme.colors.primary)
+                FolioProgressBar(progress = book.progress, color = FolioTheme.colors.accentProgress)
                 if (book.finishEstimate != null) {
                     Text(
                         text = book.finishEstimate,
@@ -68,6 +73,116 @@ internal fun FinishPredictionsCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * §12.5 top-books leaderboard: covers at `listCoverMin` (Rule 17) beside the
+ * title and the window's reading minutes.
+ */
+@Composable
+internal fun TopBooksCard(
+    books: List<TopBook>,
+    onBookClick: (String) -> Unit,
+) {
+    FolioSectionCard(title = "Top books") {
+        Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+            books.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onBookClick(entry.id) },
+                    horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BookCover(
+                        coverPath = entry.coverPath,
+                        title = entry.title,
+                        author = entry.author,
+                        modifier = Modifier
+                            .width(FolioTokens.listCoverMin)
+                            .height(FolioTokens.listCoverMin * 1.4f),
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = entry.title,
+                            style = FolioTheme.typography.titleSmall,
+                            color = FolioTheme.colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (entry.author.isNotBlank()) {
+                            Text(
+                                text = entry.author,
+                                style = FolioTheme.typography.labelSmall,
+                                color = FolioTheme.colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    Text(
+                        text = shortMinutes(entry.minutes),
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.accentProgress,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * §12.5 genre breakdown: one hue per row drawn from the palette's accent roles
+ * — never one hue at N alphas. The peak row marks itself with label weight
+ * (Rule 15), and every bar fills with its hue's vertical gradient.
+ */
+@Composable
+internal fun GenresCard(slices: List<TagSlice>) {
+    FolioSectionCard(title = "Genres") {
+        val colors = FolioTheme.colors
+        val hues = listOf(
+            colors.accentProgress,
+            colors.accentStreak,
+            colors.accentDiscovery,
+            colors.accentAnnotation,
+            colors.primary,
+            colors.tertiary,
+        )
+        val peak = (slices.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+        Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+            slices.forEachIndexed { index, slice ->
+                val hue = hues[index % hues.size]
+                val isPeak = slice.minutes >= peak
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = slice.label,
+                        style = FolioTheme.typography.bodyMedium,
+                        fontWeight = if (isPeak) FontWeight.SemiBold else FontWeight.Normal,
+                        color = FolioTheme.colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = shortMinutes(slice.minutes),
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth((slice.minutes.toFloat() / peak).coerceIn(0.04f, 1f))
+                        .height(8.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
+                            ),
+                            RoundedCornerShape(4.dp),
+                        )
+                )
             }
         }
     }
@@ -87,7 +202,7 @@ internal fun FloatingQuotesCard(quotes: List<RecentQuote>) {
                     Icon(
                         imageVector = Icons.Filled.FormatQuote,
                         contentDescription = null,
-                        tint = FolioTheme.colors.primary.copy(alpha = 0.5f),
+                        tint = FolioTheme.colors.accentAnnotation,
                         modifier = Modifier.size(20.dp).padding(top = 2.dp),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -133,12 +248,14 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                     value = stats.readChapters.toString(),
                     caption = plural(stats.completedCount, "series completed"),
                     modifier = Modifier.weight(1f),
+                    accent = FolioTheme.colors.accentProgress,
                 )
                 StatTile(
                     label = "Reading time",
                     value = formatDuration(stats.totalReadMinutes * 60_000L),
                     caption = plural(stats.downloadedChapters, "downloaded"),
                     modifier = Modifier.weight(1f),
+                    accent = FolioTheme.colors.accentProgress,
                 )
             }
         }
@@ -173,7 +290,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                         Text(
                             text = plural(entry.readChapters, "chapter"),
                             style = FolioTheme.typography.labelMedium,
-                            color = FolioTheme.colors.primary,
+                            color = FolioTheme.colors.accentProgress,
                         )
                     }
                 }
@@ -187,10 +304,14 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
     Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
         Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
             StatTile("This week", formatDuration(stats.timeThisWeekMs),
-                plural(stats.sessionsThisWeek, "session"), Modifier.weight(1f))
+                plural(stats.sessionsThisWeek, "session"), Modifier.weight(1f),
+                accent = FolioTheme.colors.accentProgress)
+            // §12.5: the streak tile is the accentStreak surface, with the
+            // best streak always alongside the current one.
             StatTile("Day streak", stats.streakDays.toString(),
-                if (stats.longestStreakDays > stats.streakDays) "best ${stats.longestStreakDays}" else "reading days",
-                Modifier.weight(1f))
+                if (stats.longestStreakDays > 0) "best ${stats.longestStreakDays} days" else "reading days",
+                Modifier.weight(1f),
+                accent = FolioTheme.colors.accentStreak)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
             StatTile("Finished", stats.booksFinished.toString(), "books completed", Modifier.weight(1f))
@@ -201,10 +322,16 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
 }
 
 @Composable
-private fun StatTile(label: String, value: String, caption: String, modifier: Modifier = Modifier) {
+private fun StatTile(
+    label: String,
+    value: String,
+    caption: String,
+    modifier: Modifier = Modifier,
+    accent: Color? = null,
+) {
     Column(
         modifier = modifier
-            .glassPanel(RoundedCornerShape(FolioTokens.radiusCard))
+            .glassPanel(RoundedCornerShape(FolioTokens.radiusCard), accent)
             .padding(FolioTokens.space3)
     ) {
         Text(
@@ -221,7 +348,7 @@ private fun StatTile(label: String, value: String, caption: String, modifier: Mo
             text = value,
             style = FolioTheme.typography.headlineMedium,
             fontWeight = FontWeight.SemiBold,
-            color = FolioTheme.colors.primary,
+            color = accent ?: FolioTheme.colors.primary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
