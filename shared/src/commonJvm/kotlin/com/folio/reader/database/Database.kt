@@ -390,6 +390,14 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     PRIMARY KEY (book_id, tag_id)
                 )
             """.trimIndent())
+
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS manga_tags (
+                    manga_id TEXT NOT NULL,
+                    tag_id TEXT NOT NULL,
+                    PRIMARY KEY (manga_id, tag_id)
+                )
+            """.trimIndent())
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS highlight_tags (
                     highlight_id TEXT NOT NULL,

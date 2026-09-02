@@ -1241,6 +1241,7 @@ fun main(args: Array<String>) {
                                             categoryRepo = deps.mangaCategoryRepository,
                                             settingsRepo = deps.settingsRepository,
                                             sessionRepo = deps.sessionRepository,
+                                            tagRepo = deps.tagRepository,
                                         )
                                     }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                     backend = deps.mangaBackend,

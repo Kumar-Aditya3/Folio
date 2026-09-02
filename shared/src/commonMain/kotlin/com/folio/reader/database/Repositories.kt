@@ -130,6 +130,11 @@ interface TagRepository {
     suspend fun removeTagFromBook(bookId: String, tagId: String)
     suspend fun addTagToHighlight(highlightId: String, tagId: String)
     suspend fun removeTagFromHighlight(highlightId: String, tagId: String)
+
+    /** Manga share the tag pool; links live in manga_tags (§11.5). */
+    suspend fun getTagsForManga(mangaId: String): List<Tag>
+    suspend fun addTagToManga(mangaId: String, tagId: String)
+    suspend fun removeTagFromManga(mangaId: String, tagId: String)
 }
 
 interface CollectionRepository {

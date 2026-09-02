@@ -729,6 +729,12 @@ Ordered by value; each already has book-side infrastructure to mirror:
   manga and §11.6 forbids the estimate.)*
 - **Manga tags**, distinct from categories: categories are shelves (one membership set), tags
   are cross-cutting. Reuse `TagRepository`'s shape.
+  *(Shipped v1.1.8: manga share the book tag pool; links live in a new `manga_tags` table
+  mirroring `book_tags` — `getTagsForManga`/`addTagToManga`/`removeTagFromManga` on
+  `TagRepository`, tag deletion cleans both link tables. Manga detail shows tag chips +
+  "Tags" chip beside categories and reuses the book-side `TagPickerDialog`. Known
+  boundary: `MangaBackupManager` exports the Mihon format, which has no tag concept, so
+  manga-tag links are local-only — same trade-off book links had before §12.)*
 - **Reading cycles / re-reads** — `ReadingCycleRepository` already exists for books.
 
 ### 11.6 Deliberately NOT built
