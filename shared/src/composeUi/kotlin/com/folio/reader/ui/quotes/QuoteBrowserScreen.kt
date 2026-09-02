@@ -64,6 +64,7 @@ import com.folio.reader.ui.theme.FolioTheme
 fun QuoteBrowserScreen(
     onBack: () -> Unit,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
+    onMangaNoteClick: (MangaQuoteItem) -> Unit = {},
     viewModel: QuoteBrowserViewModel
 ) {
     var viewMode by remember { mutableStateOf(QuoteBrowserViewModel.ViewMode.LIST) }
@@ -78,6 +79,8 @@ fun QuoteBrowserScreen(
     }
 
     val displayItems by viewModel.filteredDisplayItems(filter)
+        .collectAsState(initial = emptyList())
+    val mangaItems by viewModel.mangaItems(filter)
         .collectAsState(initial = emptyList())
 
     Scaffold(
@@ -228,7 +231,7 @@ fun QuoteBrowserScreen(
             }
         }
     ) { padding ->
-        if (displayItems.isEmpty()) {
+        if (displayItems.isEmpty() && mangaItems.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
@@ -243,8 +246,8 @@ fun QuoteBrowserScreen(
             }
         } else {
             when (viewMode) {
-                QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(displayItems, onQuoteClick, padding)
-                QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(displayItems, onQuoteClick, padding)
+                QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding)
+                QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding)
             }
         }
     }
@@ -253,7 +256,9 @@ fun QuoteBrowserScreen(
 @Composable
 private fun QuoteGrid(
     items: List<QuoteDisplayItem>,
+    mangaItems: List<MangaQuoteItem>,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
+    onMangaNoteClick: (MangaQuoteItem) -> Unit,
     padding: PaddingValues
 ) {
     LazyVerticalGrid(
@@ -266,13 +271,18 @@ private fun QuoteGrid(
         items(items) { item ->
             QuoteCard(item = item, onQuoteClick = onQuoteClick)
         }
+        items(mangaItems) { item ->
+            MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
+        }
     }
 }
 
 @Composable
 private fun QuoteList(
     items: List<QuoteDisplayItem>,
+    mangaItems: List<MangaQuoteItem>,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
+    onMangaNoteClick: (MangaQuoteItem) -> Unit,
     padding: PaddingValues
 ) {
     LazyColumn(
@@ -282,6 +292,9 @@ private fun QuoteList(
     ) {
         items(items) { item ->
             QuoteListItem(item = item, onQuoteClick = onQuoteClick)
+        }
+        items(mangaItems) { item ->
+            MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
         }
     }
 }

@@ -163,6 +163,7 @@ class MangaReaderProgressTest {
         override suspend fun get(noteId: String): MangaNote? = null
         override suspend fun notesForChapter(chapterId: String): List<MangaNote> = emptyList()
         override fun observeNotesForChapter(chapterId: String): Flow<List<MangaNote>> = flowOf(emptyList())
+        override fun observeAllNotes(): Flow<List<MangaNote>> = flowOf(emptyList())
     }
 
     class FakeCategoryRepo : MangaCategoryRepository {

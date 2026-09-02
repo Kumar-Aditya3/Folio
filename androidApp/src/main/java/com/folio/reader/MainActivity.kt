@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
         graph.startSync(appScope)
         graph.applyStoredMangaDownloadsLocation(appScope)
         graph.backfillAnnotationsOnce(appScope)
+        graph.backfillMangaAnnotationsOnce(appScope)
 
         setContent {
             val navController = rememberNavController()

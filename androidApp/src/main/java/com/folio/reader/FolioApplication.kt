@@ -194,6 +194,57 @@ class AppGraph(private val app: Application) {
         }
     }
 
+    /**
+     * One-time backfill of Revisit for manga annotations (§11.5): reader notes become
+     * NOTE items, bookmarked chapters become BOOKMARK items. Runs on its own flag so
+     * installs that already ran the book backfill still pick up the manga pass.
+     */
+    fun backfillMangaAnnotationsOnce(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val flag = "manga_annotations_backfill_v1"
+            if (runCatching { settingsRepository.getRaw(flag) }.getOrNull() == "1") return@launch
+            runCatching {
+                val notes = mangaNoteRepository.observeAllNotes().first()
+                for (manga in mangaRepository.observeAll().first()) {
+                    val existingRevisits = revisitRepository.getRevisitItemsForBook(manga.id)
+                        .map { it.type to it.sourceId }
+                        .toHashSet()
+
+                    for (n in notes.filter { it.mangaId == manga.id }) {
+                        if ((com.folio.reader.model.RevisitType.NOTE to n.id) !in existingRevisits) {
+                            revisitRepository.insertRevisitItem(
+                                com.folio.reader.model.RevisitItem(
+                                    id = "revisit-mn-${n.id}",
+                                    bookId = manga.id,
+                                    chapterId = n.chapterId,
+                                    type = com.folio.reader.model.RevisitType.NOTE,
+                                    sourceId = n.id,
+                                    deviceId = deviceId
+                                )
+                            )
+                        }
+                    }
+
+                    for (c in mangaChapterRepository.getChapters(manga.id).filter { it.bookmarked }) {
+                        if ((com.folio.reader.model.RevisitType.BOOKMARK to c.id) !in existingRevisits) {
+                            revisitRepository.insertRevisitItem(
+                                com.folio.reader.model.RevisitItem(
+                                    id = "revisit-mb-${c.id}",
+                                    bookId = manga.id,
+                                    chapterId = c.id,
+                                    type = com.folio.reader.model.RevisitType.BOOKMARK,
+                                    sourceId = c.id,
+                                    deviceId = deviceId
+                                )
+                            )
+                        }
+                    }
+                }
+                settingsRepository.setRaw(flag, "1")
+            }.onFailure { it.printStackTrace() }
+        }
+    }
+
     val epubParser = EpubParser(platform)
     val contentProvider = JvmChapterContentProvider(platform, epubParser)
     val fontManager = com.folio.reader.font.FontManager(platform)

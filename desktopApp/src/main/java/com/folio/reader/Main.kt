@@ -1110,6 +1110,9 @@ fun main(args: Array<String>) {
                                             }
                                         }
                                     },
+                                    onMangaNoteClick = { item ->
+                                        pushScreen(Screen.MangaDetail(item.mangaId))
+                                    },
                                     viewModel = remember {
                                         QuoteBrowserViewModel(
                                             getAllQuotes = { deps.quoteRepository.getAllQuotes() },
@@ -1119,7 +1122,10 @@ fun main(args: Array<String>) {
                                             getNote = { deps.noteRepository.getNote(it) },
                                             getTagsForHighlight = { deps.tagRepository.getTagsForHighlight(it) },
                                             getAllBooks = { deps.bookRepository.getAllBooks() },
-                                            getAllTags = { deps.tagRepository.getAllTags().first() }
+                                            getAllTags = { deps.tagRepository.getAllTags().first() },
+                                            observeAllMangaNotes = { deps.mangaNoteRepository.observeAllNotes() },
+                                            getManga = { deps.mangaRepository.get(it) },
+                                            getMangaChapters = { deps.mangaChapterRepository.getChapters(it) }
                                         )
                                     }
                                 )
@@ -1127,8 +1133,12 @@ fun main(args: Array<String>) {
                                 is Screen.RevisitItems -> RevisitItemsScreen(
                                     onBack = { popScreen() },
                                     onItemClick = { item ->
-                                        appScope.launch(Dispatchers.IO) {
-                                            deps.bookRepository.getBook(item.book.id)?.let { book ->
+                                        val manga = item.manga
+                                        if (manga != null) {
+                                            pushScreen(Screen.MangaDetail(manga.id))
+                                        } else appScope.launch(Dispatchers.IO) {
+                                            val bookId = item.book?.id ?: return@launch
+                                            deps.bookRepository.getBook(bookId)?.let { book ->
                                                 appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
                                             }
                                         }
@@ -1141,7 +1151,10 @@ fun main(args: Array<String>) {
                                             getChaptersForBook = { deps.bookRepository.getChaptersForBook(it) },
                                             getHighlight = { deps.highlightRepository.getHighlight(it) },
                                             getBookmark = { deps.bookmarkRepository.getBookmark(it) },
-                                            getNote = { deps.noteRepository.getNote(it) }
+                                            getNote = { deps.noteRepository.getNote(it) },
+                                            getManga = { deps.mangaRepository.get(it) },
+                                            getMangaChapters = { deps.mangaChapterRepository.getChapters(it) },
+                                            getMangaNote = { deps.mangaNoteRepository.get(it) }
                                         )
                                     }
                                 )

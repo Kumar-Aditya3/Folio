@@ -39,11 +39,17 @@ fun TagsRoute(
 }
 
 @Composable
-fun QuotesRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (String) -> Unit) {
+fun QuotesRoute(
+    navModel: FolioNavModelImpl,
+    onBack: () -> Unit,
+    onOpenReader: (String) -> Unit,
+    onOpenMangaDetail: (String) -> Unit
+) {
     val graph = navModel.graph
     QuoteBrowserScreen(
         onBack = onBack,
         onQuoteClick = { item -> onOpenReader(item.book.id) },
+        onMangaNoteClick = { item -> onOpenMangaDetail(item.mangaId) },
         viewModel = remember {
             QuoteBrowserViewModel(
                 getAllQuotes = { graph.quoteRepository.getAllQuotes() },
@@ -53,18 +59,29 @@ fun QuotesRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (
                 getNote = { graph.noteRepository.getNote(it) },
                 getTagsForHighlight = { graph.tagRepository.getTagsForHighlight(it) },
                 getAllBooks = { graph.bookRepository.getAllBooks() },
-                getAllTags = { graph.tagRepository.getAllTags().first() }
+                getAllTags = { graph.tagRepository.getAllTags().first() },
+                observeAllMangaNotes = { graph.mangaNoteRepository.observeAllNotes() },
+                getManga = { graph.mangaRepository.get(it) },
+                getMangaChapters = { graph.mangaChapterRepository.getChapters(it) }
             )
         }
     )
 }
 
 @Composable
-fun RevisitRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (String) -> Unit) {
+fun RevisitRoute(
+    navModel: FolioNavModelImpl,
+    onBack: () -> Unit,
+    onOpenReader: (String) -> Unit,
+    onOpenMangaDetail: (String) -> Unit
+) {
     val graph = navModel.graph
     RevisitItemsScreen(
         onBack = onBack,
-        onItemClick = { item -> onOpenReader(item.book.id) },
+        onItemClick = { item ->
+            val manga = item.manga
+            if (manga != null) onOpenMangaDetail(manga.id) else item.book?.let { onOpenReader(it.id) }
+        },
         viewModel = remember {
             RevisitItemsViewModel(
                 getUnresolvedRevisitItems = { graph.revisitRepository.getUnresolvedRevisitItems() },
@@ -73,7 +90,10 @@ fun RevisitRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: 
                 getChaptersForBook = { graph.bookRepository.getChaptersForBook(it) },
                 getHighlight = { graph.highlightRepository.getHighlight(it) },
                 getBookmark = { graph.bookmarkRepository.getBookmark(it) },
-                getNote = { graph.noteRepository.getNote(it) }
+                getNote = { graph.noteRepository.getNote(it) },
+                getManga = { graph.mangaRepository.get(it) },
+                getMangaChapters = { graph.mangaChapterRepository.getChapters(it) },
+                getMangaNote = { graph.mangaNoteRepository.get(it) }
             )
         }
     )
