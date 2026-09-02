@@ -286,13 +286,23 @@ deliberate rather than truncated.
 
 | Phase | Effect | Depends on | Version |
 |---|---|---|---|
-| **M1** | Rule 19 capability helpers (`MotionCapabilities.kt`), reduce-motion plumbing | nothing | 1.1.x |
-| **M2** | §13.5 chart entry animation | M1 | 1.2.x |
-| **M3** | §13.3 cover-derived hero accent | M1, §12 Phase B (hero exists) | 1.2.x |
-| **M4** | §13.4 drifting gradient mesh | M3 | 1.2.x |
-| **M5** | §13.9 hero collapse on scroll | §12 Phase B | 1.2.x |
+| **M1** | Rule 19 capability helpers (`MotionCapabilities.kt`), reduce-motion plumbing | nothing | shipped 1.1.19 |
+| **M2** | §13.5 chart entry animation | M1 | shipped 1.1.19 |
+| **M3** | §13.3 cover-derived hero accent | M1, §12 Phase B (hero exists) | shipped 1.1.19 |
+| **M4** | §13.4 drifting gradient mesh | M3 | shipped 1.1.19 |
+| **M5** | §13.9 hero collapse on scroll | §12 Phase B | shipped 1.1.19 |
 | **M6** | §13.6 shared-element transition | §12 Phase B complete, no in-flight nav work | 1.3.x |
 | **M7** | §13.7 AGSL liquid glass | M4 (fallback must exist first) | 1.4.x |
+
+M1–M5 shipped together in v1.1.19 (versionCode 50, commit 0903a64): entry sweeps keyed
+on data-window dates with `rememberSaveable` played-flags, peak caps starting strictly
+after their own bar completes; cover accent sampled from the already-cached bitmap with
+a contrast guard whose floor extends past the fallback to the better pure extreme
+(always ≥5.6:1); mesh drawn in `onDrawBehind` so no per-frame recomposition; collapse
+tracked 1:1 in the first 160dp with the title migrating to the top bar at full collapse
+and the hero tint bleeding upward via a 220ms alpha animation. Desktop gates green
+(201/0/0, incl. 7 new §13 tests); the device verification items above (gfxinfo,
+three-theme, Rule 11 smoke, reduce-motion) run on reconnect.
 
 M1 first, always: every later effect reads its capability flags, and doing it last means
 retrofitting reduce-motion into five call sites.
