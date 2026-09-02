@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,7 +75,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
@@ -161,6 +159,10 @@ fun LibraryScreen(
 
     val allSeries by viewModel.allSeries().collectAsState(initial = emptyList())
     val allCollections by viewModel.allCollections().collectAsState(initial = emptyList())
+    // §5.1: pace captions keyed by book id. Empty unless the host supplied a
+    // session repository, so callers that don't want the extra read pay nothing.
+    val finishEstimates by remember(viewModel) { viewModel.finishEstimates() }
+        .collectAsState(initial = emptyMap())
 
     val books by viewModel.filteredBooks(
         LibraryViewModel.LibraryState(
@@ -450,6 +452,7 @@ fun LibraryScreen(
                     allCollections = allCollections,
                     selectedBooks = selectedBooks,
                     isSelectionMode = isSelectionMode,
+                    finishEstimates = finishEstimates,
                     onViewMode = onBooksViewModeChange,
                     onSortChange = { sortBy = it },
                     onDirectionChange = { sortAscending = it },
@@ -480,6 +483,7 @@ private fun LibraryContent(
     allCollections: List<FolioCollection>,
     selectedBooks: Set<String>,
     isSelectionMode: Boolean,
+    finishEstimates: Map<String, String>,
     onViewMode: (LibraryViewModel.ViewMode) -> Unit,
     onSortChange: (LibraryViewModel.SortBy) -> Unit,
     onDirectionChange: (Boolean) -> Unit,
@@ -494,118 +498,19 @@ private fun LibraryContent(
     onImportClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Filter chips: status + series + collection (horizontally scrollable)
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            item {
-                com.folio.reader.ui.components.FolioChip(
-                    selected = filter.statuses.contains(BookStatus.READING),
-                    onClick = {
-                        onFilterChange(
-                            if (filter.statuses.contains(BookStatus.READING)) filter.copy(statuses = filter.statuses - BookStatus.READING)
-                            else filter.copy(statuses = filter.statuses + BookStatus.READING)
-                        )
-                    },
-                    label = "Reading"
-                )
-            }
-            item {
-                com.folio.reader.ui.components.FolioChip(
-                    selected = filter.statuses.contains(BookStatus.FINISHED),
-                    onClick = {
-                        onFilterChange(
-                            if (filter.statuses.contains(BookStatus.FINISHED)) filter.copy(statuses = filter.statuses - BookStatus.FINISHED)
-                            else filter.copy(statuses = filter.statuses + BookStatus.FINISHED)
-                        )
-                    },
-                    label = "Finished"
-                )
-            }
-            item {
-                com.folio.reader.ui.components.FolioChip(
-                    selected = filter.statuses.contains(BookStatus.UNREAD),
-                    onClick = {
-                        onFilterChange(
-                            if (filter.statuses.contains(BookStatus.UNREAD)) filter.copy(statuses = filter.statuses - BookStatus.UNREAD)
-                            else filter.copy(statuses = filter.statuses + BookStatus.UNREAD)
-                        )
-                    },
-                    label = "Unread"
-                )
-            }
-
-            item {
-                Box {
-                    com.folio.reader.ui.components.FolioChip(
-                        selected = filter.seriesId != null,
-                        onClick = { onSeriesFilterOpen(true) },
-                        label = allSeries.firstOrNull { it.id == filter.seriesId }?.name ?: "Series"
-                    )
-                    DropdownMenu(
-                        expanded = seriesFilterOpen,
-                        onDismissRequest = { onSeriesFilterOpen(false) },
-                        offset = DpOffset(0.dp, 36.dp)
-                    ) {
-                        DropdownMenuItem(text = { Text("All series") }, onClick = {
-                            onFilterChange(filter.copy(seriesId = null)); onSeriesFilterOpen(false)
-                        })
-                        allSeries.forEach { series ->
-                            DropdownMenuItem(text = { Text(series.name) }, onClick = {
-                                onFilterChange(filter.copy(seriesId = series.id)); onSeriesFilterOpen(false)
-                            })
-                        }
-                        if (allSeries.isEmpty()) {
-                            DropdownMenuItem(text = { Text("No series yet") }, onClick = { onSeriesFilterOpen(false) })
-                        }
-                    }
-                }
-            }
-
-            item {
-                Box {
-                    com.folio.reader.ui.components.FolioChip(
-                        selected = filter.collectionId != null,
-                        onClick = { onCollectionFilterOpen(true) },
-                        label = allCollections.firstOrNull { it.id == filter.collectionId }?.name ?: "Collections"
-                    )
-                    DropdownMenu(
-                        expanded = collectionFilterOpen,
-                        onDismissRequest = { onCollectionFilterOpen(false) },
-                        offset = DpOffset(0.dp, 36.dp)
-                    ) {
-                        DropdownMenuItem(text = { Text("All collections") }, onClick = {
-                            onFilterChange(filter.copy(collectionId = null)); onCollectionFilterOpen(false)
-                        })
-                        allCollections.forEach { collection ->
-                            DropdownMenuItem(text = { Text(collection.name) }, onClick = {
-                                onFilterChange(filter.copy(collectionId = collection.id)); onCollectionFilterOpen(false)
-                            })
-                        }
-                        if (allCollections.isEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("No collections yet") },
-                                onClick = { onCollectionFilterOpen(false) })
-                        }
-                    }
-                }
-            }
-
-            if (filter.hasFilters()) {
-                item {
-                    // Must be a chip, not a TextButton: the button is taller, and being
-                    // the only conditional item it changed the row's measured height as it
-                    // scrolled in and out of composition, nudging every other chip.
-                    com.folio.reader.ui.components.FolioChip(
-                        selected = false,
-                        onClick = { onFilterChange(LibraryViewModel.FilterState()) },
-                        label = "Clear"
-                    )
-                }
-            }
-        }
+        // Filter chips are owned by LibraryFilters.kt (§6). The inline copy that
+        // used to live here was the "conflicting overloads" hazard from the last
+        // split: a moved composable must be deleted from its source file.
+        LibraryFilterChips(
+            filter = filter,
+            allSeries = allSeries,
+            allCollections = allCollections,
+            seriesFilterOpen = seriesFilterOpen,
+            collectionFilterOpen = collectionFilterOpen,
+            onFilterChange = onFilterChange,
+            onSeriesFilterOpen = onSeriesFilterOpen,
+            onCollectionFilterOpen = onCollectionFilterOpen
+        )
 
         if (books == null) {
             com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
@@ -633,7 +538,8 @@ private fun LibraryContent(
                     onBookLongClick,
                     onDeleteBook,
                     selectedBooks,
-                    isSelectionMode
+                    isSelectionMode,
+                    finishEstimates
                 )
 
                 LibraryViewModel.ViewMode.LIST -> BookList(
@@ -642,7 +548,8 @@ private fun LibraryContent(
                     onBookLongClick,
                     onDeleteBook,
                     selectedBooks,
-                    isSelectionMode
+                    isSelectionMode,
+                    finishEstimates
                 )
 
                 LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
@@ -651,7 +558,8 @@ private fun LibraryContent(
                     onBookLongClick,
                     onDeleteBook,
                     selectedBooks,
-                    isSelectionMode
+                    isSelectionMode,
+                    finishEstimates
                 )
             }
         }
