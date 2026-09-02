@@ -72,7 +72,7 @@ class TagManagerViewModel(
     private val getAllTags: suspend () -> List<Tag>,
     private val insertTag: suspend (Tag) -> Unit,
     private val updateTag: suspend (Tag) -> Unit,
-    private val deleteTag: suspend (String) -> Unit,
+    private val deleteTagById: suspend (String) -> Unit,
     private val getTagsForBook: suspend (String) -> List<Tag>,
     private val getTagsForHighlight: suspend (String) -> List<Tag>,
     private val getBooksForTag: suspend (tagId: String) -> List<Book>,
@@ -147,7 +147,8 @@ class TagManagerViewModel(
 
     fun deleteTag(tagId: String, onDone: () -> Unit = {}) {
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            deleteTag(tagId)
+            // Calls the repo lambda; a bare deleteTag(tagId) would recurse into this function.
+            deleteTagById(tagId)
             refresh()
             onDone()
         }

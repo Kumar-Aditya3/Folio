@@ -27,7 +27,7 @@ fun TagsRoute(
                 getAllTags = { graph.tagRepository.getAllTags().first() },
                 insertTag = { graph.tagRepository.insertTag(it) },
                 updateTag = { graph.tagRepository.updateTag(it) },
-                deleteTag = { graph.tagRepository.deleteTag(it) },
+                deleteTagById = { graph.tagRepository.deleteTag(it) },
                 getTagsForBook = { graph.tagRepository.getTagsForBook(it) },
                 getTagsForHighlight = { graph.tagRepository.getTagsForHighlight(it) },
                 getBooksForTag = { graph.tagRepository.getBooksForTag(it) },
