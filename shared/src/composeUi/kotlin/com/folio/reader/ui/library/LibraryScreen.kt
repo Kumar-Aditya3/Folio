@@ -405,30 +405,44 @@ fun LibraryScreen(
             }
         }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(vertical = com.folio.reader.ui.theme.FolioTokens.space1),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                com.folio.reader.ui.components.FolioChip(
-                    selected = !mangaMode && !showStats,
-                    onClick = { viewModel.statsVisible.value = false; if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS) },
-                    label = "Books",
-                )
-                com.folio.reader.ui.components.FolioChip(
-                    selected = mangaMode && !showStats,
-                    onClick = { viewModel.statsVisible.value = false; if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA) },
-                    label = "Manga",
-                )
-                if (statsContent != null) {
-                    com.folio.reader.ui.components.FolioChip(
-                        selected = showStats,
-                        onClick = { viewModel.statsVisible.value = true },
-                        label = "Stats",
-                    )
+            // Books/Manga narrows *this* shelf (Rule 4: chips filter, never navigate),
+            // so the pair only renders where a manga surface actually exists. Home
+            // passes mangaContent = null and used to draw a Manga chip anyway, whose
+            // tap hit the default no-op onLibraryModeChange and did nothing at all.
+            if (mangaContent != null || statsContent != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(vertical = com.folio.reader.ui.theme.FolioTokens.space1),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (mangaContent != null) {
+                        com.folio.reader.ui.components.FolioChip(
+                            selected = !mangaMode && !showStats,
+                            onClick = {
+                                viewModel.statsVisible.value = false
+                                if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS)
+                            },
+                            label = "Books",
+                        )
+                        com.folio.reader.ui.components.FolioChip(
+                            selected = mangaMode && !showStats,
+                            onClick = {
+                                viewModel.statsVisible.value = false
+                                if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA)
+                            },
+                            label = "Manga",
+                        )
+                    }
+                    if (statsContent != null) {
+                        com.folio.reader.ui.components.FolioChip(
+                            selected = showStats,
+                            onClick = { viewModel.statsVisible.value = true },
+                            label = "Stats",
+                        )
+                    }
                 }
             }
 
