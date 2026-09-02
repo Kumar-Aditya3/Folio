@@ -1,6 +1,7 @@
 package com.folio.reader
 
 import android.app.Application
+import io.sentry.android.core.SentryAndroid
 import com.folio.reader.database.Database
 import com.folio.reader.database.JdbcBookRepository
 import com.folio.reader.database.JdbcBookmarkRepository
@@ -32,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import java.io.File
@@ -108,6 +110,87 @@ class AppGraph(private val app: Application) {
                 val ok = mangaDownloadManager.switchStorage(com.folio.reader.manga.SafDownloadStorage(app, uri))
                 if (!ok) runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
             }
+        }
+    }
+
+    /**
+     * One-time backfill of Quotes/Revisit for annotations created before the reader
+     * started populating those stores. Deterministic ids match the reader's
+     * populate-on-create path, so the INSERT OR REPLACE writes are idempotent and a
+     * retry after a mid-way failure is safe; the raw settings flag keeps it to one
+     * successful pass per install.
+     */
+    fun backfillAnnotationsOnce(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val flag = "annotations_backfill_v1"
+            if (runCatching { settingsRepository.getRaw(flag) }.getOrNull() == "1") return@launch
+            runCatching {
+                val quotedHighlights =
+                    quoteRepository.getAllQuotes().first().map { it.highlightId }.toHashSet()
+                for (book in bookRepository.getAllBooks().first()) {
+                    val existingRevisits = revisitRepository.getRevisitItemsForBook(book.id)
+                        .map { it.type to it.sourceId }
+                        .toHashSet()
+
+                    for (h in highlightRepository.getHighlightsForBook(book.id).first().filter { !it.isDeleted }) {
+                        if (h.id !in quotedHighlights) {
+                            quoteRepository.insertQuote(
+                                com.folio.reader.model.Quote(
+                                    id = "quote-${h.id}",
+                                    bookId = h.bookId,
+                                    chapterId = h.chapterId,
+                                    highlightId = h.id,
+                                    text = h.selectedText,
+                                    deviceId = h.deviceId
+                                )
+                            )
+                        }
+                        if ((com.folio.reader.model.RevisitType.HIGHLIGHT to h.id) !in existingRevisits) {
+                            revisitRepository.insertRevisitItem(
+                                com.folio.reader.model.RevisitItem(
+                                    id = "revisit-h-${h.id}",
+                                    bookId = h.bookId,
+                                    chapterId = h.chapterId,
+                                    type = com.folio.reader.model.RevisitType.HIGHLIGHT,
+                                    sourceId = h.id,
+                                    deviceId = h.deviceId
+                                )
+                            )
+                        }
+                    }
+
+                    for (b in bookmarkRepository.getBookmarksForBook(book.id).first().filter { !it.isDeleted }) {
+                        if ((com.folio.reader.model.RevisitType.BOOKMARK to b.id) !in existingRevisits) {
+                            revisitRepository.insertRevisitItem(
+                                com.folio.reader.model.RevisitItem(
+                                    id = "revisit-b-${b.id}",
+                                    bookId = b.bookId,
+                                    chapterId = b.chapterId,
+                                    type = com.folio.reader.model.RevisitType.BOOKMARK,
+                                    sourceId = b.id,
+                                    deviceId = b.deviceId
+                                )
+                            )
+                        }
+                    }
+
+                    for (n in noteRepository.getNotesForBook(book.id).first().filter { !it.isDeleted }) {
+                        if ((com.folio.reader.model.RevisitType.NOTE to n.id) !in existingRevisits) {
+                            revisitRepository.insertRevisitItem(
+                                com.folio.reader.model.RevisitItem(
+                                    id = "revisit-n-${n.id}",
+                                    bookId = n.bookId,
+                                    chapterId = n.chapterId ?: "",
+                                    type = com.folio.reader.model.RevisitType.NOTE,
+                                    sourceId = n.id,
+                                    deviceId = n.deviceId
+                                )
+                            )
+                        }
+                    }
+                }
+                settingsRepository.setRaw(flag, "1")
+            }.onFailure { it.printStackTrace() }
         }
     }
 
@@ -342,6 +425,27 @@ class FolioApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // ── CRASH REPORTING (§8.4 FOLIO_IMPLEMENTATION_SPEC) ───────────────────
+        // Opt-in crash reporting with visible privacy notice; reports contain stack trace + build version.
+        runCatching {
+            val versionName = packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+            SentryAndroid.init(this) { options ->
+                options.dsn = "https://159f3530b7a14c9b2bae0d6e20c31ee1@o600280.ingest.us.sentry.io/6033629"
+                // Disable automatic session tracking to avoid false positives for background launches
+                options.isEnableAutoSessionTracking = false
+                // Capture native crashes (zstd, JNI issues)
+                options.isEnableNdk = true
+                // Capture ANRs (property renamed isAnrEnabled in Sentry 7.x)
+                options.isAnrEnabled = true
+                // Release version for grouping reports by build
+                options.release = "com.folio.reader@$versionName"
+                // Only capture 1% of sessions for now (we'll enable more after validation)
+                options.sampleRate = 0.01
+            }
+        }.onFailure { e ->
+            e.printStackTrace() // Don't block startup on Sentry init failure
+        }
+        
         graph = runCatching { AppGraph(this) }.getOrElse { e ->
             e.printStackTrace()
             // Last-resort: rethrow so the crash is visible in logcat rather than a blank hang

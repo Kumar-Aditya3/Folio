@@ -7,6 +7,8 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection
 import com.folio.reader.model.Series
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.mapSaver
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -162,3 +164,56 @@ fun Book.toCardData(): BookCardData {
         }
     )
 }
+
+/** Restores sort order across process death; unknown names fall back to the default. */
+val SortBySaver: Saver<LibraryViewModel.SortBy, String> = Saver(
+    save = { it.name },
+    restore = { name ->
+        LibraryViewModel.SortBy.entries.firstOrNull { it.name == name }
+            ?: LibraryViewModel.SortBy.LAST_OPENED
+    }
+)
+
+/** Serializes FilterState to Bundle-safe primitives (enum names, epoch millis). */
+val FilterStateSaver: Saver<LibraryViewModel.FilterState, Any> = mapSaver(
+    save = { state ->
+        mapOf(
+            "statuses" to state.statuses.map { it.name },
+            "author" to state.author,
+            "seriesId" to state.seriesId,
+            "collectionId" to state.collectionId,
+            "tagId" to state.tagId,
+            "progressMin" to state.progressMin,
+            "progressMax" to state.progressMax,
+            "dateAddedAfter" to state.dateAddedAfter?.toEpochMilliseconds(),
+            "dateAddedBefore" to state.dateAddedBefore?.toEpochMilliseconds(),
+            "lastReadAfter" to state.lastReadAfter?.toEpochMilliseconds(),
+            "lastReadBefore" to state.lastReadBefore?.toEpochMilliseconds(),
+            "completionDateAfter" to state.completionDateAfter?.toEpochMilliseconds(),
+            "completionDateBefore" to state.completionDateBefore?.toEpochMilliseconds()
+        )
+    },
+    restore = { map ->
+        @Suppress("UNCHECKED_CAST")
+        val statuses = (map["statuses"] as? List<String>).orEmpty()
+            .mapNotNull { name -> BookStatus.entries.firstOrNull { it.name == name } }
+            .toSet()
+        fun instant(key: String): Instant? =
+            (map[key] as? Number)?.toLong()?.let { Instant.fromEpochMilliseconds(it) }
+        LibraryViewModel.FilterState(
+            statuses = statuses,
+            author = map["author"] as? String,
+            seriesId = map["seriesId"] as? String,
+            collectionId = map["collectionId"] as? String,
+            tagId = map["tagId"] as? String,
+            progressMin = (map["progressMin"] as? Number)?.toInt() ?: 0,
+            progressMax = (map["progressMax"] as? Number)?.toInt() ?: 100,
+            dateAddedAfter = instant("dateAddedAfter"),
+            dateAddedBefore = instant("dateAddedBefore"),
+            lastReadAfter = instant("lastReadAfter"),
+            lastReadBefore = instant("lastReadBefore"),
+            completionDateAfter = instant("completionDateAfter"),
+            completionDateBefore = instant("completionDateBefore")
+        )
+    }
+)

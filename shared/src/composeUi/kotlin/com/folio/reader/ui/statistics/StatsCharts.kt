@@ -1,0 +1,227 @@
+package com.folio.reader.ui.statistics
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.HeatmapCell
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.datetime.LocalDate
+
+// ---------------------------------------------------------------------------
+// Weekly bar charts
+// ---------------------------------------------------------------------------
+
+/**
+ * A bar chart of manga chapters read per day over the last 7 days, styled
+ * identically to the books [WeekChart] but with chapter counts instead of minutes.
+ */
+@Composable
+internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
+    FolioSectionCard(title = "Manga — last 7 days") {
+        val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
+        Row(
+            modifier = Modifier.fillMaxWidth().height(112.dp),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            chaptersPerDay.forEachIndexed { index, chapters ->
+                val label = labels.getOrNull(index)?.take(1) ?: ""
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    Text(
+                        text = if (chapters > 0) chapters.toString() else "",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val fraction = (chapters.toFloat() / peak).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (chapters > 0) (28 + fraction * 48).dp else 6.dp)
+                            .background(
+                                if (chapters > 0) FolioTheme.colors.primary
+                                else FolioTheme.colors.outline.copy(alpha = 0.35f),
+                                RoundedCornerShape(
+                                    topStart = 6.dp, topEnd = 6.dp,
+                                    bottomStart = 2.dp, bottomEnd = 2.dp,
+                                ),
+                            ),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = label,
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun WeekChart(week: List<StatDay>) {
+    FolioSectionCard(title = "Last 7 days") {
+        val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+        Row(
+            modifier = Modifier.fillMaxWidth().height(112.dp),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            week.forEach { day ->
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    Text(
+                        text = if (day.minutes > 0) shortMinutes(day.minutes) else "",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val fraction = (day.minutes.toFloat() / peak).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (day.minutes > 0) (28 + fraction * 48).dp else 6.dp)
+                            .background(
+                                if (day.minutes > 0) FolioTheme.colors.primary
+                                else FolioTheme.colors.outline.copy(alpha = 0.35f),
+                                RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp)
+                            )
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = day.date.dayOfWeek.name.take(1),
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Activity heatmap
+// ---------------------------------------------------------------------------
+
+private enum class HeatmapMode { ALL, BOOKS, MANGA }
+
+@Composable
+internal fun ActivityHeatmap(
+    allDays: List<StatDay>,
+    bookDays: List<StatDay>,
+    mangaDays: List<StatDay>,
+) {
+    var mode by remember { mutableStateOf(HeatmapMode.ALL) }
+    val days = when (mode) {
+        HeatmapMode.ALL -> allDays
+        HeatmapMode.BOOKS -> bookDays
+        HeatmapMode.MANGA -> mangaDays
+    }
+
+    FolioSectionCard(title = "Activity") {
+        // ── Segmented toggle ──────────────────────────────────────────
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FolioChip(selected = mode == HeatmapMode.ALL, onClick = { mode = HeatmapMode.ALL }, label = "All")
+            FolioChip(selected = mode == HeatmapMode.BOOKS, onClick = { mode = HeatmapMode.BOOKS }, label = "Books")
+            FolioChip(selected = mode == HeatmapMode.MANGA, onClick = { mode = HeatmapMode.MANGA }, label = "Manga")
+        }
+
+        Spacer(Modifier.height(FolioTokens.space2))
+
+        if (days.isEmpty()) {
+            Text(
+                "No reading recorded yet.",
+                style = FolioTheme.typography.bodyMedium,
+                color = FolioTheme.colors.onSurfaceVariant
+            )
+            return@FolioSectionCard
+        }
+        val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+        days.chunked(7).forEach { week ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // A partial trailing week keeps its slot so the grid stays square.
+                (0..6).forEach { index ->
+                    val day = week.getOrNull(index)
+                    if (day == null || day.minutes <= 0L) {
+                        Box(
+                            Modifier.size(14.dp).background(
+                                FolioTheme.colors.outline.copy(alpha = 0.22f),
+                                RoundedCornerShape(3.dp)
+                            )
+                        )
+                    } else {
+                        HeatmapCell(intensity = intensityFor(day.minutes, peak), size = 14.dp)
+                    }
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = FolioTokens.space1),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${days.first().date.shortLabel()} – ${days.last().date.shortLabel()}",
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text("Less", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+                (1..4).forEach { HeatmapCell(intensity = it, size = 9.dp) }
+                Text("More", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** Log-ish banding: a 2-hour day should not max out the scale against a 30-second one. */
+private fun intensityFor(minutes: Long, peak: Long): Int {
+    val ratio = minutes.toFloat() / peak
+    return when {
+        ratio > 0.66f -> 4
+        ratio > 0.33f -> 3
+        ratio > 0.12f -> 2
+        else -> 1
+    }
+}
+
+private fun LocalDate.shortLabel(): String = "$dayOfMonth.$monthNumber"

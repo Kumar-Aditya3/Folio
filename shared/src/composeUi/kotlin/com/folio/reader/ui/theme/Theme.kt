@@ -1047,16 +1047,30 @@ val LocalFolioColors = staticCompositionLocalOf { LightFolioColors }
 val LocalFolioTypography = staticCompositionLocalOf { FolioTypography() }
 
 object FolioTokens {
+    // Border radiuses for UI components
     val radiusCard = 20.dp
     val radiusControl = 14.dp
     val radiusChip = 10.dp
 
-    val space1 = 8.dp
-    val space2 = 12.dp
-    val space3 = 16.dp
-    val space4 = 24.dp
+    // Spacing scale – use only these throughout the app
+    val space1 = 8.dp     // Small gaps, icon padding
+    val space2 = 12.dp    // Row gaps inside cards
+    val space3 = 16.dp    // Standard horizontal padding, sibling gaps
+    val space4 = 24.dp    // Large sections, card margins
 
+    // Navigation bar height
     val barHeight = 56.dp
+
+    // Motion durations – no literal durations elsewhere in new code
+    val motionFast = 120L         // State flips: chip select, checkbox toggle
+    val motionStandard = 220L     // Enter/exit, crossfade, panel slide
+    val motionEmphasis = 320L     // Bottom sheet, full-screen transition
+
+    // Progress ring diameter when decorating covers
+    val ringSmall = 28.dp
+
+    // Override indicator dot size
+    val dotIndicator = 6.dp
 }
 
 object FolioTheme {
