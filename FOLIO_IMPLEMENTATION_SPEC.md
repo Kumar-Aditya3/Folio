@@ -713,7 +713,14 @@ request, cached 6h, silently absent on failure or when no sources exist.
 Ordered by value; each already has book-side infrastructure to mirror:
 - **Notes and bookmarks in the manga reader.** `MangaNoteRepository` exists and
   `MangaChapter.bookmarked` exists — surface them the way the book reader does.
+  *(Shipped, verified 2026-09-02: long-press → note dialog, notes-list dialog, chapter
+  bookmark toggle in reader chrome and detail rows, BOOKMARKED filter were already in
+  the reader before this spec listed the gap.)*
 - **Manga in the annotation hub.** Quotes/Revisit backfill already happened for books.
+  *(Shipped v1.1.6: Quotes hub renders manga notes as cards beside book quotes — search
+  applies, book/tag filters hide them — tap opens manga detail; Revisit resolves manga
+  NOTE and BOOKMARK rows via manga lookups; Android one-time backfill under
+  `manga_annotations_backfill_v1` imports existing notes and bookmarked chapters.)*
 - **Per-manga reading stats** on manga detail, mirroring §5.2's `BookReadingSection`.
 - **Manga tags**, distinct from categories: categories are shelves (one membership set), tags
   are cross-cutting. Reuse `TagRepository`'s shape.

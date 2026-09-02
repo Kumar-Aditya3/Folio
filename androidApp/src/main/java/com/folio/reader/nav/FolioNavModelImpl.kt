@@ -210,12 +210,12 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         TagsRoute(this, onBack, onOpenBookDetail, onOpenReader)
 
     @Composable
-    override fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit) =
-        QuotesRoute(this, onBack, onOpenReader)
+    override fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit) =
+        QuotesRoute(this, onBack, onOpenReader, onOpenMangaDetail)
 
     @Composable
-    override fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit) =
-        RevisitRoute(this, onBack, onOpenReader)
+    override fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit) =
+        RevisitRoute(this, onBack, onOpenReader, onOpenMangaDetail)
 
     @Composable
     override fun mangaDetailContent(mangaId: String, onBack: () -> Unit, onRead: (String) -> Unit) =

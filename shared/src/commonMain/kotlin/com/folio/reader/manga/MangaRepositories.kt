@@ -48,6 +48,9 @@ interface MangaNoteRepository {
     suspend fun get(noteId: String): MangaNote?
     suspend fun notesForChapter(chapterId: String): List<MangaNote>
     fun observeNotesForChapter(chapterId: String): Flow<List<MangaNote>>
+
+    /** Every note in the library, newest first — used by the annotation hub. */
+    fun observeAllNotes(): Flow<List<MangaNote>>
 }
 
 interface MangaCategoryRepository {

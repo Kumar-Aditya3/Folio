@@ -50,6 +50,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.manga.MangaChapter
+import com.folio.reader.manga.MangaEntry
+import com.folio.reader.manga.MangaNote
 import com.folio.reader.model.Book
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.Chapter
@@ -69,7 +72,8 @@ import kotlinx.coroutines.launch
 
 data class RevisitDisplayItem(
     val revisitItem: RevisitItem,
-    val book: Book,
+    val book: Book?,
+    val manga: MangaEntry? = null,
     val chapter: Chapter?,
     val sourceSnippet: String,
     val note: String?
@@ -82,7 +86,11 @@ class RevisitItemsViewModel(
     private val getChaptersForBook: suspend (String) -> List<Chapter>,
     private val getHighlight: suspend (String) -> Highlight?,
     private val getBookmark: suspend (String) -> Bookmark?,
-    private val getNote: suspend (String) -> Note?
+    private val getNote: suspend (String) -> Note?,
+    // Manga side (§11.5): revisit rows whose bookId is a mangaId resolve through these when non-null.
+    private val getManga: (suspend (String) -> MangaEntry?)? = null,
+    private val getMangaChapters: (suspend (String) -> List<MangaChapter>)? = null,
+    private val getMangaNote: (suspend (String) -> MangaNote?)? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -92,8 +100,10 @@ class RevisitItemsViewModel(
             .map { items -> if (filterType != null) items.filter { it.type == filterType } else items }
             .map { items ->
                 items.mapNotNull { item ->
-                    val book = getBook(item.bookId) ?: return@mapNotNull null
-                    val chapters = getChaptersForBook(item.bookId)
+                    val book = getBook(item.bookId)
+                    val manga = if (book == null) getManga?.invoke(item.bookId) else null
+                    if (book == null && manga == null) return@mapNotNull null
+                    val chapters = if (book != null) getChaptersForBook(item.bookId) else emptyList()
                     val chapter = chapters.find { it.id == item.chapterId }
                     val result = when (item.type) {
                         RevisitType.HIGHLIGHT -> {
@@ -101,12 +111,21 @@ class RevisitItemsViewModel(
                             Pair(hl?.selectedText.orEmpty(), hl?.noteId?.let { getNote(it)?.content } ?: item.note)
                         }
                         RevisitType.BOOKMARK -> {
-                            val bm = getBookmark(item.sourceId)
-                            Pair(bm?.label ?: chapter?.title ?: "Bookmark", item.note)
+                            if (book != null) {
+                                val bm = getBookmark(item.sourceId)
+                                Pair(bm?.label ?: chapter?.title ?: "Bookmark", item.note)
+                            } else {
+                                val mc = getMangaChapters?.invoke(item.bookId).orEmpty().find { it.id == item.sourceId }
+                                Pair(mc?.name ?: "Bookmark", item.note)
+                            }
                         }
                         RevisitType.NOTE -> {
-                            val n = getNote(item.sourceId)
-                            Pair(n?.content.orEmpty(), item.note)
+                            if (book != null) {
+                                val n = getNote(item.sourceId)
+                                Pair(n?.content.orEmpty(), item.note)
+                            } else {
+                                Pair(getMangaNote?.invoke(item.sourceId)?.content.orEmpty(), item.note)
+                            }
                         }
                         RevisitType.CHAPTER -> {
                             Pair(chapter?.title ?: "Chapter", item.note)
@@ -114,7 +133,7 @@ class RevisitItemsViewModel(
                     }
                     val snippet = result.first
                     val note = result.second
-                    RevisitDisplayItem(item, book, chapter, snippet, note)
+                    RevisitDisplayItem(item, book, manga, chapter, snippet, note)
                 }
             }
             .flowOn(Dispatchers.IO)
@@ -358,7 +377,7 @@ private fun RevisitCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.book.title,
+                    text = item.book?.title ?: item.manga?.title ?: "",
                     style = FolioTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,

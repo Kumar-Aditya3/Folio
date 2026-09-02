@@ -146,14 +146,16 @@ fun FolioNavHost(
         composable(FolioRoutes.QUOTES) {
             navModel.quotesContent(
                 onBack = { navController.popBackStack() },
-                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) }
+                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                onOpenMangaDetail = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
             )
         }
 
         composable(FolioRoutes.REVISIT) {
             navModel.revisitContent(
                 onBack = { navController.popBackStack() },
-                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) }
+                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                onOpenMangaDetail = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
             )
         }
 

@@ -1202,6 +1202,19 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
         emit(notesForChapter(chapterId))
     }
 
+    override fun observeAllNotes(): Flow<List<MangaNote>> = flow {
+        val notes = db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM manga_notes ORDER BY created_at DESC").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    val list = mutableListOf<MangaNote>()
+                    while (rs.next()) list += mapNote(rs)
+                    list
+                }
+            }
+        }
+        emit(notes)
+    }
+
     private fun mapNote(rs: ResultSet) = MangaNote(
         id = rs.getString("id"),
         mangaId = rs.getString("manga_id"),

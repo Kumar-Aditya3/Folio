@@ -1,5 +1,8 @@
 package com.folio.reader.ui.quotes
 
+import com.folio.reader.manga.MangaChapter
+import com.folio.reader.manga.MangaEntry
+import com.folio.reader.manga.MangaNote
 import com.folio.reader.model.Book
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
@@ -10,11 +13,13 @@ import com.folio.reader.model.Tag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
@@ -35,7 +40,11 @@ class QuoteBrowserViewModel(
     private val getNote: suspend (String) -> Note?,
     private val getTagsForHighlight: suspend (String) -> List<Tag>,
     private val getAllBooks: () -> kotlinx.coroutines.flow.Flow<List<Book>>,
-    private val getAllTags: suspend () -> List<Tag>
+    private val getAllTags: suspend () -> List<Tag>,
+    // Manga side (§11.5): null deps keep the hub book-only, as on desktop before wiring.
+    private val observeAllMangaNotes: (() -> Flow<List<MangaNote>>)? = null,
+    private val getManga: suspend (String) -> MangaEntry? = { null },
+    private val getMangaChapters: suspend (String) -> List<MangaChapter> = { emptyList() }
 ) {
     enum class ViewMode { GRID, LIST }
 
@@ -94,4 +103,23 @@ class QuoteBrowserViewModel(
     fun allBooks(): List<Book> = allBooksState.value
 
     suspend fun allTags(): List<Tag> = getAllTags()
+
+    /** Manga reader notes rendered as cards; empty when deps are absent or a book/tag filter hides them. */
+    fun mangaItems(filter: FilterState): Flow<List<MangaQuoteItem>> {
+        val observe = observeAllMangaNotes ?: return flowOf(emptyList())
+        return observe().map { notes ->
+            if (filter.bookId != null || filter.tagIds.isNotEmpty()) return@map emptyList()
+            withContext(Dispatchers.IO) {
+                notes.mapNotNull { note ->
+                    val manga = getManga(note.mangaId) ?: return@mapNotNull null
+                    if (filter.searchQuery.isNotBlank() &&
+                        !note.content.contains(filter.searchQuery, ignoreCase = true) &&
+                        !manga.title.contains(filter.searchQuery, ignoreCase = true)
+                    ) return@mapNotNull null
+                    val chapterTitle = getMangaChapters(note.mangaId).find { it.id == note.chapterId }?.name
+                    MangaQuoteItem(note, manga.id, manga.title, chapterTitle)
+                }
+            }
+        }
+    }
 }

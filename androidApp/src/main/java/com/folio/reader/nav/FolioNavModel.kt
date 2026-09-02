@@ -71,10 +71,10 @@ interface FolioNavModel {
     fun tagsContent(onBack: () -> Unit, onOpenBookDetail: (String) -> Unit, onOpenReader: (String) -> Unit)
 
     @Composable
-    fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit)
+    fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit)
 
     @Composable
-    fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit)
+    fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit)
 
     @Composable
     fun mangaDetailContent(mangaId: String, onBack: () -> Unit, onRead: (String) -> Unit)
