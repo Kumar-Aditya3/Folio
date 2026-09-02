@@ -36,6 +36,23 @@ internal class ReadingSessionTracker(
     val chapterEndGuard = ChapterEndGuard()
     val chapterStartGuard = ChapterEndGuard()
 
+    /** Chapter-share accounting: where this chapter began on the clock and in the book. */
+    private var chapterBaseActiveMs = 0L
+    private var chapterBaseProgress = 0.0
+
+    /** Called on every chapter entry so the finished chapter's time and words are measurable. */
+    fun markChapterEntry(progress: Double) {
+        chapterBaseActiveMs = activeMs()
+        chapterBaseProgress = progress
+    }
+
+    /** Active reading time (ms) and credited words since the last [markChapterEntry]. */
+    fun chapterShare(currentProgress: Double): Pair<Long, Long> {
+        val ms = (activeMs() - chapterBaseActiveMs).coerceAtLeast(0L)
+        val words = ((currentProgress - chapterBaseProgress).coerceAtLeast(0.0) * bookTotalWords()).toLong()
+        return ms to words
+    }
+
     /**
      * Engagement clock. [activeSpanMs] grows only in the intervals between reading
      * events that are close enough together to be plausible, so a book left open while
@@ -146,6 +163,7 @@ internal class ReadingSessionTracker(
             wordsBaseProgress = startPosition.normalizedProgress
         }
         wordsBaseActiveMs = activeMs()
+        markChapterEntry(position?.normalizedProgress ?: 0.0)
     }
 
     /** Ends the active session with its measured reading time. */

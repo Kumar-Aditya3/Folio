@@ -1065,6 +1065,7 @@ object FolioTokens {
     val motionFast = 120L         // State flips: chip select, checkbox toggle
     val motionStandard = 220L     // Enter/exit, crossfade, panel slide
     val motionEmphasis = 320L     // Bottom sheet, full-screen transition
+    val chipAutoDismiss = 4000L   // End-of-chapter chip dwell before fading out
 
     // Progress ring diameter when decorating covers
     val ringSmall = 28.dp
