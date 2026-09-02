@@ -739,6 +739,26 @@ sources without a web base) plus an overflow item "Open on <source name>" firing
 the most recently read manga, filtered to titles not already in the library, cap 6. One
 request, cached 6h, silently absent on failure or when no sources exist.
 
+*(Shipped v1.1.16: all three §11.4 surfaces. "Continue reading" (manga) — a separate card
+after the books carousel, cap 3, same layout language (cover, ring, title, caption);
+rows resolve through `MangaRepository.get`, so history rows for deleted or
+out-of-library manga never surface, and §11.2 manga exclusions hide their titles here
+too (direct / source / category, Rule 18). Primary tap opens the reader at the
+last-read chapter (`FolioDestination.mangaReader`), detail when the chapter is unknown.
+Deep link: `MangaBackend.sourceWebUrl(sourceId, mangaUrl): String?` (interface default
+null — desktop untouched; Android returns `HttpSource.baseUrl + mangaUrl`, null for the
+local source), surfaced only as a per-row overflow item "Open on <source name>" firing
+`ACTION_VIEW` — never the primary tap. Discover: LATEST page 1 of the most recently
+read library manga's source (local sources and `supportsLatest = false` sources are
+skipped), titles filtered against the library case-insensitively, cap 6; successful
+results cached 6h and empty/failed fetches 5 min so a transient failure never pins
+itself for six hours; absent without a backend, history, or a passing anchor. Discover
+taps persist a non-library entry (browse screen's `ensureEntry` contract) and open the
+detail screen. Home also gained `hasManga`, so a manga-only library renders the cards
+instead of the books empty state. Tests: `HomeMangaCardsTest` — cap 3 + library-only
+filtering, exclusions, library-title filter + cap 6 + LATEST mode, silent absence,
+cache-makes-one-request.)*
+
 ### 11.5 Manga parity worth building
 
 Ordered by value; each already has book-side infrastructure to mirror:
@@ -794,7 +814,7 @@ Ordered by value; each already has book-side infrastructure to mirror:
 | **6 — Splits (prerequisite)** | §6 manga splits: `MangaScreens` → 6 files ≤500, `MangaViewModels` → 4 ≤500, `MangaReaderScreen` → 3 ≤400. Pure extraction, one file per commit, test count unchanged | 1.1.x |
 | **7 — Stats exclusion** | §11.2 whole: table, `StatsScope`, all three consumers, `settings/stats`, visibility note, tests. Part 1 (table, resolver, `StatisticsViewModel` filtering, 10 tests) shipped in 1.1.4; `settings/stats` UI + Home consumption + Rule 8 note remain for 1.2.0 | 1.2.0 |
 | **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card. Machinery (worker, `manga_update_state`/cursor, notifier, interval setting) shipped in 1.1.5; `settings/manga` toggle (with POST_NOTIFICATIONS runtime request) + New chapters card shipped in 1.1.15 | 1.3.0 |
-| **9 — Home manga + discovery** | rest of §11.4: manga continue-reading, source deep link, Discover | 1.3.x |
+| **9 — Home manga + discovery** | rest of §11.4: manga continue-reading, source deep link, Discover — shipped in 1.1.16 (§11.4 shipped note above) | 1.3.x |
 | **10 — Parity** | §11.5 in listed order | 1.4.0 |
 
 **Acceptance criteria for §11:**

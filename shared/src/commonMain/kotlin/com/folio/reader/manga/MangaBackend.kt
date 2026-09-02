@@ -39,6 +39,12 @@ interface MangaBackend {
     /** Download a manga cover (or null when the source has none). */
     suspend fun fetchCover(sourceId: Long, thumbnailUrl: String?): ByteArray?
 
+    /**
+     * §11.4 deep link: the source's web page for this manga, or null for local
+     * sources and sources without a web base.
+     */
+    suspend fun sourceWebUrl(sourceId: Long, mangaUrl: String): String? = null
+
     // ---- Extension management (no-ops / empty on platforms without extensions) ----
 
     fun observeExtensions(): Flow<List<ExtensionEntry>>
