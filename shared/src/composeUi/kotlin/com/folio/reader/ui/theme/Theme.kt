@@ -1071,6 +1071,18 @@ object FolioTokens {
 
     // Override indicator dot size
     val dotIndicator = 6.dp
+
+    // Chart geometry — one definition shared by stats charts & the book-detail sparkline
+    val chartHeight = 112.dp
+    val chartBarBase = 28.dp
+    val chartBarSpan = 48.dp
+    val chartTrack = 6.dp
+    val chartSparkGap = 2.dp
+    val chartBarRadiusTop = 6.dp
+    val chartBarRadiusBottom = 2.dp
+
+    // Highlight-density heat strip on book detail
+    val heatStrip = 14.dp
 }
 
 object FolioTheme {

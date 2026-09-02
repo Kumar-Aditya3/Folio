@@ -1,9 +1,12 @@
 package com.folio.reader.ui.book
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,9 +39,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.Collection
+import com.folio.reader.model.Highlight
+import com.folio.reader.model.ReadingSession
 import com.folio.reader.model.Series
+import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.StatCard
+import com.folio.reader.ui.components.finishEstimate
+import com.folio.reader.ui.components.readingPaceWordsPerDay
+import com.folio.reader.ui.statistics.ChartBar
+import com.folio.reader.ui.statistics.intensityFor
+import com.folio.reader.ui.statistics.shortMinutes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import kotlin.math.roundToLong
+import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 internal fun BookMetadataEditorDialog(
@@ -275,5 +292,129 @@ internal fun formatCount(count: Long): String {
         count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
         count >= 1_000 -> "%.1fK".format(count / 1_000.0)
         else -> count.toString()
+    }
+}
+
+/**
+ * §5.2 "Your reading" card on book detail: a 30-day session sparkline, lifetime
+ * totals and pace, and a highlight-density strip by chapter. Renders nothing
+ * while the book has neither sessions nor highlights.
+ */
+@Composable
+internal fun BookReadingSection(
+    sessions: List<ReadingSession>,
+    highlights: List<Highlight>,
+    totalWords: Long,
+    progress: Double,
+) {
+    if (sessions.isEmpty() && highlights.isEmpty()) return
+
+    FolioSectionCard(title = "Your reading") {
+        val buckets = sessionMinutesByDay(sessions, days = 30)
+        if (buckets.any { it.minutes > 0L }) {
+            val peak = buckets.maxOf { it.minutes }.coerceAtLeast(1L)
+            Row(
+                modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.chartSparkGap),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                buckets.forEach { day ->
+                    ChartBar(
+                        value = day.minutes.toFloat(),
+                        peak = peak.toFloat(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            Text(
+                text = "${dayLabel(buckets.first().date)} – ${dayLabel(buckets.last().date)}",
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+            )
+        }
+
+        if (sessions.isNotEmpty()) {
+            Spacer(Modifier.height(FolioTokens.space1))
+            Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                val totalMinutes = sessions.sumOf { it.durationMs } / 60_000L
+                ReadingRow("Total time read", shortMinutes(totalMinutes))
+                val averageMinutes = sessions.sumOf { it.durationMs }.toDouble() / sessions.size / 60_000.0
+                ReadingRow("Average session", shortMinutes(averageMinutes.roundToLong()))
+                readingPaceWordsPerDay(sessions)?.let { pace ->
+                    ReadingRow("Pace (words/day)", "≈ ${formatCount(pace.toLong())} words/day")
+                }
+                finishEstimate(totalWords, progress, sessions)?.let { estimate ->
+                    Text(
+                        text = estimate,
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        if (highlights.isNotEmpty()) {
+            val perChapter = highlights.groupingBy { it.spineIndex }.eachCount()
+            val busiest = perChapter.values.max()
+            Spacer(Modifier.height(FolioTokens.space2))
+            Row(modifier = Modifier.fillMaxWidth().height(FolioTokens.heatStrip)) {
+                (perChapter.keys.min()..perChapter.keys.max()).forEach { spine ->
+                    val count = perChapter[spine] ?: 0
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(
+                                if (count == 0) FolioTheme.colors.outline.copy(alpha = 0.22f)
+                                else FolioTheme.colors.primary.copy(
+                                    alpha = stripAlpha(intensityFor(count.toLong(), busiest.toLong()))
+                                )
+                            )
+                    )
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            Text(
+                text = "${highlights.size} highlight${if (highlights.size == 1) "" else "s"} " +
+                    "across ${perChapter.size} chapter${if (perChapter.size == 1) "" else "s"}",
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReadingRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)
+        Text(value, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurface)
+    }
+}
+
+/** Mirrors the heatmap banding so one dense chapter does not flatten the rest. */
+private fun stripAlpha(intensity: Int): Float = when (intensity) {
+    4 -> 1f
+    3 -> 0.7f
+    2 -> 0.45f
+    else -> 0.25f
+}
+
+private fun dayLabel(date: LocalDate): String = "${date.dayOfMonth}.${date.monthNumber}"
+
+private data class DayBucket(val date: LocalDate, val minutes: Long)
+
+private fun sessionMinutesByDay(sessions: List<ReadingSession>, days: Int): List<DayBucket> {
+    val zone = TimeZone.currentSystemDefault()
+    val today = Clock.System.now().toLocalDateTime(zone).date
+    val byDay = sessions.groupBy { it.startedAt.toLocalDateTime(zone).date }
+        .mapValues { (_, day) -> day.sumOf { it.durationMs } / 60_000L }
+    return (days - 1 downTo 0).map { offset ->
+        val date = LocalDate.fromEpochDays(today.toEpochDays() - offset)
+        DayBucket(date, byDay[date] ?: 0L)
     }
 }
