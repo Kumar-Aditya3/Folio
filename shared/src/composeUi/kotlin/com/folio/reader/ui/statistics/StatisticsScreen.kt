@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -158,6 +159,14 @@ fun StatisticsTabContent(
             }
         }
 
+        // ── b2. §12.5 top-books leaderboard + genre breakdown ─────────
+        if (stats.topBooks.isNotEmpty()) {
+            item { TopBooksCard(books = stats.topBooks, onBookClick = onBookClick) }
+        }
+        if (stats.genres.isNotEmpty()) {
+            item { GenresCard(slices = stats.genres) }
+        }
+
         // ── c. Floating quotes & highlights ───────────────────────────
         if (recentQuotes.isNotEmpty()) {
             item {
@@ -234,7 +243,11 @@ private fun DailyGoalRing(
         Spacer(Modifier.height(FolioTokens.space2))
 
         val trackColor = FolioTheme.colors.outline.copy(alpha = 0.2f)
-        val progressColor = FolioTheme.colors.primary
+        // §12.5/Rule 14: forward motion is accentProgress, never primary.
+        val accent = FolioTheme.colors.accentProgress
+        val progressBrush = Brush.verticalGradient(
+            listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
+        )
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(140.dp)) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val strokeWidth = 12.dp.toPx()
@@ -252,7 +265,7 @@ private fun DailyGoalRing(
                 )
                 // Progress
                 drawArc(
-                    color = progressColor,
+                    brush = progressBrush,
                     startAngle = -90f,
                     sweepAngle = 360f * animatedFraction,
                     useCenter = false,
@@ -266,7 +279,7 @@ private fun DailyGoalRing(
                     text = "${todayMinutes.toInt()}",
                     style = FolioTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = FolioTheme.colors.primary,
+                    color = accent,
                 )
                 Text(
                     text = "of $goalMinutes min",
