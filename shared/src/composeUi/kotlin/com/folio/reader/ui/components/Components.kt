@@ -53,13 +53,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 
@@ -369,42 +364,6 @@ fun FolioSearchBar(
 }
 
 @Composable
-fun ProgressRing(
-    progress: Float,
-    modifier: Modifier = Modifier.size(48.dp),
-    strokeWidth: Float = 4f,
-    color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
-) {
-    Canvas(modifier = modifier) {
-        val strokePx = strokeWidth.dp.toPx()
-        val diameter = minOf(size.width, size.height) - strokePx
-        val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
-        val arcSize = Size(diameter, diameter)
-
-        drawArc(
-            color = trackColor,
-            startAngle = -90f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokePx, cap = StrokeCap.Round)
-        )
-
-        drawArc(
-            color = color,
-            startAngle = -90f,
-            sweepAngle = 360f * progress.coerceIn(0f, 1f),
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokePx, cap = StrokeCap.Round)
-        )
-    }
-}
-
-@Composable
 fun StatCard(
     title: String,
     value: String,
@@ -510,59 +469,6 @@ fun ConfirmDialog(
             }
         }
     )
-}
-
-@Composable
-fun LoadingPlaceholder(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(24.dp),
-            strokeWidth = 2.dp,
-            color = MaterialTheme.colorScheme.primary
-        )
-    }
-}
-
-/**
- * The one blank-state layout: icon, headline, optional body, optional action.
- * Every screen renders its empty condition through this so "nothing here"
- * always looks and reads the same.
- */
-@Composable
-fun EmptyState(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    headline: String,
-    body: String? = null,
-    modifier: Modifier = Modifier,
-    action: (@Composable () -> Unit)? = null
-) {
-    Column(
-        modifier = modifier.fillMaxWidth().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
-            modifier = Modifier.size(44.dp)
-        )
-        Text(
-            headline,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-        if (body != null) {
-            Text(
-                body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-        }
-        action?.invoke()
-    }
 }
 
 /** In-progress statuses announce ongoing work ("Importing…", trailing ellipsis). */
