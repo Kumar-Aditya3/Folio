@@ -1,6 +1,7 @@
 package com.folio.reader.ui.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -37,16 +39,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.BookCover
+import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
 /**
  * Grid presentation of the books shelf (§6 split of LibraryScreen.kt).
+ *
+ * [finishEstimates] is §5.1's caption source, keyed by book id; a book absent
+ * from the map renders no caption rather than a placeholder.
  */
 @Composable
 fun BookGrid(
@@ -55,7 +64,8 @@ fun BookGrid(
     onBookLongClick: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
     selectedBooks: Set<String>,
-    isSelectionMode: Boolean
+    isSelectionMode: Boolean,
+    finishEstimates: Map<String, String> = emptyMap()
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 150.dp),
@@ -70,7 +80,8 @@ fun BookGrid(
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
                 onLongClick = { onBookLongClick(book) },
-                onDeleteBook = { onDeleteBook(book) }
+                onDeleteBook = { onDeleteBook(book) },
+                finishEstimate = finishEstimates[book.id]
             )
         }
     }
@@ -84,7 +95,8 @@ fun BookCard(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onDeleteBook: (Book) -> Unit
+    onDeleteBook: (Book) -> Unit,
+    finishEstimate: String? = null
 ) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -143,15 +155,31 @@ fun BookCard(
                         .padding(4.dp),
                     iconTint = Color.White
                 )
-            }
-
-            // Progress bar
-            if (book.normalizedProgress > 0 && book.normalizedProgress < 1) {
-                com.folio.reader.ui.components.FolioProgressBar(
-                    progress = book.normalizedProgress.toFloat(),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    color = FolioTheme.colors.primary
-                )
+                // §5.1: progress decorates the cover as a ring. §2.6 forbids a ring
+                // and a bar in the same view, so the bar that used to sit under the
+                // cover is gone. A finished or untouched book shows nothing.
+                if (book.normalizedProgress > 0.0 && book.normalizedProgress < 0.99) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(FolioTokens.space1)
+                            .size(FolioTokens.ringSmall)
+                            .clip(CircleShape)
+                            .background(FolioTheme.colors.surface.copy(alpha = 0.85f))
+                            .semantics {
+                                contentDescription = "${book.progressPercent}% read"
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ProgressRing(
+                            progress = book.normalizedProgress.toFloat(),
+                            modifier = Modifier.size(FolioTokens.ringSmall),
+                            strokeWidth = 3f,
+                            color = FolioTheme.colors.primary,
+                            trackColor = FolioTheme.colors.outlineVariant
+                        )
+                    }
+                }
             }
 
             // Title
@@ -184,6 +212,20 @@ fun BookCard(
                     style = FolioTheme.typography.labelSmall,
                     color = FolioTheme.colors.primary,
                     modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
+            // §5.1: "~6 days left" — omitted entirely when no projection exists,
+            // so a fresh book gets no placeholder row.
+            finishEstimate?.let { estimate ->
+                Text(
+                    text = estimate,
+                    style = FolioTheme.typography.labelSmall,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
                 )
             }
 

@@ -2,23 +2,34 @@ package com.folio.reader.ui.library
 
 import com.folio.reader.database.BookRepository
 import com.folio.reader.database.CollectionRepository
+import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.SeriesRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection
 import com.folio.reader.model.Series
+import com.folio.reader.ui.components.finishHorizon
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.mapSaver
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlin.time.Duration.Companion.days
 
 class LibraryViewModel(
     private val bookRepository: BookRepository,
     private val collectionRepository: CollectionRepository,
-    private val seriesRepository: SeriesRepository
+    private val seriesRepository: SeriesRepository,
+    /**
+     * Optional: supplied by the Android host so library rows can show §5.1's
+     * "~6 days left" caption. Left null elsewhere, which yields no captions
+     * rather than a per-book query storm.
+     */
+    private val sessionRepository: ReadingSessionRepository? = null
 ) {
     /** Books bulk-selection; hoisted so system back can clear it instead of exiting. */
     val selectedBookIds = MutableStateFlow<Set<String>>(emptySet())
@@ -100,6 +111,32 @@ class LibraryViewModel(
 
     fun allSeries(): Flow<List<Series>> = seriesRepository.getAllSeries()
 
+    /**
+     * §5.1: "~6 days left" captions for the shelf, keyed by book id.
+     *
+     * One query for the whole 7-day session window feeds every book's estimate,
+     * so the caption costs one read rather than one per row. Books with no
+     * projection are absent from the map — callers render nothing for them
+     * instead of a placeholder.
+     */
+    fun finishEstimates(): Flow<Map<String, String>> {
+        val sessions = sessionRepository ?: return flowOf(emptyMap())
+        return combine(
+            bookRepository.getAllBooks(),
+            sessions.observeSessionsSince(Clock.System.now() - PACE_WINDOW_DAYS.days)
+        ) { books, window ->
+            val byBook = window.groupBy { it.bookId }
+            books.mapNotNull { book ->
+                finishHorizon(
+                    totalWords = book.totalWords,
+                    progress = book.normalizedProgress,
+                    bookSessions = byBook[book.id].orEmpty(),
+                    paceSessions = window
+                )?.let { book.id to it }
+            }.toMap()
+        }
+    }
+
     fun filteredBooks(state: LibraryState): Flow<List<Book>> {
         // Series/collection pick the source flow (they are join-based, not columns);
         // status/author/progress/date filters are applied on top so they combine.
@@ -140,6 +177,11 @@ class LibraryViewModel(
             SortBy.FILE_SIZE -> compareBy<Book> { it.epubFileSize }
         }
         return if (ascending) comparator else comparator.reversed()
+    }
+
+    private companion object {
+        /** Matches ReadingPace's own trailing window so both agree on "pace". */
+        const val PACE_WINDOW_DAYS = 7
     }
 }
 

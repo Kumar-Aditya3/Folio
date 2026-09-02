@@ -50,7 +50,9 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         LibraryViewModel(
             bookRepository = graph.bookRepository,
             collectionRepository = graph.collectionRepository,
-            seriesRepository = graph.seriesRepository
+            seriesRepository = graph.seriesRepository,
+            // §5.1: enables the "~6 days left" captions on the Android shelf.
+            sessionRepository = graph.sessionRepository
         )
     }
     val mangaLibVM by lazy {

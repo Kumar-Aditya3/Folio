@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,10 +28,14 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.BookCover
+import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
  * List and compact-list presentations of the books shelf (§6 split of LibraryScreen.kt).
+ *
+ * [finishEstimates] is §5.1's caption source, keyed by book id; a book absent from
+ * the map renders no caption rather than a placeholder.
  */
 @Composable
 fun BookList(
@@ -41,7 +44,8 @@ fun BookList(
     onBookLongClick: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
     selectedBooks: Set<String>,
-    isSelectionMode: Boolean
+    isSelectionMode: Boolean,
+    finishEstimates: Map<String, String> = emptyMap()
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -55,7 +59,8 @@ fun BookList(
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
                 onLongClick = { onBookLongClick(book) },
-                onDeleteBook = { onDeleteBook(book) }
+                onDeleteBook = { onDeleteBook(book) },
+                finishEstimate = finishEstimates[book.id]
             )
         }
     }
@@ -69,7 +74,8 @@ fun BookListItem(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onDeleteBook: (Book) -> Unit
+    onDeleteBook: (Book) -> Unit,
+    finishEstimate: String? = null
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().combinedClickable(
@@ -134,14 +140,24 @@ fun BookListItem(
                             color = FolioTheme.colors.onSurfaceVariant
                         )
                     }
+                    // §5.1 caption; absent when no projection exists.
+                    finishEstimate?.let {
+                        Text(
+                            it,
+                            style = FolioTheme.typography.labelSmall,
+                            color = FolioTheme.colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
-            // Progress bar
+            // §2.6: rows use the bar, covers use the ring — never both.
             if (book.normalizedProgress > 0 && book.normalizedProgress < 1) {
-                LinearProgressIndicator(
-                    modifier = Modifier.width(60.dp),
+                FolioProgressBar(
                     progress = book.normalizedProgress.toFloat(),
+                    modifier = Modifier.width(60.dp),
                     color = FolioTheme.colors.primary
                 )
             }
@@ -163,7 +179,8 @@ fun BookCompactList(
     onBookLongClick: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
     selectedBooks: Set<String>,
-    isSelectionMode: Boolean
+    isSelectionMode: Boolean,
+    finishEstimates: Map<String, String> = emptyMap()
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -177,7 +194,8 @@ fun BookCompactList(
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
                 onLongClick = { onBookLongClick(book) },
-                onDeleteBook = { onDeleteBook(book) }
+                onDeleteBook = { onDeleteBook(book) },
+                finishEstimate = finishEstimates[book.id]
             )
         }
     }
@@ -191,7 +209,8 @@ fun BookCompactItem(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onDeleteBook: (Book) -> Unit
+    onDeleteBook: (Book) -> Unit,
+    finishEstimate: String? = null
 ) {
     Row(
         modifier = Modifier
@@ -221,12 +240,12 @@ fun BookCompactItem(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(book.title, style = FolioTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val subtitle = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
-                "${book.displayAuthor} · ${book.progressPercent}% · ${book.toCardData().statusLabel}"
-            else
-                "${book.displayAuthor} · ${book.progressPercent}%"
+            val statusPart = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
+                " · ${book.toCardData().statusLabel}" else ""
+            // §5.1 caption appended only when a projection exists.
+            val pacePart = finishEstimate?.let { " · $it" } ?: ""
             Text(
-                subtitle,
+                "${book.displayAuthor} · ${book.progressPercent}%$statusPart$pacePart",
                 style = FolioTheme.typography.bodySmall,
                 color = FolioTheme.colors.onSurfaceVariant,
                 maxLines = 1,
