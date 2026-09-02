@@ -540,3 +540,170 @@ cannot parse class file v69). Use `:desktopApp:packageMsi`, as every shipped rel
 6. `:desktopApp:compileKotlin` clean; desktop UI unchanged.
 7. Copy reviewed against §2.4.
 8. Verified legible in `paper`, `midnightneon`, `rainbow`.
+
+---
+
+## 11. Manga parity, stats exclusion, update checks (v1.1+)
+
+### 11.0 Verdict
+
+All three ideas are worth building. Ranked by value:
+
+1. **Manga update checks + extension-sourced discovery — strongest.** The diagnosis is
+   correct: book recommendations need a large library because the only signal is
+   series/author overlap inside `HomeViewModel.buildState` (needs ≥2 candidates, hidden
+   otherwise). Manga has an external signal books don't — `MangaBackend.fetchBrowse` already
+   exposes `BrowseMode.POPULAR`/`BrowseMode.LATEST` per source, so a *one-manga* library can
+   still fill a Discover card. And `fetchChapterList(sourceId, mangaUrl)` plus
+   `MangaChapterRepository.replaceChapters` mean update checking needs no new backend API.
+2. **Stats exclusion — genuinely needed.** DNF books, re-reads, test imports and NSFW manga
+   all skew totals today with no way out.
+3. **Manga feature parity — real but smaller.** Some of it should not be built (§11.6).
+
+### 11.1 BLOCKER: sequence after the manga splits
+
+`MangaScreens.kt` is 2853 lines and `MangaViewModels.kt` is 1820. Rule 9 rejects any change
+that pushes a file further over budget, and every feature here lands in those two files.
+
+**The §6 manga splits are a hard prerequisite.** Do them first (Phase 6). Building these
+features into the god-files and splitting afterwards means doing the work twice and merging
+a 3000-line file against itself.
+
+### 11.2 Stats exclusion — design
+
+**One table, one resolver, one predicate.** The failure mode to avoid is the one already hit
+twice here (justify silently not applying; `finishHorizon` vs `finishEstimate` drifting): the
+same question answered in two places, differently.
+
+Schema — a single table, not one per scope:
+```sql
+CREATE TABLE stats_exclusions (
+  scope     TEXT NOT NULL,   -- BOOK | MANGA | BOOK_TAG | BOOK_COLLECTION | MANGA_CATEGORY
+  target_id TEXT NOT NULL,
+  PRIMARY KEY (scope, target_id)
+);
+```
+
+Resolver in `shared/src/commonMain/kotlin/com/folio/reader/statistics/StatsScope.kt`:
+```kotlin
+class StatsScope(private val excluded: Set<Pair<Scope, String>>) {
+    fun includesBook(bookId: String, tagIds: Set<String>, collectionIds: Set<String>): Boolean
+    fun includesManga(mangaId: String, categoryIds: Set<String>): Boolean
+}
+```
+
+**Resolution rule (v1, deliberately one-way):** an entity is excluded if it is listed
+directly **or** any group it belongs to is listed. No per-entity "include anyway" override —
+two-way overrides are what make these systems unexplainable. If a user needs one, they remove
+the group exclusion. Say so in the UI copy.
+
+**Consumption — all three take the same `StatsScope`:**
+- `StatisticsViewModel` (books/sessions)
+- `HomeViewModel` (goal ring, streak, this-week, continue-reading)
+- `MangaStatisticsRepository.getStatistics()` — computes in SQL today
+  (`JdbcMangaStatisticsRepository`), so the exclusion set is passed *in*, never applied after.
+
+**UI:** new `settings/stats` category (§3.5 pattern, own file ≤250 lines) with four rows —
+Excluded books, Excluded manga, Excluded book tags & collections, Excluded manga categories —
+each opening a multi-select. Every row shows a live count: `"12 of 148 books excluded"`.
+
+**Rule 8 applies:** an exclusion the user cannot see is the v1.0.24 bug again. Whenever any
+exclusion is active, the Stats tab and Home goal ring show one line —
+`"Some titles are excluded — review"` — tappable through to `settings/stats`.
+
+**Tests:** exclude by entity; exclude by group; entity in two groups where only one is
+excluded (still excluded); no exclusions reproduces today's numbers exactly; `HomeViewModel`
+and `StatisticsViewModel` agree under the same scope.
+
+### 11.3 Manga update checks
+
+**Worker:** `MangaUpdateWorker` (`androidApp/.../work/`), `WorkManager` periodic, default
+every 12h, `NetworkType.CONNECTED` + battery-not-low. Opt-in with a user-set interval
+(6h/12h/24h/manual) in `settings/manga`.
+
+**Per manga in library, ordered by `lastReadAt` desc:**
+1. `fetchChapterList(sourceId, url)`
+2. Diff against `getChapters(mangaId)` by url
+3. `replaceChapters` — must preserve read/bookmark/progress state on existing rows
+4. Record the new chapter count
+
+**Hard constraints (extensions are third-party HTTP; a naive loop is a self-inflicted DDoS):**
+- Serial per source, **max 2 sources in parallel**
+- ≥1s delay between requests to the same source
+- Cap 60 manga per run, resuming where the last run stopped (round-robin cursor)
+- Any source erroring twice in a run is skipped for the rest of it
+- Never check a source whose extension is missing or untrusted
+- Total run budget 10 minutes, then stop cleanly
+
+**Storage:** `manga_update_state (manga_id PK, last_checked_at, new_chapter_count, last_error)`.
+
+**Notification:** one summary — `"12 new chapters across 4 series"` — never one per manga.
+Tapping opens the Updates surface. Opt-in, respects the existing notification permission.
+
+**Rule 12 applies:** this runs extension code on a background thread in a release build for
+the first time. Verify in a **release** build with `logcat -b crash` clean; the zstd SIGABRT
+came from exactly this code path on the foreground.
+
+### 11.4 Home: manga cards
+
+Two new cards in `HomeViewModel`/`HomeScreen`, ordered after Continue reading:
+
+**Continue reading (manga)** — a separate card, not merged into the books one. Sources:
+`MangaHistoryRepository.observeRecent`, `observeProgress`, `observeUnreadCounts`. Cap 3, same
+layout language as the books card (cover, title, ring, caption).
+
+**New chapters** — up to 6 manga with `new_chapter_count > 0`, newest first, each showing its
+count. Hidden entirely when the total is zero. This is the card that works with a one-manga
+library.
+
+**Deep link to the source** — the "go to the extension link directly from home" idea:
+`MangaEntry` already carries `sourceId` + `url`. Add
+`MangaBackend.sourceWebUrl(sourceId, mangaUrl): String?` (null for local sources and for
+sources without a web base) plus an overflow item "Open on <source name>" firing an
+`ACTION_VIEW` intent. Never the primary tap — that opens the reader.
+
+**Discover** (fills the gap books can't): `fetchBrowse(BrowseMode.LATEST)` on the source of
+the most recently read manga, filtered to titles not already in the library, cap 6. One
+request, cached 6h, silently absent on failure or when no sources exist.
+
+### 11.5 Manga parity worth building
+
+Ordered by value; each already has book-side infrastructure to mirror:
+- **Notes and bookmarks in the manga reader.** `MangaNoteRepository` exists and
+  `MangaChapter.bookmarked` exists — surface them the way the book reader does.
+- **Manga in the annotation hub.** Quotes/Revisit backfill already happened for books.
+- **Per-manga reading stats** on manga detail, mirroring §5.2's `BookReadingSection`.
+- **Manga tags**, distinct from categories: categories are shelves (one membership set), tags
+  are cross-cutting. Reuse `TagRepository`'s shape.
+- **Reading cycles / re-reads** — `ReadingCycleRepository` already exists for books.
+
+### 11.6 Deliberately NOT built
+
+- **Manga "finish estimate."** Chapter counts change under you and ongoing series have no end;
+  `finishHorizon` would produce confident nonsense. Show unread count instead.
+- **Merging books and manga into one Continue-reading card.** Different pacing, different
+  progress semantics (words vs chapters). Two cards.
+- **Auto-download on update.** Silent bandwidth and disk use. Per-manga opt-in later at most,
+  never a default.
+- **TTS.** Cut by user decision 2026-09-02 (§7.1 tombstone). Do not implement or suggest it.
+
+### 11.7 Phasing
+
+| Phase | Contents | Version |
+|---|---|---|
+| **6 — Splits (prerequisite)** | §6 manga splits: `MangaScreens` → 6 files ≤500, `MangaViewModels` → 4 ≤500, `MangaReaderScreen` → 3 ≤400. Pure extraction, one file per commit, test count unchanged | 1.1.x |
+| **7 — Stats exclusion** | §11.2 whole: table, `StatsScope`, all three consumers, `settings/stats`, visibility note, tests | 1.2.0 |
+| **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card | 1.3.0 |
+| **9 — Home manga + discovery** | rest of §11.4: manga continue-reading, source deep link, Discover | 1.3.x |
+| **10 — Parity** | §11.5 in listed order | 1.4.0 |
+
+**Acceptance criteria for §11:**
+- With no exclusions configured, every stats number is identical to v1.0.30.
+- Excluding a book tag removes its books from Stats **and** Home's ring/streak/week in the
+  same pass — no surface disagrees.
+- An update run over 60 manga across ≥3 sources issues at most one request per source per
+  second and leaves read/bookmark/progress state intact.
+- Airplane mode mid-run: no crash, `last_error` recorded, next run resumes from the cursor.
+- "New chapters" appears with a one-manga library; "Because you finished" still hides under
+  two candidates (books' limitation is unchanged, and that is fine).
+- Release-build device smoke test per Rule 11, including one manual update run.
