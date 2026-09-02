@@ -418,14 +418,10 @@ is a data registry, not logic, and `ThemeSchemeTest` guards it.
 Each entry: what, where, and how it is judged done. Build in the order given within a tier.
 
 ### Tier 1 — highest value
-**7.1 TTS / read-aloud.** `android.speech.tts.TextToSpeech` in
-`shared/src/androidMain/.../reader/TtsController.kt`. The reader already exposes
-paragraph-indexed selection (`folio-sel:<paragraphIndex>:…` in `PageEngine`) — reuse those
-anchors to highlight the spoken sentence and auto-advance pages.
-*Done when:* play/pause/skip-sentence/speed(0.5–2.0×) work from a reader bar control; the
-spoken sentence is visibly highlighted; playback continues with the screen off via a
-foreground service with a `MediaStyle` notification; closing the book stops it; progress is
-saved on stop.
+**7.1 TTS / read-aloud — REMOVED FROM SCOPE** (user decision, 2026-09-02): no read-aloud
+feature in this cycle. Numbering kept so downstream references (§9) stay valid; the
+paragraph anchors (`folio-sel:<paragraphIndex>:…` in `PageEngine`) remain available if it is
+ever revisited.
 
 **7.2 Dictionary + Wikipedia on selection.** Extend the existing selection action bar
 (currently Highlight only). Offline first: a `DictionaryProvider` interface with a bundled
