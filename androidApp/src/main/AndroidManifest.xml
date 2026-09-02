@@ -10,6 +10,8 @@
     <!-- Needed to discover installed Mihon extension packages on Android 11+. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- Manga update summary notification (§11.3); runtime-granted on 33+, notifier no-ops when withheld. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".FolioApplication"

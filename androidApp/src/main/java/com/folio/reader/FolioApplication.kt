@@ -222,6 +222,12 @@ class AppGraph(private val app: Application) {
         appScope.launch {
             runCatching { mangaCategoryRepository.ensureSeeded() }
         }
+        // §11.3: align the manga update worker with the stored interval (0 = off cancels it).
+        appScope.launch {
+            val hours = runCatching { settingsRepository.getGlobalSettings().mangaUpdateIntervalHours }
+                .getOrDefault(0)
+            com.folio.reader.work.MangaUpdateScheduler.sync(app, hours)
+        }
     }
 
     /** Stable per-installation device id, persisted next to the database. */

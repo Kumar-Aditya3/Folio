@@ -357,6 +357,21 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     PRIMARY KEY (scope, target_id)
                 )
             """.trimIndent())
+            // §11.3 manga update checks: per-manga new-chapter badge + one-row round-robin cursor.
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS manga_update_state (
+                    manga_id TEXT PRIMARY KEY,
+                    last_checked_at INTEGER NOT NULL,
+                    new_chapter_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT
+                )
+            """.trimIndent())
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS manga_update_cursor (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    cursor INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
 
             // Tags, quotes and revisit items (backing the sync + annotation model)
             conn.createStatementExec("""
