@@ -46,6 +46,7 @@ class BookDetailViewModel(
     private val _series = MutableStateFlow<Series?>(null)
     private val _collections = MutableStateFlow<List<Collection>>(emptyList())
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())
+    private val _availableTags = MutableStateFlow<List<Tag>>(emptyList())
     private val _availableSeries = MutableStateFlow<List<Series>>(emptyList())
     private val _availableCollections = MutableStateFlow<List<Collection>>(emptyList())
 
@@ -57,6 +58,7 @@ class BookDetailViewModel(
     val series: Flow<Series?> = _series.asStateFlow()
     val collections: Flow<List<Collection>> = _collections.asStateFlow()
     val tags: Flow<List<Tag>> = _tags.asStateFlow()
+    val availableTags: Flow<List<Tag>> = _availableTags.asStateFlow()
     val availableSeries: Flow<List<Series>> = _availableSeries.asStateFlow()
     val availableCollections: Flow<List<Collection>> = _availableCollections.asStateFlow()
 
@@ -90,6 +92,9 @@ class BookDetailViewModel(
             }
             launch {
                 _tags.value = tagRepository.getTagsForBook(bookId)
+            }
+            launch {
+                _availableTags.value = tagRepository.getAllTags().first()
             }
         }
     }
@@ -158,6 +163,18 @@ class BookDetailViewModel(
         _collections.value = collectionRepository.getCollectionsForBook(bookId)
         _availableSeries.value = seriesRepository.getAllSeries().first()
         _availableCollections.value = collectionRepository.getAllCollections().first()
+    }
+
+    /** Diff-assigns tags the same way saveMetadata syncs collections. */
+    fun updateBookTags(selectedIds: Set<String>) {
+        val bookId = currentBookId ?: return
+        viewModelScope.launch {
+            val currentIds = tagRepository.getTagsForBook(bookId).mapTo(mutableSetOf()) { it.id }
+            (currentIds - selectedIds).forEach { tagRepository.removeTagFromBook(bookId, it) }
+            (selectedIds - currentIds).forEach { tagRepository.addTagToBook(bookId, it) }
+            _tags.value = tagRepository.getTagsForBook(bookId)
+            _availableTags.value = tagRepository.getAllTags().first()
+        }
     }
 
     private fun String.blankToNull(): String? = trim().takeIf { it.isNotEmpty() }
