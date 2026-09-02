@@ -94,6 +94,7 @@ private fun ReaderRouteContent(
     val showToc by viewModel.showToc.collectAsState(initial = false)
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
     val loadError by viewModel.loadError.collectAsState(initial = null)
+    val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
     val overridden by remember {
         combine(viewModel.settings, viewModel.bookSettings) { global, book ->
             book?.overriddenFields(global) ?: emptySet()
@@ -163,6 +164,8 @@ private fun ReaderRouteContent(
         onScrollProgress = { fraction -> viewModel.updateScrollProgress(fraction) },
         onChapterEnd = { viewModel.onChapterEnd() },
         onChapterStart = { viewModel.onChapterStart() },
+        chapterChip = chapterChip,
+        onDismissChapterChip = { viewModel.dismissChapterChip() },
         onHighlightParagraph = { paragraphIndex, snippet ->
             val pos = position
             viewModel.addHighlight(

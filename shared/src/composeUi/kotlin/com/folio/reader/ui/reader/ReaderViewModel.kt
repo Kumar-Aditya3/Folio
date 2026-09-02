@@ -25,8 +25,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.folio.reader.ui.render.LinkClickResult
+import kotlinx.datetime.Clock
+import kotlin.time.Duration.Companion.days
 
 class ReaderViewModel(
     private val bookRepository: BookRepository,
@@ -52,6 +55,7 @@ class ReaderViewModel(
     private val _showToc = MutableStateFlow(false)
     private val _showAnnotations = MutableStateFlow(false)
     private val _chapterHtml = MutableStateFlow("")
+    private val _chapterChip = MutableStateFlow<String?>(null)
     private val _isLoadingContent = MutableStateFlow(false)
     private val _loadError = MutableStateFlow<String?>(null)
     val loadError: Flow<String?> = _loadError
@@ -59,6 +63,8 @@ class ReaderViewModel(
     private var currentBookId: String? = null
     private var deviceId: String = ""
     private var closeStarted = false
+    /** This book's session history, loaded at open; feeds the chapter-chip pace band. */
+    private var recentSessions: List<ReadingSession> = emptyList()
 
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -129,6 +135,7 @@ class ReaderViewModel(
     val showToc: Flow<Boolean> = _showToc
     val showAnnotations: Flow<Boolean> = _showAnnotations
     val chapterHtml: Flow<String> = _chapterHtml
+    val chapterChip: Flow<String?> = _chapterChip
     val isLoadingContent: Flow<Boolean> = _isLoadingContent
     val linkClickResult: Flow<LinkClickResult?> = links.linkClickResult
 
@@ -156,6 +163,8 @@ class ReaderViewModel(
 
             // Load or create session; the engagement clock starts from zero every open.
             sessionTracker.openSession(bookId, deviceId, chapters, startIndex, _position.value)
+            recentSessions = runCatching { sessionRepository.getSessionsForBook(bookId).first() }
+                .getOrNull() ?: emptyList()
 
             // Mark opened
             loadedBook?.let { runCatching { bookRepository.markOpened(it.id) } }
@@ -221,6 +230,7 @@ class ReaderViewModel(
             chapterProgress = resumeFraction,
             scrollOffset = resumeFraction
         )
+        sessionTracker.markChapterEntry(_position.value?.normalizedProgress ?: 0.0)
         viewModelScope.launch { loadChapterHtml() }
     }
 
@@ -250,7 +260,44 @@ class ReaderViewModel(
     fun onChapterEnd() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
         if (!sessionTracker.chapterEndGuard.accept(chapter.id)) return
-        if (_currentChapterIndex.value < _chapters.value.lastIndex) nextChapter()
+        val finishedIndex = _currentChapterIndex.value
+        val share = sessionTracker.chapterShare(_position.value?.normalizedProgress ?: 0.0)
+        _chapterChip.value = buildChapterChip(finishedIndex, share.first, share.second)
+        if (finishedIndex < _chapters.value.lastIndex) nextChapter()
+    }
+
+    fun dismissChapterChip() {
+        _chapterChip.value = null
+    }
+
+    /** §5.3 end-of-chapter summary; null when there is nothing honest to claim. */
+    private fun buildChapterChip(finishedIndex: Int, chapterMs: Long, chapterWords: Long): String? {
+        if (chapterMs < 30_000L) return null
+        val minutesLabel = if (chapterMs >= 60_000L) "${chapterMs / 60_000L} min" else "<1 min"
+        val base = "Chapter ${finishedIndex + 1} · $minutesLabel"
+        val totalWords = _book.value?.totalWords ?: 0L
+        val comparison = paceComparison(chapterMs, chapterWords, totalWords) ?: return base
+        return "$base · $comparison"
+    }
+
+    /**
+     * Compares this chapter's minutes per 1000 words against the trailing 7-day pace
+     * on the same book; ±10% counts as usual. A too-thin week shows no comparison.
+     */
+    private fun paceComparison(chapterMs: Long, chapterWords: Long, totalWords: Long): String? {
+        if (totalWords <= 0L || chapterWords <= 0L) return null
+        val weekAgo = Clock.System.now() - 7.days
+        val week = recentSessions.filter { it.startedAt >= weekAgo }
+        val weekMs = week.sumOf { it.durationMs }
+        val weekWords = week.sumOf { it.wordsRead }
+        if (weekMs <= 0L || weekWords < 700L) return null
+        val chapterRate = (chapterMs / 60_000.0) / (chapterWords / 1000.0)
+        val usualRate = (weekMs / 60_000.0) / (weekWords / 1000.0)
+        return when {
+            chapterRate < usualRate * 0.9 -> "a little faster than usual"
+            chapterRate > usualRate * 1.1 -> "a little slower than usual"
+            else -> "about your usual pace"
+        }
     }
 
     fun toggleControls() {

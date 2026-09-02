@@ -1301,6 +1301,7 @@ private fun ReaderRoute(
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
     val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
     val loadError by viewModel.loadError.collectAsState(initial = null)
+    val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
     val syncState: com.folio.reader.sync.SyncState? by remember(deps.syncEngineState.value) {
         deps.syncEngine?.syncState ?: kotlinx.coroutines.flow.flowOf(null)
     }.collectAsState(initial = null)
@@ -1403,6 +1404,8 @@ private fun ReaderRoute(
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
         onChapterEnd = { viewModel.onChapterEnd() },
         onChapterStart = { viewModel.onChapterStart() },
+        chapterChip = chapterChip,
+        onDismissChapterChip = { viewModel.dismissChapterChip() },
         onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
         onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
         syncState = syncState

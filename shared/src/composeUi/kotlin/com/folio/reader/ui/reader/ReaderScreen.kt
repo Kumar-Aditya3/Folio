@@ -71,6 +71,8 @@ fun ReaderScreen(
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
     onChapterEnd: () -> Unit = {},
     onChapterStart: () -> Unit = {},
+    chapterChip: String? = null,
+    onDismissChapterChip: () -> Unit = {},
     scopeControlEnabled: Boolean = false,
     overriddenFields: Set<String> = emptySet(),
     onWriteGlobal: ((ReaderSettings) -> Unit)? = null,
@@ -324,6 +326,14 @@ fun ReaderScreen(
         if (syncState != null) {
             ReaderSyncPill(showControls = showControls, syncState = syncState)
         }
+
+        // End-of-chapter summary chip (§5.3)
+        ReaderChapterChipHost(
+            chip = chapterChip,
+            onDismiss = onDismissChapterChip,
+            aboveBar = settings.showProgress && showControls,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
 
         // Top bar overlay - slides over content
         androidx.compose.animation.AnimatedVisibility(
