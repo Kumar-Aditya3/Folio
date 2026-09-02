@@ -347,6 +347,16 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     PRIMARY KEY (device_id, date)
                 )
             """.trimIndent())
+            // §11.2 stats exclusions: one table, one resolver (StatsScope). target_id
+            // holds a book/manga id, a tag/collection/series/category id, a BookStatus
+            // name or a manga source id depending on scope.
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS stats_exclusions (
+                    scope TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    PRIMARY KEY (scope, target_id)
+                )
+            """.trimIndent())
 
             // Tags, quotes and revisit items (backing the sync + annotation model)
             conn.createStatementExec("""

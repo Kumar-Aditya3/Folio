@@ -1,11 +1,16 @@
 package com.folio.reader.ui.statistics
 
 import com.folio.reader.database.BookRepository
+import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.HighlightRepository
 import com.folio.reader.database.QuoteRepository
 import com.folio.reader.database.ReadingSessionRepository
+import com.folio.reader.database.StatsExclusionRepository
+import com.folio.reader.database.TagRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.ReadingSession
+import com.folio.reader.statistics.Scope
+import com.folio.reader.statistics.StatsScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -86,7 +91,14 @@ class StatisticsViewModel(
     private val bookRepository: BookRepository,
     private val sessionRepository: ReadingSessionRepository,
     private val quoteRepository: QuoteRepository? = null,
-    private val highlightRepository: HighlightRepository? = null
+    private val highlightRepository: HighlightRepository? = null,
+    // §11.2 stats exclusions. Desktop passes none and keeps today's numbers
+    // byte-identical; Android also wires the group repos needed to resolve each
+    // book's tags and collections (series and status resolve from the books
+    // themselves). The settings UI is a later slice.
+    private val statsExclusionRepository: StatsExclusionRepository? = null,
+    private val tagRepository: TagRepository? = null,
+    private val collectionRepository: CollectionRepository? = null
 ) {
     companion object {
         /** Days of history pulled into every calculation. */
@@ -104,14 +116,72 @@ class StatisticsViewModel(
     /**
      * Reading sessions are synced across devices, so the history here is the whole
      * account's, not this handset's — which is the point of showing it.
+     *
+     * §11.2: when a [StatsExclusionRepository] is wired, the same [StatsScope]
+     * predicate filters both the sessions and the book lists before any number
+     * is computed — one question, answered in exactly one place. Without it the
+     * legacy pipeline runs untouched.
      */
-    val state: Flow<StatisticsUiState> = combine(
-        sessionRepository.observeSessionsSince(
-            today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
-        ),
-        bookRepository.getCurrentlyReading(),
-        bookRepository.getFinishedBooks()
-    ) { sessions, inProgress, finished -> buildState(sessions, inProgress, finished) }
+    val state: Flow<StatisticsUiState> = if (statsExclusionRepository == null) {
+        combine(
+            sessionRepository.observeSessionsSince(
+                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
+            ),
+            bookRepository.getCurrentlyReading(),
+            bookRepository.getFinishedBooks()
+        ) { sessions, inProgress, finished -> buildState(sessions, inProgress, finished) }
+    } else {
+        combine(
+            sessionRepository.observeSessionsSince(
+                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
+            ),
+            bookRepository.getCurrentlyReading(),
+            bookRepository.getFinishedBooks(),
+            // Exclusions can hit books absent from both lists above (abandoned,
+            // unread, deleted) — resolve against the whole library.
+            bookRepository.getAllBooks(),
+            statsExclusionRepository.observeExclusions()
+        ) { sessions, inProgress, finished, allBooks, exclusions ->
+            val scope = StatsScope(exclusions)
+            val excluded = excludedBookIds(allBooks, scope)
+            // Direct BOOK rows also cover sessions whose book row is gone
+            // (deleted) — there are no groups left to resolve for those.
+            val directBooks = exclusions.mapNotNull { (kind, id) ->
+                if (kind == Scope.BOOK) id else null
+            }.toSet()
+            buildState(
+                sessions.filterNot { it.bookId in excluded || it.bookId in directBooks },
+                inProgress.filterNot { it.id in excluded },
+                finished.filterNot { it.id in excluded }
+            )
+        }
+    }
+
+    /**
+     * §11.2 one-way resolution, evaluated once per emission: a book is excluded
+     * when [StatsScope.includesBook] says so — listed directly, or any of its
+     * tags/collections, its series or its status is listed. Each book's groups
+     * are resolved exactly once per pass and reused for the session filter and
+     * both book lists; series membership needs no lookup because every book
+     * carries its own seriesId, so excluding a series removes all of its books.
+     */
+    private suspend fun excludedBookIds(books: List<Book>, scope: StatsScope): Set<String> {
+        val excluded = HashSet<String>()
+        val tagCache = HashMap<String, Set<String>>()
+        val collectionCache = HashMap<String, Set<String>>()
+        for (book in books) {
+            val tagIds = tagCache.getOrPut(book.id) {
+                tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            }
+            val collectionIds = collectionCache.getOrPut(book.id) {
+                collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            }
+            if (!scope.includesBook(book.id, tagIds, collectionIds, book.seriesId, book.status)) {
+                excluded.add(book.id)
+            }
+        }
+        return excluded
+    }
 
     /**
      * Merged feed of saved quotes and user highlights for the floating-quotes card.
