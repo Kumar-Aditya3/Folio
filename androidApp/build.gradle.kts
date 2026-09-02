@@ -22,8 +22,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 34
-        versionName = "1.1.3"
+        versionCode = 35
+        versionName = "1.1.4"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -124,4 +124,8 @@ dependencies {
     // ── CRASH REPORTING (§8.4 FOLIO_IMPLEMENTATION_SPEC) ────────────────────
     // Opt-in crash reporting with privacy notice; reports include stack trace + build version.
     implementation("io.sentry:sentry-android:7.3.0")
+
+    // ── MANGA UPDATE CHECKS (§11.3) ─────────────────────────────────────────
+    // 2.9.1 is the newest line that still builds against compileSdk 34 (2.10 needs 35).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

@@ -46,11 +46,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.theme.FolioTheme
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class TagCount(
@@ -83,10 +79,13 @@ class TagManagerViewModel(
 ) {
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val _tags = flow {
-        emit(loadTags())
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val _tags = MutableStateFlow<List<TagCount>>(emptyList())
+
+    init {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _tags.value = loadTags()
+        }
+    }
 
     private suspend fun loadTags(): List<TagCount> {
         val tags = getAllTags()
@@ -101,8 +100,7 @@ class TagManagerViewModel(
 
     fun refresh() {
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val loaded = loadTags()
-            (_tags as MutableStateFlow).value = loaded
+            _tags.value = loadTags()
         }
     }
 
