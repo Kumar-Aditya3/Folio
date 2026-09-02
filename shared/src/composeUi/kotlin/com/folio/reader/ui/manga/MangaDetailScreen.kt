@@ -451,7 +451,10 @@ fun MangaDetailScreen(
                     val readCount = chapters.count { it.read }
                     val totalCount = chapters.size
                     val progress = if (totalCount > 0) readCount.toFloat() / totalCount else 0f
-                    com.folio.reader.ui.components.FolioSectionCard(title = "Progress") {
+                    com.folio.reader.ui.components.FolioSectionCard(
+                        title = "Progress",
+                        accent = FolioTheme.colors.accentProgress
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,

@@ -13,6 +13,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
+// §12.6: the multi-series/chart hue role. Borrowed from the reader's paper
+// highlighters and reordered so the first six (the genre breakdown's cap) are
+// pairwise distinct. Reassign or override per palette HERE; feature files never
+// hardcode chart hues.
+private val chartSeriesDefault: List<Color> = listOf(
+    0xFFE8C84D, 0xFF4D8FC7, 0xFF5DAE5D, 0xFFD65F5F,
+    0xFF9B7BC7, 0xFFD67AB5, 0xFF5DB8B8, 0xFFD4A843
+).map { Color(it) }
+
 data class FolioColors(
     val primary: Color = Color(0xFF4F46E5),
     val onPrimary: Color = Color.White,
@@ -50,7 +59,9 @@ data class FolioColors(
     val accentProgress: Color = primary,
     val accentStreak: Color = primary,
     val accentDiscovery: Color = tertiary,
-    val accentAnnotation: Color = primary
+    val accentAnnotation: Color = primary,
+    // §12.6: shared multi-series/chart hues (reader highlighter palette).
+    val chartSeries: List<Color> = chartSeriesDefault
 )
 
 val LightFolioColors = FolioColors(

@@ -55,6 +55,6 @@ internal fun HeatmapCell(
                     Modifier
                 }
             )
-            .background(colors[intensity.coerceIn(0, 4)], RoundedCornerShape(2.dp))
+            .background(colors[intensity.coerceIn(0, 4)], RoundedCornerShape(3.dp))
     )
 }
