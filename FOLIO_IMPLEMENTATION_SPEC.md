@@ -722,6 +722,11 @@ Ordered by value; each already has book-side infrastructure to mirror:
   NOTE and BOOKMARK rows via manga lookups; Android one-time backfill under
   `manga_annotations_backfill_v1` imports existing notes and bookmarked chapters.)*
 - **Per-manga reading stats** on manga detail, mirroring §5.2's `BookReadingSection`.
+  *(Shipped v1.1.7: "Your reading" card via `MangaReadingCard.kt` — 30-day minutes
+  sparkline, total/average/7-day time rows, chapters-read counts. Manga sessions
+  already ride the shared `reading_sessions` table with `book_id = mangaId`, so no new
+  schema; words-pace and finish estimate intentionally absent — `wordsRead` is 0 for
+  manga and §11.6 forbids the estimate.)*
 - **Manga tags**, distinct from categories: categories are shelves (one membership set), tags
   are cross-cutting. Reuse `TagRepository`'s shape.
 - **Reading cycles / re-reads** — `ReadingCycleRepository` already exists for books.

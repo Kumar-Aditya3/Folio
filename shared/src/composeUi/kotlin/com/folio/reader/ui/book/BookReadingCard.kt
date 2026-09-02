@@ -386,7 +386,7 @@ internal fun BookReadingSection(
 }
 
 @Composable
-private fun ReadingRow(label: String, value: String) {
+internal fun ReadingRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -404,11 +404,11 @@ private fun stripAlpha(intensity: Int): Float = when (intensity) {
     else -> 0.25f
 }
 
-private fun dayLabel(date: LocalDate): String = "${date.dayOfMonth}.${date.monthNumber}"
+internal fun dayLabel(date: LocalDate): String = "${date.dayOfMonth}.${date.monthNumber}"
 
-private data class DayBucket(val date: LocalDate, val minutes: Long)
+internal data class DayBucket(val date: LocalDate, val minutes: Long)
 
-private fun sessionMinutesByDay(sessions: List<ReadingSession>, days: Int): List<DayBucket> {
+internal fun sessionMinutesByDay(sessions: List<ReadingSession>, days: Int): List<DayBucket> {
     val zone = TimeZone.currentSystemDefault()
     val today = Clock.System.now().toLocalDateTime(zone).date
     val byDay = sessions.groupBy { it.startedAt.toLocalDateTime(zone).date }

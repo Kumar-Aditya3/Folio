@@ -28,11 +28,13 @@ class MangaDetailViewModel(
     private val downloadRepo: com.folio.reader.manga.MangaDownloadRepository?,
     private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
+    private val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
 ) {
     val scope = mangaVmScope()
 
     val manga = MutableStateFlow<MangaEntry?>(null)
     val chapters = MutableStateFlow<List<MangaChapter>>(emptyList())
+    val sessions = MutableStateFlow<List<com.folio.reader.model.ReadingSession>>(emptyList())
     val refreshing = MutableStateFlow(false)
     val refreshNotice = MutableStateFlow<String?>(null)
     val error = MutableStateFlow<String?>(null)
@@ -81,6 +83,10 @@ class MangaDetailViewModel(
             }
         }
         scope.launch { categoryRepo.observeCategoriesFor(mangaId).collect { myCategoryIds.value = it } }
+        scope.launch {
+            val repo = sessionRepo ?: return@launch
+            repo.getSessionsForBook(mangaId).collect { sessions.value = it }
+        }
     }
 
     val allCategories = categoryRepo.observeCategories()
