@@ -45,7 +45,9 @@ data class ReaderSettings(
     val syncSettings: Boolean = true,
     val autoSyncInterval: Int = 15, // minutes
     /** Daily reading goal in minutes, shown as a ring on the Stats tab. */
-    val dailyGoalMinutes: Int = 60
+    val dailyGoalMinutes: Int = 60,
+    /** Hours between background manga chapter update checks; 0 = updates off (§11.3). */
+    val mangaUpdateIntervalHours: Int = 0
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(
