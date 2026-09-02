@@ -33,6 +33,32 @@ import kotlinx.datetime.LocalDate
 // ---------------------------------------------------------------------------
 
 /**
+ * One day-bar in the shared chart idiom: primary fill scaled against [peak],
+ * stubbed track when the day is empty. Used by the weekly charts and the
+ * book-detail sparkline.
+ */
+@Composable
+internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) {
+    val fraction = if (peak > 0f) (value / peak).coerceIn(0f, 1f) else 0f
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(
+                if (value > 0f) FolioTokens.chartBarBase + FolioTokens.chartBarSpan * fraction
+                else FolioTokens.chartTrack
+            )
+            .background(
+                if (value > 0f) FolioTheme.colors.primary
+                else FolioTheme.colors.outline.copy(alpha = 0.35f),
+                RoundedCornerShape(
+                    topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
+                    bottomStart = FolioTokens.chartBarRadiusBottom, bottomEnd = FolioTokens.chartBarRadiusBottom,
+                ),
+            )
+    )
+}
+
+/**
  * A bar chart of manga chapters read per day over the last 7 days, styled
  * identically to the books [WeekChart] but with chapter counts instead of minutes.
  */
@@ -41,7 +67,7 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
     FolioSectionCard(title = "Manga — last 7 days") {
         val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
         Row(
-            modifier = Modifier.fillMaxWidth().height(112.dp),
+            modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -60,20 +86,7 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(4.dp))
-                    val fraction = (chapters.toFloat() / peak).coerceIn(0f, 1f)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (chapters > 0) (28 + fraction * 48).dp else 6.dp)
-                            .background(
-                                if (chapters > 0) FolioTheme.colors.primary
-                                else FolioTheme.colors.outline.copy(alpha = 0.35f),
-                                RoundedCornerShape(
-                                    topStart = 6.dp, topEnd = 6.dp,
-                                    bottomStart = 2.dp, bottomEnd = 2.dp,
-                                ),
-                            ),
-                    )
+                    ChartBar(value = chapters.toFloat(), peak = peak.toFloat())
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = label,
@@ -91,7 +104,7 @@ internal fun WeekChart(week: List<StatDay>) {
     FolioSectionCard(title = "Last 7 days") {
         val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
         Row(
-            modifier = Modifier.fillMaxWidth().height(112.dp),
+            modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             verticalAlignment = Alignment.Bottom
         ) {
@@ -109,17 +122,7 @@ internal fun WeekChart(week: List<StatDay>) {
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(4.dp))
-                    val fraction = (day.minutes.toFloat() / peak).coerceIn(0f, 1f)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (day.minutes > 0) (28 + fraction * 48).dp else 6.dp)
-                            .background(
-                                if (day.minutes > 0) FolioTheme.colors.primary
-                                else FolioTheme.colors.outline.copy(alpha = 0.35f),
-                                RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp)
-                            )
-                    )
+                    ChartBar(value = day.minutes.toFloat(), peak = peak.toFloat())
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = day.date.dayOfWeek.name.take(1),
@@ -214,7 +217,7 @@ internal fun ActivityHeatmap(
 }
 
 /** Log-ish banding: a 2-hour day should not max out the scale against a 30-second one. */
-private fun intensityFor(minutes: Long, peak: Long): Int {
+internal fun intensityFor(minutes: Long, peak: Long): Int {
     val ratio = minutes.toFloat() / peak
     return when {
         ratio > 0.66f -> 4
