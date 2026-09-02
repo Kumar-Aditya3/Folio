@@ -230,7 +230,7 @@ is a role reassignment in `Theme.kt`, never a change in a feature file.
 
 | Phase | Contents | Version |
 |---|---|---|
-| **A — Foundations** | §12.2 tokens, §12.3 accent roles across all 28 palettes + `ThemeSchemeTest` extension, `FolioHeroCard`/`FolioQuietRow`, `glassPanel` accent param | 1.1.x |
+| **A — Foundations** | §12.2 tokens, §12.3 accent roles across all 28 palettes + `ThemeSchemeTest` extension, `FolioHeroCard`/`FolioQuietRow`, `glassPanel` accent param | 1.1.x *(shipped through v1.1.13: tokens, accent roles, ThemeSchemeTest contract incl. pairwise ΔE + WCAG gates, glassPanel accent; HeroCard/QuiRow components exist)* |
 | **B — Home** | §12.4 in full, including Home's own sparkline, **and §12.9's `StatsScope` gating** | 1.2.0 |
 | **C — Stats** | §12.5 in full | 1.2.x |
 | **D — Spread** | §12.6 across library, book detail, reader chrome | 1.3.x |

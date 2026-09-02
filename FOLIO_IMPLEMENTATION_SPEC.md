@@ -381,6 +381,10 @@ start." + one filled "Import a book" button. Nothing else on screen.
 Keep the existing `StatisticsScreen` content (year heatmap, totals, genre breakdown,
 per-book leaderboard) as the bar destination. Remove the `statsContent` slot and
 `viewModel.statsVisible` from `LibraryScreen` entirely.
+*(Shipped v1.1.13: the slot and `statsVisible` are gone from `LibraryScreen`, which now
+exposes an optional `onOpenStats` callback — Android passes nothing (bottom bar owns Stats);
+desktop gained a real `Screen.Stats` route with `FolioTopBar` chrome, reachable from the
+Library's Stats chip and system back/Escape.)*
 
 **Acceptance criteria for §5:**
 - `LibraryScreen.kt` has no reference to `statsVisible` or `statsContent`.
@@ -486,6 +490,9 @@ androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")
 ```
 Pin exact versions (no ranges), matching the Compose 1.7.6 the project already resolves.
+*(Shipped v1.1.13, with one safety deviation: the debug build is release-signed so an
+instrumented run installs over the app instead of uninstalling it — see the never-again
+rule in the project's device/build memory.)*
 
 ### 8.2 Required instrumented tests
 | Test | Asserts |
@@ -500,6 +507,10 @@ Pin exact versions (no ranges), matching the Compose 1.7.6 the project already r
 `AccessibilityAuditTest` walks every screen and asserts: zero `hasClickAction()` nodes without
 text or `contentDescription`; zero clickable nodes < 48.dp in either dimension; every image
 has a description or is explicitly decorative.
+*(Shipped v1.1.13, 22/22 green. The 48dp check measures `touchBoundsInRoot` — the touch
+target Material3 expands via `touchBoundsExpansion` — because several compliant components
+draw smaller than 48dp; nodes with unplaced zero bounds (LazyColumn prefetch below the fold)
+are excluded as untappable.)*
 
 ### 8.4 Crash reporting (do this before any feature work)
 Both bugs found this cycle were diagnosed only because a device happened to be on a cable.
