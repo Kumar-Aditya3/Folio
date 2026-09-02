@@ -663,6 +663,14 @@ excluded (still excluded); exclude by series removes every book in that series; 
 source removes all of its titles; no exclusions reproduces today's numbers exactly;
 `HomeViewModel` and `StatisticsViewModel` agree under the same scope.
 
+*(Shipped v1.1.14: `settings/stats` category — `SettingsStatsScreen`, six multi-select rows
+with live counts; `HomeViewModel` consumes the same `StatsScope` and gates hero, carousel,
+discovery anchor/candidates and session numbers (§12.9); `MangaStatisticsRepository
+.getStatistics(exclusions)` resolves the set into SQL `NOT IN` filters. Rule 8's
+"Some titles are excluded — review" line shows on the Stats tab and under the Home goal
+strip, both tappable to `settings/stats`. Desktop passes no exclusions repository —
+numbers byte-identical. Tests: `StatsScopeTest` + `HomeStatsScopeTest`.)*
+
 ### 11.3 Manga update checks
 
 **Worker:** `MangaUpdateWorker` (`androidApp/.../work/`), `WorkManager` periodic, default

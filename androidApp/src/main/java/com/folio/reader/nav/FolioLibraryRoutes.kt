@@ -38,14 +38,28 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
         FolioTopBar(title = "Home")
         Box(modifier = Modifier.weight(1f)) {
             val viewModel = remember {
-                HomeViewModel(graph.bookRepository, graph.sessionRepository, graph.settingsRepository)
+                HomeViewModel(
+                    graph.bookRepository,
+                    graph.sessionRepository,
+                    graph.settingsRepository,
+                    // §11.2/§12.9: exclusions gate every Home content selection;
+                    // group repos resolve each book's tags and collections.
+                    com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
+                    graph.tagRepository,
+                    graph.collectionRepository
+                )
             }
             val state by viewModel.state.collectAsState(initial = HomeUiState())
             HomeScreen(
                 state = state,
                 onOpenBook = { navController.navigate(FolioDestination.reader(it)) },
                 onOpenBookDetail = { navController.navigate(FolioDestination.bookDetail(it)) },
-                onImportClick = { navModel.callbacks.onImportEpubs() }
+                onImportClick = { navModel.callbacks.onImportEpubs() },
+                onOpenStats = { navController.navigate(FolioRoutes.STATS) },
+                onOpenLibrary = { navController.navigate(FolioRoutes.LIBRARY) },
+                onOpenExclusions = {
+                    navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
+                }
             )
         }
     }
@@ -160,6 +174,7 @@ fun LibraryRoute(
 
 @Composable
 fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) {
+    val navController = navModel.navController ?: return
     // StatisticsTabContent is embeddable and supplies no top bar of its own; the
     // Android host provides one (with the status-bar band) like the other tabs.
     Column(
@@ -174,7 +189,10 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
                 onBookClick = onOpenBookDetail,
                 settingsRepository = navModel.graph.settingsRepository,
                 initialGoalMinutes = navModel.globalSettings.dailyGoalMinutes,
-                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database)
+                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database),
+                onOpenExclusions = {
+                    navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
+                }
             )
         }
     }
@@ -229,6 +247,9 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.ADVANCED ->
             com.folio.reader.settings.SettingsAdvancedScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.STATS ->
+            com.folio.reader.settings.SettingsStatsScreen(navModel, onBack)
 
         // Unknown/legacy categories (e.g. deep links from older builds) land
         // on the hub instead of a dead end.
