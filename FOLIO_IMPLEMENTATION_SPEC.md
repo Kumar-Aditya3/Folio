@@ -149,6 +149,13 @@ repeat the crash-buffer check.
 
 **Benchmark:** crash buffer empty and process alive after both launch and a source browse.
 
+**Missing device is NOT a blocker (user instruction 2026-09-02):** if `XCR4XOVSJBZXRKQK`
+is not connected, keep working — commit and continue the plan as scheduled. When the phone
+reconnects, install the newest `releases/Folio-<version>.apk` for every release that missed
+its smoke (the latest build supersedes earlier ones), run the scripted checks, and hand the
+user a short, specific checklist of what to tap through and screenshot. A release is only
+"device-confirmed" once that deferred pass happens.
+
 ### Rule 12 — R8 keep rules for anything reached by JNI or reflection
 The zstd crash happened because R8 stripped classes native code resolves via `FindClass`.
 Any new dependency shipping a `.so`, or any reflective lookup, gets an explicit `-keep` in
