@@ -1,6 +1,7 @@
 package com.folio.reader.ui.statistics
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,13 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -30,6 +34,7 @@ import com.folio.reader.ui.components.FolioHeroCard
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.coroutines.flow.first
 import kotlinx.datetime.LocalDate
 
 // ---------------------------------------------------------------------------
@@ -224,24 +229,35 @@ internal fun ActivityHeatmap(
             }
             val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
             val cellAccent = FolioTheme.colors.accentProgress
-            days.chunked(7).forEach { week ->
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // A partial trailing week keeps its slot so the grid stays square.
+            val weeks = days.chunked(7)
+            // GitHub orientation: one column per week, most recent on the right;
+            // even 4dp gutters on both axes so cells never chain into a wall.
+            val gridScroll = rememberScrollState()
+            LaunchedEffect(weeks.size) {
+                snapshotFlow { gridScroll.maxValue }.first { it > 0 }
+                gridScroll.animateScrollTo(gridScroll.maxValue)
+            }
+            Box(Modifier.fillMaxWidth().horizontalScroll(gridScroll)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     (0..6).forEach { index ->
-                        val day = week.getOrNull(index)
-                        if (day == null || day.minutes <= 0L) {
-                            Box(
-                                Modifier.size(14.dp).background(
-                                    FolioTheme.colors.outline.copy(alpha = 0.22f),
-                                    RoundedCornerShape(3.dp)
-                                )
-                            )
-                        } else {
-                            HeatmapCell(
-                                intensity = intensityFor(day.minutes, peak),
-                                size = 14.dp,
-                                accent = cellAccent
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            weeks.forEach { week ->
+                                val day = week.getOrNull(index)
+                                if (day == null || day.minutes <= 0L) {
+                                    Box(
+                                        Modifier.size(14.dp).background(
+                                            FolioTheme.colors.outline.copy(alpha = 0.14f),
+                                            RoundedCornerShape(3.dp)
+                                        )
+                                    )
+                                } else {
+                                    HeatmapCell(
+                                        intensity = intensityFor(day.minutes, peak),
+                                        size = 14.dp,
+                                        accent = cellAccent
+                                    )
+                                }
+                            }
                         }
                     }
                 }

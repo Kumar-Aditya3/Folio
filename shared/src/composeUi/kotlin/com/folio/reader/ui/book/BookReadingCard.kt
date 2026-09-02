@@ -309,7 +309,7 @@ internal fun BookReadingSection(
 ) {
     if (sessions.isEmpty() && highlights.isEmpty()) return
 
-    FolioSectionCard(title = "Your reading") {
+    FolioSectionCard(title = "Your reading", accent = FolioTheme.colors.accentProgress) {
         val buckets = sessionMinutesByDay(sessions, days = 30)
         if (buckets.any { it.minutes > 0L }) {
             val peak = buckets.maxOf { it.minutes }.coerceAtLeast(1L)

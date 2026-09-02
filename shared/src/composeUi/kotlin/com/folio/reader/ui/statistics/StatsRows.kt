@@ -135,22 +135,15 @@ internal fun TopBooksCard(
 }
 
 /**
- * §12.5 genre breakdown: one hue per row drawn from the palette's accent roles
- * — never one hue at N alphas. The peak row marks itself with label weight
- * (Rule 15), and every bar fills with its hue's vertical gradient.
+ * §12.5/§12.6 genre breakdown: one hue per row drawn from the theme's
+ * chartSeries role (the reader highlighter palette) — never one hue at N
+ * alphas. The peak row marks itself with label weight (Rule 15), and every bar
+ * fills with its hue's vertical gradient.
  */
 @Composable
 internal fun GenresCard(slices: List<TagSlice>) {
     FolioSectionCard(title = "Genres") {
-        val colors = FolioTheme.colors
-        val hues = listOf(
-            colors.accentProgress,
-            colors.accentStreak,
-            colors.accentDiscovery,
-            colors.accentAnnotation,
-            colors.primary,
-            colors.tertiary,
-        )
+        val hues = FolioTheme.colors.chartSeries
         val peak = (slices.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
         Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
             slices.forEachIndexed { index, slice ->

@@ -130,6 +130,23 @@ class ThemeSchemeTest {
         }
     }
 
+    @Test
+    fun chartSeriesPaletteIsUsableForMultiSeriesCharts() {
+        // §12.6: every palette carries the shared reader-highlighter chart hues;
+        // the first six — the genre breakdown's cap — must be pairwise tellable
+        // apart, or adjacent genre rows would read as the same series.
+        for (palette in AppPalette.entries) {
+            val series = palette.colors.chartSeries
+            assertTrue(series.size == 8,
+                "${palette.id}: chartSeries must carry 8 hues, got ${series.size}")
+            for (i in 0 until 6) for (j in i + 1 until 6) {
+                val dE = deltaE(series[i], series[j])
+                assertTrue(dE >= 10.0,
+                    "${palette.id}: chartSeries[$i] vs [$j] ΔE=$dE — genre rows would collide")
+            }
+        }
+    }
+
     // ── colour math ─────────────────────────────────────────────────────────
 
     private fun deltaE(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Double {
