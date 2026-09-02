@@ -1,6 +1,7 @@
 package com.folio.reader.ui.revisit
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -210,6 +212,7 @@ fun RevisitItemsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -258,13 +261,14 @@ fun RevisitItemsScreen(
             LazyColumn(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(padding)
+                modifier = Modifier.fillMaxSize().padding(padding)
             ) {
                 items(items, key = { it.revisitItem.id }) { item ->
                     RevisitCard(
                         item = item,
                         onItemClick = { onItemClick(item) },
-                        onResolve = { viewModel.resolveItem(item.revisitItem.id) }
+                        onResolve = { viewModel.resolveItem(item.revisitItem.id) },
+                        modifier = Modifier.animateItem()
                     )
                 }
             }
@@ -276,11 +280,12 @@ fun RevisitItemsScreen(
 private fun RevisitCard(
     item: RevisitDisplayItem,
     onItemClick: () -> Unit,
-    onResolve: () -> Unit
+    onResolve: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val badge = item.revisitItem.type.toBadge()
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onItemClick() },
+        modifier = modifier.fillMaxWidth().clickable { onItemClick() },
         colors = CardDefaults.cardColors(
             containerColor = FolioTheme.colors.surface,
             contentColor = FolioTheme.colors.onSurface

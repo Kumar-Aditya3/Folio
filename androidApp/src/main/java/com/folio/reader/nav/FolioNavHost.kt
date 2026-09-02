@@ -1,5 +1,8 @@
 package com.folio.reader.nav
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -36,7 +39,13 @@ fun FolioNavHost(
     NavHost(
         navController = navController,
         startDestination = FolioRoutes.LIBRARY,
-        modifier = modifier
+        modifier = modifier,
+        // The library-default crossfade is ~700ms with delays, which reads as lag;
+        // a quick fade keeps pushes and back smooth but snappy.
+        enterTransition = { fadeIn(tween(180)) },
+        exitTransition = { fadeOut(tween(120)) },
+        popEnterTransition = { fadeIn(tween(180)) },
+        popExitTransition = { fadeOut(tween(120)) }
     ) {
         // ── Bottom-bar destinations ─────────────────────────────────────────
         composable(FolioRoutes.HOME) {
