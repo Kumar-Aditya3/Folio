@@ -30,6 +30,7 @@ class MangaDetailViewModel(
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
     private val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
     private val tagRepo: com.folio.reader.database.TagRepository? = null,
+    private val cycleRepo: com.folio.reader.database.ReadingCycleRepository? = null,
 ) {
     val scope = mangaVmScope()
 
@@ -38,6 +39,9 @@ class MangaDetailViewModel(
     val sessions = MutableStateFlow<List<com.folio.reader.model.ReadingSession>>(emptyList())
     val tags = MutableStateFlow<List<com.folio.reader.model.Tag>>(emptyList())
     val allTags = MutableStateFlow<List<com.folio.reader.model.Tag>>(emptyList())
+
+    /** §11.5 item 5: completed re-read passes (cycles minus the first full read). */
+    val reReads = MutableStateFlow(0)
     val refreshing = MutableStateFlow(false)
     val refreshNotice = MutableStateFlow<String?>(null)
     val error = MutableStateFlow<String?>(null)
@@ -66,10 +70,26 @@ class MangaDetailViewModel(
         scope.launch { settingsRepo.setRaw("$KEY_CHAPTER_SORT.$id", if (sortAscending.value) "ASC" else "DESC") }
     }
 
+    /**
+     * Reconciles re-read cycles after a read-state change (bootstrap only — detail
+     * actions never close a pass) and refreshes the surfaced count.
+     */
+    private fun refreshCycles(mangaId: String) {
+        val repo = cycleRepo ?: return
+        scope.launch {
+            runCatching { reconcileMangaReadingCycle(mangaId, chapterRepo, repo) }
+            runCatching {
+                reReads.value = (repo.getCyclesForBook(mangaId).count { it.isCompleted } - 1)
+                    .coerceAtLeast(0)
+            }
+        }
+    }
+
     fun open(mangaId: String) {
         scope.launch {
             manga.value = mangaRepo.get(mangaId)
             chapters.value = chapterRepo.getChapters(mangaId)
+            refreshCycles(mangaId)
             // The library-wide Downloaded mode wins over the per-manga saved filter:
             // opening a manga shows only its downloaded chapters while it is on.
             val downloadedMode = settingsRepo.getRaw(KEY_LIBRARY_DOWNLOADED_FILTER) == "true"
@@ -197,6 +217,7 @@ class MangaDetailViewModel(
         scope.launch {
             chapterRepo.markRead(listOf(chapter.id), !chapter.read)
             chapters.value = chapterRepo.getChapters(chapter.mangaId)
+            refreshCycles(chapter.mangaId)
         }
     }
 
@@ -206,6 +227,7 @@ class MangaDetailViewModel(
             val id = manga.value?.id ?: return@launch
             chapterRepo.markAllReadForManga(id, read)
             chapters.value = chapterRepo.getChapters(id)
+            refreshCycles(id)
         }
     }
 
@@ -223,6 +245,7 @@ class MangaDetailViewModel(
             val previous = all.filter { STORY_ORDER.compare(it, chapter) < 0 }
             chapterRepo.markRead(previous.map { it.id }, true)
             chapters.value = chapterRepo.getChapters(chapter.mangaId)
+            refreshCycles(chapter.mangaId)
         }
     }
 
@@ -281,6 +304,7 @@ class MangaDetailViewModel(
         scope.launch {
             chapterRepo.markRead(ids, read)
             chapters.value = chapterRepo.getChapters(mangaId)
+            refreshCycles(mangaId)
             clearChapterSelection()
         }
     }

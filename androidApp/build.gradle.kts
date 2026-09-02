@@ -22,8 +22,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 41
-        versionName = "1.1.10"
+        versionCode = 42
+        versionName = "1.1.11"
         vectorDrawables.useSupportLibrary = true
     }
 

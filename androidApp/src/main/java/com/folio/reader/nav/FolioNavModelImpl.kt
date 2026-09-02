@@ -112,7 +112,8 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             categoryRepo = graph.mangaCategoryRepository,
             settingsRepo = graph.settingsRepository,
             sessionRepo = graph.sessionRepository,
-            tagRepo = graph.tagRepository
+            tagRepo = graph.tagRepository,
+            cycleRepo = graph.readingCycleRepository
         ).also {
             mangaDetailVmKey = mangaId
             mangaDetailVmInstance = it

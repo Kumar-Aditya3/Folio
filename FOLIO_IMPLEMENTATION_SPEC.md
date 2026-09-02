@@ -736,6 +736,15 @@ Ordered by value; each already has book-side infrastructure to mirror:
   boundary: `MangaBackupManager` exports the Mihon format, which has no tag concept, so
   manga-tag links are local-only — same trade-off book links had before §12.)*
 - **Reading cycles / re-reads** — `ReadingCycleRepository` already exists for books.
+  *(Shipped v1.1.11: manga rows reuse the `reading_cycles` table with bookId = mangaId.
+  A stateless reconcile in `MangaReadingCycles.kt` runs from the reader's save worker on
+  chapter finishes and from detail read-state actions: everything-read with no cycle
+  bootstraps completed cycle #1 exactly once; a first-chapter finish opens a pass (how
+  Continue funnels re-reads); the final-chapter finish closes it; one-shots count every
+  re-finish. Detail actions only bootstrap — they never close a pass, so toggles mid
+  re-read can't complete it early, and final-page re-entries never inflate. The
+  `MangaReadingSection` card gains a Re-reads row (completed passes − 1) once ≥1. Cycles
+  are local bookkeeping — totalDurationMs/sessionCount stay 0 and rows never sync.)*
 
 ### 11.6 Deliberately NOT built
 

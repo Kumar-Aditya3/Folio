@@ -105,6 +105,7 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val bookRepository = JdbcBookRepository(database)
     val positionRepository = JdbcReadingPositionRepository(database)
     val sessionRepository = JdbcReadingSessionRepository(database)
+    val readingCycleRepository = com.folio.reader.database.JdbcReadingCycleRepository(database)
     val bookmarkRepository = JdbcBookmarkRepository(database)
     val highlightRepository = JdbcHighlightRepository(database)
     val noteRepository = JdbcNoteRepository(database)
@@ -1242,6 +1243,7 @@ fun main(args: Array<String>) {
                                             settingsRepo = deps.settingsRepository,
                                             sessionRepo = deps.sessionRepository,
                                             tagRepo = deps.tagRepository,
+                                            cycleRepo = deps.readingCycleRepository,
                                         )
                                     }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
                                     backend = deps.mangaBackend,
@@ -1485,6 +1487,7 @@ private fun MangaReaderRoute(
                 settingsRepo = deps.settingsRepository,
                 fileSystem = deps.platform.fileSystem,
                 sessionRepo = deps.sessionRepository,
+                cycleRepo = deps.readingCycleRepository,
             )
         },
         manga = m,

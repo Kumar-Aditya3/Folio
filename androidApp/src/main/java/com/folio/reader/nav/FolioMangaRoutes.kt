@@ -170,7 +170,8 @@ fun MangaReaderRoute(
                 noteRepo = graph.mangaNoteRepository,
                 settingsRepo = graph.settingsRepository,
                 fileSystem = graph.platform.fileSystem,
-                sessionRepo = graph.sessionRepository
+                sessionRepo = graph.sessionRepository,
+                cycleRepo = graph.readingCycleRepository
             )
         },
         manga = m,
