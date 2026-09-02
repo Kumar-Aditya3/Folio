@@ -65,10 +65,24 @@ fun BookDetailScreen(
     val series by viewModel.series.collectAsState(initial = null)
     val collections by viewModel.collections.collectAsState(initial = emptyList())
     val tags by viewModel.tags.collectAsState(initial = emptyList())
+    val availableTags by viewModel.availableTags.collectAsState(initial = emptyList())
     val availableSeries by viewModel.availableSeries.collectAsState(initial = emptyList())
     val availableCollections by viewModel.availableCollections.collectAsState(initial = emptyList())
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showMetadataEditor by remember { mutableStateOf(false) }
+    var showTagPicker by remember { mutableStateOf(false) }
+
+    if (showTagPicker) {
+        com.folio.reader.ui.tags.TagPickerDialog(
+            tags = availableTags,
+            assignedTagIds = tags.mapTo(mutableSetOf()) { it.id },
+            onDismiss = { showTagPicker = false },
+            onSave = { ids ->
+                viewModel.updateBookTags(ids)
+                showTagPicker = false
+            }
+        )
+    }
 
     book?.let { currentBook ->
         if (showMetadataEditor) {
@@ -169,6 +183,7 @@ fun BookDetailScreen(
                         onTagClick = onTagClick,
                         onSeriesClick = onSeriesClick,
                         onCollectionClick = onCollectionClick,
+                        onAddTags = { showTagPicker = true },
                         onCoverClick = onStartReading
                     )
                 }

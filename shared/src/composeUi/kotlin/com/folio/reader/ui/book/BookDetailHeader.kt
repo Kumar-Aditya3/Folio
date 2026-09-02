@@ -49,6 +49,7 @@ internal fun BookHeaderSection(
     onTagClick: (Tag) -> Unit,
     onSeriesClick: (Series) -> Unit,
     onCollectionClick: (Collection) -> Unit,
+    onAddTags: () -> Unit,
     onCoverClick: () -> Unit = {}
 ) {
     Column(
@@ -127,7 +128,8 @@ internal fun BookHeaderSection(
             tags = tags,
             onTagClick = onTagClick,
             onSeriesClick = onSeriesClick,
-            onCollectionClick = onCollectionClick
+            onCollectionClick = onCollectionClick,
+            onAddTags = onAddTags
         )
 
         book.description?.takeIf { it.isNotBlank() }?.let {
@@ -210,11 +212,9 @@ private fun BookChipsRow(
     tags: List<Tag>,
     onTagClick: (Tag) -> Unit,
     onSeriesClick: (Series) -> Unit,
-    onCollectionClick: (Collection) -> Unit
+    onCollectionClick: (Collection) -> Unit,
+    onAddTags: () -> Unit
 ) {
-    val hasAny = series != null || collections.isNotEmpty() || tags.isNotEmpty()
-    if (!hasAny) return
-
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -252,6 +252,15 @@ private fun BookChipsRow(
                 )
             )
         }
+
+        SuggestionChip(
+            onClick = onAddTags,
+            label = { Text("+ Tag") },
+            colors = SuggestionChipDefaults.suggestionChipColors(
+                containerColor = FolioTheme.colors.surface,
+                labelColor = FolioTheme.colors.onSurfaceVariant
+            )
+        )
     }
 }
 

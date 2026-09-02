@@ -734,8 +734,8 @@ Ordered by value; each already has book-side infrastructure to mirror:
 | Phase | Contents | Version |
 |---|---|---|
 | **6 — Splits (prerequisite)** | §6 manga splits: `MangaScreens` → 6 files ≤500, `MangaViewModels` → 4 ≤500, `MangaReaderScreen` → 3 ≤400. Pure extraction, one file per commit, test count unchanged | 1.1.x |
-| **7 — Stats exclusion** | §11.2 whole: table, `StatsScope`, all three consumers, `settings/stats`, visibility note, tests | 1.2.0 |
-| **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card | 1.3.0 |
+| **7 — Stats exclusion** | §11.2 whole: table, `StatsScope`, all three consumers, `settings/stats`, visibility note, tests. Part 1 (table, resolver, `StatisticsViewModel` filtering, 10 tests) shipped in 1.1.4; `settings/stats` UI + Home consumption + Rule 8 note remain for 1.2.0 | 1.2.0 |
+| **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card. Machinery (worker, `manga_update_state`/cursor, notifier, interval setting) shipped in 1.1.5; `settings/manga` toggle (with POST_NOTIFICATIONS runtime request) + New chapters card remain for 1.3.0 | 1.3.0 |
 | **9 — Home manga + discovery** | rest of §11.4: manga continue-reading, source deep link, Discover | 1.3.x |
 | **10 — Parity** | §11.5 in listed order | 1.4.0 |
 
@@ -755,3 +755,33 @@ Ordered by value; each already has book-side infrastructure to mirror:
 - "New chapters" appears with a one-manga library; "Because you finished" still hides under
   two candidates (books' limitation is unchanged, and that is fine).
 - Release-build device smoke test per Rule 11, including one manual update run.
+
+## 12. Tag assignment UI (added 2026-09-02)
+
+**Gap found on-device:** the tag manager could create/rename/recolor/delete tags and book
+detail *displayed* tag chips, but nothing in the UI ever called
+`TagRepository.addTagToBook` / `removeTagFromBook` — the only caller was backup restore, so
+a freshly created tag could never attach to anything. (Found because tag creation also
+crashed: `TagManagerViewModel.refresh()` cast its `stateIn` flow to `MutableStateFlow` and
+always threw — fixed in v1.1.4, the bug predates the §6 split.)
+
+**Scope:**
+- Book detail: the chips row now always renders, ending in a `+ Tag` chip that opens
+  `ui/tags/TagPickerDialog` — checkbox list with color dots; Save diff-assigns through
+  `BookDetailViewModel.updateBookTags`, mirroring how `saveMetadata` syncs collections.
+- Tag creation stays in the tag manager; the empty picker shows
+  "No tags yet — create them in More → Tags."
+- Highlight tagging in the Quotes hub is **deferred**: `QuoteBrowserScreen` sits at 552
+  lines and Rule 9 leaves too little headroom for this pass.
+- Assigning a tag immediately participates in §11.2 stats exclusion (both resolve through
+  `getTagsForBook`).
+
+**Known boundaries (unchanged by this):** tag *entities* sync; book↔tag links ride
+backup/restore only.
+
+**Version:** v1.1.5 (versionCode 36). Shared UI — Android and desktop both get the picker.
+
+**Acceptance:** create a tag in the manager → open a book → `+ Tag` → check it → Save →
+the chip appears without an app restart; unchecking removes it; the tag's detail page lists
+the book; a backup export/import round-trip preserves the link; `shared:desktopTest` stays
+green and no `composeUi` file exceeds 600 lines (Rule 9).
