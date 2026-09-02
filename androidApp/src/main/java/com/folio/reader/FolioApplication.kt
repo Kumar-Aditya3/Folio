@@ -88,6 +88,12 @@ class AppGraph(private val app: Application) {
         chapterRepo = mangaChapterRepository,
         initialStorage = com.folio.reader.manga.FileDownloadStorage(platform.fileSystem.mangaDownloadsDir),
     ).apply { start() }
+    val mangaUpdateRepository = com.folio.reader.database.JdbcMangaUpdateRepository(
+        db = database,
+        mangaRepository = mangaRepository,
+        chapterRepository = mangaChapterRepository,
+        backend = mangaBackend,
+    )
 
     /**
      * Restores a user-picked manga downloads location at startup. The picker persists a

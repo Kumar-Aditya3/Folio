@@ -46,7 +46,10 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     // group repos resolve each book's tags and collections.
                     com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
                     graph.tagRepository,
-                    graph.collectionRepository
+                    graph.collectionRepository,
+                    // §11.4: the New-chapters card reads manga_update_state through
+                    // the same exclusions the worker's badges are gated by.
+                    graph.mangaUpdateRepository
                 )
             }
             val state by viewModel.state.collectAsState(initial = HomeUiState())
@@ -59,7 +62,9 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 onOpenLibrary = { navController.navigate(FolioRoutes.LIBRARY) },
                 onOpenExclusions = {
                     navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
-                }
+                },
+                mangaBackend = graph.mangaBackend,
+                onOpenMangaDetail = { navController.navigate(FolioDestination.mangaDetail(it)) }
             )
         }
     }
@@ -250,6 +255,9 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.STATS ->
             com.folio.reader.settings.SettingsStatsScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.MANGA ->
+            com.folio.reader.settings.SettingsMangaScreen(navModel, onBack)
 
         // Unknown/legacy categories (e.g. deep links from older builds) land
         // on the hub instead of a dead end.

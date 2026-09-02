@@ -705,6 +705,18 @@ Tapping opens the Updates surface. Opt-in, respects the existing notification pe
 the first time. Verify in a **release** build with `logcat -b crash` clean; the zstd SIGABRT
 came from exactly this code path on the foreground.
 
+*(Shipped v1.1.15: `settings/manga` — Off / Manual / 6h / 12h / 24h picker backed by
+`mangaUpdateIntervalHours`, with Manual stored as −1 (the scheduler treats ≤0 as off) and a
+"Check now" row driving a one-time work request; the Android 13 POST_NOTIFICATIONS runtime
+request fires when a periodic interval is selected. The §11.4 "New chapters" card is on
+Home after Continue reading: up to 6 library manga with `new_chapter_count > 0`, newest
+check first, each row opening manga detail, hidden entirely at zero. The badge query joins
+`manga_library` (`favorite = 1`), so orphaned update-state rows for removed manga never
+surface — the 8a follow-up — and it resolves the §11.2 manga exclusions, so an excluded
+title's badge never reaches Home (§12.9). The badge clears when the reader opens that
+manga. Tests: `MangaUpdateBadgeTest` (JDBC: join/orphan/order/cap/exclusions) + two Home
+badge tests in `HomeStatsScopeTest`.)*
+
 ### 11.4 Home: manga cards
 
 Two new cards in `HomeViewModel`/`HomeScreen`, ordered after Continue reading:
@@ -781,7 +793,7 @@ Ordered by value; each already has book-side infrastructure to mirror:
 |---|---|---|
 | **6 — Splits (prerequisite)** | §6 manga splits: `MangaScreens` → 6 files ≤500, `MangaViewModels` → 4 ≤500, `MangaReaderScreen` → 3 ≤400. Pure extraction, one file per commit, test count unchanged | 1.1.x |
 | **7 — Stats exclusion** | §11.2 whole: table, `StatsScope`, all three consumers, `settings/stats`, visibility note, tests. Part 1 (table, resolver, `StatisticsViewModel` filtering, 10 tests) shipped in 1.1.4; `settings/stats` UI + Home consumption + Rule 8 note remain for 1.2.0 | 1.2.0 |
-| **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card. Machinery (worker, `manga_update_state`/cursor, notifier, interval setting) shipped in 1.1.5; `settings/manga` toggle (with POST_NOTIFICATIONS runtime request) + New chapters card remain for 1.3.0 | 1.3.0 |
+| **8 — Update checks** | §11.3 worker + storage + notification; §11.4 "New chapters" card. Machinery (worker, `manga_update_state`/cursor, notifier, interval setting) shipped in 1.1.5; `settings/manga` toggle (with POST_NOTIFICATIONS runtime request) + New chapters card shipped in 1.1.15 | 1.3.0 |
 | **9 — Home manga + discovery** | rest of §11.4: manga continue-reading, source deep link, Discover | 1.3.x |
 | **10 — Parity** | §11.5 in listed order | 1.4.0 |
 

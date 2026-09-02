@@ -43,6 +43,7 @@ class MangaReaderViewModel(
     internal val fileSystem: com.folio.reader.platform.FolioFileSystem,
     internal val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
     internal val cycleRepo: com.folio.reader.database.ReadingCycleRepository? = null,
+    private val updateRepo: com.folio.reader.manga.MangaUpdateRepository? = null,
 ) {
     val scope = mangaVmScope()
 
@@ -150,6 +151,11 @@ class MangaReaderViewModel(
         this.chapter.value = chapter
         currentIndex.value = 0
         error.value = null
+        // §11.3: the reader has now shown this manga's chapters — clear the
+        // Home "new chapters" badge. Guarded so a repo failure can't break open.
+        updateRepo?.let { repo ->
+            scope.launch { runCatching { repo.clearNewChapters(manga.id) } }
+        }
         startSession(manga, chapter)
         openJob?.cancel()
         prefetchJob?.cancel()

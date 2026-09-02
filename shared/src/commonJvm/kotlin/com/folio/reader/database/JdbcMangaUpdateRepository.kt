@@ -6,11 +6,13 @@ import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaChapterRef
 import com.folio.reader.manga.MangaChapterRepository
 import com.folio.reader.manga.MangaEntry
+import com.folio.reader.manga.MangaNewChapterBadge
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaUpdateRepository
 import com.folio.reader.manga.MangaUpdateRunResult
 import com.folio.reader.manga.MangaUpdateState
 import com.folio.reader.manga.chapterId
+import com.folio.reader.statistics.Scope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -193,6 +195,65 @@ class JdbcMangaUpdateRepository(
             }
         }
         db.bumpMangaData()
+    }
+
+    /**
+     * §11.4 Home rows. The JOIN drops orphaned state rows for manga no longer in
+     * the library (8a follow-up); `favorite = 1` matches the library surface; the
+     * §11.2 exclusion set resolves to concrete manga ids exactly as the stats
+     * queries do, so an excluded title's badge never reaches Home (§12.9).
+     */
+    override suspend fun getNewChapterBadges(
+        exclusions: Set<Pair<Scope, String>>
+    ): List<MangaNewChapterBadge> = db.withConnection { conn ->
+        val excluded = HashSet<String>()
+        for ((kind, id) in exclusions) {
+            when (kind) {
+                Scope.MANGA -> excluded += id
+                Scope.MANGA_SOURCE ->
+                    conn.prepareStatement("SELECT id FROM manga_library WHERE source_id = ?").use { st ->
+                        val sourceId = id.toLongOrNull() ?: return@use
+                        st.setLong(1, sourceId)
+                        st.executeQuery().use { rs -> while (rs.next()) excluded += rs.getString(1) }
+                    }
+                Scope.MANGA_CATEGORY ->
+                    conn.prepareStatement("SELECT manga_id FROM manga_category_map WHERE category_id = ?").use { st ->
+                        st.setString(1, id)
+                        st.executeQuery().use { rs -> while (rs.next()) excluded += rs.getString(1) }
+                    }
+                else -> {}
+            }
+        }
+        val sql = buildString {
+            append(
+                "SELECT s.manga_id, m.title, m.source_id, m.thumbnail_url, m.cover_path, " +
+                    "s.new_chapter_count, s.last_checked_at "
+            )
+            append("FROM manga_update_state s JOIN manga_library m ON m.id = s.manga_id ")
+            append("WHERE m.favorite = 1 AND s.new_chapter_count > 0")
+            if (excluded.isNotEmpty()) {
+                append(" AND m.id NOT IN (${excluded.joinToString(",") { "?" }})")
+            }
+            append(" ORDER BY s.last_checked_at DESC LIMIT 6")
+        }
+        conn.prepareStatement(sql).use { st ->
+            excluded.forEachIndexed { index, id -> st.setString(index + 1, id) }
+            st.executeQuery().use { rs ->
+                val badges = mutableListOf<MangaNewChapterBadge>()
+                while (rs.next()) {
+                    badges += MangaNewChapterBadge(
+                        mangaId = rs.getString("manga_id"),
+                        title = rs.getString("title"),
+                        sourceId = rs.getLong("source_id"),
+                        thumbnailUrl = rs.getString("thumbnail_url"),
+                        coverPath = rs.getString("cover_path"),
+                        newChapterCount = rs.getInt("new_chapter_count"),
+                        lastCheckedAt = Instant.fromEpochMilliseconds(rs.getLong("last_checked_at")),
+                    )
+                }
+                badges
+            }
+        }
     }
 
     private suspend fun queryStates(): List<MangaUpdateState> = db.withConnection { conn ->
