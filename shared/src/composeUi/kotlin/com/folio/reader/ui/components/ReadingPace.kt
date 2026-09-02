@@ -2,6 +2,9 @@ package com.folio.reader.ui.components
 
 import com.folio.reader.model.ReadingSession
 import kotlinx.datetime.Clock
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Duration.Companion.days
 
@@ -97,4 +100,15 @@ fun finishEstimate(
     val target = if (wholeDays <= 365) "${months[date.monthNumber - 1]} ${date.dayOfMonth}"
         else "${months[date.monthNumber - 1]} ${date.year}"
     return "On pace to finish in ${horizonPhrase(wholeDays)} · around $target"
+}
+
+/** Consecutive reading days ending today — or yesterday, if today hasn't started yet. */
+internal fun currentStreak(readDays: Set<LocalDate>, today: LocalDate): Int {
+    var day = if (today in readDays) today else today.minus(DatePeriod(days = 1))
+    var streak = 0
+    while (day in readDays) {
+        streak++
+        day = day.minus(DatePeriod(days = 1))
+    }
+    return streak
 }

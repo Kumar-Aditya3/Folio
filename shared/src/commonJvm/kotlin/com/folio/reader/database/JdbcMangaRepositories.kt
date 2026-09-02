@@ -1228,28 +1228,79 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
 
 class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader.manga.MangaStatisticsRepository {
 
-    override suspend fun getStatistics(): com.folio.reader.manga.MangaStatistics = db.withConnection { conn ->
+    override suspend fun getStatistics(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>>
+    ): com.folio.reader.manga.MangaStatistics = db.withConnection { conn ->
+        // §11.2: the raw exclusion set is resolved to concrete manga ids first,
+        // then every aggregate below computes with a `NOT IN` filter — the
+        // exclusion is part of the query, never applied after the fact.
+        val excluded = HashSet<String>()
+        for ((kind, id) in exclusions) {
+            when (kind) {
+                com.folio.reader.statistics.Scope.MANGA -> excluded += id
+                com.folio.reader.statistics.Scope.MANGA_SOURCE ->
+                    conn.prepareStatement("SELECT id FROM manga_library WHERE source_id = ?").use { st ->
+                        val sourceId = id.toLongOrNull() ?: return@use
+                        st.setLong(1, sourceId)
+                        st.executeQuery().use { rs -> while (rs.next()) excluded += rs.getString(1) }
+                    }
+                com.folio.reader.statistics.Scope.MANGA_CATEGORY ->
+                    conn.prepareStatement("SELECT manga_id FROM manga_category_map WHERE category_id = ?").use { st ->
+                        st.setString(1, id)
+                        st.executeQuery().use { rs -> while (rs.next()) excluded += rs.getString(1) }
+                    }
+                else -> {}
+            }
+        }
+        val ids = excluded.toList()
+        fun notIn(column: String): String =
+            if (ids.isEmpty()) "" else " AND $column NOT IN (${ids.joinToString(",") { "?" }})"
+        fun whereNotIn(column: String): String =
+            if (ids.isEmpty()) "" else " WHERE $column NOT IN (${ids.joinToString(",") { "?" }})"
+        fun bindExclusions(st: java.sql.PreparedStatement, from: Int) {
+            ids.forEachIndexed { i, id -> st.setString(from + i, id) }
+        }
+
         var libraryCount = 0; var completedCount = 0
-        conn.prepareStatement("SELECT COUNT(*), SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) FROM manga_library WHERE favorite = 1").use { st ->
+        conn.prepareStatement(
+            "SELECT COUNT(*), SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) FROM manga_library WHERE favorite = 1" + notIn("id")
+        ).use { st ->
+            bindExclusions(st, 1)
             st.executeQuery().use { rs -> if (rs.next()) { libraryCount = rs.getInt(1); completedCount = rs.getInt(2) } }
         }
         var readChapters = 0; var unreadChapters = 0; var downloadedChapters = 0; var bookmarkedChapters = 0
-        conn.createStatement().use { st ->
-            st.executeQuery("SELECT SUM(CASE WHEN read=1 THEN 1 ELSE 0 END), SUM(CASE WHEN read=0 THEN 1 ELSE 0 END), SUM(CASE WHEN downloaded_pages>0 THEN 1 ELSE 0 END), SUM(CASE WHEN bookmarked=1 THEN 1 ELSE 0 END) FROM manga_chapters").use { rs ->
+        conn.prepareStatement(
+            "SELECT SUM(CASE WHEN read=1 THEN 1 ELSE 0 END), SUM(CASE WHEN read=0 THEN 1 ELSE 0 END), " +
+                "SUM(CASE WHEN downloaded_pages>0 THEN 1 ELSE 0 END), SUM(CASE WHEN bookmarked=1 THEN 1 ELSE 0 END) " +
+                "FROM manga_chapters" + whereNotIn("manga_id")
+        ).use { st ->
+            bindExclusions(st, 1)
+            st.executeQuery().use { rs ->
                 if (rs.next()) { readChapters = rs.getInt(1); unreadChapters = rs.getInt(2); downloadedChapters = rs.getInt(3); bookmarkedChapters = rs.getInt(4) }
             }
         }
         var notesCount = 0
-        conn.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM manga_notes").use { rs -> if (rs.next()) notesCount = rs.getInt(1) } }
+        conn.prepareStatement("SELECT COUNT(*) FROM manga_notes" + whereNotIn("manga_id")).use { st ->
+            bindExclusions(st, 1)
+            st.executeQuery().use { rs ->
+                if (rs.next()) notesCount = rs.getInt(1)
+            }
+        }
         var totalReadMinutes = 0L
-        conn.prepareStatement("SELECT COALESCE(SUM(s.duration_ms),0)/60000 FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id").use { st ->
+        conn.prepareStatement(
+            "SELECT COALESCE(SUM(s.duration_ms),0)/60000 FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id" +
+                whereNotIn("m.id")
+        ).use { st ->
+            bindExclusions(st, 1)
             st.executeQuery().use { rs -> if (rs.next()) totalReadMinutes = rs.getLong(1) }
         }
         var readActiveDays = 0
-        conn.createStatement().use { st ->
-            st.executeQuery(
-                "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters WHERE read = 1 GROUP BY date(updated_at/1000,'unixepoch','localtime'))"
-            ).use { rs -> if (rs.next()) readActiveDays = rs.getInt(1) }
+        conn.prepareStatement(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters WHERE read = 1" + notIn("manga_id") +
+                " GROUP BY date(updated_at/1000,'unixepoch','localtime'))"
+        ).use { st ->
+            bindExclusions(st, 1)
+            st.executeQuery().use { rs -> if (rs.next()) readActiveDays = rs.getInt(1) }
         }
         val week = MutableList(7) { 0 }
         val labels = MutableList(7) { "" }
@@ -1257,13 +1308,20 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         for (i in 0 until 7) {
             val day = java.time.LocalDate.now().minusDays(6 - i.toLong())
             labels[i] = day.format(fmt)
-            conn.prepareStatement("SELECT COUNT(*) FROM manga_chapters WHERE read = 1 AND date(updated_at/1000,'unixepoch','localtime') = ?").use { st ->
+            conn.prepareStatement(
+                "SELECT COUNT(*) FROM manga_chapters WHERE read = 1 AND date(updated_at/1000,'unixepoch','localtime') = ?" + notIn("manga_id")
+            ).use { st ->
                 st.setString(1, day.toString())
+                bindExclusions(st, 2)
                 st.executeQuery().use { rs -> if (rs.next()) week[i] = rs.getInt(1) }
             }
         }
         val top = mutableListOf<com.folio.reader.manga.MangaTopEntry>()
-        conn.prepareStatement("SELECT c.manga_id, m.title, COUNT(*) c FROM manga_chapters c JOIN manga_library m ON m.id = c.manga_id WHERE c.read = 1 GROUP BY c.manga_id ORDER BY c DESC LIMIT 5").use { st ->
+        conn.prepareStatement(
+            "SELECT c.manga_id, m.title, COUNT(*) c FROM manga_chapters c JOIN manga_library m ON m.id = c.manga_id " +
+                "WHERE c.read = 1" + notIn("c.manga_id") + " GROUP BY c.manga_id ORDER BY c DESC LIMIT 5"
+        ).use { st ->
+            bindExclusions(st, 1)
             st.executeQuery().use { rs -> while (rs.next()) top += com.folio.reader.manga.MangaTopEntry(rs.getString(1), rs.getString(2), rs.getInt(3)) }
         }
         com.folio.reader.manga.MangaStatistics(

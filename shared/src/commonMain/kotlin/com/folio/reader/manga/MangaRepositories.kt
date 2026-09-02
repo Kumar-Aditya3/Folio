@@ -39,7 +39,13 @@ interface MangaChapterRepository {
 }
 
 interface MangaStatisticsRepository {
-    suspend fun getStatistics(): MangaStatistics
+    /**
+     * §11.2: the raw stats-exclusion set is passed *in* — the implementation
+     * computes with it (SQL filters here), never applies it after the fact.
+     */
+    suspend fun getStatistics(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>> = emptySet()
+    ): MangaStatistics
 }
 
 interface MangaNoteRepository {

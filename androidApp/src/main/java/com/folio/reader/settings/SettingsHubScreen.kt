@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
@@ -133,6 +134,12 @@ fun SettingsHubScreen(
                         title = "Revisit",
                         subtitle = "Books worth returning to",
                         onClick = onOpenRevisit
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Equalizer,
+                        title = "Statistics exclusions",
+                        subtitle = "Keep titles out of Stats and Home",
+                        onClick = { onOpenSettings(FolioSettingsCategory.STATS) }
                     )
                 }
             }

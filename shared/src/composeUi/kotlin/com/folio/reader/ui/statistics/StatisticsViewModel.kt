@@ -11,6 +11,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
+import com.folio.reader.ui.components.currentStreak
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -156,6 +157,14 @@ class StatisticsViewModel(
             )
         }
     }
+
+    /**
+     * §11.2/Rule 8: the live exclusion set, for hosts that must react to it —
+     * the "Some titles are excluded — review" line and the manga stats pass it
+     * straight into [com.folio.reader.manga.MangaStatisticsRepository.getStatistics].
+     */
+    val exclusions: Flow<Set<Pair<Scope, String>>> =
+        statsExclusionRepository?.observeExclusions() ?: flowOf(emptySet())
 
     /**
      * §11.2 one-way resolution, evaluated once per emission: a book is excluded
