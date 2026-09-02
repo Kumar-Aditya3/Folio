@@ -71,3 +71,12 @@
     native <methods>;
 }
 -keep class org.brotli.** { *; }
+
+# --- Sentry crash reporting (§8.4 FOLIO_IMPLEMENTATION_SPEC) ──────────────
+# Sentry uses reflection + native libraries for crash capture; must be kept.
+-dontnote io.sentry.*
+-keep class io.sentry.** { *; }
+-keep class kotlin.reflect.** { *; }
+# Native libs for crash tracing (minidump, backtrace)
+-keep class org.hildan.fordilla.** { *; }
+-dontwarn org.slf4j.**

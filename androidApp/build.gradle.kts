@@ -110,7 +110,18 @@ dependencies {
     implementation(libs.compose.multiplatform.ui)
     implementation(libs.compose.multiplatform.foundation)
     implementation(libs.compose.multiplatform.material3)
+    implementation(libs.androidx.navigation.compose)
 
     implementation(libs.coil.compose)
 
+    // ── TEST INFRASTRUCTURE (§8.1 FOLIO_IMPLEMENTATION_SPEC) ────────────────
+    // Pin exact versions to match Compose 1.7.6 baseline; no ranges.
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.7.6")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")
+
+    // ── CRASH REPORTING (§8.4 FOLIO_IMPLEMENTATION_SPEC) ────────────────────
+    // Opt-in crash reporting with privacy notice; reports include stack trace + build version.
+    implementation("io.sentry:sentry-android:7.3.0")
 }

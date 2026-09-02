@@ -135,6 +135,84 @@ data class BookReaderSettings(
     }
 }
 
+/**
+ * Fields this book overrides, for the reader panel's override dots. Only fields
+ * [ReaderSettings.copyWith] honours can count — the inert formatting-panel fields
+ * (alignment, formattingMode, hyphenation) never differ in effect, so legacy
+ * non-null values for them must not surface as overrides.
+ */
+fun BookReaderSettings.overriddenFields(global: ReaderSettings): Set<String> {
+    val fields = mutableSetOf<String>()
+    if (fontFamily != null && fontFamily != global.fontFamily) fields += "fontFamily"
+    if (fontSize != null && fontSize != global.fontSize) fields += "fontSize"
+    if (fontWeight != null && fontWeight != global.fontWeight) fields += "fontWeight"
+    if (lineHeight != null && lineHeight != global.lineHeight) fields += "lineHeight"
+    if (letterSpacing != null && letterSpacing != global.letterSpacing) fields += "letterSpacing"
+    if (wordSpacing != null && wordSpacing != global.wordSpacing) fields += "wordSpacing"
+    if (paragraphSpacing != null && paragraphSpacing != global.paragraphSpacing) fields += "paragraphSpacing"
+    if (margins != null && margins != global.margins) fields += "margins"
+    if (textWidth != null && textWidth != global.textWidth) fields += "textWidth"
+    if (themeId != null && themeId != global.themeId) fields += "themeId"
+    if (layoutMode != null && layoutMode != global.layoutMode) fields += "layoutMode"
+    if (showChapterTitle != null && showChapterTitle != global.showChapterTitle) fields += "showChapterTitle"
+    if (showProgress != null && showProgress != global.showProgress) fields += "showProgress"
+    if (showClock != null && showClock != global.showClock) fields += "showClock"
+    if (highlightColorIndex != null && highlightColorIndex != global.highlightColorIndex) fields += "highlightColorIndex"
+    if (customTheme != null && customTheme != global.customTheme) fields += "customTheme"
+    return fields
+}
+
+/** Drops the named fields so the book follows the global defaults again. */
+fun BookReaderSettings.clearing(fields: Set<String>): BookReaderSettings = copy(
+    fontFamily = if ("fontFamily" in fields) null else fontFamily,
+    fontSize = if ("fontSize" in fields) null else fontSize,
+    fontWeight = if ("fontWeight" in fields) null else fontWeight,
+    lineHeight = if ("lineHeight" in fields) null else lineHeight,
+    letterSpacing = if ("letterSpacing" in fields) null else letterSpacing,
+    wordSpacing = if ("wordSpacing" in fields) null else wordSpacing,
+    paragraphSpacing = if ("paragraphSpacing" in fields) null else paragraphSpacing,
+    margins = if ("margins" in fields) null else margins,
+    textWidth = if ("textWidth" in fields) null else textWidth,
+    alignment = if ("alignment" in fields) null else alignment,
+    hyphenation = if ("hyphenation" in fields) null else hyphenation,
+    themeId = if ("themeId" in fields) null else themeId,
+    layoutMode = if ("layoutMode" in fields) null else layoutMode,
+    formattingMode = if ("formattingMode" in fields) null else formattingMode,
+    showChapterTitle = if ("showChapterTitle" in fields) null else showChapterTitle,
+    showProgress = if ("showProgress" in fields) null else showProgress,
+    showClock = if ("showClock" in fields) null else showClock,
+    highlightColorIndex = if ("highlightColorIndex" in fields) null else highlightColorIndex,
+    customTheme = if ("customTheme" in fields) null else customTheme
+)
+
+/**
+ * Fields whose value differs between two global settings snapshots, for the
+ * reader panel's "All books" write: the open book's override is cleared only
+ * for the fields actually being changed. Names mirror
+ * [BookReaderSettings.overriddenFields] so [BookReaderSettings.clearing]
+ * accepts the result directly.
+ */
+fun ReaderSettings.changedFields(other: ReaderSettings): Set<String> {
+    val fields = mutableSetOf<String>()
+    if (fontFamily != other.fontFamily) fields += "fontFamily"
+    if (fontSize != other.fontSize) fields += "fontSize"
+    if (fontWeight != other.fontWeight) fields += "fontWeight"
+    if (lineHeight != other.lineHeight) fields += "lineHeight"
+    if (letterSpacing != other.letterSpacing) fields += "letterSpacing"
+    if (wordSpacing != other.wordSpacing) fields += "wordSpacing"
+    if (paragraphSpacing != other.paragraphSpacing) fields += "paragraphSpacing"
+    if (margins != other.margins) fields += "margins"
+    if (textWidth != other.textWidth) fields += "textWidth"
+    if (themeId != other.themeId) fields += "themeId"
+    if (layoutMode != other.layoutMode) fields += "layoutMode"
+    if (showChapterTitle != other.showChapterTitle) fields += "showChapterTitle"
+    if (showProgress != other.showProgress) fields += "showProgress"
+    if (showClock != other.showClock) fields += "showClock"
+    if (highlightColorIndex != other.highlightColorIndex) fields += "highlightColorIndex"
+    if (customTheme != other.customTheme) fields += "customTheme"
+    return fields
+}
+
 @Serializable
 data class Margins(
     val left: Float = 24f,
