@@ -70,7 +70,14 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             bookRepository = graph.bookRepository,
             sessionRepository = graph.sessionRepository,
             quoteRepository = graph.quoteRepository,
-            highlightRepository = graph.highlightRepository
+            highlightRepository = graph.highlightRepository,
+            // §11.2 stats exclusions: repository plus the group repos that resolve
+            // each book's tags/collections (series/status come from the books).
+            // The exclusions repo is built here against the shared database; the
+            // settings UI is a later slice.
+            statsExclusionRepository = com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
+            tagRepository = graph.tagRepository,
+            collectionRepository = graph.collectionRepository
         )
     }
     val mangaBrowseVM by lazy {
