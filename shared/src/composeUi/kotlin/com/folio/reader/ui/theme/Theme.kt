@@ -44,7 +44,13 @@ data class FolioColors(
     val inverseSurface: Color = Color(0xFF0F172A),
     val inverseOnSurface: Color = Color(0xFFF8FAFC),
     val inversePrimary: Color = Color(0xFF818CF8),
-    val statusBar: Color = Color(0xFF0F172A)
+    val statusBar: Color = Color(0xFF0F172A),
+    // §12.3 semantic accent roles. The defaults only keep old callers compiling;
+    // every AppPalette assigns all four explicitly (ThemeSchemeTest enforces it).
+    val accentProgress: Color = primary,
+    val accentStreak: Color = primary,
+    val accentDiscovery: Color = tertiary,
+    val accentAnnotation: Color = primary
 )
 
 val LightFolioColors = FolioColors(
@@ -78,7 +84,11 @@ val LightFolioColors = FolioColors(
     inverseSurface = Color(0xFF202124),
     inverseOnSurface = Color(0xFFFFFFFF),
     inversePrimary = Color(0xFF8AB4F8),
-    statusBar = Color(0xFF202124)
+    statusBar = Color(0xFF202124),
+    accentProgress = Color(0xFF0B57D0),
+    accentStreak = Color(0xFFB3261E),
+    accentDiscovery = Color(0xFF006C63),
+    accentAnnotation = Color(0xFF7B1FA2)
 )
 
 val DarkFolioColors = FolioColors(
@@ -112,7 +122,11 @@ val DarkFolioColors = FolioColors(
     inverseSurface = Color(0xFFE8EAED),
     inverseOnSurface = Color(0xFF0A0A0A),
     inversePrimary = Color(0xFF1A73E8),
-    statusBar = Color(0xFF000000)
+    statusBar = Color(0xFF000000),
+    accentProgress = Color(0xFF42A5F5),
+    accentStreak = Color(0xFFFFB300),
+    accentDiscovery = Color(0xFF26C6DA),
+    accentAnnotation = Color(0xFFF06292)
 )
 
 // ── LIGHT THEMES ────────────────────────────────────────────────────────
@@ -142,7 +156,11 @@ private val WarmFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF3A2100),
     inverseOnSurface = Color(0xFFFFF4DA),
     inversePrimary = Color(0xFFFFC44D),
-    statusBar = Color(0xFF241400)
+    statusBar = Color(0xFF241400),
+    accentProgress = Color(0xFF005F5F),
+    accentStreak = Color(0xFF9A5B00),
+    accentDiscovery = Color(0xFFA82553),
+    accentAnnotation = Color(0xFF5B3D8F)
 )
 
 private val MatchaFolioColors = LightFolioColors.copy(
@@ -170,7 +188,11 @@ private val MatchaFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF0A2410),
     inverseOnSurface = Color(0xFFECFAE0),
     inversePrimary = Color(0xFF7CF08A),
-    statusBar = Color(0xFF041808)
+    statusBar = Color(0xFF041808),
+    accentProgress = Color(0xFF166534),
+    accentStreak = Color(0xFF92400E),
+    accentDiscovery = Color(0xFF1D4ED8),
+    accentAnnotation = Color(0xFF6D28D9)
 )
 
 private val ArcticFolioColors = LightFolioColors.copy(
@@ -198,7 +220,11 @@ private val ArcticFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF00172E),
     inverseOnSurface = Color(0xFFDBEFFF),
     inversePrimary = Color(0xFF7FC4FF),
-    statusBar = Color(0xFF00101F)
+    statusBar = Color(0xFF00101F),
+    accentProgress = Color(0xFF0747A6),
+    accentStreak = Color(0xFFB45309),
+    accentDiscovery = Color(0xFF0F766E),
+    accentAnnotation = Color(0xFF6D28D9)
 )
 
 private val SakuraFolioColors = LightFolioColors.copy(
@@ -226,7 +252,11 @@ private val SakuraFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF3C001C),
     inverseOnSurface = Color(0xFFFFE2EF),
     inversePrimary = Color(0xFFFF9EC4),
-    statusBar = Color(0xFF280012)
+    statusBar = Color(0xFF280012),
+    accentProgress = Color(0xFFBE185D),
+    accentStreak = Color(0xFF9A3412),
+    accentDiscovery = Color(0xFF6D28D9),
+    accentAnnotation = Color(0xFF0F766E)
 )
 
 private val HoneyFolioColors = LightFolioColors.copy(
@@ -254,7 +284,11 @@ private val HoneyFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF332200),
     inverseOnSurface = Color(0xFFFFF0B8),
     inversePrimary = Color(0xFFFFD54F),
-    statusBar = Color(0xFF1F1400)
+    statusBar = Color(0xFF1F1400),
+    accentProgress = Color(0xFF1D4ED8),
+    accentStreak = Color(0xFFB45309),
+    accentDiscovery = Color(0xFF0F766E),
+    accentAnnotation = Color(0xFF7C3AED)
 )
 
 private val MossFolioColors = LightFolioColors.copy(
@@ -282,7 +316,11 @@ private val MossFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF002115),
     inverseOnSurface = Color(0xFFDDF5E4),
     inversePrimary = Color(0xFF6BF0AC),
-    statusBar = Color(0xFF00160E)
+    statusBar = Color(0xFF00160E),
+    accentProgress = Color(0xFF14532D),
+    accentStreak = Color(0xFFB45309),
+    accentDiscovery = Color(0xFF1D4ED8),
+    accentAnnotation = Color(0xFF6D28D9)
 )
 
 // ── DARK THEMES ─────────────────────────────────────────────────────────
@@ -312,7 +350,11 @@ private val DuskFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFF0DCFF),
     inverseOnSurface = Color(0xFF210847),
     inversePrimary = Color(0xFF6A00BF),
-    statusBar = Color(0xFF0A001C)
+    statusBar = Color(0xFF0A001C),
+    accentProgress = Color(0xFF00E5FF),
+    accentStreak = Color(0xFFFF4FA3),
+    accentDiscovery = Color(0xFFFFB74D),
+    accentAnnotation = Color(0xFF69F0AE)
 )
 
 private val EspressoFolioColors = DarkFolioColors.copy(
@@ -340,7 +382,11 @@ private val EspressoFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFFFE6CC),
     inverseOnSurface = Color(0xFF2A1608),
     inversePrimary = Color(0xFFB25A00),
-    statusBar = Color(0xFF0E0602)
+    statusBar = Color(0xFF0E0602),
+    accentProgress = Color(0xFF4DB6AC),
+    accentStreak = Color(0xFFFF6E5A),
+    accentDiscovery = Color(0xFFFF5C8A),
+    accentAnnotation = Color(0xFFD7B377)
 )
 
 private val MidnightFolioColors = DarkFolioColors.copy(
@@ -368,7 +414,11 @@ private val MidnightFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFDCEAFF),
     inverseOnSurface = Color(0xFF0A1E52),
     inversePrimary = Color(0xFF0047A3),
-    statusBar = Color(0xFF00081F)
+    statusBar = Color(0xFF00081F),
+    accentProgress = Color(0xFF00B8D9),
+    accentStreak = Color(0xFFFFB74D),
+    accentDiscovery = Color(0xFFB39DFF),
+    accentAnnotation = Color(0xFFF06292)
 )
 
 private val OceanFolioColors = DarkFolioColors.copy(
@@ -396,7 +446,11 @@ private val OceanFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFCFFFF0),
     inverseOnSurface = Color(0xFF002E28),
     inversePrimary = Color(0xFF00877A),
-    statusBar = Color(0xFF001410)
+    statusBar = Color(0xFF001410),
+    accentProgress = Color(0xFF29B6FF),
+    accentStreak = Color(0xFFFFB300),
+    accentDiscovery = Color(0xFFB2FF59),
+    accentAnnotation = Color(0xFFF48FB1)
 )
 
 private val GrapeFolioColors = DarkFolioColors.copy(
@@ -424,7 +478,11 @@ private val GrapeFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFF2DCFF),
     inverseOnSurface = Color(0xFF28054D),
     inversePrimary = Color(0xFFA000CC),
-    statusBar = Color(0xFF0F001C)
+    statusBar = Color(0xFF0F001C),
+    accentProgress = Color(0xFFA78BFA),
+    accentStreak = Color(0xFFFF2ED1),
+    accentDiscovery = Color(0xFF00E5FF),
+    accentAnnotation = Color(0xFFFFD54F)
 )
 
 private val OledFolioColors = DarkFolioColors.copy(
@@ -454,7 +512,11 @@ private val OledFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFECEFF1),
     inverseOnSurface = Color(0xFF000000),
     inversePrimary = Color(0xFF546E7A),
-    statusBar = Color(0xFF000000)
+    statusBar = Color(0xFF000000),
+    accentProgress = Color(0xFFB3C7D6),
+    accentStreak = Color(0xFFECEFF1),
+    accentDiscovery = Color(0xFF8CA3B3),
+    accentAnnotation = Color(0xFF6E8794)
 )
 
 private val EmberFolioColors = DarkFolioColors.copy(
@@ -482,7 +544,11 @@ private val EmberFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFFFE0CC),
     inverseOnSurface = Color(0xFF2E0E04),
     inversePrimary = Color(0xFFB73A00),
-    statusBar = Color(0xFF100301)
+    statusBar = Color(0xFF100301),
+    accentProgress = Color(0xFFFFD54F),
+    accentStreak = Color(0xFFFF2E5B),
+    accentDiscovery = Color(0xFFFF8A65),
+    accentAnnotation = Color(0xFFB39DDB)
 )
 
 // ── FUN / UNUSUAL THEMES ───────────────────────────────────────────────
@@ -512,7 +578,11 @@ private val SynthwaveFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFF0E6FF),
     inverseOnSurface = Color(0xFF150535),
     inversePrimary = Color(0xFFC0109E),
-    statusBar = Color(0xFF070112)
+    statusBar = Color(0xFF070112),
+    accentProgress = Color(0xFF00E5FF),
+    accentStreak = Color(0xFFFF6E9C),
+    accentDiscovery = Color(0xFFB388FF),
+    accentAnnotation = Color(0xFF69F0AE)
 )
 
 private val BubblegumFolioColors = LightFolioColors.copy(
@@ -539,7 +609,11 @@ private val BubblegumFolioColors = LightFolioColors.copy(
     outlineVariant = Color(0xFFF0C4DA),
     inverseSurface = Color(0xFF4A1033),
     inverseOnSurface = Color(0xFFFFF0F6),
-    statusBar = Color(0xFF2E0A20)
+    statusBar = Color(0xFF2E0A20),
+    accentProgress = Color(0xFF00695C),
+    accentStreak = Color(0xFFB45309),
+    accentDiscovery = Color(0xFF6A3ABF),
+    accentAnnotation = Color(0xFF01579B)
 )
 
 private val AcidFolioColors = DarkFolioColors.copy(
@@ -567,7 +641,11 @@ private val AcidFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFE8FFD6),
     inverseOnSurface = Color(0xFF0E120C),
     inversePrimary = Color(0xFF5E7A00),
-    statusBar = Color(0xFF020302)
+    statusBar = Color(0xFF020302),
+    accentProgress = Color(0xFF00FFAA),
+    accentStreak = Color(0xFFFFB300),
+    accentDiscovery = Color(0xFFFF2ED1),
+    accentAnnotation = Color(0xFF80DEEA)
 )
 
 private val LavaFolioColors = DarkFolioColors.copy(
@@ -595,7 +673,11 @@ private val LavaFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFFFE4D4),
     inverseOnSurface = Color(0xFF220B06),
     inversePrimary = Color(0xFFB03A00),
-    statusBar = Color(0xFF0C0202)
+    statusBar = Color(0xFF0C0202),
+    accentProgress = Color(0xFF29B6F6),
+    accentStreak = Color(0xFFFF2E63),
+    accentDiscovery = Color(0xFFFFD180),
+    accentAnnotation = Color(0xFFB39DDB)
 )
 
 private val SherbetFolioColors = LightFolioColors.copy(
@@ -622,7 +704,11 @@ private val SherbetFolioColors = LightFolioColors.copy(
     outlineVariant = Color(0xFFF0DCC4),
     inverseSurface = Color(0xFF4A2C1A),
     inverseOnSurface = Color(0xFFFFF7EE),
-    statusBar = Color(0xFF341C0C)
+    statusBar = Color(0xFF341C0C),
+    accentProgress = Color(0xFF007A5E),
+    accentStreak = Color(0xFFB3300C),
+    accentDiscovery = Color(0xFF0277BD),
+    accentAnnotation = Color(0xFF6A1B9A)
 )
 
 // ── NEW VIVID THEMES ───────────────────────────────────────────────────
@@ -652,7 +738,11 @@ private val VaporwaveFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFF2DCFF),
     inverseOnSurface = Color(0xFF260E47),
     inversePrimary = Color(0xFFC2008A),
-    statusBar = Color(0xFF0E0320)
+    statusBar = Color(0xFF0E0320),
+    accentProgress = Color(0xFF00E5FF),
+    accentStreak = Color(0xFFFFB74D),
+    accentDiscovery = Color(0xFFD1B3FF),
+    accentAnnotation = Color(0xFF69F0AE)
 )
 
 private val NeonTokyoFolioColors = DarkFolioColors.copy(
@@ -680,7 +770,11 @@ private val NeonTokyoFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFE8DAFF),
     inverseOnSurface = Color(0xFF140026),
     inversePrimary = Color(0xFFB0005C),
-    statusBar = Color(0xFF05000C)
+    statusBar = Color(0xFF05000C),
+    accentProgress = Color(0xFF00FFD5),
+    accentStreak = Color(0xFFFFB300),
+    accentDiscovery = Color(0xFFE040FB),
+    accentAnnotation = Color(0xFFF48FB1)
 )
 
 private val HyperpopFolioColors = LightFolioColors.copy(
@@ -708,7 +802,11 @@ private val HyperpopFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF33001F),
     inverseOnSurface = Color(0xFFFFDCF2),
     inversePrimary = Color(0xFFFF7ADB),
-    statusBar = Color(0xFF200013)
+    statusBar = Color(0xFF200013),
+    accentProgress = Color(0xFF6200FF),
+    accentStreak = Color(0xFFC2185B),
+    accentDiscovery = Color(0xFF006064),
+    accentAnnotation = Color(0xFF9A3412)
 )
 
 private val ToxicLimeFolioColors = DarkFolioColors.copy(
@@ -736,7 +834,11 @@ private val ToxicLimeFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFE4FFCC),
     inverseOnSurface = Color(0xFF121C02),
     inversePrimary = Color(0xFF5E8400),
-    statusBar = Color(0xFF050800)
+    statusBar = Color(0xFF050800),
+    accentProgress = Color(0xFF00FF9D),
+    accentStreak = Color(0xFFFFA300),
+    accentDiscovery = Color(0xFFB388FF),
+    accentAnnotation = Color(0xFFF48FB1)
 )
 
 private val RetroSunsetFolioColors = DarkFolioColors.copy(
@@ -764,7 +866,11 @@ private val RetroSunsetFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFFFE2CC),
     inverseOnSurface = Color(0xFF300A38),
     inversePrimary = Color(0xFFB73E00),
-    statusBar = Color(0xFF14031C)
+    statusBar = Color(0xFF14031C),
+    accentProgress = Color(0xFF8C9CE0),
+    accentStreak = Color(0xFFFF2E88),
+    accentDiscovery = Color(0xFFFFD97A),
+    accentAnnotation = Color(0xFF80CBC4)
 )
 
 private val PeacockFolioColors = DarkFolioColors.copy(
@@ -792,7 +898,11 @@ private val PeacockFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFC8FAFF),
     inverseOnSurface = Color(0xFF002530),
     inversePrimary = Color(0xFF008A7C),
-    statusBar = Color(0xFF000F16)
+    statusBar = Color(0xFF000F16),
+    accentProgress = Color(0xFF26C6DA),
+    accentStreak = Color(0xFFFF8A00),
+    accentDiscovery = Color(0xFF69F0AE),
+    accentAnnotation = Color(0xFFF06292)
 )
 
 private val RainbowCandyFolioColors = LightFolioColors.copy(
@@ -820,7 +930,11 @@ private val RainbowCandyFolioColors = LightFolioColors.copy(
     inverseSurface = Color(0xFF38001C),
     inverseOnSurface = Color(0xFFFFE3EF),
     inversePrimary = Color(0xFFFF8FB0),
-    statusBar = Color(0xFF240012)
+    statusBar = Color(0xFF240012),
+    accentProgress = Color(0xFF01579B),
+    accentStreak = Color(0xFFC2185B),
+    accentDiscovery = Color(0xFF2E7D32),
+    accentAnnotation = Color(0xFF6A1B9A)
 )
 
 private val MidnightNeonFolioColors = DarkFolioColors.copy(
@@ -848,7 +962,11 @@ private val MidnightNeonFolioColors = DarkFolioColors.copy(
     inverseSurface = Color(0xFFDCF5FF),
     inverseOnSurface = Color(0xFF0A0E18),
     inversePrimary = Color(0xFF3EA814),
-    statusBar = Color(0xFF020306)
+    statusBar = Color(0xFF020306),
+    accentProgress = Color(0xFF3DDCFF),
+    accentStreak = Color(0xFFFF3DDB),
+    accentDiscovery = Color(0xFF7CFF3D),
+    accentAnnotation = Color(0xFFFFB300)
 )
 
 enum class AppPalette(
@@ -1086,6 +1204,17 @@ object FolioTokens {
 
     // Highlight-density heat strip on book detail
     val heatStrip = 14.dp
+
+    // §12 surface tiers
+    val radiusHero = 28.dp          // hero cards sit above radiusCard's 20
+    val heroCoverMin = 120.dp       // Rule 17 hero cover floor
+    val listCoverMin = 64.dp        // Rule 17 list cover floor
+
+    // §12 data visuals
+    val chartPeakCap = 3.dp         // brighter cap marking a peak bar
+    val ringStrokeHero = 8f         // hero ring stroke (compact strip uses 4f)
+    val sparkHeight = 32.dp         // inline sparkline height
+    val gradientMinAlpha = 0.55f    // floor for chart gradients (Rule 15)
 }
 
 object FolioTheme {

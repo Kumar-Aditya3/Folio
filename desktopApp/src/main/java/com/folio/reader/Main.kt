@@ -1,6 +1,7 @@
 package com.folio.reader
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
@@ -346,6 +347,7 @@ private sealed interface Screen {
     data object Library : Screen
     data class Reader(val book: Book, val targetSpineIndex: Int? = null) : Screen
     data object Settings : Screen
+    data object Stats : Screen
     data object Search : Screen
     data class BookDetail(val bookId: String) : Screen
     data object TagManager : Screen
@@ -846,10 +848,6 @@ fun main(args: Array<String>) {
                             popScreen()
                             true
                         }
-                        libraryVM.statsVisible.value -> {
-                            libraryVM.statsVisible.value = false
-                            true
-                        }
                         else -> false
                     }
                 } else false
@@ -944,16 +942,22 @@ fun main(args: Array<String>) {
                                                 browseViewModel = mangaLibBrowseVM,
                                             )
                                         },
-                                        statsContent = {
-                                            StatisticsTabContent(
-                                                viewModel = statisticsVM,
-                                                onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
-                                                settingsRepository = deps.settingsRepository,
-                                                initialGoalMinutes = globalSettings.dailyGoalMinutes,
-                                                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
-                                            )
-                                        }
+                                        onOpenStats = { pushScreen(Screen.Stats) }
                                     )
+                                }
+
+                                is Screen.Stats -> {
+                                    // StatisticsTabContent supplies no chrome of its own.
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        com.folio.reader.ui.components.FolioTopBar(title = "Stats")
+                                        StatisticsTabContent(
+                                            viewModel = statisticsVM,
+                                            onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
+                                            settingsRepository = deps.settingsRepository,
+                                            initialGoalMinutes = globalSettings.dailyGoalMinutes,
+                                            mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
+                                        )
+                                    }
                                 }
 
                                 is Screen.Reader -> ReaderRoute(

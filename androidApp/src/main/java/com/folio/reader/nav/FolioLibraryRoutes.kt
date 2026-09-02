@@ -154,9 +154,7 @@ fun LibraryRoute(
                 browseViewModel = navModel.mangaBrowseVM,
                 onImportLocal = { callbacks.onImportMangaChoice() }
             )
-        },
-        // Stats moved to its own bottom-bar destination (§3.4 step 2).
-        statsContent = null
+        }
     )
 }
 

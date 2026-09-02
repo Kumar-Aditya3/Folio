@@ -290,13 +290,13 @@ data class Theme(
                 id = "paper", name = "Paper",
                 background = 0xFFFFF8EC.toInt(), surface = 0xFFF5ECD8.toInt(),
                 primaryText = 0xFF3B2A14.toInt(), secondaryText = 0xFF7A6544.toInt(),
-                headingText = 0xFF2E1E0A.toInt(), link = 0xFFBF8C3E.toInt(),
+                headingText = 0xFF2E1E0A.toInt(), link = 0xFF8A5A00.toInt(),
                 selection = 0xFFD4C4A4.toInt(), bookmark = 0xFFC0504D.toInt(),
                 highlightColors = listOf(
                     0xFFE8C84D.toInt(), 0xFF4D8FC7.toInt(), 0xFF5DAE5D.toInt(), 0xFFD65F5F.toInt(),
                     0xFF9B7BC7.toInt(), 0xFFD4A843.toInt(), 0xFF5DB8B8.toInt(), 0xFFD67AB5.toInt()
                 ),
-                progress = 0xFFBF8C3E.toInt(), divider = 0xFFE8D9BE.toInt(),
+                progress = 0xFF8A5A00.toInt(), divider = 0xFFE8D9BE.toInt(),
                 isDark = false
             ),
             "sepia" to Theme(

@@ -75,28 +75,29 @@ import androidx.compose.foundation.border
  * elevation instead.
  */
 @Composable
-fun Modifier.glassPanel(shape: Shape): Modifier {
+fun Modifier.glassPanel(shape: Shape, accent: Color? = null): Modifier {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
     val luminance = colors.background.red * 0.2126f + colors.background.green * 0.7152f + colors.background.blue * 0.0722f
     val dark = luminance < 0.45f
     val fill = if (dark) colors.surface.copy(alpha = 0.86f) else colors.surface.copy(alpha = 0.89f)
+    // §12.6: heroes pass an accent that mixes 8% into the sheen's top stop;
+    // null keeps the sheen byte-identical to the un-accented panel.
+    val sheenTop = if (accent != null) {
+        androidx.compose.ui.graphics.lerp(Color.White, accent, 0.08f).copy(alpha = if (dark) 0.14f else 0.26f)
+    } else null
+    val sheen = if (dark) listOf(
+        sheenTop ?: Color.White.copy(alpha = 0.14f),
+        Color.White.copy(alpha = 0.04f),
+        Color.White.copy(alpha = 0.08f)
+    ) else listOf(
+        sheenTop ?: Color.White.copy(alpha = 0.26f),
+        Color.White.copy(alpha = 0.08f),
+        Color.White.copy(alpha = 0.17f)
+    )
     return this
         .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
         .background(fill, shape)
-        .background(
-            brush = Brush.verticalGradient(
-                colors = if (dark) listOf(
-                    Color.White.copy(alpha = 0.14f),
-                    Color.White.copy(alpha = 0.04f),
-                    Color.White.copy(alpha = 0.08f)
-                ) else listOf(
-                    Color.White.copy(alpha = 0.26f),
-                    Color.White.copy(alpha = 0.08f),
-                    Color.White.copy(alpha = 0.17f)
-                )
-            ),
-            shape = shape
-        )
+        .background(brush = Brush.verticalGradient(colors = sheen), shape = shape)
         .border(1.dp, if (dark) Color.White.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.14f), shape)
         .clip(shape)
 }
@@ -106,12 +107,13 @@ fun Modifier.glassPanel(shape: Shape): Modifier {
 fun FolioSectionCard(
     title: String? = null,
     modifier: Modifier = Modifier,
+    accent: Color? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .glassPanel(RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusCard))
+            .glassPanel(RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusCard), accent)
             .padding(com.folio.reader.ui.theme.FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(com.folio.reader.ui.theme.FolioTokens.space2)
     ) {
@@ -120,9 +122,57 @@ fun FolioSectionCard(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary
+                color = accent ?: MaterialTheme.colorScheme.primary
             )
         }
+        content()
+    }
+}
+
+/**
+ * §12.1 Rule 13 hero tier: the one surface a screen is about. Accent-tinted
+ * gradient over glass at radiusHero; the accent defaults to the palette's
+ * accentProgress role. At most one per screen.
+ */
+@Composable
+fun FolioHeroCard(
+    modifier: Modifier = Modifier,
+    accent: Color? = null,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
+) {
+    val tint = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.accentProgress
+    val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusHero)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .glassPanel(shape, tint)
+            .background(
+                brush = Brush.verticalGradient(
+                    listOf(tint.copy(alpha = 0.30f), Color.Transparent)
+                ),
+                shape = shape
+            )
+            .padding(com.folio.reader.ui.theme.FolioTokens.space3)
+    ) {
+        content()
+    }
+}
+
+/**
+ * §12.1 Rule 13 quiet tier: no fill, no border — just breathing room. For
+ * lists, secondary stats and metadata that must not compete with cards.
+ */
+@Composable
+fun FolioQuietRow(
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = com.folio.reader.ui.theme.FolioTokens.space2),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         content()
     }
 }

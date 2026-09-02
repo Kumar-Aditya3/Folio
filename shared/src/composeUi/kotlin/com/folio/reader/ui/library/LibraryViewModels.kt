@@ -35,9 +35,6 @@ class LibraryViewModel(
     val selectedBookIds = MutableStateFlow<Set<String>>(emptySet())
     val isSelectionMode = MutableStateFlow(false)
 
-    /** Stats tab visibility; hoisted so system back returns to the shelf instead of exiting. */
-    val statsVisible = MutableStateFlow(false)
-
     fun toggleSelection(bookId: String) {
         val next = if (bookId in selectedBookIds.value) selectedBookIds.value - bookId else selectedBookIds.value + bookId
         selectedBookIds.value = next
