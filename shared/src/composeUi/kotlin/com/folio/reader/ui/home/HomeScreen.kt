@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -26,6 +27,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,7 +39,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -50,10 +59,13 @@ import com.folio.reader.ui.components.FolioHeroCard
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberMotionEnabled
 
 /**
  * §12.4 Home surface: hero first, then never two adjacent surfaces of the same
@@ -74,7 +86,8 @@ fun HomeScreen(
     onOpenMangaDetail: (String) -> Unit = {},
     onOpenMangaReader: (String, String) -> Unit = { _, _ -> },
     onOpenSourceWeb: (String) -> Unit = {},
-    onOpenDiscover: (MangaDiscoverItem) -> Unit = {}
+    onOpenDiscover: (MangaDiscoverItem) -> Unit = {},
+    onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> }
 ) {
     when {
         !state.loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -88,44 +101,78 @@ fun HomeScreen(
                     action = { Button(onClick = onImportClick) { Text("Import a book") } }
                 )
             }
-        else -> LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(FolioTokens.space4),
-            verticalArrangement = Arrangement.spacedBy(FolioTokens.space4)
-        ) {
-            item { HeroCard(state, onOpenBook, onOpenLibrary) }
-            item { GoalStrip(state, onOpenStats, onOpenExclusions) }
-            if (state.continueReading.isNotEmpty()) {
-                item { ContinueReadingCard(state.continueReading, onOpenBook) }
-            }
-            // §11.4: manga Continue reading — separate card, never merged into the
-            // books carousel. Primary tap opens the reader; the overflow item is
-            // the only path to the source's web page.
-            if (state.mangaContinue.isNotEmpty() && mangaBackend != null) {
-                item {
-                    MangaContinueCard(
-                        items = state.mangaContinue,
-                        backend = mangaBackend,
-                        onOpenReader = onOpenMangaReader,
-                        onOpenDetail = onOpenMangaDetail,
-                        onOpenSourceWeb = onOpenSourceWeb
-                    )
+        else -> {
+            val listState = rememberLazyListState()
+            // §13.9 hero collapse: tracked 1:1 off the scroll offset — no spring,
+            // no settle — over the first 160dp; reduce-motion keeps the hero full
+            // size and simply scrolling away.
+            val motion = rememberMotionEnabled()
+            val density = LocalDensity.current
+            val collapseRange = with(density) { 160.dp.toPx() }
+            val collapse = remember(motion, collapseRange) {
+                derivedStateOf {
+                    when {
+                        !motion -> 0f
+                        listState.firstVisibleItemIndex > 0 -> 1f
+                        else -> (listState.firstVisibleItemScrollOffset / collapseRange).coerceIn(0f, 1f)
+                    }
                 }
             }
-            // §11.4: manga "New chapters" sits after the books carousel; hidden
-            // when the total is zero. Tapping a row opens the manga detail.
-            if (state.newChapters.isNotEmpty() && mangaBackend != null) {
-                item { NewChaptersCard(state.newChapters, mangaBackend, onOpenMangaDetail) }
+            val fullyCollapsed = remember { derivedStateOf { collapse.value >= 1f } }
+            // The hero tint is computed here so the host top bar can bleed the
+            // same colour upward (§13.9); the hero itself re-derives it cheaply
+            // from the accent cache.
+            val heroTint = if (state.coverTint && state.hero != null) {
+                rememberCoverAccent(state.hero.coverPath, FolioTheme.colors.accentProgress)
+            } else null
+            val fallbackTint = FolioTheme.colors.accentProgress
+            LaunchedEffect(fullyCollapsed.value, state.hero?.id, state.coverTint) {
+                onHeroCollapse(
+                    if (fullyCollapsed.value) 1f else 0f,
+                    state.hero?.title,
+                    heroTint ?: fallbackTint
+                )
             }
-            // §11.4: Discover — LATEST from the most recently read manga's source.
-            if (state.discover.isNotEmpty() && mangaBackend != null) {
-                item { DiscoverCard(state.discover, mangaBackend, onOpenDiscover) }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(FolioTokens.space4),
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.space4)
+            ) {
+                item { HeroCard(state, collapse, heroTint, onOpenBook, onOpenLibrary) }
+                item { GoalStrip(state, onOpenStats, onOpenExclusions) }
+                if (state.continueReading.isNotEmpty()) {
+                    item { ContinueReadingCard(state.continueReading, onOpenBook) }
+                }
+                // §11.4: manga Continue reading — separate card, never merged into the
+                // books carousel. Primary tap opens the reader; the overflow item is
+                // the only path to the source's web page.
+                if (state.mangaContinue.isNotEmpty() && mangaBackend != null) {
+                    item {
+                        MangaContinueCard(
+                            items = state.mangaContinue,
+                            backend = mangaBackend,
+                            onOpenReader = onOpenMangaReader,
+                            onOpenDetail = onOpenMangaDetail,
+                            onOpenSourceWeb = onOpenSourceWeb
+                        )
+                    }
+                }
+                // §11.4: manga "New chapters" sits after the books carousel; hidden
+                // when the total is zero. Tapping a row opens the manga detail.
+                if (state.newChapters.isNotEmpty() && mangaBackend != null) {
+                    item { NewChaptersCard(state.newChapters, mangaBackend, onOpenMangaDetail) }
+                }
+                // §11.4: Discover — LATEST from the most recently read manga's source.
+                if (state.discover.isNotEmpty() && mangaBackend != null) {
+                    item { DiscoverCard(state.discover, mangaBackend, onOpenDiscover) }
+                }
+                val finishedTitle = state.becauseFinishedTitle
+                if (finishedTitle != null && state.candidates.size >= 2) {
+                    item { BecauseYouFinishedCard(finishedTitle, state.candidates, onOpenBookDetail) }
+                }
+                item { ThisWeekCard(state) }
             }
-            val finishedTitle = state.becauseFinishedTitle
-            if (finishedTitle != null && state.candidates.size >= 2) {
-                item { BecauseYouFinishedCard(finishedTitle, state.candidates, onOpenBookDetail) }
-            }
-            item { ThisWeekCard(state) }
         }
     }
 }
@@ -134,10 +181,17 @@ fun HomeScreen(
  * §12.4 hero — "Reading now". Thin progress bar under the cover (one form per
  * view, §2.6), one filled "Continue" button. Null hero is the §12.9 designed
  * empty: never fall back to an excluded book.
+ *
+ * §13.3: the hero gradient is tinted by the current cover's dominant colour
+ * (contrast-guarded, toggle in Themes) instead of a flat accentProgress. §13.9:
+ * over the first 160dp of scroll the cover scales 1.0→0.55 toward the top bar
+ * and the gradient fades 0.30→0.12, tracked 1:1 with the finger.
  */
 @Composable
 private fun HeroCard(
     state: HomeUiState,
+    collapse: State<Float>,
+    heroTint: Color?,
     onOpenBook: (String) -> Unit,
     onOpenLibrary: () -> Unit
 ) {
@@ -159,13 +213,28 @@ private fun HeroCard(
         }
         return
     }
-    FolioHeroCard(modifier = Modifier.clickable { onOpenBook(hero.id) }) {
+    val collapseFraction = collapse.value
+    val gradientAlpha = androidx.compose.ui.util.lerp(0.30f, 0.12f, collapseFraction)
+    FolioHeroCard(
+        modifier = Modifier.clickable { onOpenBook(hero.id) },
+        accent = heroTint,
+        mesh = true,
+        gradientAlpha = gradientAlpha
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Box(
                     modifier = Modifier
                         .width(FolioTokens.heroCoverMin)
                         .height(180.dp)
+                        .graphicsLayer {
+                            val scale = androidx.compose.ui.util.lerp(1f, 0.55f, collapse.value)
+                            scaleX = scale
+                            scaleY = scale
+                            // Shrink toward the top bar; never fully hidden — the
+                            // collapsed thumbnail keeps the anchor.
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                        }
                         .clip(RoundedCornerShape(4.dp))
                 ) {
                     BookCover(coverPath = hero.coverPath, title = hero.title, author = hero.author)
@@ -399,8 +468,12 @@ private fun ThisWeekCard(state: HomeUiState) {
 @Composable
 private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
     val color = FolioTheme.colors.accentProgress
+    // §13.5: the line trims in once per window (keyed on dates, not minutes),
+    // drawn in the canvas phase so nothing recomposes per frame.
+    val entry = rememberEntryState(week.map { it.date })
     Canvas(modifier = modifier) {
         if (week.size < 2) return@Canvas
+        val progress = entry.value
         val max = week.maxOf { it.minutes }.coerceAtLeast(1L)
         val stepX = size.width / (week.size - 1)
         val points = week.mapIndexed { index, day ->
@@ -412,18 +485,20 @@ private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
             lineTo(size.width, size.height)
             close()
         }
-        drawPath(
-            areaPath,
-            brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
-        )
         val linePath = Path().apply {
             points.forEachIndexed { index, point ->
                 if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
             }
         }
-        drawPath(linePath, color = color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        clipRect(size.width * progress) {
+            drawPath(
+                areaPath,
+                brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
+            )
+            drawPath(linePath, color = color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        }
         // The dot marks today — the last day of the trailing week.
-        points.last().let { drawCircle(color, radius = 3.dp.toPx(), center = it) }
+        if (progress >= 1f) points.last().let { drawCircle(color, radius = 3.dp.toPx(), center = it) }
     }
 }
 

@@ -29,6 +29,10 @@ fun ProgressRing(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
 ) {
+    // §13.5: the sweep grows from zero once per instance — rememberSaveable, so
+    // a lazy-list item scrolled away and back does not replay it. Live progress
+    // changes draw through immediately once the entry has played.
+    val entry = rememberEntryProgress()
     Canvas(modifier = modifier) {
         val strokePx = strokeWidth.dp.toPx()
         val diameter = minOf(size.width, size.height) - strokePx
@@ -48,7 +52,7 @@ fun ProgressRing(
         drawArc(
             color = color,
             startAngle = -90f,
-            sweepAngle = 360f * progress.coerceIn(0f, 1f),
+            sweepAngle = 360f * progress.coerceIn(0f, 1f) * entry,
             useCenter = false,
             topLeft = topLeft,
             size = arcSize,

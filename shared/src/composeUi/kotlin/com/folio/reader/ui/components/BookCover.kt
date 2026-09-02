@@ -53,6 +53,20 @@ fun clearCoverCache() {
 }
 
 /**
+ * §13.3: the already-decoded cover bitmap for accent sampling — reads the cache
+ * only, waiting briefly for [BookCover] to finish decoding the same path. Never
+ * decodes here: a second decode path would re-open the v1.0.24 crash class.
+ */
+internal suspend fun awaitCoverBitmapForAccent(path: String, timeoutMs: Long = 3_000): ImageBitmap? {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+        coverCache[path]?.let { return it }
+        kotlinx.coroutines.delay(100)
+    }
+    return coverCache[path]
+}
+
+/**
  * An inline EPUB image: [src] is resolved against the chapter by [resolve]
  * (platform layer extracts it from the EPUB to a cache file), then decoded and
  * displayed with a fade-in. Falls back to a subtle placeholder while loading.

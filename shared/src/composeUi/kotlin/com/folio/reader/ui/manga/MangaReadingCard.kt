@@ -16,6 +16,8 @@ import com.folio.reader.ui.book.ReadingRow
 import com.folio.reader.ui.book.dayLabel
 import com.folio.reader.ui.book.sessionMinutesByDay
 import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.chartStagger
+import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.statistics.ChartBar
 import com.folio.reader.ui.statistics.shortMinutes
 import com.folio.reader.ui.theme.FolioTheme
@@ -46,6 +48,10 @@ internal fun MangaReadingSection(
         val buckets = sessionMinutesByDay(sessions, days = 30)
         if (buckets.any { it.minutes > 0L }) {
             val peak = buckets.maxOf { it.minutes }.coerceAtLeast(1L)
+            // §13.5: one entry sweep, no stagger — 30 bars staggering 40ms would
+            // take 1.5s and read as a loading state.
+            val entry = rememberEntryProgress(buckets.map { it.date })
+            val (growth, cap) = chartStagger(entry, 0, 1)
             Row(
                 modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.chartSparkGap),
@@ -56,6 +62,8 @@ internal fun MangaReadingSection(
                         value = day.minutes.toFloat(),
                         peak = peak.toFloat(),
                         modifier = Modifier.weight(1f),
+                        growth = growth,
+                        capReveal = cap,
                     )
                 }
             }

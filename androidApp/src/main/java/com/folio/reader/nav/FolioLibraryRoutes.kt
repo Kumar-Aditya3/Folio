@@ -2,6 +2,8 @@ package com.folio.reader.nav
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,10 +12,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.MaterialTheme
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
@@ -38,12 +46,42 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
     val navController = navModel.navController ?: return
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // §13.9 hero collapse: Home reports the fully-collapsed flip, the hero title
+    // and the hero tint; the bar swaps its title to titleMedium and bleeds the
+    // hero gradient upward while the collapse tracks the finger inside HomeScreen.
+    var heroCollapsed by remember { mutableStateOf(false) }
+    var heroTitle by remember { mutableStateOf<String?>(null) }
+    var heroTint by remember { mutableStateOf<Color?>(null) }
+    val bleedAlpha by animateFloatAsState(
+        targetValue = if (heroCollapsed) 1f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "heroBleed",
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(FolioTheme.colors.background)
     ) {
-        FolioTopBar(title = "Home")
+        Box {
+            FolioTopBar(
+                title = if (heroCollapsed && heroTitle != null) heroTitle!! else "Home",
+                titleStyle = if (heroCollapsed && heroTitle != null) {
+                    MaterialTheme.typography.titleMedium
+                } else null
+            )
+            if (heroTint != null && bleedAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer { alpha = bleedAlpha }
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, heroTint!!.copy(alpha = 0.12f))
+                            )
+                        )
+                )
+            }
+        }
         Box(modifier = Modifier.weight(1f)) {
             val viewModel = remember {
                 HomeViewModel(
@@ -109,6 +147,11 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                             navController.navigate(FolioDestination.mangaDetail(id))
                         }
                     }
+                },
+                onHeroCollapse = { collapsed, title, tint ->
+                    heroCollapsed = collapsed >= 1f
+                    heroTitle = title
+                    heroTint = tint
                 }
             )
         }
