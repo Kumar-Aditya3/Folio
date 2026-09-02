@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
@@ -145,6 +146,12 @@ fun SettingsHubScreen(
             }
             item {
                 FolioSectionCard(title = "Manga") {
+                    HubRow(
+                        icon = Icons.Filled.Notifications,
+                        title = "Manga updates",
+                        subtitle = "Background chapter checks",
+                        onClick = { onOpenSettings(FolioSettingsCategory.MANGA) }
+                    )
                     HubRow(
                         icon = Icons.Filled.Extension,
                         title = "Extensions",

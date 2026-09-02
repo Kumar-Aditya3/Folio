@@ -19,6 +19,17 @@ data class MangaUpdateRunResult(
     val newChaptersTotal: Int,
 )
 
+/** One Home "New chapters" row (§11.4): a library manga with new_chapter_count > 0. */
+data class MangaNewChapterBadge(
+    val mangaId: String,
+    val title: String,
+    val sourceId: Long,
+    val thumbnailUrl: String?,
+    val coverPath: String?,
+    val newChapterCount: Int,
+    val lastCheckedAt: Instant,
+)
+
 /**
  * Background manga chapter update checks (§11.3). Runs are rate-limited and capped by
  * the implementation; per-manga failures never propagate, they land in
@@ -33,4 +44,13 @@ interface MangaUpdateRepository {
 
     /** Resets the badge once the reader has shown the new chapters. */
     suspend fun clearNewChapters(mangaId: String)
+
+    /**
+     * Up to 6 library manga with new chapters, newest check first. Joins the library
+     * table (orphaned rows for removed manga never surface) and resolves the
+     * §11.2/§12.9 manga exclusions so excluded titles never reach Home.
+     */
+    suspend fun getNewChapterBadges(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>> = emptySet()
+    ): List<MangaNewChapterBadge>
 }

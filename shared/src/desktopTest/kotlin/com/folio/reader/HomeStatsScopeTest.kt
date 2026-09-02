@@ -5,6 +5,10 @@ import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
+import com.folio.reader.manga.MangaNewChapterBadge
+import com.folio.reader.manga.MangaUpdateRepository
+import com.folio.reader.manga.MangaUpdateRunResult
+import com.folio.reader.manga.MangaUpdateState
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Chapter
@@ -22,6 +26,7 @@ import com.folio.reader.ui.statistics.StatisticsViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
@@ -123,6 +128,22 @@ class HomeStatsScopeTest {
         override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {}
     }
 
+    /** Mirrors the real query's one-way MANGA scope; source/category resolution lives in JDBC tests. */
+    private class FakeMangaUpdateRepo(badges: List<MangaNewChapterBadge>) : MangaUpdateRepository {
+        val badges = MutableStateFlow(badges)
+        override suspend fun runUpdateCheck(): MangaUpdateRunResult = MangaUpdateRunResult(0, 0, 0)
+        override fun observeUpdateStates(): Flow<List<MangaUpdateState>> = flowOf(emptyList())
+        override suspend fun clearNewChapters(mangaId: String) {}
+        override suspend fun getNewChapterBadges(
+            exclusions: Set<Pair<Scope, String>>
+        ): List<MangaNewChapterBadge> {
+            val excluded = exclusions
+                .mapNotNull { (kind, id) -> if (kind == Scope.MANGA) id else null }
+                .toSet()
+            return badges.value.filter { it.mangaId !in excluded }
+        }
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private fun book(
@@ -156,16 +177,28 @@ class HomeStatsScopeTest {
         )
     }
 
+    private fun badge(mangaId: String, count: Int) = MangaNewChapterBadge(
+        mangaId = mangaId,
+        title = "Manga $mangaId",
+        sourceId = 1L,
+        thumbnailUrl = null,
+        coverPath = null,
+        newChapterCount = count,
+        lastCheckedAt = Clock.System.now()
+    )
+
     private fun homeViewModel(
         books: List<Book>,
         sessions: List<ReadingSession>,
-        exclusions: FakeExclusionRepo? = null
+        exclusions: FakeExclusionRepo? = null,
+        mangaUpdate: FakeMangaUpdateRepo? = null
     ): HomeViewModel = HomeViewModel(
         bookRepository = FakeBookRepo(books),
         sessionRepository = FakeSessionRepo(sessions),
         statsExclusionRepository = exclusions,
         tagRepository = EmptyTagRepo(),
-        collectionRepository = EmptyCollectionRepo()
+        collectionRepository = EmptyCollectionRepo(),
+        mangaUpdateRepository = mangaUpdate
     )
 
     // ── §12.9 acceptance ─────────────────────────────────────────────────────
@@ -264,5 +297,35 @@ class HomeStatsScopeTest {
         // And the same list of in-progress books (hero + carousel on Home).
         val homeInProgress = listOfNotNull(home.hero?.id) + home.continueReading.map { it.id }
         assertEquals(stats.currentlyReading.map { it.id }.toSet(), homeInProgress.toSet())
+    }
+
+    @Test
+    fun `manga new-chapter badges surface on Home and honor the manga exclusions`() = runBlocking {
+        val mangaUpdate = FakeMangaUpdateRepo(listOf(badge("m1", 3), badge("m2", 12)))
+        val exclusions = FakeExclusionRepo().apply { add(Scope.MANGA, "m2") }
+
+        val state = homeViewModel(
+            books = listOf(book("a")),
+            sessions = emptyList(),
+            exclusions = exclusions,
+            mangaUpdate = mangaUpdate
+        ).state.first()
+
+        // §12.9: an excluded manga's badge never reaches Home.
+        assertEquals(listOf("m1"), state.newChapters.map { it.mangaId })
+        assertEquals(3, state.newChapters.single().newChapterCount)
+    }
+
+    @Test
+    fun `new-chapters card is hidden with no badges or no update repository`() = runBlocking {
+        val noBadges = homeViewModel(
+            books = listOf(book("a")),
+            sessions = emptyList(),
+            mangaUpdate = FakeMangaUpdateRepo(emptyList())
+        ).state.first()
+        assertTrue(noBadges.newChapters.isEmpty())
+
+        val noRepo = homeViewModel(books = listOf(book("a")), sessions = emptyList()).state.first()
+        assertTrue(noRepo.newChapters.isEmpty())
     }
 }

@@ -6,6 +6,8 @@ import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
+import com.folio.reader.manga.MangaNewChapterBadge
+import com.folio.reader.manga.MangaUpdateRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.ReadingSession
@@ -46,6 +48,8 @@ data class HomeUiState(
     val continueReading: List<ReadingInProgress> = emptyList(),
     val becauseFinishedTitle: String? = null,
     val candidates: List<Book> = emptyList(),
+    /** §11.4: library manga with new chapters, newest check first — empty hides the card. */
+    val newChapters: List<MangaNewChapterBadge> = emptyList(),
     /** Rule 8: some exclusions are active — Home shows the "review" line. */
     val exclusionsActive: Boolean = false
 )
@@ -66,7 +70,8 @@ class HomeViewModel(
     private val settingsRepository: SettingsRepository? = null,
     private val statsExclusionRepository: StatsExclusionRepository? = null,
     private val tagRepository: TagRepository? = null,
-    private val collectionRepository: CollectionRepository? = null
+    private val collectionRepository: CollectionRepository? = null,
+    private val mangaUpdateRepository: MangaUpdateRepository? = null
 ) {
     private val timeZone: TimeZone get() = TimeZone.currentSystemDefault()
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
@@ -167,6 +172,12 @@ class HomeViewModel(
             .count { (_, group) -> group.minOf { it.startedAt } >= weekStartInstant }
         val finishedThisWeek = gatedFinished.count { it.updatedAt >= weekStartInstant }
 
+        // §11.4: the update repository resolves the same exclusions against the
+        // manga side; null on desktop keeps the legacy shape.
+        val newChapters = mangaUpdateRepository
+            ?.getNewChapterBadges(exclusions ?: emptySet())
+            .orEmpty()
+
         return HomeUiState(
             loaded = true,
             hasBooks = books.isNotEmpty(),
@@ -183,6 +194,7 @@ class HomeViewModel(
             continueReading = continueReading,
             becauseFinishedTitle = anchor?.displayTitle,
             candidates = candidatePool,
+            newChapters = newChapters,
             exclusionsActive = exclusions?.isNotEmpty() == true
         )
     }

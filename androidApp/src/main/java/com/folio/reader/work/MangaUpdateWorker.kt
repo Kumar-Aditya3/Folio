@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.folio.reader.FolioApplication
-import com.folio.reader.database.JdbcMangaUpdateRepository
 
 /**
  * Background manga chapter update check (§11.3). The heavy lifting (rate limiting,
@@ -18,13 +17,7 @@ class MangaUpdateWorker(
 
     override suspend fun doWork(): Result {
         val graph = (applicationContext as? FolioApplication)?.graph ?: return Result.failure()
-        val repository = JdbcMangaUpdateRepository(
-            db = graph.database,
-            mangaRepository = graph.mangaRepository,
-            chapterRepository = graph.mangaChapterRepository,
-            backend = graph.mangaBackend,
-        )
-        val result = runCatching { repository.runUpdateCheck() }.getOrElse { e ->
+        val result = runCatching { graph.mangaUpdateRepository.runUpdateCheck() }.getOrElse { e ->
             e.printStackTrace()
             return Result.failure()
         }

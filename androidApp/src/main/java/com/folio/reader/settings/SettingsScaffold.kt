@@ -28,6 +28,7 @@ object FolioSettingsCategory {
     const val CLOUD_SYNC = "cloud_sync"
     const val ADVANCED = "advanced"
     const val STATS = "stats"
+    const val MANGA = "manga"
 }
 
 /**
