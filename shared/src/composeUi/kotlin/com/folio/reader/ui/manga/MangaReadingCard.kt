@@ -38,6 +38,7 @@ internal fun MangaReadingSection(
     sessions: List<ReadingSession>,
     chaptersRead: Int,
     chaptersReadThisWeek: Int,
+    reReads: Int = 0,
 ) {
     if (sessions.isEmpty()) return
 
@@ -82,6 +83,7 @@ internal fun MangaReadingSection(
             ReadingRow("Last 7 days", shortMinutes(weekMinutes))
             ReadingRow("Chapters read", chaptersRead.toString())
             ReadingRow("Chapters (7 days)", chaptersReadThisWeek.toString())
+            if (reReads > 0) ReadingRow("Re-reads", reReads.toString())
         }
     }
 }

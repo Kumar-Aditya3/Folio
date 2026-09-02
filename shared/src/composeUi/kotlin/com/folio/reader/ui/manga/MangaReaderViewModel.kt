@@ -42,8 +42,12 @@ class MangaReaderViewModel(
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
     internal val fileSystem: com.folio.reader.platform.FolioFileSystem,
     internal val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
+    internal val cycleRepo: com.folio.reader.database.ReadingCycleRepository? = null,
 ) {
     val scope = mangaVmScope()
+
+    /** Re-read reconcile runs at most once per chapter per reader visit (§11.5 item 5). */
+    internal val reconciledFinishChapters = mutableSetOf<String>()
 
     val manga = MutableStateFlow<MangaEntry?>(null)
     val chapter = MutableStateFlow<MangaChapter?>(null)

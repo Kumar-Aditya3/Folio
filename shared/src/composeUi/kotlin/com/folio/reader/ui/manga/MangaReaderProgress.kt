@@ -65,6 +65,15 @@ internal suspend fun MangaReaderViewModel.writeSnapshot(snapshot: ProgressSnapsh
             if (existing != null && !existing.read) {
                 chapterRepo.markRead(listOf(snapshot.chapterId), true)
             }
+            // Re-read pass bookkeeping (§11.5 item 5). Guarded so a cycle-tracking
+            // failure can never kill the save worker loop, and deduped per chapter
+            // per reader visit so re-entering the final page cannot double-count.
+            val cycles = cycleRepo
+            if (cycles != null && reconciledFinishChapters.add(snapshot.chapterId)) {
+                runCatching {
+                    reconcileMangaReadingCycle(mangaId, chapterRepo, cycles, snapshot.chapterId)
+                }
+            }
         }
         mangaRepo.touchLastRead(mangaId)
     }

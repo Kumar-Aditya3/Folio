@@ -54,6 +54,7 @@ class AppGraph(private val app: Application) {
     val bookRepository = JdbcBookRepository(database)
     val positionRepository = JdbcReadingPositionRepository(database)
     val sessionRepository = JdbcReadingSessionRepository(database)
+    val readingCycleRepository = com.folio.reader.database.JdbcReadingCycleRepository(database)
     val bookmarkRepository = JdbcBookmarkRepository(database)
     val highlightRepository = JdbcHighlightRepository(database)
     val noteRepository = JdbcNoteRepository(database)

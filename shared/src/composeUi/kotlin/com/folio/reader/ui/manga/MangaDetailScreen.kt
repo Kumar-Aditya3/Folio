@@ -71,6 +71,7 @@ fun MangaDetailScreen(
     val manga by viewModel.manga.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
     val sessions by viewModel.sessions.collectAsState()
+    val reReads by viewModel.reReads.collectAsState()
     val refreshing by viewModel.refreshing.collectAsState()
     val error by viewModel.error.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
@@ -484,6 +485,7 @@ fun MangaDetailScreen(
                     sessions = sessions,
                     chaptersRead = chapters.count { it.read },
                     chaptersReadThisWeek = chapters.count { it.read && it.updatedAt.toLocalDateTime(zone).date >= weekAgo },
+                    reReads = reReads,
                 )
             }
 
