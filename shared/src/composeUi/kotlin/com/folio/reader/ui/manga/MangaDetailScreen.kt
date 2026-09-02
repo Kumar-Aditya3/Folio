@@ -55,6 +55,9 @@ import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
 
 @Composable
@@ -67,6 +70,7 @@ fun MangaDetailScreen(
 ) {
     val manga by viewModel.manga.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
+    val sessions by viewModel.sessions.collectAsState()
     val refreshing by viewModel.refreshing.collectAsState()
     val error by viewModel.error.collectAsState()
     val sortAscending by viewModel.sortAscending.collectAsState()
@@ -449,6 +453,17 @@ fun MangaDetailScreen(
                         )
                     }
                 }
+            }
+
+            item {
+                val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+                val weekAgo = kotlinx.datetime.Clock.System.now()
+                    .toLocalDateTime(zone).date.minus(kotlinx.datetime.DatePeriod(days = 7))
+                MangaReadingSection(
+                    sessions = sessions,
+                    chaptersRead = chapters.count { it.read },
+                    chaptersReadThisWeek = chapters.count { it.read && it.updatedAt.toLocalDateTime(zone).date >= weekAgo },
+                )
             }
 
             item {
