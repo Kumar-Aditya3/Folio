@@ -6,7 +6,13 @@ import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
+import com.folio.reader.manga.BrowseMode
+import com.folio.reader.manga.MangaBackend
+import com.folio.reader.manga.MangaCategoryRepository
+import com.folio.reader.manga.MangaChapterRepository
+import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.manga.MangaNewChapterBadge
+import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaUpdateRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
@@ -20,6 +26,7 @@ import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.statistics.StatisticsViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
@@ -32,6 +39,8 @@ import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.todayIn
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.minutes
 
 /** Everything the Home surface renders, computed in one pass. */
 data class HomeUiState(
@@ -50,8 +59,39 @@ data class HomeUiState(
     val candidates: List<Book> = emptyList(),
     /** §11.4: library manga with new chapters, newest check first — empty hides the card. */
     val newChapters: List<MangaNewChapterBadge> = emptyList(),
+    /** §11.4: manga Continue reading — recently read library manga, cap 3. */
+    val mangaContinue: List<MangaContinueItem> = emptyList(),
+    /** §11.4: LATEST browse hits from the most recently read manga's source, cap 6. */
+    val discover: List<MangaDiscoverItem> = emptyList(),
+    /** True when the manga library is non-empty — Home renders for manga-only users. */
+    val hasManga: Boolean = false,
     /** Rule 8: some exclusions are active — Home shows the "review" line. */
     val exclusionsActive: Boolean = false
+)
+
+/** One row of the manga Continue-reading card (§11.4). */
+data class MangaContinueItem(
+    val mangaId: String,
+    val title: String,
+    val thumbnailUrl: String?,
+    val coverPath: String?,
+    val sourceId: Long,
+    val sourceName: String,
+    /** Last-read chapter — the primary tap opens the reader here, detail when null. */
+    val chapterId: String?,
+    val caption: String?,
+    val progress: Float,
+    /** Source web page, when the backend can produce one — drives the overflow item. */
+    val webUrl: String?
+)
+
+/** One Discover row (§11.4): a LATEST browse hit not already in the library. */
+data class MangaDiscoverItem(
+    val sourceId: Long,
+    val sourceName: String,
+    val url: String,
+    val title: String,
+    val thumbnailUrl: String?
 )
 
 /**
@@ -71,7 +111,12 @@ class HomeViewModel(
     private val statsExclusionRepository: StatsExclusionRepository? = null,
     private val tagRepository: TagRepository? = null,
     private val collectionRepository: CollectionRepository? = null,
-    private val mangaUpdateRepository: MangaUpdateRepository? = null
+    private val mangaUpdateRepository: MangaUpdateRepository? = null,
+    private val mangaHistoryRepository: MangaHistoryRepository? = null,
+    private val mangaRepository: MangaRepository? = null,
+    private val mangaChapterRepository: MangaChapterRepository? = null,
+    private val mangaCategoryRepository: MangaCategoryRepository? = null,
+    private val mangaBackend: MangaBackend? = null
 ) {
     private val timeZone: TimeZone get() = TimeZone.currentSystemDefault()
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
@@ -177,10 +222,14 @@ class HomeViewModel(
         val newChapters = mangaUpdateRepository
             ?.getNewChapterBadges(exclusions ?: emptySet())
             .orEmpty()
+        val mangaContinue = buildMangaContinue(exclusions)
+        val discover = buildDiscover(exclusions)
+        val hasManga = mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
 
         return HomeUiState(
             loaded = true,
             hasBooks = books.isNotEmpty(),
+            hasManga = hasManga,
             goalMinutes = goalMinutes,
             todayMinutes = minutesByDay[today] ?: 0L,
             streakDays = currentStreak(readDays, today),
@@ -195,8 +244,91 @@ class HomeViewModel(
             becauseFinishedTitle = anchor?.displayTitle,
             candidates = candidatePool,
             newChapters = newChapters,
+            mangaContinue = mangaContinue,
+            discover = discover,
             exclusionsActive = exclusions?.isNotEmpty() == true
         )
+    }
+
+    /**
+     * §11.4 manga Continue reading: the most recently read library manga, cap 3,
+     * same gating as the badge card — history rows without a library entry and
+     * out-of-library reads never surface, and §11.2 manga exclusions hide their
+     * titles here too (Rule 18).
+     */
+    private suspend fun buildMangaContinue(
+        exclusions: Set<Pair<Scope, String>>?
+    ): List<MangaContinueItem> {
+        val history = mangaHistoryRepository ?: return emptyList()
+        val mangaRepo = mangaRepository ?: return emptyList()
+        val chapterRepo = mangaChapterRepository ?: return emptyList()
+        val scope = exclusions?.let(::StatsScope)
+        val progress = chapterRepo.observeProgress().first()
+        val unread = chapterRepo.observeUnreadCounts().first()
+        val rows = mutableListOf<MangaContinueItem>()
+        for (item in history.observeRecent(RECENT_POOL).first().distinctBy { it.mangaId }) {
+            if (rows.size >= MANGA_CONTINUE_CAP) break
+            val entry = mangaRepo.get(item.mangaId) ?: continue
+            if (!entry.inLibrary) continue
+            val categories = mangaCategoryRepository?.categoriesFor(entry.id).orEmpty()
+            if (scope?.includesManga(entry.id, categories, entry.sourceId) == false) continue
+            rows += MangaContinueItem(
+                mangaId = entry.id,
+                title = entry.title,
+                thumbnailUrl = entry.thumbnailUrl,
+                coverPath = entry.coverPath,
+                sourceId = entry.sourceId,
+                sourceName = entry.sourceName,
+                chapterId = item.chapterId,
+                caption = item.chapterName?.takeIf { it.isNotBlank() }
+                    ?: unread[entry.id]?.takeIf { it > 0 }?.let { "$it unread" },
+                progress = (progress[entry.id] ?: 0f).coerceIn(0f, 1f),
+                webUrl = mangaBackend?.let { backend ->
+                    runCatching { backend.sourceWebUrl(entry.sourceId, entry.url) }.getOrNull()
+                }
+            )
+        }
+        return rows
+    }
+
+    /**
+     * §11.4 Discover: LATEST from the source of the most recently read library
+     * manga, minus titles already in the library, cap 6. One browse request per
+     * cache window, silently absent on failure, without a backend, without
+     * history, or when the source cannot serve LATEST.
+     */
+    private suspend fun buildDiscover(exclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
+        val backend = mangaBackend ?: return emptyList()
+        val history = mangaHistoryRepository ?: return emptyList()
+        val mangaRepo = mangaRepository ?: return emptyList()
+        val now = Clock.System.now()
+        discoverCache?.let { (cachedAt, rows) ->
+            val ttl = if (rows.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
+            if (now - cachedAt < ttl) return rows
+        }
+        val fetched: List<MangaDiscoverItem> = runCatching {
+            val recent = history.observeRecent(1).first().firstOrNull() ?: return emptyList()
+            val entry = mangaRepo.get(recent.mangaId) ?: return emptyList()
+            if (!entry.inLibrary || entry.isLocal) return emptyList()
+            val categories = mangaCategoryRepository?.categoriesFor(entry.id).orEmpty()
+            if (exclusions != null &&
+                !StatsScope(exclusions).includesManga(entry.id, categories, entry.sourceId)
+            ) return emptyList()
+            val source = backend.observeSources().first().firstOrNull { it.id == entry.sourceId }
+            if (source?.supportsLatest != true) return emptyList()
+            val inLibraryTitles = mangaRepo.observeLibrary().first()
+                .map { it.title.trim().lowercase() }
+                .toSet()
+            backend.fetchBrowse(entry.sourceId, page = 1, mode = BrowseMode.LATEST)
+                .items
+                .filter { it.title.trim().lowercase() !in inLibraryTitles }
+                .take(DISCOVER_CAP)
+                .map {
+                    MangaDiscoverItem(entry.sourceId, entry.sourceName, it.url, it.title, it.thumbnailUrl)
+                }
+        }.getOrDefault(emptyList())
+        discoverCache = now to fetched
+        return fetched
     }
 
     private fun Book.toReadingInProgress(sessions: List<ReadingSession>) = ReadingInProgress(
@@ -235,5 +367,26 @@ class HomeViewModel(
         private const val CONTINUE_CAP = 3
         /** Books suggested by "Because you finished". */
         private const val CANDIDATE_CAP = 6
+        /** Manga surfaced in the manga Continue-reading card (§11.4). */
+        private const val MANGA_CONTINUE_CAP = 3
+        /** History pool scanned before the cap, so filtered rows don't starve the card. */
+        private const val RECENT_POOL = 25
+        /** Browse hits surfaced in Discover (§11.4). */
+        private const val DISCOVER_CAP = 6
+        /** Successful Discover results are reused for six hours (§11.4). */
+        private val DISCOVER_TTL = 6.days
+        /** Failed/empty Discover fetches retry after five minutes, not six hours. */
+        private val DISCOVER_NEGATIVE_TTL = 5.minutes
+
+        /**
+         * The Discover cache must outlive Home's composition — HomeRoute recreates
+         * the view model per visit, so an instance field would re-fetch every time.
+         */
+        @Volatile
+        private var discoverCache: Pair<Instant, List<MangaDiscoverItem>>? = null
+
+        internal fun resetDiscoverCache() {
+            discoverCache = null
+        }
     }
 }

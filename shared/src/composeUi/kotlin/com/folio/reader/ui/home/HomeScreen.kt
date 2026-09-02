@@ -43,7 +43,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
-import com.folio.reader.manga.MangaNewChapterBadge
 import com.folio.reader.model.Book
 import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.EmptyState
@@ -51,7 +50,6 @@ import com.folio.reader.ui.components.FolioHeroCard
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
-import com.folio.reader.ui.manga.MangaCover
 import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.theme.FolioTheme
@@ -73,19 +71,23 @@ fun HomeScreen(
     onOpenLibrary: () -> Unit = {},
     onOpenExclusions: () -> Unit = {},
     mangaBackend: MangaBackend? = null,
-    onOpenMangaDetail: (String) -> Unit = {}
+    onOpenMangaDetail: (String) -> Unit = {},
+    onOpenMangaReader: (String, String) -> Unit = { _, _ -> },
+    onOpenSourceWeb: (String) -> Unit = {},
+    onOpenDiscover: (MangaDiscoverItem) -> Unit = {}
 ) {
     when {
         !state.loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             LoadingPlaceholder()
         }
-        !state.hasBooks -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            EmptyState(
-                icon = Icons.Filled.MenuBook,
-                headline = "Your library is empty — import an EPUB to start.",
-                action = { Button(onClick = onImportClick) { Text("Import a book") } }
-            )
-        }
+        !state.hasBooks && !state.hasManga ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.MenuBook,
+                    headline = "Your library is empty — import an EPUB to start.",
+                    action = { Button(onClick = onImportClick) { Text("Import a book") } }
+                )
+            }
         else -> LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(FolioTokens.space4),
@@ -96,10 +98,28 @@ fun HomeScreen(
             if (state.continueReading.isNotEmpty()) {
                 item { ContinueReadingCard(state.continueReading, onOpenBook) }
             }
+            // §11.4: manga Continue reading — separate card, never merged into the
+            // books carousel. Primary tap opens the reader; the overflow item is
+            // the only path to the source's web page.
+            if (state.mangaContinue.isNotEmpty() && mangaBackend != null) {
+                item {
+                    MangaContinueCard(
+                        items = state.mangaContinue,
+                        backend = mangaBackend,
+                        onOpenReader = onOpenMangaReader,
+                        onOpenDetail = onOpenMangaDetail,
+                        onOpenSourceWeb = onOpenSourceWeb
+                    )
+                }
+            }
             // §11.4: manga "New chapters" sits after the books carousel; hidden
             // when the total is zero. Tapping a row opens the manga detail.
             if (state.newChapters.isNotEmpty() && mangaBackend != null) {
                 item { NewChaptersCard(state.newChapters, mangaBackend, onOpenMangaDetail) }
+            }
+            // §11.4: Discover — LATEST from the most recently read manga's source.
+            if (state.discover.isNotEmpty() && mangaBackend != null) {
+                item { DiscoverCard(state.discover, mangaBackend, onOpenDiscover) }
             }
             val finishedTitle = state.becauseFinishedTitle
             if (finishedTitle != null && state.candidates.size >= 2) {
@@ -302,59 +322,6 @@ private fun ContinueReadingCard(books: List<ReadingInProgress>, onOpenBook: (Str
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-            }
-        }
-    }
-}
-
-/**
- * §11.4: up to 6 library manga with new chapters, newest check first, each
- * showing its count. Same layout language as the manga library — cover, title,
- * caption — with the count in the discovery accent.
- */
-@Composable
-private fun NewChaptersCard(
-    badges: List<MangaNewChapterBadge>,
-    backend: MangaBackend,
-    onOpenMangaDetail: (String) -> Unit
-) {
-    FolioSectionCard(title = "New chapters", accent = FolioTheme.colors.accentDiscovery) {
-        Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-            badges.forEach { badge ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenMangaDetail(badge.mangaId) },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    MangaCover(
-                        backend = backend,
-                        sourceId = badge.sourceId,
-                        thumbnailUrl = badge.thumbnailUrl,
-                        coverPath = badge.coverPath,
-                        modifier = Modifier
-                            .width(40.dp)
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                    )
-                    Spacer(Modifier.width(FolioTokens.space2))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            badge.title,
-                            style = FolioTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            "+${badge.newChapterCount} " +
-                                if (badge.newChapterCount == 1) "chapter" else "chapters",
-                            style = FolioTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = FolioTheme.colors.accentDiscovery
-                        )
-                    }
                 }
             }
         }

@@ -255,6 +255,12 @@ class AndroidMangaBackend(
         }
     }
 
+    override suspend fun sourceWebUrl(sourceId: Long, mangaUrl: String): String? {
+        if (sourceId == LOCAL_SOURCE_ID) return null
+        val source = sourceById(sourceId) as? HttpSource ?: return null
+        return runCatching { source.baseUrl + mangaUrl }.getOrNull()
+    }
+
     // ---------- Extensions ----------
 
     override fun observeExtensions(): Flow<List<ExtensionEntry>> = combine(

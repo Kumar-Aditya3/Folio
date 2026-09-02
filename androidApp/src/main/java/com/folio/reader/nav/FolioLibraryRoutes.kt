@@ -1,5 +1,7 @@
 package com.folio.reader.nav
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +11,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.folio.reader.manga.MangaEntry
+import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.home.HomeScreen
 import com.folio.reader.ui.home.HomeUiState
@@ -30,6 +36,8 @@ import kotlinx.coroutines.launch
 fun HomeRoute(navModel: FolioNavModelImpl) {
     val graph = navModel.graph
     val navController = navModel.navController ?: return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -49,7 +57,13 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     graph.collectionRepository,
                     // §11.4: the New-chapters card reads manga_update_state through
                     // the same exclusions the worker's badges are gated by.
-                    graph.mangaUpdateRepository
+                    graph.mangaUpdateRepository,
+                    // §11.4 Phase 9: manga Continue reading + Discover.
+                    graph.mangaHistoryRepository,
+                    graph.mangaRepository,
+                    graph.mangaChapterRepository,
+                    graph.mangaCategoryRepository,
+                    graph.mangaBackend
                 )
             }
             val state by viewModel.state.collectAsState(initial = HomeUiState())
@@ -64,7 +78,38 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
                 },
                 mangaBackend = graph.mangaBackend,
-                onOpenMangaDetail = { navController.navigate(FolioDestination.mangaDetail(it)) }
+                onOpenMangaDetail = { navController.navigate(FolioDestination.mangaDetail(it)) },
+                onOpenMangaReader = { mangaId, chapterId ->
+                    navController.navigate(FolioDestination.mangaReader(mangaId, chapterId))
+                },
+                onOpenSourceWeb = { url ->
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
+                },
+                onOpenDiscover = { item ->
+                    // Persist for the detail screen without adding to the library —
+                    // the browse screen's ensureEntry contract, minimal form.
+                    scope.launch(Dispatchers.IO) {
+                        val id = graph.mangaRepository.findBySourceUrl(item.sourceId, item.url)?.id
+                            ?: mangaId(item.sourceId, item.url).also { newId ->
+                                graph.mangaRepository.upsert(
+                                    MangaEntry(
+                                        id = newId,
+                                        sourceId = item.sourceId,
+                                        sourceName = item.sourceName,
+                                        url = item.url,
+                                        title = item.title,
+                                        thumbnailUrl = item.thumbnailUrl,
+                                        inLibrary = false
+                                    )
+                                )
+                            }
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            navController.navigate(FolioDestination.mangaDetail(id))
+                        }
+                    }
+                }
             )
         }
     }
