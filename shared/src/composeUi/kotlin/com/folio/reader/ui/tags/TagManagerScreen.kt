@@ -27,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -161,6 +163,10 @@ fun TagManagerScreen(
     viewModel: TagManagerViewModel
 ) {
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    fun notify(message: String) {
+        scope.launch { snackbarHostState.showSnackbar(message) }
+    }
     val tags by viewModel.tags.collectAsState()
     var selectedTagId by remember { mutableStateOf<String?>(null) }
     var selectedTagDetail by remember { mutableStateOf<TagDetailItem?>(null) }
@@ -177,6 +183,7 @@ fun TagManagerScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 com.folio.reader.ui.components.FolioStatusBarBand()
@@ -275,7 +282,7 @@ fun TagManagerScreen(
             initialName = "",
             initialColor = TagPresetColors.random(),
             onConfirm = { name, color ->
-                viewModel.createTag(name, color)
+                viewModel.createTag(name, color) { notify("Tag \"${name.trim()}\" created") }
                 showCreateDialog = false
             },
             onDismiss = { showCreateDialog = false }
@@ -288,7 +295,7 @@ fun TagManagerScreen(
             initialName = tag.name,
             initialColor = tag.color ?: TagPresetColors[0],
             onConfirm = { name, color ->
-                viewModel.renameTag(tag, name)
+                viewModel.renameTag(tag, name) { notify("Tag renamed") }
                 if (color != tag.color) {
                     viewModel.changeTagColor(tag, color)
                 }
@@ -302,7 +309,7 @@ fun TagManagerScreen(
         DeleteTagDialog(
             tag = tag,
             onConfirm = {
-                viewModel.deleteTag(tag.id)
+                viewModel.deleteTag(tag.id) { notify("Tag \"${tag.name}\" deleted") }
                 showDeleteDialog = null
                 if (selectedTagId == tag.id) {
                     selectedTagId = null
@@ -362,6 +369,7 @@ private fun TagListView(
             items(tags, key = { it.tag.id }) { tagCount ->
                 TagListItem(
                     tagCount = tagCount,
+                    modifier = Modifier.animateItem(),
                     onClick = { onTagClick(tagCount) },
                     onLongClick = { onTagLongClick(tagCount) },
                     onEditClick = { onEditClick(tagCount) },
@@ -376,6 +384,7 @@ private fun TagListView(
 @Composable
 private fun TagListItem(
     tagCount: TagCount,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onEditClick: () -> Unit,
@@ -384,7 +393,7 @@ private fun TagListItem(
     val tag = tagCount.tag
     val tagColor = tag.color?.let { Color(it) } ?: FolioTheme.colors.primary
     ListItem(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
