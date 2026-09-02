@@ -578,17 +578,37 @@ same question answered in two places, differently.
 Schema — a single table, not one per scope:
 ```sql
 CREATE TABLE stats_exclusions (
-  scope     TEXT NOT NULL,   -- BOOK | MANGA | BOOK_TAG | BOOK_COLLECTION | MANGA_CATEGORY
+  scope     TEXT NOT NULL,
+  -- BOOK | BOOK_TAG | BOOK_COLLECTION | BOOK_SERIES | BOOK_STATUS
+  -- MANGA | MANGA_CATEGORY | MANGA_SOURCE
   target_id TEXT NOT NULL,
   PRIMARY KEY (scope, target_id)
 );
 ```
 
+`BOOK_STATUS` stores the enum name (`ABANDONED`, `PAUSED`, …) as its target_id, so
+"exclude every DNF book" is one row that stays correct as more books are abandoned rather
+than a list the user has to maintain. `BOOK_SERIES` exists because `Book.seriesId` and
+`SeriesRepository` already make series a first-class grouping — excluding a 14-book series
+one book at a time would be miserable. `MANGA_SOURCE` is the same idea for
+"everything from this extension".
+
 Resolver in `shared/src/commonMain/kotlin/com/folio/reader/statistics/StatsScope.kt`:
 ```kotlin
 class StatsScope(private val excluded: Set<Pair<Scope, String>>) {
-    fun includesBook(bookId: String, tagIds: Set<String>, collectionIds: Set<String>): Boolean
-    fun includesManga(mangaId: String, categoryIds: Set<String>): Boolean
+    fun includesBook(
+        bookId: String,
+        tagIds: Set<String>,
+        collectionIds: Set<String>,
+        seriesId: String?,
+        status: BookStatus
+    ): Boolean
+
+    fun includesManga(
+        mangaId: String,
+        categoryIds: Set<String>,
+        sourceId: Long
+    ): Boolean
 }
 ```
 
@@ -603,17 +623,27 @@ the group exclusion. Say so in the UI copy.
 - `MangaStatisticsRepository.getStatistics()` — computes in SQL today
   (`JdbcMangaStatisticsRepository`), so the exclusion set is passed *in*, never applied after.
 
-**UI:** new `settings/stats` category (§3.5 pattern, own file ≤250 lines) with four rows —
-Excluded books, Excluded manga, Excluded book tags & collections, Excluded manga categories —
-each opening a multi-select. Every row shows a live count: `"12 of 148 books excluded"`.
+**UI:** new `settings/stats` category (§3.5 pattern, own file ≤250 lines) with six rows, each
+opening a multi-select:
+- Excluded books
+- Excluded book tags & collections
+- Excluded book series
+- Excluded book statuses (checkbox per `BookStatus`; "Abandoned" is the DNF case that
+  motivated this)
+- Excluded manga & manga categories
+- Excluded manga sources
+
+Every row shows a live count: `"12 of 148 books excluded"`.
 
 **Rule 8 applies:** an exclusion the user cannot see is the v1.0.24 bug again. Whenever any
 exclusion is active, the Stats tab and Home goal ring show one line —
 `"Some titles are excluded — review"` — tappable through to `settings/stats`.
 
 **Tests:** exclude by entity; exclude by group; entity in two groups where only one is
-excluded (still excluded); no exclusions reproduces today's numbers exactly; `HomeViewModel`
-and `StatisticsViewModel` agree under the same scope.
+excluded (still excluded); exclude by series removes every book in that series; exclude
+`ABANDONED` removes DNF books from Stats **and** Home in the same pass; exclude a manga
+source removes all of its titles; no exclusions reproduces today's numbers exactly;
+`HomeViewModel` and `StatisticsViewModel` agree under the same scope.
 
 ### 11.3 Manga update checks
 
@@ -630,10 +660,15 @@ every 12h, `NetworkType.CONNECTED` + battery-not-low. Opt-in with a user-set int
 **Hard constraints (extensions are third-party HTTP; a naive loop is a self-inflicted DDoS):**
 - Serial per source, **max 2 sources in parallel**
 - ≥1s delay between requests to the same source
-- Cap 60 manga per run, resuming where the last run stopped (round-robin cursor)
+- Cap **20 manga per run**, resuming where the last run stopped (round-robin cursor). Chosen
+  so a full run finishes in well under a minute; the cursor still covers the whole library
+  over a few cycles.
+- Per-request timeout 30s; a source that times out twice is dropped for the rest of the run
 - Any source erroring twice in a run is skipped for the rest of it
 - Never check a source whose extension is missing or untrusted
-- Total run budget 10 minutes, then stop cleanly
+- Total run budget 10 minutes — WorkManager stops a Worker around that mark anyway, so this
+  is the platform ceiling and a backstop against a pathological run, not a target. Normal
+  runs are expected to finish in seconds.
 
 **Storage:** `manga_update_state (manga_id PK, last_checked_at, new_chapter_count, last_error)`.
 
@@ -701,8 +736,14 @@ Ordered by value; each already has book-side infrastructure to mirror:
 - With no exclusions configured, every stats number is identical to v1.0.30.
 - Excluding a book tag removes its books from Stats **and** Home's ring/streak/week in the
   same pass — no surface disagrees.
-- An update run over 60 manga across ≥3 sources issues at most one request per source per
+- Excluding the `ABANDONED` status removes every DNF book from both surfaces, and stays
+  correct when a further book is abandoned without the user touching settings again.
+- Excluding a book series removes all of its books; excluding a manga source removes all of
+  its titles.
+- An update run over 20 manga across ≥3 sources issues at most one request per source per
   second and leaves read/bookmark/progress state intact.
+- A full 20-manga run completes in under a minute on the test device; the round-robin cursor
+  advances so successive runs cover the rest of the library.
 - Airplane mode mid-run: no crash, `last_error` recorded, next run resumes from the cursor.
 - "New chapters" appears with a one-manga library; "Because you finished" still hides under
   two candidates (books' limitation is unchanged, and that is fine).
