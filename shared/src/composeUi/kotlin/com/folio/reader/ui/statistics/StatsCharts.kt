@@ -102,34 +102,40 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
 @Composable
 internal fun WeekChart(week: List<StatDay>) {
     FolioSectionCard(title = "Last 7 days") {
-        val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
-        Row(
-            modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            week.forEach { day ->
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    Text(
-                        text = if (day.minutes > 0) shortMinutes(day.minutes) else "",
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    ChartBar(value = day.minutes.toFloat(), peak = peak.toFloat())
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = day.date.dayOfWeek.name.take(1),
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
-                }
+        WeekBars(week)
+    }
+}
+
+/** The bare 7-day bar row shared by the stats week chart and the Home "This week" card. */
+@Composable
+internal fun WeekBars(week: List<StatDay>) {
+    val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
+        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        week.forEach { day ->
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom
+            ) {
+                Text(
+                    text = if (day.minutes > 0) shortMinutes(day.minutes) else "",
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                ChartBar(value = day.minutes.toFloat(), peak = peak.toFloat())
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = day.date.dayOfWeek.name.take(1),
+                    style = FolioTheme.typography.labelSmall,
+                    color = FolioTheme.colors.onSurfaceVariant
+                )
             }
         }
     }

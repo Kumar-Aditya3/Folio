@@ -6,8 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.home.HomeScreen
+import com.folio.reader.ui.home.HomeUiState
+import com.folio.reader.ui.home.HomeViewModel
 import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.library.LibraryScreen
 import com.folio.reader.ui.library.LibraryViewModel
@@ -17,31 +23,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Books-only surface behind the Home bar item. §5.4 replaces this with the
- * dedicated home surface; until then it mirrors the books library.
+ * §5.4: Home is a purpose-built surface — daily goal ring, continue reading,
+ * because-you-finished, this week — not a mirror of the books library.
  */
 @Composable
 fun HomeRoute(navModel: FolioNavModelImpl) {
     val graph = navModel.graph
     val navController = navModel.navController ?: return
-    LibraryScreen(
-        onBookClick = { navController.navigate(FolioDestination.reader(it.id)) },
-        onBookDetailClick = { navController.navigate(FolioDestination.bookDetail(it.id)) },
-        onImportClick = { navModel.callbacks.onImportEpubs() },
-        onSearchClick = { navController.navigate(FolioRoutes.SEARCH) },
-        onSettingsClick = { navController.goToTopLevelTab(FolioRoutes.MORE) },
-        showSettingsAction = false,
-        onTagManagerClick = { navController.navigate(FolioRoutes.TAGS) },
-        onQuoteBrowserClick = { navController.navigate(FolioRoutes.QUOTES) },
-        onRevisitClick = { navController.navigate(FolioRoutes.REVISIT) },
-        viewModel = navModel.libraryVM,
-        syncState = navModel.collectSyncState(),
-        onSyncNow = { graph.syncEngine?.triggerSync(immediate = true) },
-        libraryMode = LibraryMode.BOOKS,
-        mangaLibraryViewModel = null,
-        mangaContent = null,
-        statsContent = null
-    )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(FolioTheme.colors.background)
+    ) {
+        FolioTopBar(title = "Home")
+        Box(modifier = Modifier.weight(1f)) {
+            val viewModel = remember {
+                HomeViewModel(graph.bookRepository, graph.sessionRepository, graph.settingsRepository)
+            }
+            val state by viewModel.state.collectAsState(initial = HomeUiState())
+            HomeScreen(
+                state = state,
+                onOpenBook = { navController.navigate(FolioDestination.reader(it)) },
+                onOpenBookDetail = { navController.navigate(FolioDestination.bookDetail(it)) },
+                onImportClick = { navModel.callbacks.onImportEpubs() }
+            )
+        }
+    }
 }
 
 @Composable

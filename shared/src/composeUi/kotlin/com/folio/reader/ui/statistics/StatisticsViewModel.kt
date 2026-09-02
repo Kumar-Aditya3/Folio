@@ -30,7 +30,8 @@ data class ReadingInProgress(
     val title: String,
     val author: String,
     val progress: Float,
-    val finishEstimate: String? = null
+    val finishEstimate: String? = null,
+    val coverPath: String? = null
 )
 
 /** A recent quote/highlight for the floating quotes card on the stats tab. */
@@ -268,17 +269,6 @@ class StatisticsViewModel(
             },
             todayMinutes = minutesByDay[today] ?: 0L
         )
-    }
-
-    /** Consecutive reading days ending today — or yesterday, if today hasn't started yet. */
-    private fun currentStreak(readDays: Set<LocalDate>, today: LocalDate): Int {
-        var day = if (today in readDays) today else today.minus(DatePeriod(days = 1))
-        var streak = 0
-        while (day in readDays) {
-            streak++
-            day = day.minus(DatePeriod(days = 1))
-        }
-        return streak
     }
 
     private fun longestStreak(readDays: Set<LocalDate>): Int {

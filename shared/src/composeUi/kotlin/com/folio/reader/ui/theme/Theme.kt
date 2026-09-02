@@ -1069,6 +1069,8 @@ object FolioTokens {
 
     // Progress ring diameter when decorating covers
     val ringSmall = 28.dp
+    // Progress ring diameter on the Home daily-goal card
+    val ringLarge = 96.dp
 
     // Override indicator dot size
     val dotIndicator = 6.dp
