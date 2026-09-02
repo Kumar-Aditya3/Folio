@@ -1091,7 +1091,7 @@ fun main(args: Array<String>) {
                                             getAllTags = { deps.tagRepository.getAllTags().first() },
                                             insertTag = { deps.tagRepository.insertTag(it) },
                                             updateTag = { deps.tagRepository.updateTag(it) },
-                                            deleteTag = { deps.tagRepository.deleteTag(it) },
+                                            deleteTagById = { deps.tagRepository.deleteTag(it) },
                                             getTagsForBook = { deps.tagRepository.getTagsForBook(it) },
                                             getTagsForHighlight = { deps.tagRepository.getTagsForHighlight(it) },
                                             getBooksForTag = { deps.tagRepository.getBooksForTag(it) },
