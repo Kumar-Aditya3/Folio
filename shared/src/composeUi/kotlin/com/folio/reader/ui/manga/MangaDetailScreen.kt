@@ -94,6 +94,9 @@ fun MangaDetailScreen(
     val myCategoryIds by viewModel.myCategoryIds.collectAsState()
     var categoryPickerOpen by remember { mutableStateOf(false) }
     var categoryPrompt by remember { mutableStateOf(false) }
+    val tags by viewModel.tags.collectAsState()
+    val allTags by viewModel.allTags.collectAsState()
+    var tagPickerOpen by remember { mutableStateOf(false) }
 
     val displayChapters = remember(chapters, sortAscending, chapterFilter) {
         val filtered = viewModel.applyFilter(chapters)
@@ -224,6 +227,12 @@ fun MangaDetailScreen(
                 item {
                     FolioChip(selected = false, onClick = { categoryPickerOpen = true }, label = "Categories")
                 }
+                items(tags) { tag ->
+                    FolioChip(selected = true, onClick = { tagPickerOpen = true }, label = tag.name)
+                }
+                item {
+                    FolioChip(selected = false, onClick = { tagPickerOpen = true }, label = "Tags")
+                }
             }
             Spacer(Modifier.height(4.dp))
         }
@@ -247,6 +256,18 @@ fun MangaDetailScreen(
                 onCreate = { name -> viewModel.createCategory(name) },
                 onApply = { viewModel.setCategories(it) },
                 onDismiss = { categoryPrompt = false },
+            )
+        }
+
+        if (tagPickerOpen) {
+            com.folio.reader.ui.tags.TagPickerDialog(
+                tags = allTags,
+                assignedTagIds = tags.mapTo(mutableSetOf()) { it.id },
+                onDismiss = { tagPickerOpen = false },
+                onSave = { ids ->
+                    viewModel.updateMangaTags(ids)
+                    tagPickerOpen = false
+                },
             )
         }
 

@@ -29,12 +29,15 @@ class MangaDetailViewModel(
     private val categoryRepo: com.folio.reader.manga.MangaCategoryRepository,
     private val settingsRepo: com.folio.reader.database.SettingsRepository,
     private val sessionRepo: com.folio.reader.database.ReadingSessionRepository? = null,
+    private val tagRepo: com.folio.reader.database.TagRepository? = null,
 ) {
     val scope = mangaVmScope()
 
     val manga = MutableStateFlow<MangaEntry?>(null)
     val chapters = MutableStateFlow<List<MangaChapter>>(emptyList())
     val sessions = MutableStateFlow<List<com.folio.reader.model.ReadingSession>>(emptyList())
+    val tags = MutableStateFlow<List<com.folio.reader.model.Tag>>(emptyList())
+    val allTags = MutableStateFlow<List<com.folio.reader.model.Tag>>(emptyList())
     val refreshing = MutableStateFlow(false)
     val refreshNotice = MutableStateFlow<String?>(null)
     val error = MutableStateFlow<String?>(null)
@@ -87,6 +90,14 @@ class MangaDetailViewModel(
             val repo = sessionRepo ?: return@launch
             repo.getSessionsForBook(mangaId).collect { sessions.value = it }
         }
+        scope.launch {
+            val repo = tagRepo ?: return@launch
+            repo.getAllTags().collect { allTags.value = it }
+        }
+        scope.launch {
+            val repo = tagRepo ?: return@launch
+            tags.value = repo.getTagsForManga(mangaId)
+        }
     }
 
     val allCategories = categoryRepo.observeCategories()
@@ -105,6 +116,18 @@ class MangaDetailViewModel(
 
     suspend fun createCategory(name: String): String? =
         runCatching { categoryRepo.create(name).id }.getOrNull()
+
+    /** Diffs the picker's selection against current links, mirroring the book detail flow. */
+    fun updateMangaTags(selected: Set<String>) {
+        val id = manga.value?.id ?: return
+        val repo = tagRepo ?: return
+        scope.launch {
+            val current = repo.getTagsForManga(id).map { it.id }.toSet()
+            (current - selected).forEach { repo.removeTagFromManga(id, it) }
+            (selected - current).forEach { repo.addTagToManga(id, it) }
+            tags.value = repo.getTagsForManga(id)
+        }
+    }
 
     fun refresh() {
         scope.launch {

@@ -38,6 +38,9 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
             conn.prepareStatement("DELETE FROM book_tags WHERE tag_id = ?").use {
                 it.setString(1, tagId); it.executeUpdate()
             }
+            conn.prepareStatement("DELETE FROM manga_tags WHERE tag_id = ?").use {
+                it.setString(1, tagId); it.executeUpdate()
+            }
             conn.prepareStatement("DELETE FROM highlight_tags WHERE tag_id = ?").use {
                 it.setString(1, tagId); it.executeUpdate()
             }
@@ -86,6 +89,23 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
         }
     }
 
+    override suspend fun getTagsForManga(mangaId: String): List<Tag> = withContext(Dispatchers.IO) {
+        db.withConnection { conn ->
+            val out = mutableListOf<Tag>()
+            conn.prepareStatement(
+                """
+                SELECT t.* FROM tags t
+                JOIN manga_tags mt ON mt.tag_id = t.id
+                WHERE mt.manga_id = ? ORDER BY t.name
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, mangaId)
+                stmt.executeQuery().use { rs -> while (rs.next()) out.add(mapTag(rs)) }
+            }
+            out
+        }
+    }
+
     override suspend fun getTagsForHighlight(highlightId: String): List<Tag> = withContext(Dispatchers.IO) {
         db.withConnection { conn ->
             val out = mutableListOf<Tag>()
@@ -115,6 +135,22 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
         db.withConnection { conn ->
             conn.prepareStatement("DELETE FROM book_tags WHERE book_id = ? AND tag_id = ?").use {
                 it.setString(1, bookId); it.setString(2, tagId); it.executeUpdate()
+            }
+        }
+    }
+
+    override suspend fun addTagToManga(mangaId: String, tagId: String): Unit = withContext(Dispatchers.IO) {
+        db.withConnection { conn ->
+            conn.prepareStatement("INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) VALUES (?, ?)").use {
+                it.setString(1, mangaId); it.setString(2, tagId); it.executeUpdate()
+            }
+        }
+    }
+
+    override suspend fun removeTagFromManga(mangaId: String, tagId: String): Unit = withContext(Dispatchers.IO) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM manga_tags WHERE manga_id = ? AND tag_id = ?").use {
+                it.setString(1, mangaId); it.setString(2, tagId); it.executeUpdate()
             }
         }
     }
