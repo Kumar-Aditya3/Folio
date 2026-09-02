@@ -133,25 +133,39 @@ fun FolioSectionCard(
  * §12.1 Rule 13 hero tier: the one surface a screen is about. Accent-tinted
  * gradient over glass at radiusHero; the accent defaults to the palette's
  * accentProgress role. At most one per screen.
+ *
+ * §13.4 [mesh] adds the drifting gradient mesh behind the content (Home hero
+ * only opts in); §13.9 [gradientAlpha] lets a collapsing hero fade its tint
+ * from 0.30 toward 0.12. Both default to the pre-§13 rendering.
  */
 @Composable
 fun FolioHeroCard(
     modifier: Modifier = Modifier,
     accent: Color? = null,
+    mesh: Boolean = false,
+    gradientAlpha: Float = 0.30f,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
 ) {
     val tint = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.accentProgress
     val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusHero)
+    val meshModifier = if (mesh) {
+        val colors = com.folio.reader.ui.theme.FolioTheme.colors
+        Modifier.heroMesh(
+            layers = listOf(tint, colors.accentDiscovery, colors.accentProgress),
+            animate = com.folio.reader.ui.theme.rememberMotionEnabled()
+        )
+    } else Modifier
     Box(
         modifier = modifier
             .fillMaxWidth()
             .glassPanel(shape, tint)
             .background(
                 brush = Brush.verticalGradient(
-                    listOf(tint.copy(alpha = 0.30f), Color.Transparent)
+                    listOf(tint.copy(alpha = gradientAlpha), Color.Transparent)
                 ),
                 shape = shape
             )
+            .then(meshModifier)
             .padding(com.folio.reader.ui.theme.FolioTokens.space3)
     ) {
         content()
@@ -215,11 +229,14 @@ fun FolioChip(
     }
 }
 
-/** Glass top bar shared by all screens: optional back button, title, actions. */
+/** Glass top bar shared by all screens: optional back button, title, actions.
+ *  §13.9 passes [titleStyle] so a collapsing Home hero can migrate its title in
+ *  at titleMedium without re-styling every other bar. */
 @Composable
 fun FolioTopBar(
     title: String,
     modifier: Modifier = Modifier,
+    titleStyle: androidx.compose.ui.text.TextStyle? = null,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
 ) {
@@ -241,7 +258,7 @@ fun FolioTopBar(
             if (navigationIcon != null) navigationIcon()
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleLarge,
+                style = titleStyle ?: MaterialTheme.typography.titleLarge,
                 color = colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

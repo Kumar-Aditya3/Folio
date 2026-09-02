@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import com.folio.reader.ui.components.rememberEntryProgress
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
@@ -211,6 +212,9 @@ private fun DailyGoalRing(
         animationSpec = tween(durationMillis = 800, easing = LinearEasing),
         label = "goalRing",
     )
+    // §13.5: the ring sweeps in once on entry; live goal changes keep using the
+    // fraction animation above.
+    val ringEntry = rememberEntryProgress("dailyGoalRing")
 
     Column(
         modifier = Modifier
@@ -267,7 +271,7 @@ private fun DailyGoalRing(
                 drawArc(
                     brush = progressBrush,
                     startAngle = -90f,
-                    sweepAngle = 360f * animatedFraction,
+                    sweepAngle = 360f * animatedFraction * ringEntry,
                     useCenter = false,
                     topLeft = topLeft,
                     size = arcSize,

@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
@@ -66,7 +65,9 @@ data class HomeUiState(
     /** True when the manga library is non-empty — Home renders for manga-only users. */
     val hasManga: Boolean = false,
     /** Rule 8: some exclusions are active — Home shows the "review" line. */
-    val exclusionsActive: Boolean = false
+    val exclusionsActive: Boolean = false,
+    /** §13.3: hero gradient is tinted from the current book's cover (Themes toggle). */
+    val coverTint: Boolean = true
 )
 
 /** One row of the manga Continue-reading card (§11.4). */
@@ -129,6 +130,14 @@ class HomeViewModel(
         emit(goal)
     }
 
+    /** §13.3 cover-tint toggle, read cold like the goal. */
+    private val coverTintFlow: Flow<Boolean> = flow {
+        val tint = settingsRepository
+            ?.let { repo -> runCatching { repo.getGlobalSettings().homeCoverTint }.getOrNull() }
+            ?: true
+        emit(tint)
+    }
+
     /** One combine emission before exclusion gating, so both pipelines share it. */
     private data class Inputs(
         val books: List<Book>,
@@ -152,13 +161,19 @@ class HomeViewModel(
 
     val state: Flow<HomeUiState> = run {
         val exclusionRepo = statsExclusionRepository
-        if (exclusionRepo == null) inputs.map { it.build(null) }
-        else combine(inputs, exclusionRepo.observeExclusions()) { value, exclusions ->
-            value.build(exclusions)
+        if (exclusionRepo == null) {
+            combine(inputs, coverTintFlow) { value, tint -> value.build(null, coverTint = tint) }
+        } else {
+            combine(inputs, coverTintFlow, exclusionRepo.observeExclusions()) { value, tint, exclusions ->
+                value.build(exclusions, coverTint = tint)
+            }
         }
     }
 
-    private suspend fun Inputs.build(exclusions: Set<Pair<Scope, String>>?): HomeUiState {
+    private suspend fun Inputs.build(
+        exclusions: Set<Pair<Scope, String>>?,
+        coverTint: Boolean = true
+    ): HomeUiState {
         val today = today()
         val weekStart = today.minus(DatePeriod(days = 6))
         val weekStartInstant = weekStart.atStartOfDayIn(timeZone)
@@ -246,7 +261,8 @@ class HomeViewModel(
             newChapters = newChapters,
             mangaContinue = mangaContinue,
             discover = discover,
-            exclusionsActive = exclusions?.isNotEmpty() == true
+            exclusionsActive = exclusions?.isNotEmpty() == true,
+            coverTint = coverTint
         )
     }
 

@@ -26,12 +26,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioHeroCard
 import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.chartStagger
+import com.folio.reader.ui.components.rememberEntryProgress
+import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.first
@@ -47,10 +51,23 @@ import kotlinx.datetime.LocalDate
  * scaled against [peak], stubbed track when the day is empty. The bar at the
  * window's max carries the Rule 15 peak marker: a brighter `accentStreak` cap.
  * Used by the weekly charts and the book-detail sparkline.
+ *
+ * §13.5: [growth] scales the bar from the empty track up to full height, and
+ * [capReveal] fades the peak cap in only after its bar has finished growing —
+ * both default to 1f, the pre-§13 static rendering.
  */
 @Composable
-internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) {
+internal fun ChartBar(
+    value: Float,
+    peak: Float,
+    modifier: Modifier = Modifier,
+    growth: Float = 1f,
+    capReveal: Float = 1f,
+) {
     val fraction = if (peak > 0f) (value / peak).coerceIn(0f, 1f) else 0f
+    val grown = if (value > 0f) {
+        androidx.compose.ui.unit.lerp(FolioTokens.chartTrack, FolioTokens.chartBarBase + FolioTokens.chartBarSpan * fraction, growth)
+    } else FolioTokens.chartTrack
     val accent = FolioTheme.colors.accentProgress
     val barShape = RoundedCornerShape(
         topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
@@ -59,10 +76,7 @@ internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(
-                if (value > 0f) FolioTokens.chartBarBase + FolioTokens.chartBarSpan * fraction
-                else FolioTokens.chartTrack
-            )
+            .height(grown)
     ) {
         Box(
             Modifier
@@ -74,14 +88,14 @@ internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) 
                     barShape,
                 )
         )
-        if (value > 0f && value >= peak) {
+        if (value > 0f && value >= peak && capReveal > 0f) {
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .height(FolioTokens.chartPeakCap)
                     .background(
-                        FolioTheme.colors.accentStreak,
+                        FolioTheme.colors.accentStreak.copy(alpha = capReveal),
                         RoundedCornerShape(
                             topStart = FolioTokens.chartBarRadiusTop, topEnd = FolioTokens.chartBarRadiusTop,
                             bottomStart = 1.dp, bottomEnd = 1.dp,
@@ -100,6 +114,8 @@ internal fun ChartBar(value: Float, peak: Float, modifier: Modifier = Modifier) 
 internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
     FolioSectionCard(title = "Manga — last 7 days") {
         val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
+        // §13.5: same entry sweep as the books week chart, keyed on the labels.
+        val entry = rememberEntryProgress(labels)
         Row(
             modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
@@ -107,6 +123,7 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
         ) {
             chaptersPerDay.forEachIndexed { index, chapters ->
                 val label = labels.getOrNull(index)?.take(1) ?: ""
+                val (growth, cap) = chartStagger(entry, index, chaptersPerDay.size)
                 Column(
                     modifier = Modifier.weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -120,7 +137,12 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(4.dp))
-                    ChartBar(value = chapters.toFloat(), peak = peak.toFloat())
+                    ChartBar(
+                        value = chapters.toFloat(),
+                        peak = peak.toFloat(),
+                        growth = growth,
+                        capReveal = cap,
+                    )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = label,
@@ -144,12 +166,16 @@ internal fun WeekChart(week: List<StatDay>) {
 @Composable
 internal fun WeekBars(week: List<StatDay>) {
     val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+    // §13.5: one entry sweep for the window, keyed on the days' DATES — minutes
+    // updating live must not replay it — staggered 40ms left-to-right.
+    val entry = rememberEntryProgress(week.map { it.date })
     Row(
         modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
         horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
         verticalAlignment = Alignment.Bottom
     ) {
-        week.forEach { day ->
+        week.forEachIndexed { index, day ->
+            val (growth, cap) = chartStagger(entry, index, week.size)
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -163,7 +189,12 @@ internal fun WeekBars(week: List<StatDay>) {
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.height(4.dp))
-                ChartBar(value = day.minutes.toFloat(), peak = peak.toFloat())
+                ChartBar(
+                    value = day.minutes.toFloat(),
+                    peak = peak.toFloat(),
+                    growth = growth,
+                    capReveal = cap,
+                )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = day.date.dayOfWeek.name.take(1),
@@ -238,7 +269,18 @@ internal fun ActivityHeatmap(
                 gridScroll.animateScrollTo(gridScroll.maxValue)
             }
             Box(Modifier.fillMaxWidth().horizontalScroll(gridScroll)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // §13.5: the whole grid grows from zero on first composition — one
+                // shared timeline, read in the layer phase so 365 cells never
+                // recompose per frame.
+                val gridEntry = rememberEntryState(mode)
+                Column(
+                    modifier = Modifier.graphicsLayer {
+                        val p = gridEntry.value
+                        scaleX = p
+                        scaleY = p
+                    },
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     (0..6).forEach { index ->
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             weeks.forEach { week ->

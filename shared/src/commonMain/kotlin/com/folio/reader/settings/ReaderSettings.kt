@@ -47,7 +47,9 @@ data class ReaderSettings(
     /** Daily reading goal in minutes, shown as a ring on the Stats tab. */
     val dailyGoalMinutes: Int = 60,
     /** Hours between background manga chapter update checks; 0 = updates off (§11.3). */
-    val mangaUpdateIntervalHours: Int = 0
+    val mangaUpdateIntervalHours: Int = 0,
+    /** §13.3: tint the Home hero from the current book's cover. Contrast-guarded, so on by default. */
+    val homeCoverTint: Boolean = true
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(

@@ -148,6 +148,28 @@ fun GeneralSettingsPanel(
             )
         }
 
+        // §13.3: hero tint sampled from the current book's cover. On by default —
+        // the contrast guard keeps the hero legible even on white/black covers.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Tint Home from book cover", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Colour the Home hero from the book you are reading, " +
+                        "contrast-checked so text stays readable.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.homeCoverTint,
+                onCheckedChange = { onSettingsChange(settings.copy(homeCoverTint = it)) }
+            )
+        }
+
         // Import custom font button
         OutlinedButton(
             onClick = onImportFont,
