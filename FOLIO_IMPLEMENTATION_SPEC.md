@@ -798,8 +798,15 @@ always threw — fixed in v1.1.4, the bug predates the §6 split.)
   `BookDetailViewModel.updateBookTags`, mirroring how `saveMetadata` syncs collections.
 - Tag creation stays in the tag manager; the empty picker shows
   "No tags yet — create them in More → Tags."
-- Highlight tagging in the Quotes hub is **deferred**: `QuoteBrowserScreen` sits at 552
-  lines and Rule 9 leaves too little headroom for this pass.
+- Highlight tagging in the Quotes hub shipped v1.1.12 (the screen shrank to 470 lines after
+  the v1.1.6 manga-card split, restoring Rule 9 headroom): every book quote card (grid and
+  list) ends its tags row with an inline `+ Tag` chip → the shared `TagPickerDialog` →
+  `QuoteBrowserViewModel.updateHighlightTags` (collections-style diff over
+  `addTagToHighlight`/`removeTagFromHighlight`, wired at both nav sites); a tags-revision
+  counter makes open hub queries re-resolve tags right after a save. Manga note cards stay
+  untaggable (manga tags attach to the series, not per-note). Also fixed while here: the
+  hub's filter chain had `?: true && ...` precedence, so an active book filter silently
+  dropped the tag and search filters — now parenthesized.
 - Assigning a tag immediately participates in §11.2 stats exclusion (both resolve through
   `getTagsForBook`).
 
