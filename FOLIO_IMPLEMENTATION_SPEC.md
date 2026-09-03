@@ -671,6 +671,13 @@ discovery anchor/candidates and session numbers (§12.9); `MangaStatisticsReposi
 strip, both tappable to `settings/stats`. Desktop passes no exclusions repository —
 numbers byte-identical. Tests: `StatsScopeTest` + `HomeStatsScopeTest`.)*
 
+*(Fix v1.1.21, live user report: the multi-select never showed the tick for a selection
+made inside the dialog — `observeExclusions()` was a single-emission snapshot, so a write
+never reached the collecting screen. The repository now re-queries on every write via a
+revision counter; regression `observeExclusions re-emits to a live collector after add and
+remove` pins the live-update contract the original `first()`-based roundtrip test could not
+see.)*
+
 ### 11.3 Manga update checks
 
 **Worker:** `MangaUpdateWorker` (`androidApp/.../work/`), `WorkManager` periodic, default
