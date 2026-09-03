@@ -231,7 +231,9 @@ primary                  #F8A0B4   rose — the reference's dominant accent
 onPrimary                #2B0A14
 primaryContainer         #6E2438
 onPrimaryContainer       #FFD9E1
-accentProgress           #F8A0B4   rose
+accentProgress           #FFC2D1   bloom pink (amended — see annotation; the original table
+                                   pinned this to the same rose as `primary`, which the
+                                   accent-equality test correctly rejects)
 accentStreak             #F0C088   peach (the reference's tan swatch)
 accentDiscovery          #E8748C   deeper rose (its red swatch)
 accentAnnotation         #C9A0D8   violet, for separation from the rose family
@@ -253,6 +255,18 @@ Pack: `ThemePack("blossom", "Blossom", "blossom", "blossom")`.
 4. `ThemePack.ALL` entry pairing them — darkness must agree (existing test)
 5. `ThemeSchemeTest` green, including the new Rule 22 cases
 6. Visual check on Home, Library, Stats, Book detail, reader
+
+*(Shipped v1.2.3 — both themes landed as `AppPalette` + `ThemePack` entries with reader presets
+(`graphite`, `blossom`; the highlight picker derives from `PRESETS`, so both appear automatically).
+BLOSSOM joins the §15.5 `achromaticByDesign` allowlist — its true-black background carries no hue
+and its warm-shifted surface separates by ΔL* ≈ 5.1, the third such entry after DARK and GRAPHITE.
+One recorded deviation: this section's table pinned `accentProgress` to the same rose as `primary`
+(`#F8A0B4`), which `everyPaletteAssignsAccentRolesExplicitly` rejects — accent roles may not fall
+back to `primary`. Honoring "do not weaken the test", the colour moved, not the threshold: the
+table above is amended to `accentProgress #FFC2D1` (a lighter bloom pink — ΔE 14.7 from `primary`,
+≥ 36 from the other three accents, 12.5:1 on surface). GRAPHITE needed no deviation; its outline
+contrast ships at 1.59 against the 1.5 floor. BLOSSOM `chartSeries` opens rose/blue/green/gold —
+first six pairwise ΔE ≥ 10. Visual checks on device pending with the carried 1.2.x passes.)*
 
 ---
 
