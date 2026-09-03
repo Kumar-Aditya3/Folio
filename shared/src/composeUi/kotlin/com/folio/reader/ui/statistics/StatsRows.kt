@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -304,7 +305,8 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
             StatTile("Day streak", stats.streakDays.toString(),
                 if (stats.longestStreakDays > 0) "best ${stats.longestStreakDays} days" else "reading days",
                 Modifier.weight(1f),
-                accent = FolioTheme.colors.accentStreak)
+                accent = FolioTheme.colors.accentStreak,
+                valueStyle = FolioTheme.typography.displaySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
             StatTile("Finished", stats.booksFinished.toString(), "books completed", Modifier.weight(1f))
@@ -321,6 +323,7 @@ private fun StatTile(
     caption: String,
     modifier: Modifier = Modifier,
     accent: Color? = null,
+    valueStyle: TextStyle? = null,
 ) {
     Column(
         modifier = modifier
@@ -339,8 +342,8 @@ private fun StatTile(
         // the value itself never has to shrink to fit.
         Text(
             text = value,
-            style = FolioTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = valueStyle
+                ?: FolioTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
             color = accent ?: FolioTheme.colors.primary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

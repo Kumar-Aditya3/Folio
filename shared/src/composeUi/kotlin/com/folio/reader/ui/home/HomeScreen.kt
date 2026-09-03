@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.model.Book
 import com.folio.reader.ui.components.BookCover
@@ -261,7 +262,7 @@ private fun HeroCard(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
                 Text(
                     hero.title,
-                    style = FolioTheme.typography.titleLarge,
+                    style = FolioTheme.typography.displaySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -322,12 +323,14 @@ private fun GoalStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclusi
                     withStyle(SpanStyle(fontWeight = if (met) FontWeight.SemiBold else FontWeight.Normal, color = colors.onSurface)) {
                         append("${state.todayMinutes}")
                     }
-                    withStyle(SpanStyle(color = colors.onSurfaceVariant)) { append(" / ${state.goalMinutes} min") }
-                    withStyle(SpanStyle(color = colors.accentStreak)) {
+                    withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = colors.onSurfaceVariant)) {
+                        append(" / ${state.goalMinutes} min")
+                    }
+                    withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = colors.accentStreak)) {
                         append(if (state.streakDays > 0) " · ${state.streakDays}-day streak" else " · No streak yet")
                     }
                 },
-                style = FolioTheme.typography.labelLarge,
+                style = FolioTheme.typography.headlineMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
