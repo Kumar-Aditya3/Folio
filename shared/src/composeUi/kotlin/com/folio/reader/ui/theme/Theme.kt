@@ -539,6 +539,81 @@ private val OledFolioColors = DarkFolioColors.copy(
     accentAnnotation = Color(0xFF6E8794)
 )
 
+// §15.4.1 GRAPHITE — the deliberate opposite of the saturated palettes: zero hue,
+// maximum legibility. In the ThemeSchemeTest allowlist; planes separate by lightness
+// (background #17181A vs surface #1F2124, ΔL* ≈ 4.4). Accents are desaturated on
+// purpose — on a neutral field a little colour goes far.
+private val GraphiteFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFE8EAED),
+    onPrimary = Color(0xFF17181A),
+    primaryContainer = Color(0xFF3C4043),
+    onPrimaryContainer = Color(0xFFE8EAED),
+    secondary = Color(0xFF9AA0A6),
+    onSecondary = Color(0xFF17181A),
+    secondaryContainer = Color(0xFF35383D),
+    onSecondaryContainer = Color(0xFFE8EAED),
+    tertiary = Color(0xFF7FA8C7),
+    onTertiary = Color(0xFF10181E),
+    tertiaryContainer = Color(0xFF2C3E4A),
+    onTertiaryContainer = Color(0xFFD6E8F2),
+    background = Color(0xFF17181A),
+    onBackground = Color(0xFFF5F6F7),
+    surface = Color(0xFF1F2124),
+    onSurface = Color(0xFFF5F6F7),
+    surfaceVariant = Color(0xFF2A2D31),
+    onSurfaceVariant = Color(0xFFA8AEB5),
+    surfaceContainerHighest = Color(0xFF35383D),
+    outline = Color(0xFF3E4247),
+    outlineVariant = Color(0xFF2A2D31),
+    inverseSurface = Color(0xFFF5F6F7),
+    inverseOnSurface = Color(0xFF1F2124),
+    inversePrimary = Color(0xFF43464B),
+    statusBar = Color(0xFF101114),
+    accentProgress = Color(0xFF7FB0D9),
+    accentStreak = Color(0xFFE0C070),
+    accentDiscovery = Color(0xFF8FBF9F),
+    accentAnnotation = Color(0xFFC89BB5)
+)
+
+// §15.4.2 BLOSSOM — true black + one warm rose accent family. The true-black
+// background cannot carry hue, so it is in the ThemeSchemeTest allowlist; the
+// planes separate by lightness (ΔL* ≈ 5.1) and surface stays warm-shifted per spec.
+private val BlossomFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFF8A0B4),
+    onPrimary = Color(0xFF2B0A14),
+    primaryContainer = Color(0xFF6E2438),
+    onPrimaryContainer = Color(0xFFFFD9E1),
+    secondary = Color(0xFFD9A8B8),
+    onSecondary = Color(0xFF33101C),
+    secondaryContainer = Color(0xFF4A2530),
+    onSecondaryContainer = Color(0xFFFFD9E1),
+    tertiary = Color(0xFFB88CD0),
+    onTertiary = Color(0xFF2A0E38),
+    tertiaryContainer = Color(0xFF4E2464),
+    onTertiaryContainer = Color(0xFFE4CCFF),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFF7EFF2),
+    surface = Color(0xFF141013),
+    onSurface = Color(0xFFF7EFF2),
+    surfaceVariant = Color(0xFF241C21),
+    onSurfaceVariant = Color(0xFFB9A6AE),
+    surfaceContainerHighest = Color(0xFF33272E),
+    outline = Color(0xFF45353D),
+    outlineVariant = Color(0xFF241C21),
+    inverseSurface = Color(0xFFF7EFF2),
+    inverseOnSurface = Color(0xFF141013),
+    inversePrimary = Color(0xFFB0526C),
+    statusBar = Color(0xFF06030A),
+    accentProgress = Color(0xFFFFC2D1),
+    accentStreak = Color(0xFFF0C088),
+    accentDiscovery = Color(0xFFE8748C),
+    accentAnnotation = Color(0xFFC9A0D8),
+    chartSeries = listOf(
+        0xFFF8A0B4, 0xFF8FB8E8, 0xFFA8D8A8, 0xFFE8C87D,
+        0xFFC3A6E8, 0xFF7FD4C8, 0xFFE89A7D, 0xFFC9A9C4
+    ).map { Color(it) }
+)
+
 private val EmberFolioColors = DarkFolioColors.copy(
     primary = Color(0xFFFF6D1A),
     onPrimary = Color(0xFF3D1000),
@@ -1022,7 +1097,9 @@ enum class AppPalette(
     RETRO_SUNSET("retrosunset", "Retro Sunset", true, RetroSunsetFolioColors),
     PEACOCK("peacock", "Peacock", true, PeacockFolioColors),
     MIDNIGHT_NEON("midnightneon", "Midnight Neon", true, MidnightNeonFolioColors),
-    OLED("oled", "Black", true, OledFolioColors);
+    OLED("oled", "Black", true, OledFolioColors),
+    GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
+    BLOSSOM("blossom", "Blossom", true, BlossomFolioColors);
 
     companion object {
         fun byId(id: String): AppPalette = entries.firstOrNull { it.id == id } ?: LIGHT
@@ -1065,6 +1142,8 @@ data class ThemePack(
             ThemePack("midnightneon", "Midnight Neon", "midnightneon", "midnightneon"),
             ThemePack("hyperpop", "Hyperpop", "hyperpop", "candypop"),
             ThemePack("rainbow", "Rainbow Candy", "rainbow", "rainbow"),
+            ThemePack("graphite", "Graphite", "graphite", "graphite"),
+            ThemePack("blossom", "Blossom", "blossom", "blossom"),
         )
     }
 }

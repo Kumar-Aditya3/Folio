@@ -432,6 +432,32 @@ data class Theme(
                 progress = 0xFF82B1FF.toInt(), divider = 0xFF1A1A1A.toInt(),
                 isDark = true
             ),
+            "graphite" to Theme(
+                id = "graphite", name = "Graphite",
+                background = 0xFF1A1B1D.toInt(), surface = 0xFF242628.toInt(),
+                primaryText = 0xFFEDEEEF.toInt(), secondaryText = 0xFFA8AEB5.toInt(),
+                headingText = 0xFFF5F6F7.toInt(), link = 0xFF7FB0D9.toInt(),
+                selection = 0xFF3E4247.toInt(), bookmark = 0xFFC89BB5.toInt(),
+                highlightColors = listOf(
+                    0xFFE0C070.toInt(), 0xFF7FB0D9.toInt(), 0xFF8FBF9F.toInt(), 0xFFD98F9F.toInt(),
+                    0xFFC89BB5.toInt(), 0xFF9BC4E8.toInt(), 0xFFA8D0B8.toInt(), 0xFFD4A843.toInt()
+                ),
+                progress = 0xFF7FB0D9.toInt(), divider = 0xFF35383D.toInt(),
+                isDark = true
+            ),
+            "blossom" to Theme(
+                id = "blossom", name = "Blossom",
+                background = 0xFF0A0508.toInt(), surface = 0xFF141013.toInt(),
+                primaryText = 0xFFF2E6EA.toInt(), secondaryText = 0xFFB9A6AE.toInt(),
+                headingText = 0xFFF7EFF2.toInt(), link = 0xFFF8A0B4.toInt(),
+                selection = 0xFF4A2530.toInt(), bookmark = 0xFFE8748C.toInt(),
+                highlightColors = listOf(
+                    0xFFF8A0B4.toInt(), 0xFFE8748C.toInt(), 0xFFF0C088.toInt(), 0xFFC9A0D8.toInt(),
+                    0xFFD96A8A.toInt(), 0xFFF5C1CE.toInt(), 0xFFB890C8.toInt(), 0xFFE8A87D.toInt()
+                ),
+                progress = 0xFFF8A0B4.toInt(), divider = 0xFF241C21.toInt(),
+                isDark = true
+            ),
             "high_contrast" to Theme(
                 id = "high_contrast", name = "High Contrast",
                 background = 0xFF000000.toInt(), surface = 0xFF1A1A1A.toInt(),

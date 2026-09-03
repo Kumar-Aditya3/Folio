@@ -156,7 +156,10 @@ class ThemeSchemeTest {
     // luminance clause instead of hue rotation. The list lives here, not in
     // Theme.kt, so adding a palette to it is a visible, reviewable decision.
     // DARK joins OLED: a #000000 base cannot carry hue at all.
-    private val achromaticByDesign = setOf("light", "dark", "oled", "graphite")
+    // GRAPHITE is the deliberate zero-hue palette (planes separate by ΔL* ≈ 4.4).
+    // BLOSSOM pairs a true-black background with a warm-shifted surface (ΔL* ≈ 5.1):
+    // the background carries no hue, so the pair rides the luminance clause too.
+    private val achromaticByDesign = setOf("light", "dark", "oled", "graphite", "blossom")
 
     @Test
     fun neutralsVaryInHueNotOnlyLightness() {
