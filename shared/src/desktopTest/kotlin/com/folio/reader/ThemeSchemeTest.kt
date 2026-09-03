@@ -155,7 +155,8 @@ class ThemeSchemeTest {
     // §15.5: palettes that are achromatic by design satisfy Rule 22 through the
     // luminance clause instead of hue rotation. The list lives here, not in
     // Theme.kt, so adding a palette to it is a visible, reviewable decision.
-    private val achromaticByDesign = setOf("light", "oled", "graphite")
+    // DARK joins OLED: a #000000 base cannot carry hue at all.
+    private val achromaticByDesign = setOf("light", "dark", "oled", "graphite")
 
     @Test
     fun neutralsVaryInHueNotOnlyLightness() {
