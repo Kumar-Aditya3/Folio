@@ -42,26 +42,40 @@ internal fun rgbToHsv(argb: Int): Triple<Float, Float, Float> {
 }
 
 /**
- * §13.3 sampling: pixels qualifying (saturation > 0.25, value 0.2..0.9, so
- * paper-white and black-bar covers never win) are bucketed into 12 hue bins;
- * the modal bin's mean colour wins. Null when nothing qualifies — the caller
- * keeps accentProgress.
+ * §13.3 sampling: pixels qualifying (saturation > 0.25 — paper-white loses on
+ * saturation alone; value ≥ 0.2 — black bars lose) are bucketed into 12 hue
+ * bins elected by chroma salience — each pixel weighs s·v². No upper value cap:
+ * the first pass capped at 0.9 and filtered out exactly the bloom of glow
+ * covers, then the modal bin's flat mean landed on the dark field colour,
+ * failed the contrast guard and fell back to the accent, so the hero stopped
+ * visibly tracking the cover. Salience weighting lets the glow speak for the
+ * cover. The modal bin's salience-weighted mean colour wins. Null when nothing
+ * qualifies — the caller keeps accentProgress.
  */
 internal fun sampleCoverAccent(argbPixels: IntArray): Color? {
-    val bins = Array(12) { mutableListOf<Triple<Float, Float, Float>>() }
+    val binWeight = DoubleArray(12)
+    val binHue = DoubleArray(12)
+    val binSat = DoubleArray(12)
+    val binVal = DoubleArray(12)
     for (pixel in argbPixels) {
         val (h, s, v) = rgbToHsv(pixel)
-        if (s > 0.25f && v in 0.2f..0.9f) {
-            bins[((h / 30f).toInt()).coerceIn(0, 11)].add(Triple(h, s, v))
+        if (s > 0.25f && v >= 0.2f) {
+            val w = s.toDouble() * v.toDouble() * v.toDouble()
+            val bin = ((h / 30f).toInt()).coerceIn(0, 11)
+            binWeight[bin] += w
+            binHue[bin] += h * w
+            binSat[bin] += s * w
+            binVal[bin] += v * w
         }
     }
-    val modal = bins.maxByOrNull { it.size }?.takeIf { it.isNotEmpty() } ?: return null
-    var hs = 0f
-    var ss = 0f
-    var vs = 0f
-    modal.forEach { (h, s, v) -> hs += h; ss += s; vs += v }
-    val n = modal.size.toFloat()
-    return Color.hsv(hue = hs / n, saturation = ss / n, value = vs / n)
+    val modal = (0..11).maxByOrNull { binWeight[it] } ?: return null
+    val w = binWeight[modal]
+    if (w <= 0.0) return null
+    return Color.hsv(
+        hue = (binHue[modal] / w).toFloat(),
+        saturation = (binSat[modal] / w).toFloat(),
+        value = (binVal[modal] / w).toFloat(),
+    )
 }
 
 private fun relativeLuminance(c: Color): Double {
