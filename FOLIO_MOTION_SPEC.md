@@ -175,6 +175,14 @@ document and it makes Stats feel responsive rather than static.
 - `ANIMATOR_DURATION_SCALE = 0` → charts render complete on first frame
 - Peak cap never appears before its bar has finished growing
 
+*(Fix shipped v1.2.4 — the sparkline path-trim inverted into a self-erase. `clipRect`'s first
+positional parameter is `left`, not `right`, so `clipRect(size.width * progress)` clipped to
+`[width·progress, width]`: the chart started fully visible and the animation wiped it away,
+ending at a zero-width clip — users saw the line for a second and then it was gone, while the
+endpoint dot drawn outside the clip survived. One-line fix in `WeekSparkline`:
+`clipRect(right = size.width * progress)`. It is the only `clipRect` in the UI; bars, rings and
+the heatmap animate by alpha/sweep/graphicsLayer and were unaffected.)*
+
 ---
 
 ## 13.6 Effect 4 — Shared-element transition, library → book detail
