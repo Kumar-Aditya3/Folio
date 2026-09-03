@@ -259,6 +259,19 @@ reuse existing maths:
 `setOf("light", "oled", "graphite")` — checked against the luminance clause instead of hue. Keep that
 list in the test, not in `Theme.kt`, so adding a palette to it is a visible decision.
 
+*(Shipped v1.2.1 — Rule 22/§15.2 applied to all 28 palettes. Two recorded readings: **(1)** the
+achromatic luminance clause is enforced as ΔL* (CIELAB) ≥ 4.0, not ΔY ≥ 0.04 — the spec's own
+Graphite pair `#17181A`/`#1F2124` measures ΔY ≈ 0.006 yet ΔL* ≈ 4.4, so the literal 0.04 reading
+would reject this spec's own reference theme; **(2)** `dark` joins the allowlist in
+`ThemeSchemeTest` (`setOf("light", "dark", "oled", "graphite")`): a true-black base cannot carry
+hue, so `DARK` and `OLED` separate planes by lightness instead — both surfaces lifted to `#101010`
+(ΔL* ≈ 4.7 against true black) and `OLED`'s outline lightened `#262626` → `#494949` (2.11:1;
+darkening can never reach 1.5:1 against a near-black surface). Dark palettes rotate surface =
+background hue +11° and the variant planes +20°; light palettes hold colour value at 1.0 so the
+§12.3 4.5:1 accent gate survives with at most one darkened accent per palette. The §15.2 Peacock
+worked example was not already Rule 22-compliant — it needed the same rotation and now measures
+Δhue ≈ 10.8.)*
+
 ## 15.6 Phasing
 
 | Phase | Contents | Version |
