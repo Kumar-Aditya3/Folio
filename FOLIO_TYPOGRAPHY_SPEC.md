@@ -163,6 +163,19 @@ hierarchy, and it is the cheapest visual upgrade available in this codebase.
 - `displayLarge` (57sp) stays defined but unused — no surface in a reader justifies it. Keep it for a
   future onboarding moment rather than deleting it.
 
+*(Shipped v1.2.2 — weight ladder + reassignment applied. Mapping notes against the shipped code,
+since this table's "Now" column was written against the mockups: the book-detail title was
+`headlineSmall`, not `titleLarge`, and became `headlineLarge` as specified; the Stats "primary
+total" is the DailyGoalRing's today-minutes figure (`displayMedium` 45sp W300 fits inside the
+140dp ring's 116dp inner circle); the "streak count" is the streak `StatTile`, which takes
+`displaySmall` through a new `valueStyle` parameter so the other three tiles keep
+`headlineMedium`; the goal strip's minutes figure moved from one inline `labelLarge` string to a
+`headlineMedium` base with the unit and streak spans dropped to 11sp W700 on the same baseline.
+`ReadingRow` figures (book AND manga detail — it is shared) became `headlineSmall`, with the
+"Pace (words/day)" row kept at `bodyMedium` because its value is prose, not a number. Rule 23
+benchmark verified: Home hits `typography.displaySmall`, Stats hits `displayMedium` +
+`displaySmall`, Book detail hits `headlineLarge`.)*
+
 ## 15.4 Two new themes
 
 Both from the supplied reference images. Added to `AppPalette`, `Theme.PRESETS` and `ThemePack.ALL`
