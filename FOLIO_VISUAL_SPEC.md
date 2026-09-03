@@ -3,8 +3,9 @@
 Companion to `FOLIO_IMPLEMENTATION_SPEC.md`. Separate file so it can be edited in parallel;
 merge into the main spec as §12 when convenient.
 
-Rules 1–12 of the main spec apply unchanged. This document adds Rules 13–18, which are
-**additive** — nothing here relaxes Rule 2 (tokens only) or Rule 3 (one component per job).
+Rules 1–12 of the main spec apply unchanged. This document adds Rules 13–18 and Rule 20, which
+are **additive** — nothing here relaxes Rule 2 (tokens only) or Rule 3 (one component per job).
+Rule 19 lives in `FOLIO_MOTION_SPEC.md` (§13).
 
 Baseline: v1.0.30 / commit `70985ed`. Platform: **Android only** (Rule 1).
 
@@ -103,6 +104,14 @@ the user asked for it — library, search, direct navigation, its own detail scr
 treatment in §12.9.
 
 **Benchmark:** the §12.9 acceptance criteria.
+
+### Rule 20 — Home has a floor
+Home must render **at least five surfaces** whenever the library is non-empty, without
+inventing filler. Any card whose data can be absent must have a sibling that cannot. Full
+treatment in §12.10.
+
+**Benchmark:** a library of exactly one unread book, zero sessions, zero manga renders ≥5
+surfaces, none of which is a placeholder or an empty state.
 
 ---
 
@@ -234,15 +243,20 @@ is a role reassignment in `Theme.kt`, never a change in a feature file.
 | **B — Home** | §12.4 in full, including Home's own sparkline, **and §12.9's `StatsScope` gating** | 1.2.0 *(shipped v1.1.14: hero, goal strip, carousel, discovery, Home-owned sparkline, plus §12.9 gating landed in the same change as §11 Phase 7b's Home consumption. Three-theme + blur checks deferred to the manual visual pass.)* |
 | **C — Stats** | §12.5 in full — shipped in 1.1.17: heatmap promoted to `FolioHeroCard` with `accentProgress` cells scaled by intensity (HeatmapCell moved to `ui/statistics/` with an `accent` param); `ChartBar` fills with the Rule 15 `accentProgress` gradient and self-marks its peak bar with an `accentStreak` cap (applies to week charts + book/manga detail sparklines); streak tile is the `accentStreak` surface with best-streak always alongside; Top-books leaderboard built (covers at `listCoverMin`, window minutes); Genres breakdown built from book tags — one hue per row from the palette's accent roles, peak row marked by label weight (reader `highlightColors` palette deferred to Phase D per §12.6); quotes feed `accentAnnotation`; goal ring `accentProgress` gradient. Three-theme + blur checks deferred to the manual visual pass | 1.2.x |
 | **D — Spread** | §12.6 across library, book detail, reader chrome — shipped in 1.1.18: section titles take the card's semantic accent (book/manga "Your reading" and manga "Progress" now pass `accentProgress` to `FolioSectionCard`, which already accepted one); reader `highlightColors` became the chart palette via a new `chartSeries` role on `FolioColors` — default is the paper reader preset's 8 hues reordered so the genre breakdown's first six are pairwise distinct (ΔE ≥ 10, ThemeSchemeTest-enforced); Genres breakdown draws from that role, and per §12.6's constraint any palette-level fix happens only in Theme.kt. Cover-derived tint shipped in 1.1.19 per §13.3 (the "optional/last" item) — `homeCoverTint` toggle in Settings → Themes, defaulting ON with a 4.5:1 contrast guard; toggle-off renders the pixel-identical `accentProgress` hero. Plus on-device feedback on §12.5: the year heatmap was rebuilt GitHub-style — one column per week in a horizontally scrolling strip auto-scrolled to the most recent week, even 4dp gutters on both axes, quieter empty cells (it was 53 stacked rows with no vertical gap, chaining into a wall). Three-theme + blur checks deferred to the manual visual pass | 1.3.x |
+| **E — Home floor** | §12.10 in full: Rule 20, cards A–E, revised 11-surface order | 1.3.x |
 
 Phase A ships with **zero visible change** except the new components existing — that is the
 point: roles land and are proven contrast-safe before any screen depends on them.
 
 **Verification for every §12 phase** (in addition to main-spec §10):
+
+
 - Three-theme check per §2.7 — `LIGHT`/`paper`, `midnightneon`, `rainbow`
 - Rule 13 blur test on every screen touched
 - `ThemeSchemeTest` green across all 28 palettes
 - Rule 11 device smoke test
+
+---
 
 ## 12.8 Sequencing against §11
 
@@ -305,3 +319,99 @@ button. Do **not** fall back to showing an excluded book.
 - Excluding a manga category removes those titles from all three manga Home cards
 - Tests: `HomeViewModel` under a scope excluding the hero book; under a scope excluding all
   in-progress books; `becauseFinished` anchor selection skipping an excluded finished book
+
+---
+
+## 12.10 Home is empty because every card is conditional
+
+**Symptom.** Home renders four surfaces on a real library and reads as bland.
+
+**Cause, from the composition order in `HomeScreen.kt`.** Only three items are unconditional —
+hero, goal strip, this-week sparkline. Everything else is gated:
+
+| Card | Gate | Absent when |
+|---|---|---|
+| Continue reading | `continueReading.isNotEmpty()` | nothing in progress |
+| Because you finished | `becauseFinishedTitle != null && candidates.size >= 2` | no finished book, or a small/unconnected library |
+| Manga continue / New chapters / Discover | manga library non-empty, updates run, source supports LATEST | books-only user |
+
+So a books-only user with two in-progress titles sees hero + strip + one carousel + sparkline.
+Nothing is broken; the page is simply mostly gates.
+
+**Root cause.** Every existing Home card derives from **reading activity**, and activity is
+precisely what a new or light user lacks. Meanwhile the app already stores plenty that is not
+activity-derived and never surfaces it: library inventory, quotes, highlights, tags,
+collections, series, re-read cycles.
+
+### 12.10.1 Always-available cards (add these)
+
+Each is backed by a repository call that exists today — no schema change, no new data.
+
+**A. "Up next" — always present when any unread book exists.**
+`BookRepository.getUnreadBooks()` (declared, currently unused by Home). Up to 6 covers at
+`listCoverMin`, ordered by date added desc. Title: "Up next". This is the card that fixes a
+brand-new library: import one book and Home has content immediately.
+Tap → book detail. Respects `StatsScope` (Rule 18).
+
+**B. "From your highlights" — present whenever one highlight or quote exists.**
+`QuoteRepository.getAllQuotes()` + `HighlightRepository`. One quote, `bodyLarge`, italic, with
+book title beneath — a pull-quote, not a list row. Rotates per Home visit, deterministic on the
+day so it does not flicker between recompositions. Accent: `accentAnnotation`.
+Tap → the Quotes hub. Highest-value addition after A: it is the only card that gives something
+*back* rather than asking for input.
+
+**C. "Your library at a glance" — present whenever the library is non-empty.**
+Derived from `getAllBooks()`, which Home already collects. A quiet row, not a card:
+`"148 books · 12 reading · 31 finished · 4 series"`. One pass over data already in memory.
+Tap → Library.
+
+**D. "Pick up again" — present whenever a paused/abandoned book exists.**
+`BookStatus.PAUSED` and `ABANDONED` are already modelled and currently invisible on Home. Up to
+3 covers, title "Pick up again". Distinct from Continue reading, which is `READING` only.
+Excluded titles stay out (Rule 18) — this is the card most likely to surface something the user
+deliberately excluded, so the gate matters.
+
+**E. "On this day" — present whenever a session exists from ≥1 year ago.**
+`observeSessionsSince` already pulls 365 days. "A year ago you were reading X." Absent for
+users under a year old, which is fine — it is a bonus, not a floor card.
+
+### 12.10.2 Revised order
+
+Hero, then alternating weights, then the gated cards, with the floor cards placed to fill
+whatever the gates leave empty:
+
+1. Hero — "Reading now" *(unconditional)*
+2. Goal strip *(quiet, unconditional)*
+3. Continue reading *(gated)*
+4. **Up next** *(A — unconditional with any unread book)*
+5. **From your highlights** *(B — pull-quote, gated on ≥1 annotation)*
+6. Manga continue / New chapters / Discover *(gated, §11.4)*
+7. Because you finished *(gated)*
+8. **Pick up again** *(D — gated on paused/abandoned)*
+9. This week — sparkline *(quiet, unconditional)*
+10. **Library at a glance** *(C — quiet, unconditional)*
+11. **On this day** *(E — gated)*
+
+Rule 13 still holds: one hero, no two adjacent surfaces of the same weight. Items 9 and 10 are
+both quiet, which is permitted because one is a chart and one is a single text row — a large
+enough difference in form. Do not add a third quiet surface adjacent to them.
+
+### 12.10.3 What not to do
+
+- **No skeleton or "coming soon" filler.** An empty card is worse than a shorter page.
+- **No duplicating the Library.** "Up next" is 6 covers with a purpose, not a second shelf.
+- **No card that only states a number.** C earns its place by being one quiet row, not a card.
+- **Do not un-gate the existing cards.** "Because you finished" hiding below 2 candidates is
+  correct (§5.4); the fix is more *sources* of content, not weaker thresholds.
+- **No infinite feed.** Home is a launchpad. It ends.
+
+### 12.10.4 Acceptance criteria
+
+- One unread book, zero sessions, zero manga → ≥5 surfaces, no placeholders (Rule 20)
+- A brand-new import appears in "Up next" without any reading having happened
+- The pull-quote is stable within a day and changes across days
+- Every new card honours `StatsScope` (Rule 18); an excluded book appears in none of them
+- Rule 13 blur test still identifies the hero with the page fully populated
+- Home holds 60fps scrolling with all 11 surfaces present
+- `ui/home/` still imports nothing from `ui/statistics/` beyond the shared data types (Rule 16)
+- Three-theme check per §2.7
