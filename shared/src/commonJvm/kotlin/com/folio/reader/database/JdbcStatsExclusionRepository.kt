@@ -2,7 +2,8 @@ package com.folio.reader.database
 
 import com.folio.reader.statistics.Scope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * JDBC-backed stats exclusions (§11.2): one row per (scope, target_id) in the
@@ -12,24 +13,26 @@ import kotlinx.coroutines.flow.flow
  */
 class JdbcStatsExclusionRepository(private val db: Database) : StatsExclusionRepository {
 
-    override fun observeExclusions(): Flow<Set<Pair<Scope, String>>> = flow {
-        emit(
-            db.withConnection { conn ->
-                conn.prepareStatement("SELECT scope, target_id FROM stats_exclusions").use { stmt ->
-                    stmt.executeQuery().use { rs ->
-                        val out = mutableSetOf<Pair<Scope, String>>()
-                        while (rs.next()) {
-                            // Tolerate a row written by a newer build with a scope this
-                            // build does not know; dropping it beats crashing the stats tab.
-                            val scope = runCatching { Scope.valueOf(rs.getString("scope")) }.getOrNull()
-                            val targetId = rs.getString("target_id")
-                            if (scope != null && targetId != null) out.add(scope to targetId)
-                        }
-                        out.toSet()
+    // The JDBC read is a snapshot, so without this the exclusions screen would
+    // write a row and never see its own checkbox tick (reported live 2026-09-03).
+    private val revision = MutableStateFlow(0)
+
+    override fun observeExclusions(): Flow<Set<Pair<Scope, String>>> = revision.map {
+        db.withConnection { conn ->
+            conn.prepareStatement("SELECT scope, target_id FROM stats_exclusions").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    val out = mutableSetOf<Pair<Scope, String>>()
+                    while (rs.next()) {
+                        // Tolerate a row written by a newer build with a scope this
+                        // build does not know; dropping it beats crashing the stats tab.
+                        val scope = runCatching { Scope.valueOf(rs.getString("scope")) }.getOrNull()
+                        val targetId = rs.getString("target_id")
+                        if (scope != null && targetId != null) out.add(scope to targetId)
                     }
+                    out.toSet()
                 }
             }
-        )
+        }
     }
 
     override suspend fun add(scope: Scope, targetId: String) {
@@ -42,6 +45,7 @@ class JdbcStatsExclusionRepository(private val db: Database) : StatsExclusionRep
                 stmt.executeUpdate()
             }
         }
+        revision.value += 1
     }
 
     override suspend fun remove(scope: Scope, targetId: String) {
@@ -54,5 +58,6 @@ class JdbcStatsExclusionRepository(private val db: Database) : StatsExclusionRep
                 stmt.executeUpdate()
             }
         }
+        revision.value += 1
     }
 }

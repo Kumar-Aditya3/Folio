@@ -6,7 +6,10 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.platform.DesktopPlatform
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
@@ -162,6 +165,30 @@ class StatsScopeTest {
                 assertEquals(setOf(Scope.BOOK_STATUS to BookStatus.ABANDONED.name), reopened.observeExclusions().first())
             } finally {
                 second.close()
+            }
+        } finally {
+            tempRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `observeExclusions re-emits to a live collector after add and remove`() = runBlocking {
+        // The exclusions screen collects ONE flow instance while writing through
+        // the same repository — the tick must appear without re-subscribing.
+        val tempRoot = createTempDir("folio-stats-exclusions-live-")
+        try {
+            val platform = DesktopPlatform(tempRoot)
+            val repo = JdbcStatsExclusionRepository(Database(platform.fileSystem.getDatabasePath()))
+            val snapshots = Channel<Set<Pair<Scope, String>>>(Channel.UNLIMITED)
+            val job = launch { repo.observeExclusions().take(3).collect { snapshots.send(it) } }
+            try {
+                assertEquals(emptySet(), snapshots.receive())
+                repo.add(Scope.BOOK, "b1")
+                assertEquals(setOf(Scope.BOOK to "b1"), snapshots.receive())
+                repo.remove(Scope.BOOK, "b1")
+                assertEquals(emptySet(), snapshots.receive())
+            } finally {
+                job.cancel()
             }
         } finally {
             tempRoot.deleteRecursively()
