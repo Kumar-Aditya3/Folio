@@ -493,7 +493,7 @@ private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
                 if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
             }
         }
-        clipRect(size.width * progress) {
+        clipRect(right = size.width * progress) {
             drawPath(
                 areaPath,
                 brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
