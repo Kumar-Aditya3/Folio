@@ -68,6 +68,39 @@ class CoverAccentTest {
     }
 
     @Test
+    fun glowingCoverSpeaksForTheCover() {
+        // A glow cover: dark maroon field, bright orange bloom, cream title (too
+        // unsaturated to qualify), some blue art, near-black bars. The bloom must
+        // win the election by chroma salience — the first pass took the modal
+        // bin's flat mean, landed on the dark field colour, failed the guard and
+        // fell back to the accent, so the hero never visibly tracked the cover.
+        val pixels = IntArray(32 * 32) { i ->
+            when {
+                i < 600 -> argb(120, 25, 20)   // maroon field, hue ~3°
+                i < 900 -> argb(255, 150, 40)  // orange bloom, hue ~31°
+                i < 950 -> argb(70, 110, 150)  // blue art
+                i < 980 -> argb(245, 230, 200) // cream title — saturation ≤ 0.25
+                else -> argb(15, 12, 10)       // near-black bar — value < 0.2
+            }
+        }
+        val accent = sampleCoverAccent(pixels)
+        assertNotNull(accent)
+        val hsv = rgbToHsv(
+            argb(
+                (accent.red * 255f).toInt(),
+                (accent.green * 255f).toInt(),
+                (accent.blue * 255f).toInt(),
+            )
+        )
+        assertTrue(hsv.first in 25f..40f, "expected the orange bloom, got hue ${hsv.first}")
+        assertTrue(hsv.third >= 0.9f, "expected the bloom's brightness, got value ${hsv.third}")
+        // And it must be bright enough that the guard leaves it untouched — the
+        // visible symptom was the guard washing the whole tint into the accent.
+        val dark = Color(0xFF101418)
+        assertEquals(accent, guardCoverContrast(accent, dark, Color(0xFFE040FB)))
+    }
+
+    @Test
     fun guardAlwaysReturnsLegibleColor() {
         val lightSurface = Color(0xFFFAF7F2)
         val darkSurface = Color(0xFF101418)
