@@ -33,6 +33,7 @@ import com.folio.reader.nav.FolioNavCallbacks
 import com.folio.reader.nav.FolioNavHost
 import com.folio.reader.nav.FolioNavModelImpl
 import com.folio.reader.nav.FolioNavShell
+import com.folio.reader.ui.components.folioField
 import com.folio.reader.nav.FolioRoutes
 import com.folio.reader.nav.changeMangaDownloadsLocation
 import com.folio.reader.nav.handleAnnotationsExport
@@ -231,9 +232,15 @@ class MainActivity : ComponentActivity() {
                 palette = AppPalette.byId(model.globalSettings.appThemeId),
                 fontTheme = FontTheme.byId(model.globalSettings.fontThemeId)
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = FolioTheme.colors.background
+                // The app's ground plane. `folioField` replaces the flat
+                // background fill with the theme's atmosphere — a vertical wash
+                // plus three enormous, very low-alpha accent pools — so every
+                // screen sits in an environment instead of on a colour. One
+                // drawing pass, no recomposition; see FolioAtmosphere.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .folioField()
                 ) {
                     androidx.compose.runtime.key(refreshTick) {
                         FolioNavShell(

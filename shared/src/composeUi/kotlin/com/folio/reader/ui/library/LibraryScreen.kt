@@ -412,10 +412,10 @@ fun LibraryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(vertical = com.folio.reader.ui.theme.FolioTokens.space1),
+                        .padding(horizontal = com.folio.reader.ui.theme.FolioTokens.gutter)
+                        .padding(top = com.folio.reader.ui.theme.FolioTokens.space1),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (mangaContent != null) {
                         com.folio.reader.ui.components.FolioChip(
@@ -519,6 +519,7 @@ private fun LibraryContent(
             onSeriesFilterOpen = onSeriesFilterOpen,
             onCollectionFilterOpen = onCollectionFilterOpen
         )
+        Spacer(Modifier.height(com.folio.reader.ui.theme.FolioTokens.space1))
 
         if (books == null) {
             com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())

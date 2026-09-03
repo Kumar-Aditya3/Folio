@@ -51,6 +51,7 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
+import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -139,12 +140,14 @@ fun TOCSidebar(
     onChapterClick: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val tocShape = RoundedCornerShape(topStart = 20.dp)
+    // Glass, because it sits over the page. A 26dp leading sweep so the panel
+    // reads as sliding in from the edge rather than being pasted on.
+    val tocShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
     Column(
         modifier = Modifier
             .fillMaxHeight()
             .width(260.dp)
-            .glassPanel(tocShape)
+            .folioVeil(tocShape)
     ) {
         Row(
             modifier = Modifier
@@ -234,7 +237,7 @@ fun AnnotationsSidebar(
         modifier = Modifier
             .fillMaxHeight()
             .width(300.dp)
-            .glassPanel(RoundedCornerShape(topStart = 20.dp))
+            .folioVeil(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
             .padding(vertical = 16.dp)
     ) {
         Row(

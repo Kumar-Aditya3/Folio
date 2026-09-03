@@ -1,6 +1,7 @@
 package com.folio.reader.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.folioPanel
 
 @Composable
 fun CloudSyncSettingsPanel(
@@ -59,9 +61,10 @@ fun CloudSyncSettingsPanel(
             onSyncNow = onSyncNow
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioPanel(com.folio.reader.ui.theme.FolioShapes.card)
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),

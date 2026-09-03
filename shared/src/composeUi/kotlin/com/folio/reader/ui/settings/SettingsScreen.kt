@@ -93,7 +93,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .background(FolioTheme.colors.background),
+                            ,
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -173,7 +173,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .background(FolioTheme.colors.background),
+                            ,
                         contentPadding = PaddingValues(24.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {

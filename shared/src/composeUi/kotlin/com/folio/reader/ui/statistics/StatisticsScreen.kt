@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,12 +47,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.manga.MangaStatistics
 import com.folio.reader.manga.MangaStatisticsRepository
+import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.launch
@@ -105,12 +111,8 @@ fun StatisticsTabContent(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = FolioTokens.space3,
-            end = FolioTokens.space3,
-            top = FolioTokens.space3,
-            bottom = FolioTokens.space4
+            bottom = FolioTokens.spaceMovement
         ),
-        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
     ) {
         // ── Rule 8 — an exclusion the user cannot see is invisible behavior ──
         if (exclusions.isNotEmpty() && onOpenExclusions != null) {
@@ -118,9 +120,8 @@ fun StatisticsTabContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(FolioTokens.radiusChip))
                         .clickable(onClick = onOpenExclusions)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -140,156 +141,154 @@ fun StatisticsTabContent(
 
         // ── a. Daily goal ring ────────────────────────────────────────
         item {
-            DailyGoalRing(
-                todayMinutes = stats.todayMinutes,
+            StatsOverture(
+                stats = stats,
                 goalMinutes = goalMinutes,
-                onGoalChanged = { newGoal ->
-                    goalMinutes = newGoal
-                },
+                onGoalChanged = { newGoal -> goalMinutes = newGoal },
                 settingsRepository = settingsRepository,
             )
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
         }
 
-        // ── b. Finish predictions ─────────────────────────────────────
+        item {
+            HeadlineRow(stats)
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+
+        item {
+            WeekChart(stats.week)
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+
+        item {
+            ActivityHeatmap(stats.heatmap, stats.heatmapBooks, stats.heatmapManga)
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+
         if (stats.currentlyReading.isNotEmpty()) {
             item {
                 FinishPredictionsCard(
                     books = stats.currentlyReading.take(5),
                     onBookClick = onBookClick,
                 )
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
         }
 
-        // ── b2. §12.5 top-books leaderboard + genre breakdown ─────────
         if (stats.topBooks.isNotEmpty()) {
-            item { TopBooksCard(books = stats.topBooks, onBookClick = onBookClick) }
+            item {
+                TopBooksCard(books = stats.topBooks, onBookClick = onBookClick)
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
+            }
         }
         if (stats.genres.isNotEmpty()) {
-            item { GenresCard(slices = stats.genres) }
+            item {
+                GenresCard(slices = stats.genres)
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
+            }
         }
 
-        // ── c. Floating quotes & highlights ───────────────────────────
+        item {
+            PatternsCard(stats, mangaStats)
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+
         if (recentQuotes.isNotEmpty()) {
             item {
                 FloatingQuotesCard(quotes = recentQuotes)
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
         }
 
-        // ── c2. Manga statistics (when available) ─────────────────────
         if (mangaStats != null && mangaStats!!.hasData) {
             item {
                 MangaStatsSection(mangaStats!!)
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
         }
 
-        // ── d. Deep stats (existing sections) ─────────────────────────
-        item { HeadlineRow(stats) }
-        item { WeekChart(stats.week) }
-        item { ActivityHeatmap(stats.heatmap, stats.heatmapBooks, stats.heatmapManga) }
-        item { PatternsCard(stats, mangaStats) }
         if (!stats.hasData) {
             item { EmptyState() }
         }
-        item { Spacer(Modifier.height(FolioTokens.space1)) }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Daily Goal Ring
+// The overture — Stats' opening statement
 // ---------------------------------------------------------------------------
 
+/**
+ * Stats' opening statement, and the screen's only raised composition.
+ *
+ * The old screen opened with a 140dp ring inside a card, so the first thing it
+ * said was "here is a widget". This says something about the reader instead: the
+ * year's reading time as a hero figure, the chronotype as a sentence, and the
+ * daily-goal ring demoted to a compact companion on the trailing edge — still
+ * informative, no longer the headline.
+ *
+ * Both progress forms coexist legitimately here because they measure different
+ * spans (year vs today) and only one is a ring; §2.6 forbids duplicated *forms*
+ * for the same quantity.
+ */
 @Composable
-private fun DailyGoalRing(
-    todayMinutes: Long,
+private fun StatsOverture(
+    stats: StatisticsUiState,
     goalMinutes: Int,
     onGoalChanged: (Int) -> Unit,
     settingsRepository: SettingsRepository?,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
-    val fraction = if (goalMinutes > 0) (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f) else 0f
-    val animatedFraction by animateFloatAsState(
-        targetValue = fraction,
-        animationSpec = tween(durationMillis = 800, easing = LinearEasing),
-        label = "goalRing",
-    )
-    // §13.5: the ring sweeps in once on entry; live goal changes keep using the
-    // fraction animation above.
-    val ringEntry = rememberEntryProgress("dailyGoalRing")
-
+    val colors = FolioTheme.colors
+    val hours = stats.timeThisYearMs / 3_600_000
     Column(
         modifier = Modifier
-            .glassPanel(RoundedCornerShape(FolioTokens.radiusCard))
-            .padding(FolioTokens.space3),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Daily goal",
-                style = FolioTheme.typography.titleSmall,
-                color = FolioTheme.colors.onSurface,
+            .fillMaxWidth()
+            .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
+            .folioRaised(shape = FolioShapes.heroBleed, accent = colors.accentProgress)
+            .padding(
+                start = FolioTokens.gutter,
+                end = FolioTokens.space3,
+                top = FolioTokens.space3,
+                bottom = FolioTokens.space3,
             )
-            if (settingsRepository != null) {
-                IconButton(onClick = { showEditDialog = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = "Edit daily goal",
-                        tint = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                FolioFigure(
+                    value = if (hours > 0) hours.toString() else stats.todayMinutes.toString(),
+                    unit = if (hours > 0) "hours this year" else "minutes today",
+                    label = "Your reading life",
+                    accent = colors.accentProgress,
+                    emphasis = FigureScale.Hero,
+                )
+                if (stats.chronotype.isNotBlank()) {
+                    Spacer(Modifier.height(FolioTokens.space2))
+                    Text(
+                        text = stats.chronotype,
+                        style = FolioTheme.typography.titleMedium,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (stats.peakWindow.isNotBlank()) {
+                    Text(
+                        text = "Mostly between ${stats.peakWindow}",
+                        style = FolioTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-        }
-
-        Spacer(Modifier.height(FolioTokens.space2))
-
-        val trackColor = FolioTheme.colors.outline.copy(alpha = 0.2f)
-        // §12.5/Rule 14: forward motion is accentProgress, never primary.
-        val accent = FolioTheme.colors.accentProgress
-        val progressBrush = Brush.verticalGradient(
-            listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
-        )
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(140.dp)) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val strokeWidth = 12.dp.toPx()
-                val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
-                val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
-                // Track
-                drawArc(
-                    color = trackColor,
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-                )
-                // Progress
-                drawArc(
-                    brush = progressBrush,
-                    startAngle = -90f,
-                    sweepAngle = 360f * animatedFraction * ringEntry,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-                )
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "${todayMinutes.toInt()}",
-                    style = FolioTheme.typography.displayMedium,
-                    color = accent,
-                )
-                Text(
-                    text = "of $goalMinutes min",
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                )
-            }
+            Spacer(Modifier.width(FolioTokens.space3))
+            GoalDial(
+                todayMinutes = stats.todayMinutes,
+                goalMinutes = goalMinutes,
+                onEdit = if (settingsRepository != null) {
+                    { showEditDialog = true }
+                } else null,
+            )
         }
     }
 
@@ -303,6 +302,78 @@ private fun DailyGoalRing(
             },
             settingsRepository = settingsRepository,
         )
+    }
+}
+
+/**
+ * The daily goal, compact. 96dp instead of 140dp, no card of its own, the numeral
+ * inside the ring rather than a label beside it — a companion to the hero figure,
+ * not a rival. Tapping the ring edits the goal, so the whole dial is the target
+ * instead of a 32dp pencil.
+ */
+@Composable
+private fun GoalDial(
+    todayMinutes: Long,
+    goalMinutes: Int,
+    onEdit: (() -> Unit)?,
+) {
+    val colors = FolioTheme.colors
+    val fraction = if (goalMinutes > 0) (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f) else 0f
+    val animatedFraction by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = tween(durationMillis = 800, easing = LinearEasing),
+        label = "goalRing",
+    )
+    // §13.5: the ring sweeps in once on entry; live goal changes keep using the
+    // fraction animation above.
+    val ringEntry = rememberEntryProgress("dailyGoalRing")
+    val met = goalMinutes > 0 && todayMinutes >= goalMinutes
+    // Rule 14: forward motion is accentProgress; a met goal is a celebration and
+    // switches to accentStreak.
+    val accent = if (met) colors.accentStreak else colors.accentProgress
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(96.dp)
+            .then(if (onEdit != null) Modifier.clickable(onClick = onEdit) else Modifier)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 7.dp.toPx()
+            val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+            val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
+            drawArc(
+                color = accent.copy(alpha = 0.16f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+            )
+            drawArc(
+                brush = Brush.verticalGradient(
+                    listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
+                ),
+                startAngle = -90f,
+                sweepAngle = 360f * animatedFraction * ringEntry,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "${todayMinutes.toInt()}",
+                style = FolioTheme.typography.headlineSmall,
+                color = accent,
+            )
+            Text(
+                text = "/ $goalMinutes min",
+                style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
     }
 }
 

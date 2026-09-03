@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
+import com.folio.reader.ui.theme.FolioTokens
 
 /**
  * Status / series / collection filter chips for the books shelf
@@ -32,7 +33,7 @@ internal fun LibraryFilterChips(
     onCollectionFilterOpen: (Boolean) -> Unit
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

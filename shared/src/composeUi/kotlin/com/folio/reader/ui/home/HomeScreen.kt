@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,35 +45,52 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.model.Book
-import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.EmptyState
-import com.folio.reader.ui.components.FolioHeroCard
-import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioFigure
+import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
+import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberEntryState
+import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.rememberMotionEnabled
 
 /**
- * §12.4 Home surface: hero first, then never two adjacent surfaces of the same
- * weight — goal strip (quiet), continue-reading carousel, because-you-finished,
- * this-week sparkline (quiet). The sparkline is Home's own (Rule 16); the only
- * ui/statistics imports are the shared data types.
+ * Home, recomposed as a reading room rather than a dashboard.
+ *
+ * The old screen was four `FolioSectionCard`s of identical weight, so nothing
+ * answered "what am I reading?" faster than anything else. The new order is a
+ * deliberate crescendo and rest:
+ *
+ * 1. **The anchor** — one book, one cover at 148dp overhanging the edge of a
+ *    raised asymmetric plane, lit by its own dominant colour. Unmissable.
+ * 2. **The ledger** — goal and streak as small figures directly on the page, no
+ *    container at all. The deliberate quiet beat after the anchor.
+ * 3. **Shelves** — continue-reading and discovery as rows of cover plates that
+ *    run past the gutter, headed by type instead of boxed.
+ * 4. **The week** — a sunken well, so the one chart on the screen reads as cut
+ *    *into* the page while the anchor floats above it.
+ *
+ * Nothing was removed: every element, tap target and exclusion notice the old
+ * layout carried is still here, re-ranked.
  */
 @Composable
 fun HomeScreen(
@@ -137,16 +155,26 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space4),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space4)
+                // No uniform arrangement: each block owns the space beneath it, so
+                // related things sit close and unrelated things get a real break.
+                contentPadding = PaddingValues(bottom = FolioTokens.spaceMovement)
             ) {
-                item { HeroCard(state, collapse, heroTint, onOpenBook, onOpenLibrary) }
-                item { GoalStrip(state, onOpenStats, onOpenExclusions) }
-                if (state.continueReading.isNotEmpty()) {
-                    item { ContinueReadingCard(state.continueReading, onOpenBook) }
+                item {
+                    ReadingNowAnchor(state, collapse, heroTint, onOpenBook, onOpenLibrary)
+                    Spacer(Modifier.height(FolioTokens.spaceBeat))
                 }
-                // §11.4: manga Continue reading — separate card, never merged into the
-                // books carousel. Primary tap opens the reader; the overflow item is
+                item {
+                    LedgerStrip(state, onOpenStats, onOpenExclusions)
+                    Spacer(Modifier.height(FolioTokens.spaceMovement))
+                }
+                if (state.continueReading.isNotEmpty()) {
+                    item {
+                        ContinueShelf(state.continueReading, onOpenBook)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
+                }
+                // §11.4: manga Continue reading — separate shelf, never merged into
+                // the books one. Primary tap opens the reader; the overflow item is
                 // the only path to the source's web page.
                 if (state.mangaContinue.isNotEmpty() && mangaBackend != null) {
                     item {
@@ -157,39 +185,56 @@ fun HomeScreen(
                             onOpenDetail = onOpenMangaDetail,
                             onOpenSourceWeb = onOpenSourceWeb
                         )
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
                     }
                 }
-                // §11.4: manga "New chapters" sits after the books carousel; hidden
-                // when the total is zero. Tapping a row opens the manga detail.
+                // §11.4: "New chapters" sits after the books shelf; hidden at zero.
                 if (state.newChapters.isNotEmpty() && mangaBackend != null) {
-                    item { NewChaptersCard(state.newChapters, mangaBackend, onOpenMangaDetail) }
+                    item {
+                        NewChaptersCard(state.newChapters, mangaBackend, onOpenMangaDetail)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
                 }
                 // §11.4: Discover — LATEST from the most recently read manga's source.
                 if (state.discover.isNotEmpty() && mangaBackend != null) {
-                    item { DiscoverCard(state.discover, mangaBackend, onOpenDiscover) }
+                    item {
+                        DiscoverCard(state.discover, mangaBackend, onOpenDiscover)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
                 }
                 val finishedTitle = state.becauseFinishedTitle
                 if (finishedTitle != null && state.candidates.size >= 2) {
-                    item { BecauseYouFinishedCard(finishedTitle, state.candidates, onOpenBookDetail) }
+                    item {
+                        BecauseYouFinishedShelf(finishedTitle, state.candidates, onOpenBookDetail)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
                 }
-                item { ThisWeekCard(state) }
+                item { ThisWeekWell(state, onOpenStats) }
             }
         }
     }
 }
 
 /**
- * §12.4 hero — "Reading now". Thin progress bar under the cover (one form per
- * view, §2.6), one filled "Continue" button. Null hero is the §12.9 designed
- * empty: never fall back to an excluded book.
+ * **The anchor.** One book, stated as an object in a room.
  *
- * §13.3: the hero gradient is tinted by the current cover's dominant colour
- * (contrast-guarded, toggle in Themes) instead of a flat accentProgress. §13.9:
- * over the first 160dp of scroll the cover scales 1.0→0.55 toward the top bar
- * and the gradient fades 0.30→0.12, tracked 1:1 with the finger.
+ * Composition: a raised asymmetric plane inset from the trailing edge only, with
+ * the cover plate *overhanging its leading edge* by 12dp so the artwork breaks the
+ * container instead of sitting inside it. Title sits beside the cover, not beneath
+ * — large, in the display face, ranged left against the cover's edge. Progress is
+ * integrated as a hairline seam across the plane's foot with the percentage set as
+ * a figure, so it reads as part of the composition rather than metadata.
+ *
+ * The cover's own dominant colour does three jobs at once: it lights the plane's
+ * top rim, throws a halo behind the plate, and tints the plane's gradient. That is
+ * the whole "cover as design material" idea in one place — and it is scoped to this
+ * one composable, so a single cover never recolours the app.
+ *
+ * §13.9 collapse is preserved: the cover scales 1.0→0.62 toward the bar and the
+ * tint fades 0.30→0.10, tracked 1:1 with the finger, frozen under reduce-motion.
  */
 @Composable
-private fun HeroCard(
+private fun ReadingNowAnchor(
     state: HomeUiState,
     collapse: State<Float>,
     heroTint: Color?,
@@ -197,150 +242,217 @@ private fun HeroCard(
     onOpenLibrary: () -> Unit
 ) {
     val hero = state.hero
+    val colors = FolioTheme.colors
     if (hero == null) {
-        FolioSectionCard {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)
-            ) {
-                Text(
-                    "Nothing in progress — pick something from your library.",
-                    style = FolioTheme.typography.bodyMedium,
-                    color = FolioTheme.colors.onSurfaceVariant
-                )
-                OutlinedButton(onClick = onOpenLibrary) { Text("Open library") }
-            }
+        // §12.9 designed empty: an invitation set in type, not an empty card.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = FolioTokens.gutter)
+                .padding(top = FolioTokens.spaceBeat),
+            verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)
+        ) {
+            FolioEyebrow("Reading now", accent = colors.accentProgress)
+            Text(
+                "Nothing in progress.",
+                style = FolioTheme.typography.displaySmall,
+                color = colors.onSurface,
+            )
+            Text(
+                "Pick something from your library and it will anchor this page.",
+                style = FolioTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant
+            )
+            OutlinedButton(onClick = onOpenLibrary) { Text("Open library") }
         }
         return
     }
-    val collapseFraction = collapse.value
-    val gradientAlpha = androidx.compose.ui.util.lerp(0.30f, 0.12f, collapseFraction)
-    FolioHeroCard(
-        modifier = Modifier.clickable { onOpenBook(hero.id) },
-        accent = heroTint,
-        mesh = true,
-        gradientAlpha = gradientAlpha
+    val tint = heroTint ?: colors.accentProgress
+    val fraction = collapse.value
+    val interaction = rememberFolioInteraction()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Inset on the trailing side only: the plane runs off the leading edge,
+            // which is what makes it read as a spread rather than a card.
+            .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
+            .folioPressable(interaction)
+            .folioRaised(
+                shape = FolioShapes.heroBleed,
+                accent = tint,
+                elevation = FolioTokens.elevationRaised,
+            )
+            .background(
+                Brush.linearGradient(
+                    0f to tint.copy(alpha = androidx.compose.ui.util.lerp(0.30f, 0.10f, fraction)),
+                    0.65f to Color.Transparent,
+                ),
+                FolioShapes.heroBleed,
+            )
+            .clickable(interactionSource = interaction, indication = null) { onOpenBook(hero.id) }
+            .padding(
+                start = FolioTokens.gutter,
+                end = FolioTokens.space3,
+                top = FolioTokens.space3,
+                bottom = FolioTokens.space3,
+            )
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column {
+        Column {
+            Row(verticalAlignment = Alignment.Top) {
+                // The plate overhangs the plane's leading edge — a negative offset,
+                // so the artwork sits in front of the surface holding it.
                 Box(
                     modifier = Modifier
-                        .width(FolioTokens.heroCoverMin)
-                        .height(180.dp)
+                        .offset(x = -(FolioTokens.gutter - FolioTokens.space1))
                         .graphicsLayer {
-                            val scale = androidx.compose.ui.util.lerp(1f, 0.55f, collapse.value)
+                            val scale = androidx.compose.ui.util.lerp(1f, 0.62f, collapse.value)
                             scaleX = scale
                             scaleY = scale
-                            // Shrink toward the top bar; never fully hidden — the
-                            // collapsed thumbnail keeps the anchor.
-                            transformOrigin = TransformOrigin(0.5f, 0f)
+                            transformOrigin = TransformOrigin(0f, 0f)
                         }
-                        .clip(RoundedCornerShape(4.dp))
                 ) {
-                    BookCover(coverPath = hero.coverPath, title = hero.title, author = hero.author)
+                    FolioCoverPlate(
+                        coverPath = hero.coverPath,
+                        title = hero.title,
+                        author = hero.author,
+                        width = FolioTokens.coverAnchor,
+                        halo = tint,
+                        elevation = 16.dp,
+                    )
                 }
-                if (hero.progress > 0f) {
-                    Spacer(Modifier.height(FolioTokens.space1))
-                    Box(
-                        modifier = Modifier
-                            .width(FolioTokens.heroCoverMin)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(FolioTheme.colors.accentProgress.copy(alpha = 0.25f))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(hero.progress)
-                                .height(4.dp)
-                                .background(FolioTheme.colors.accentProgress, RoundedCornerShape(2.dp))
+                Spacer(Modifier.width(FolioTokens.space2))
+                // Matched to the plate's height and distributed, so the title sits at
+                // the cover's head and the figure at its foot — no dead band between
+                // them, which is what an unbalanced Column produced here.
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(FolioTokens.coverAnchor * FolioTokens.coverAspect),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceHair)) {
+                        FolioEyebrow("Reading now", accent = tint)
+                        Text(
+                            hero.title,
+                            style = FolioTheme.typography.headlineMedium,
+                            color = colors.onSurface,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (hero.author.isNotBlank()) {
+                            Text(
+                                hero.author,
+                                style = FolioTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
+                    // Progress as a figure at the composition's foot; the estimate is
+                    // its caption and the seam below spans the full measure.
+                    FolioFigure(
+                        value = "${(hero.progress * 100).toInt()}",
+                        unit = "%",
+                        caption = hero.finishEstimate ?: "Just started",
+                        accent = tint,
+                        emphasis = FigureScale.Quiet,
+                    )
                 }
             }
-            Spacer(Modifier.width(FolioTokens.space3))
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+            Spacer(Modifier.height(FolioTokens.space3))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    hero.title,
-                    style = FolioTheme.typography.displaySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    "Continue",
+                    style = FolioTheme.typography.labelLarge,
+                    color = tint,
                 )
-                if (hero.author.isNotBlank()) {
-                    Text(
-                        hero.author,
-                        style = FolioTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (hero.finishEstimate != null) {
-                    Text(
-                        hero.finishEstimate,
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Button(onClick = { onOpenBook(hero.id) }) { Text("Continue") }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(FolioTokens.space3))
+                // §2.6: one progress form in this view — the seam.
+                FolioProgressBar(
+                    progress = hero.progress,
+                    color = tint,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
 }
 
 /**
- * §12.4 goal strip: 32dp ring in accentProgress, streak in accentStreak, met-goal
- * fill at 12% with the numeral semibold. Tapping opens the Stats tab. Rule 8:
- * when any exclusion is active, the review line sits under the strip.
+ * **The ledger.** The quiet beat after the anchor: today's minutes and the streak
+ * set as two small figures directly on the page — no container, no ring, nothing
+ * competing. A hairline rule under them is the only structure, which is precisely
+ * why the anchor above keeps all the weight.
+ *
+ * Met goals are marked by the figure switching to `accentStreak` and a small
+ * ring appearing beside it, not by a coloured box: celebration should feel like
+ * emphasis, not like a notification.
+ *
+ * Tapping opens Stats. Rule 8's exclusion notice keeps its own row beneath.
  */
 @Composable
-private fun GoalStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclusions: () -> Unit) {
+private fun LedgerStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclusions: () -> Unit) {
     val colors = FolioTheme.colors
     val met = state.goalMinutes > 0 && state.todayMinutes >= state.goalMinutes
-    Column {
+    val goalFraction = if (state.goalMinutes > 0) {
+        (state.todayMinutes.toFloat() / state.goalMinutes).coerceIn(0f, 1f)
+    } else 0f
+    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(FolioTokens.radiusChip))
-                .background(if (met) colors.accentStreak.copy(alpha = 0.12f) else Color.Transparent)
-                .clickable(onClick = onOpenStats)
-                .padding(horizontal = FolioTokens.space2, vertical = FolioTokens.space2),
-            verticalAlignment = Alignment.CenterVertically
+                .clickable(onClick = onOpenStats),
+            verticalAlignment = Alignment.Bottom
         ) {
-            ProgressRing(
-                progress = if (state.goalMinutes > 0) {
-                    (state.todayMinutes.toFloat() / state.goalMinutes).coerceIn(0f, 1f)
-                } else 0f,
-                modifier = Modifier.size(32.dp),
-                strokeWidth = 3f,
-                color = colors.accentProgress
+            FolioFigure(
+                value = state.todayMinutes.toString(),
+                unit = "of ${state.goalMinutes} min",
+                label = "Today",
+                accent = if (met) colors.accentStreak else colors.onSurface,
+                emphasis = FigureScale.Quiet,
             )
-            Spacer(Modifier.width(FolioTokens.space2))
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = if (met) FontWeight.SemiBold else FontWeight.Normal, color = colors.onSurface)) {
-                        append("${state.todayMinutes}")
-                    }
-                    withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = colors.onSurfaceVariant)) {
-                        append(" / ${state.goalMinutes} min")
-                    }
-                    withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = colors.accentStreak)) {
-                        append(if (state.streakDays > 0) " · ${state.streakDays}-day streak" else " · No streak yet")
-                    }
-                },
-                style = FolioTheme.typography.headlineMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            Spacer(Modifier.width(FolioTokens.spaceMovement))
+            FolioFigure(
+                value = if (state.streakDays > 0) state.streakDays.toString() else "—",
+                unit = if (state.streakDays == 1) "day" else "days",
+                label = "Streak",
+                accent = if (state.streakDays > 0) colors.accentStreak else colors.onSurfaceVariant,
+                emphasis = FigureScale.Quiet,
             )
+            Spacer(Modifier.weight(1f))
+            if (met) {
+                ProgressRing(
+                    progress = 1f,
+                    modifier = Modifier.size(26.dp),
+                    strokeWidth = 3f,
+                    color = colors.accentStreak,
+                    trackColor = colors.accentStreak.copy(alpha = 0.18f),
+                )
+            } else if (goalFraction > 0f) {
+                ProgressRing(
+                    progress = goalFraction,
+                    modifier = Modifier.size(26.dp),
+                    strokeWidth = 3f,
+                    color = colors.accentProgress,
+                    trackColor = colors.accentProgress.copy(alpha = 0.14f),
+                )
+            }
         }
+        Spacer(Modifier.height(FolioTokens.space2))
+        FolioRule()
         if (state.exclusionsActive) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onOpenExclusions)
-                    .padding(horizontal = FolioTokens.space2, vertical = FolioTokens.space1),
+                    .padding(vertical = FolioTokens.space2),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -359,40 +471,77 @@ private fun GoalStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclusi
     }
 }
 
-/** §12.4 carousel: covers at listCoverMin with rings, hero excluded upstream. */
+/**
+ * **A shelf.** Covers on a rail that runs off the trailing edge of the screen —
+ * the row's content padding starts at the gutter and ends nowhere, so the shelf
+ * visibly continues past the frame. That single decision is what separates a
+ * shelf from a boxed carousel.
+ *
+ * Progress lives *on* the plate as a seam across its foot rather than as a ring
+ * below it, so the covers form an unbroken line and the eye reads artwork first.
+ */
 @Composable
-private fun ContinueReadingCard(books: List<ReadingInProgress>, onOpenBook: (String) -> Unit) {
-    FolioSectionCard(title = "Continue reading") {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+private fun ContinueShelf(books: List<ReadingInProgress>, onOpenBook: (String) -> Unit) {
+    Column {
+        FolioSectionHead(
+            title = "Continue reading",
+            modifier = Modifier.padding(horizontal = FolioTokens.gutter),
+        )
+        Spacer(Modifier.height(FolioTokens.space3))
+        LazyRow(
+            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+        ) {
             items(books.size) { index ->
                 val book = books[index]
+                val interaction = rememberFolioInteraction()
                 Column(
                     modifier = Modifier
-                        .width(FolioTokens.listCoverMin)
-                        .clickable { onOpenBook(book.id) },
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .width(FolioTokens.coverShelf)
+                        .folioPressable(interaction)
+                        .clickable(
+                            interactionSource = interaction,
+                            indication = null
+                        ) { onOpenBook(book.id) }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .width(FolioTokens.listCoverMin)
-                            .height(96.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                    ) {
-                        BookCover(coverPath = book.coverPath, title = book.title, author = book.author, small = true)
-                    }
-                    Spacer(Modifier.height(FolioTokens.space1))
-                    ProgressRing(
-                        progress = book.progress,
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 3f
+                    FolioCoverPlate(
+                        coverPath = book.coverPath,
+                        title = book.title,
+                        author = book.author,
+                        width = FolioTokens.coverShelf,
+                        small = true,
+                        overlay = {
+                            if (book.progress > 0f) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.BottomStart)
+                                        .fillMaxWidth()
+                                        .height(3.dp)
+                                        .background(Color.Black.copy(alpha = 0.35f))
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth(book.progress)
+                                            .height(3.dp)
+                                            .background(FolioTheme.colors.accentProgress)
+                                    )
+                                }
+                            }
+                        },
                     )
-                    Spacer(Modifier.height(FolioTokens.space1))
+                    Spacer(Modifier.height(FolioTokens.space2))
                     Text(
                         book.title,
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.onSurface,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${(book.progress * 100).toInt()}%",
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.accentProgress,
+                        maxLines = 1,
                     )
                 }
             }
@@ -400,41 +549,57 @@ private fun ContinueReadingCard(books: List<ReadingInProgress>, onOpenBook: (Str
     }
 }
 
-/** §12.4: card title tinted accentDiscovery; covers at listCoverMin. */
+/**
+ * **Discovery shelf.** Same rail language as [ContinueShelf] but a step down in
+ * scale and led by an eyebrow rather than a heading, because a suggestion should
+ * not shout as loudly as the book you are actually reading. Tinted
+ * `accentDiscovery` so the theme's own discovery hue marks the section.
+ */
 @Composable
-private fun BecauseYouFinishedCard(
+private fun BecauseYouFinishedShelf(
     finishedTitle: String,
     candidates: List<Book>,
     onOpenBookDetail: (String) -> Unit
 ) {
-    FolioSectionCard(
-        title = "Because you finished $finishedTitle",
-        accent = FolioTheme.colors.accentDiscovery
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
+    val discovery = FolioTheme.colors.accentDiscovery
+    Column {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            FolioEyebrow("Because you finished", accent = discovery)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                finishedTitle,
+                style = FolioTheme.typography.titleLarge,
+                color = FolioTheme.colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.height(FolioTokens.space3))
+        LazyRow(
+            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
-            candidates.forEach { book ->
+            items(candidates.size) { index ->
+                val book = candidates[index]
+                val interaction = rememberFolioInteraction()
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .clickable { onOpenBookDetail(book.id) },
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .width(FolioTokens.coverInline * 1.25f)
+                        .folioPressable(interaction)
+                        .clickable(
+                            interactionSource = interaction,
+                            indication = null
+                        ) { onOpenBookDetail(book.id) }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(84.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                    ) {
-                        BookCover(
-                            coverPath = book.coverPath,
-                            title = book.title,
-                            author = book.displayAuthor,
-                            small = true
-                        )
-                    }
+                    FolioCoverPlate(
+                        coverPath = book.coverPath,
+                        title = book.title,
+                        author = book.displayAuthor,
+                        width = FolioTokens.coverInline * 1.25f,
+                        shape = FolioShapes.plateSmall,
+                        elevation = 5.dp,
+                        small = true,
+                    )
                     Spacer(Modifier.height(FolioTokens.space1))
                     Text(
                         book.title,
@@ -442,7 +607,6 @@ private fun BecauseYouFinishedCard(
                         color = FolioTheme.colors.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -450,20 +614,50 @@ private fun BecauseYouFinishedCard(
     }
 }
 
-/** §12.4: Home's own sparkline (Rule 16) — 32dp line with a dot on today. */
+/**
+ * **The week.** The only chart on Home, and the only *sunken* surface — cut into
+ * the page while the anchor floats above it, so the screen reads as having a
+ * genuine top and bottom rather than one plane of cards.
+ *
+ * Edge-to-edge on purpose: the well spans the full width with only the type inset,
+ * which gives the sparkline room and keeps the bottom of the screen from becoming
+ * a fourth card. Rule 16 still holds — this is Home's own sparkline, not the Stats
+ * bar chart.
+ */
 @Composable
-private fun ThisWeekCard(state: HomeUiState) {
-    FolioSectionCard(title = "This week") {
+private fun ThisWeekWell(state: HomeUiState, onOpenStats: () -> Unit) {
+    val colors = FolioTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .folioSunken(FolioShapes.edgeStart)
+            .clickable(onClick = onOpenStats)
+            .padding(
+                start = FolioTokens.gutter,
+                end = FolioTokens.gutter,
+                top = FolioTokens.space3,
+                bottom = FolioTokens.space3,
+            )
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            FolioFigure(
+                value = formatMinutes(state.week.sumOf { it.minutes }),
+                label = "This week",
+                emphasis = FigureScale.Quiet,
+                accent = colors.accentProgress,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
+                style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.height(FolioTokens.space3))
         WeekSparkline(
             week = state.week,
-            modifier = Modifier.fillMaxWidth().height(FolioTokens.sparkHeight)
-        )
-        Spacer(Modifier.height(FolioTokens.space1))
-        Text(
-            "${formatMinutes(state.week.sumOf { it.minutes })} this week · " +
-                "${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
-            style = FolioTheme.typography.bodySmall,
-            color = FolioTheme.colors.onSurfaceVariant
+            modifier = Modifier.fillMaxWidth().height(FolioTokens.sparkHeight * 1.4f)
         )
     }
 }

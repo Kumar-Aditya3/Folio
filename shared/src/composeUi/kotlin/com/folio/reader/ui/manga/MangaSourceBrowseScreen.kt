@@ -92,7 +92,7 @@ fun SourceBrowseScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         FolioTopBar(
             title = viewModel.source.name,
             navigationIcon = {

@@ -110,7 +110,7 @@ fun MangaDetailScreen(
         return
     }
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         if (chapterSelectionMode) {
             // Chapter selection swaps the regular chrome for bulk actions in the same
             // bar — no extra block, no layout shift below.

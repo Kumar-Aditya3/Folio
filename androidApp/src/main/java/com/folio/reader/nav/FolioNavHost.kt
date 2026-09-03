@@ -3,6 +3,8 @@ package com.folio.reader.nav
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -19,6 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
+import com.folio.reader.ui.theme.FolioTokens
 
 /**
  * Wires routes to screen composables (§3.2 FOLIO_IMPLEMENTATION_SPEC).
@@ -40,12 +43,26 @@ fun FolioNavHost(
         navController = navController,
         startDestination = FolioRoutes.LIBRARY,
         modifier = modifier,
-        // The library-default crossfade is ~700ms with delays, which reads as lag;
-        // a quick fade keeps pushes and back smooth but snappy.
-        enterTransition = { fadeIn(tween(180)) },
-        exitTransition = { fadeOut(tween(120)) },
-        popEnterTransition = { fadeIn(tween(180)) },
-        popExitTransition = { fadeOut(tween(120)) }
+        // Pushes travel: a fade plus a short horizontal slide, so opening a book
+        // reads as moving *into* it and back reads as returning. The library
+        // default (~700ms with delays) reads as lag; these are 220/180 with the
+        // slide capped at 4% of the width, which is felt rather than watched.
+        enterTransition = {
+            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+        },
+        exitTransition = {
+            fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+        },
+        popEnterTransition = {
+            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+        },
+        popExitTransition = {
+            fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+        }
     ) {
         // ── Bottom-bar destinations ─────────────────────────────────────────
         composable(FolioRoutes.HOME) {

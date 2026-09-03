@@ -92,7 +92,7 @@ fun ExtensionsScreen(
             .distinctBy { it.pkgName }
             .filter { it.name.contains(extQuery, ignoreCase = true) }
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         FolioTopBar(
             title = "Extensions",
             navigationIcon = {

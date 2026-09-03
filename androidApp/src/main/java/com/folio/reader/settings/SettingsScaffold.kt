@@ -32,8 +32,14 @@ object FolioSettingsCategory {
 }
 
 /**
- * Shared shell for a pushed settings category screen: status band + top bar,
- * one section card with the panel, optional live preview below.
+ * Shared shell for a pushed settings category screen: masthead, then the panel
+ * directly on the page.
+ *
+ * The panel used to sit inside a `FolioSectionCard`, which boxed content that was
+ * already the entire screen — a container around the only thing present adds no
+ * information and costs 32dp of measure. Controls now sit on the field, and any
+ * live preview keeps its own surface because a preview genuinely *is* a separate
+ * object.
  */
 @Composable
 fun SettingsCategoryScaffold(
@@ -42,11 +48,7 @@ fun SettingsCategoryScaffold(
     livePreviewSettings: ReaderSettings? = null,
     content: @Composable () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(FolioTheme.colors.background)
-    ) {
+    Column(modifier = Modifier.fillMaxSize()) {
         FolioTopBar(
             title = title,
             navigationIcon = {
@@ -57,12 +59,15 @@ fun SettingsCategoryScaffold(
         )
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(FolioTokens.space3),
-            verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+            contentPadding = PaddingValues(
+                start = FolioTokens.gutter,
+                end = FolioTokens.gutter,
+                top = FolioTokens.space2,
+                bottom = FolioTokens.spaceMovement,
+            ),
+            verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceMovement)
         ) {
-            item {
-                FolioSectionCard { content() }
-            }
+            item { content() }
             if (livePreviewSettings != null) {
                 item { SettingsLivePreview(livePreviewSettings) }
             }

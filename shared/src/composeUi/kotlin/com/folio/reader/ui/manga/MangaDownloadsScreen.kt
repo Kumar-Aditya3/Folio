@@ -225,7 +225,7 @@ fun DownloadsScreen(
     val chapterNames by viewModel.chapterNames.collectAsState()
     val storageDescription by viewModel.storageDescription.collectAsState()
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         FolioTopBar(
             title = "Downloads",
             navigationIcon = {

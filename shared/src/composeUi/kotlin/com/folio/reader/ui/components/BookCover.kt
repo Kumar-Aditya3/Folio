@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -191,18 +192,26 @@ fun BookCover(
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         val current = bitmap
+        // Covers fade in over 260ms instead of popping: a grid of eight covers
+        // snapping in at different moments reads as jank, while a short fade reads
+        // as paper developing. Honours reduce-motion via rememberEntryProgress.
         when {
-            current != null -> Image(
-                bitmap = current,
-                contentDescription = title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            current != null -> {
+                val reveal = rememberEntryProgress(coverPath)
+                Image(
+                    bitmap = current,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = reveal }
+                )
+            }
             failed -> FallbackCover(title, author, small)
             else -> CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
                 strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary
+                color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.5f)
             )
         }
     }

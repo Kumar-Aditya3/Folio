@@ -144,7 +144,7 @@ fun MangaLibraryScreen(
         browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         if (searchActive) {
             MangaSearchHeader(
                 scope = searchScope,
@@ -159,7 +159,7 @@ fun MangaLibraryScreen(
         } else {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp),
+                contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(categories) { category ->
@@ -264,8 +264,10 @@ fun MangaLibraryScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space3),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
+                contentPadding = PaddingValues(
+                    top = FolioTokens.space2,
+                    bottom = FolioTokens.spaceMovement,
+                ),
             ) {
                 items(visible, key = { it.id }) { manga ->
                     val prog = progress[manga.id] ?: 0f
@@ -297,11 +299,16 @@ fun MangaLibraryScreen(
         } else {
             LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Adaptive(minSize = 110.dp),
+                columns = GridCells.Adaptive(minSize = 116.dp),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space3),
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.gutter,
+                    end = FolioTokens.gutter,
+                    top = FolioTokens.space3,
+                    bottom = FolioTokens.spaceMovement,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat),
             ) {
                 items(visible, key = { it.id }) { manga ->
                     val prog = progress[manga.id] ?: 0f

@@ -58,9 +58,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
         label = "heroBleed",
     )
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(FolioTheme.colors.background)
+        modifier = Modifier.fillMaxSize()
     ) {
         Box {
             FolioTopBar(
@@ -270,10 +268,10 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
     val navController = navModel.navController ?: return
     // StatisticsTabContent is embeddable and supplies no top bar of its own; the
     // Android host provides one (with the status-bar band) like the other tabs.
+    // The screen paints nothing of its own: the app's `folioField` ground plane
+    // shows through, so Stats sits in the same environment as every other tab.
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(FolioTheme.colors.background)
+        modifier = Modifier.fillMaxSize()
     ) {
         FolioTopBar(title = "Stats")
         Box(modifier = Modifier.weight(1f)) {

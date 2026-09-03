@@ -69,7 +69,7 @@ fun MangaBrowseScreen(
     var queryText by remember { mutableStateOf(viewModel.globalQuery.value) }
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         FolioTopBar(
             title = "Browse",
             navigationIcon = {

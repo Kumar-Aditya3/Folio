@@ -1314,6 +1314,38 @@ object FolioTokens {
     val ringStrokeHero = 8f         // hero ring stroke (compact strip uses 4f)
     val sparkHeight = 32.dp         // inline sparkline height
     val gradientMinAlpha = 0.55f    // floor for chart gradients (Rule 15)
+
+    // ── Redesign: material elevation ladder ────────────────────────────────
+    // Four steps, not a continuum. Anything between two of these reads as an
+    // accident. FolioAtmosphere.shadowScale trims all four on dark palettes,
+    // where the same physical shadow reads much heavier.
+    val elevationFlat = 0.dp        // embedded / on-page: no shadow at all
+    val elevationPanel = 2.dp       // resting surface
+    val elevationVeil = 10.dp       // glass over content (bars, nav, sheets)
+    val elevationRaised = 18.dp     // the floating hero
+
+    // ── Redesign: spatial rhythm ───────────────────────────────────────────
+    // Screens breathe unevenly on purpose: a tight gap groups, a wide gap
+    // separates movements. Uniform spacing is what made every screen read as
+    // one undifferentiated stack.
+    val spaceHair = 4.dp            // inside a figure, label→value
+    val spaceBeat = 20.dp           // between related blocks
+    val spaceMovement = 36.dp       // between sections of different kinds
+    val gutter = 20.dp              // screen side margin
+    val heroBleed = 12.dp           // how far a cover overhangs its surface
+
+    // ── Redesign: cover scale ladder ───────────────────────────────────────
+    // Covers are the app's strongest asset, so their sizes are a deliberate
+    // ladder rather than whatever fitted the row.
+    val coverAnchor = 148.dp        // Home's one anchoring cover
+    val coverFeature = 112.dp       // a featured shelf entry
+    val coverShelf = 84.dp          // standard shelf/grid entry
+    val coverInline = 52.dp         // inline list rows
+    val coverAspect = 1.5f          // height = width × this (2:3 printed trim)
+
+    // Floating navigation capsule
+    val navFloatHeight = 62.dp
+    val navFloatInset = 12.dp
 }
 
 object FolioTheme {

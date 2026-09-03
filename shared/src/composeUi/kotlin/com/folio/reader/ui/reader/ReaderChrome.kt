@@ -40,8 +40,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
 /**
  * The reader's top bar: back, title, clock and the right-side actions. On
@@ -67,16 +69,16 @@ internal fun ReaderTopBar(
 ) {
     Column(Modifier.fillMaxWidth()) {
         com.folio.reader.ui.components.FolioStatusBarBand()
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            color = FolioTheme.colors.surface.copy(alpha = 0.92f),
-            shadowElevation = 4.dp
-        ) {
         Row(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                // Glass, like every other surface that sits over content. Squared
+                // top corners so it meets the status band cleanly.
+                .folioVeil(
+                    shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                    elevation = FolioTokens.elevationVeil,
+                )
+                .height(56.dp)
                 .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -161,7 +163,6 @@ internal fun ReaderTopBar(
                 }
             }
         }
-        }
     }
 }
 
@@ -184,7 +185,7 @@ internal fun ReaderFloatingRail(
         modifier = Modifier
             .padding(start = 12.dp)
             .width(56.dp)
-            .glassPanel(RoundedCornerShape(20.dp))
+            .folioVeil(RoundedCornerShape(24.dp))
             .padding(vertical = 12.dp)
     ) {
         Column(

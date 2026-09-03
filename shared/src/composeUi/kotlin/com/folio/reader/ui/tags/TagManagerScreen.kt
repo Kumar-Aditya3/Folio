@@ -48,6 +48,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -363,7 +364,7 @@ private fun TagListView(
         }
     } else {
         LazyColumn(
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(padding)
         ) {
