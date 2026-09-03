@@ -71,7 +71,7 @@ internal fun BookHeaderSection(
             ) {
                 Text(
                     text = book.title,
-                    style = FolioTheme.typography.headlineSmall,
+                    style = FolioTheme.typography.headlineLarge,
                     color = FolioTheme.colors.onSurface
                 )
 

@@ -1071,22 +1071,22 @@ data class ThemePack(
 
 data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {
     val displayLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 96f),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.display(fontTheme, weight = 300, opticalSize = 96f),
+        fontWeight = FontWeight.W300,
         fontSize = 57.sp,
         lineHeight = 64.sp,
         letterSpacing = (-0.02).em
     )
     val displayMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 72f),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.display(fontTheme, weight = 300, opticalSize = 72f),
+        fontWeight = FontWeight.W300,
         fontSize = 45.sp,
         lineHeight = 52.sp,
         letterSpacing = (-0.015).em
     )
     val displaySmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 60f),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.display(fontTheme, weight = 300, opticalSize = 60f),
+        fontWeight = FontWeight.W300,
         fontSize = 36.sp,
         lineHeight = 44.sp,
         letterSpacing = (-0.01).em
@@ -1152,22 +1152,22 @@ data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {
         letterSpacing = 0.15.sp
     )
     val labelLarge: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(fontTheme, weight = 600),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.text(fontTheme, weight = 700),
+        fontWeight = FontWeight.W700,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     )
     val labelMedium: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(fontTheme, weight = 600),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.text(fontTheme, weight = 700),
+        fontWeight = FontWeight.W700,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.3.sp
     )
     val labelSmall: TextStyle = TextStyle(
-        fontFamily = UiFonts.text(fontTheme, weight = 600),
-        fontWeight = FontWeight.W600,
+        fontFamily = UiFonts.text(fontTheme, weight = 700),
+        fontWeight = FontWeight.W700,
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp

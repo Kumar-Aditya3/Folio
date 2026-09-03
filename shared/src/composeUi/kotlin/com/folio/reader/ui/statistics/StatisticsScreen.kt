@@ -281,8 +281,7 @@ private fun DailyGoalRing(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "${todayMinutes.toInt()}",
-                    style = FolioTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
+                    style = FolioTheme.typography.displayMedium,
                     color = accent,
                 )
                 Text(

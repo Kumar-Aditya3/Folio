@@ -350,7 +350,8 @@ internal fun BookReadingSection(
                 val averageMinutes = sessions.sumOf { it.durationMs }.toDouble() / sessions.size / 60_000.0
                 ReadingRow("Average session", shortMinutes(averageMinutes.roundToLong()))
                 readingPaceWordsPerDay(sessions)?.let { pace ->
-                    ReadingRow("Pace (words/day)", "≈ ${formatCount(pace.toLong())} words/day")
+                    ReadingRow("Pace (words/day)", "≈ ${formatCount(pace.toLong())} words/day",
+                        valueStyle = FolioTheme.typography.bodyMedium)
                 }
                 finishEstimate(totalWords, progress, sessions)?.let { estimate ->
                     Text(
@@ -394,13 +395,27 @@ internal fun BookReadingSection(
 }
 
 @Composable
-internal fun ReadingRow(label: String, value: String) {
+internal fun ReadingRow(
+    label: String,
+    value: String,
+    valueStyle: androidx.compose.ui.text.TextStyle = FolioTheme.typography.headlineSmall,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(label, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)
-        Text(value, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurface)
+        Text(
+            label,
+            style = FolioTheme.typography.bodyMedium,
+            color = FolioTheme.colors.onSurfaceVariant,
+            modifier = Modifier.alignByBaseline()
+        )
+        Text(
+            value,
+            style = valueStyle,
+            color = FolioTheme.colors.onSurface,
+            modifier = Modifier.alignByBaseline()
+        )
     }
 }
 
