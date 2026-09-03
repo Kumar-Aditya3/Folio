@@ -46,7 +46,7 @@ private enum class ExcludeDialog { BOOKS, TAGS_COLLECTIONS, SERIES, STATUSES, MA
 fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     val graph = navModel.graph
     val repo = remember { com.folio.reader.database.JdbcStatsExclusionRepository(graph.database) }
-    val exclusions by repo.observeExclusions().collectAsState(initial = emptySet())
+    val exclusions by remember { repo.observeExclusions() }.collectAsState(initial = emptySet())
 
     var books by remember { mutableStateOf(emptyList<com.folio.reader.model.Book>()) }
     var tags by remember { mutableStateOf(emptyList<com.folio.reader.model.Tag>()) }
