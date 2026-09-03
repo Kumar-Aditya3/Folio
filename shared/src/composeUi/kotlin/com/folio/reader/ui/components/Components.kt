@@ -57,6 +57,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.atmosphere
 
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.clip
@@ -64,45 +67,23 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.border
 
 /**
- * Frosted-glass surface that follows the active theme: dark frosted glass on dark
- * themes, light frosted glass on light ones, so panels never read as a foreign
- * smudge over the page or app background.
+ * Legacy name, new material. Every existing call site keeps working, but the
+ * rendering is now the §R1 panel material: a resting surface with a hairline rim
+ * and a whisper of shadow, instead of the old white-sheen glass that made every
+ * card in the app the same object.
  *
- * The fill stays near-opaque on purpose. A panel cannot blur what is behind it on
- * Android — the page is a separate native surface, so there is nothing to sample —
- * and a see-through fill let book text bleed through at full contrast, which read as
- * labels dissolving into the theme. Glass is carried by the rim, the sheen and the
- * elevation instead.
+ * New code should reach for [folioPanel], [folioRaised], [folioSunken] or
+ * [folioVeil] directly and pick the one that matches what the surface is *doing*.
  */
 @Composable
-fun Modifier.glassPanel(shape: Shape, accent: Color? = null): Modifier {
-    val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    val luminance = colors.background.red * 0.2126f + colors.background.green * 0.7152f + colors.background.blue * 0.0722f
-    val dark = luminance < 0.45f
-    val fill = if (dark) colors.surface.copy(alpha = 0.86f) else colors.surface.copy(alpha = 0.89f)
-    // §12.6: heroes pass an accent that mixes 8% into the sheen's top stop;
-    // null keeps the sheen byte-identical to the un-accented panel.
-    val sheenTop = if (accent != null) {
-        androidx.compose.ui.graphics.lerp(Color.White, accent, 0.08f).copy(alpha = if (dark) 0.14f else 0.26f)
-    } else null
-    val sheen = if (dark) listOf(
-        sheenTop ?: Color.White.copy(alpha = 0.14f),
-        Color.White.copy(alpha = 0.04f),
-        Color.White.copy(alpha = 0.08f)
-    ) else listOf(
-        sheenTop ?: Color.White.copy(alpha = 0.26f),
-        Color.White.copy(alpha = 0.08f),
-        Color.White.copy(alpha = 0.17f)
-    )
-    return this
-        .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
-        .background(fill, shape)
-        .background(brush = Brush.verticalGradient(colors = sheen), shape = shape)
-        .border(1.dp, if (dark) Color.White.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.14f), shape)
-        .clip(shape)
-}
+fun Modifier.glassPanel(shape: Shape, accent: Color? = null): Modifier =
+    this.folioPanel(shape, accent)
 
-/** Glass card with an optional section header — the shared container for grouped content. */
+/**
+ * Grouped content. The heading is an eyebrow — small, letterspaced, sitting on
+ * the panel's own top edge — not a title competing with the screen heading. Use
+ * [FolioSectionHead] outside a panel when a section deserves a real voice.
+ */
 @Composable
 fun FolioSectionCard(
     title: String? = null,
@@ -113,16 +94,14 @@ fun FolioSectionCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .glassPanel(RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusCard), accent)
+            .folioPanel(com.folio.reader.ui.theme.FolioShapes.card, accent)
             .padding(com.folio.reader.ui.theme.FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(com.folio.reader.ui.theme.FolioTokens.space2)
     ) {
         if (title != null) {
-            Text(
+            FolioEyebrow(
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = accent ?: MaterialTheme.colorScheme.primary
+                accent = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
             )
         }
         content()
@@ -130,13 +109,17 @@ fun FolioSectionCard(
 }
 
 /**
- * §12.1 Rule 13 hero tier: the one surface a screen is about. Accent-tinted
- * gradient over glass at radiusHero; the accent defaults to the palette's
- * accentProgress role. At most one per screen.
+ * The hero tier: the one surface a screen is about. Now genuinely a different
+ * *object* rather than a card with a tint —
  *
- * §13.4 [mesh] adds the drifting gradient mesh behind the content (Home hero
- * only opts in); §13.9 [gradientAlpha] lets a collapsing hero fade its tint
- * from 0.30 toward 0.12. Both default to the pre-§13 rendering.
+ *  - [FolioShapes.hero]'s asymmetric silhouette (34/20/34/8) so it is
+ *    identifiable at 8px blur, which is Rule 13's own benchmark;
+ *  - the raised material, so it floats while panels rest;
+ *  - the accent bled into the top light catch, so a cover-tinted hero reports
+ *    that cover's hue at its lit edge.
+ *
+ * [mesh] keeps the §13.4 drifting gradient mesh; [gradientAlpha] keeps the §13.9
+ * collapse fade. At most one per screen.
  */
 @Composable
 fun FolioHeroCard(
@@ -144,10 +127,10 @@ fun FolioHeroCard(
     accent: Color? = null,
     mesh: Boolean = false,
     gradientAlpha: Float = 0.30f,
+    shape: Shape = com.folio.reader.ui.theme.FolioShapes.hero,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
 ) {
     val tint = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.accentProgress
-    val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusHero)
     val meshModifier = if (mesh) {
         val colors = com.folio.reader.ui.theme.FolioTheme.colors
         Modifier.heroMesh(
@@ -158,7 +141,7 @@ fun FolioHeroCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .glassPanel(shape, tint)
+            .folioRaised(shape = shape, accent = tint)
             .background(
                 brush = Brush.verticalGradient(
                     listOf(tint.copy(alpha = gradientAlpha), Color.Transparent)
@@ -191,7 +174,14 @@ fun FolioQuietRow(
     }
 }
 
-/** Pill chip used for filters and segmented controls; glassy, theme-cohesive. */
+/**
+ * Filter/segment control. A **pill**, because in this design language a pill means
+ * "tap me" — panels and figures are never pill-shaped, so shape alone now tells
+ * the user what is interactive.
+ *
+ * Selection is carried by fill and by an accent rim, never by weight: a heavier
+ * label widens the chip, reflows the row and nudges the grid below it.
+ */
 @Composable
 fun FolioChip(
     selected: Boolean,
@@ -199,39 +189,46 @@ fun FolioChip(
     label: String,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusChip)
+    val shape = com.folio.reader.ui.theme.FolioShapes.pill
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val atmos = FolioTheme.atmosphere
+    val interaction = rememberFolioInteraction()
     Box(
         modifier = modifier
+            .folioPressable(interaction, scaleTo = 0.94f)
             .clip(shape)
             .background(
-                if (selected) colors.primary.copy(alpha = 0.90f) else colors.surface.copy(alpha = 0.55f),
+                if (selected) colors.primary else atmos.sunkenFill.copy(alpha = 0.55f),
                 shape
             )
             .border(
                 1.dp,
-                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
+                if (selected) colors.primary else atmos.hairline,
                 shape
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 8.dp)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            // Weight must not change with selection: a heavier weight widens the
-            // chip, reflows the row and nudges the grid below it downward.
             fontWeight = FontWeight.Medium,
-            color = if (selected) colors.onPrimary else colors.onSurface
+            color = if (selected) colors.onPrimary else colors.onSurfaceVariant
         )
     }
 }
 
-/** Glass top bar shared by all screens: optional back button, title, actions.
- *  §13.9 passes [titleStyle] so a collapsing Home hero can migrate its title in
- *  at titleMedium without re-styling every other bar. */
+/**
+ * The screen's masthead. Editorial, not Material: the title carries the display
+ * face at `headlineMedium`, the bar has **no fill of its own** so the page's field
+ * runs behind it, and a hairline marks the boundary instead of a shadow.
+ *
+ * That single change removes the "grey band on top of every screen" that made the
+ * old build read as a scaffold. [titleStyle] still lets the §13.9 collapsing Home
+ * hero migrate its title in at a smaller size.
+ */
 @Composable
 fun FolioTopBar(
     title: String,
@@ -240,34 +237,28 @@ fun FolioTopBar(
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
 ) {
-    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val colors = FolioTheme.colors
     Column(modifier = modifier.fillMaxWidth()) {
         FolioStatusBarBand()
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(colors.surface.copy(alpha = 0.85f))
+                .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
             if (navigationIcon != null) navigationIcon()
             Text(
                 text = title,
-                style = titleStyle ?: MaterialTheme.typography.titleLarge,
+                style = titleStyle ?: FolioTheme.typography.headlineMedium,
                 color = colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = 8.dp)
+                    .padding(horizontal = 10.dp)
             )
             actions()
-            }
         }
     }
 }
@@ -287,23 +278,27 @@ fun FolioStatusBarBand(modifier: Modifier = Modifier) {
     )
 }
 
-/** Thin rounded progress bar in the theme accent. */
+/**
+ * Progress as a hairline seam, not a widget. 3dp, squared caps at the leading
+ * edge, drawn in the accent's own colour over a very low-alpha track — it reads as
+ * an inlay in the surface rather than another control.
+ */
 @Composable
 fun FolioProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary
+    color: Color = FolioTheme.colors.accentProgress
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(4.dp)
-            .background(color.copy(alpha = 0.18f), RoundedCornerShape(2.dp))
+            .height(3.dp)
+            .background(color.copy(alpha = 0.14f), RoundedCornerShape(2.dp))
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(progress.coerceIn(0f, 1f))
-                .height(4.dp)
+                .height(3.dp)
                 .background(color, RoundedCornerShape(2.dp))
         )
     }
@@ -430,45 +425,33 @@ fun FolioSearchBar(
     )
 }
 
+/**
+ * A statistic rendered as an editorial figure on an embedded well, not as another
+ * elevated card. The old version was a Material `Card` with a bold
+ * `headlineMedium` — visually identical to every other card on the screen, which
+ * is exactly why a screen of eight of them read as a spreadsheet.
+ */
 @Composable
 fun StatCard(
     title: String,
     value: String,
     subtitle: String? = null,
-    color: Color = MaterialTheme.colorScheme.primary,
+    color: Color = FolioTheme.colors.accentProgress,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        ),
-        shape = RoundedCornerShape(12.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .folioSunken(FolioShapes.inset, accent = color)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        FolioFigure(
+            value = value,
+            label = title,
+            caption = subtitle,
+            accent = color,
+            emphasis = FigureScale.Quiet,
+        )
     }
 }
 

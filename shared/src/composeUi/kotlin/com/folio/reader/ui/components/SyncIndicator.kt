@@ -122,15 +122,15 @@ fun SyncIndicator(
                         Modifier.semantics { contentDescription = "Sync is resting — Google's free quota reached, it resumes automatically." }
                     else Modifier
                 ),
-            shape = RoundedCornerShape(24.dp),
+            shape = com.folio.reader.ui.theme.FolioShapes.pill,
             color = when (phase) {
                 SyncPillPhase.ERROR -> MaterialTheme.colorScheme.errorContainer
                 SyncPillPhase.SUCCESS -> MaterialTheme.colorScheme.tertiaryContainer
                 SyncPillPhase.QUOTA_LIMITED -> quotaContainerColor()
                 else -> MaterialTheme.colorScheme.primaryContainer
             },
-            tonalElevation = 6.dp,
-            shadowElevation = 4.dp
+            tonalElevation = 0.dp,
+            shadowElevation = 8.dp
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -248,22 +248,25 @@ fun SyncStatusCard(
     onSyncNow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                !isConnected -> MaterialTheme.colorScheme.surfaceVariant
-                syncState.quotaLimited -> quotaContainerColor()
-                syncState.lastError != null -> FolioTheme.colors.errorContainer.copy(alpha = 0.4f)
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            }
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            // Status is reference information, so it sits *in* the page as a well,
+            // tinted by whatever state it is reporting.
+            .folioSunken(
+                com.folio.reader.ui.theme.FolioShapes.inset,
+                accent = when {
+                    !isConnected -> null
+                    syncState.quotaLimited -> quotaContainerColor()
+                    syncState.lastError != null -> FolioTheme.colors.error
+                    else -> FolioTheme.colors.accentProgress
+                },
+            )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

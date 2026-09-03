@@ -59,7 +59,7 @@ fun MangaHistoryScreen(
     val scope = rememberCoroutineScope()
     var confirmClear by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    Column(Modifier.fillMaxSize()) {
         FolioTopBar(
             title = "History",
             navigationIcon = {

@@ -1,6 +1,8 @@
 package com.folio.reader.ui.quotes
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,41 +33,41 @@ internal fun MangaQuoteCard(
     item: MangaQuoteItem,
     onClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = FolioTheme.colors.surface,
-            contentColor = FolioTheme.colors.onSurface
-        ),
-        shape = RoundedCornerShape(12.dp)
+    // Same pull-quote language as book quotes, marked "Manga" by a tertiary pill
+    // rather than by a different container.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Surface(
-                color = FolioTheme.colors.tertiaryContainer,
-                shape = RoundedCornerShape(8.dp)
+        com.folio.reader.ui.components.FolioCallout(accent = FolioTheme.colors.tertiary) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        FolioTheme.colors.tertiary.copy(alpha = 0.16f),
+                        com.folio.reader.ui.theme.FolioShapes.pill,
+                    )
             ) {
                 Text(
                     text = "Manga",
                     style = FolioTheme.typography.labelSmall,
-                    color = FolioTheme.colors.onTertiaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    color = FolioTheme.colors.tertiary,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
 
             Text(
                 text = "\u201C${item.note.content}\u201D",
                 style = FolioTheme.typography.quote,
+                color = FolioTheme.colors.onSurface,
                 maxLines = 6,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
             Text(
                 text = item.mangaTitle,
                 style = FolioTheme.typography.titleSmall,
+                color = FolioTheme.colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

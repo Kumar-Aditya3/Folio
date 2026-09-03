@@ -1,6 +1,7 @@
 package com.folio.reader.ui.manga
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -40,12 +42,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
+import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
 
 @Composable
 internal fun CollectionRow(
@@ -89,6 +99,11 @@ internal fun CollectionRow(
     }
 }
 
+/**
+ * A manga shelf entry, in the same object language as the books shelf: a plate
+ * with a contact shadow, type beneath, no card. Read-through titles sit back at
+ * 0.86 alpha the way finished books do, so the shelf has depth.
+ */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun MangaGridItem(
@@ -108,27 +123,31 @@ internal fun MangaGridItem(
     onCategories: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    androidx.compose.material3.Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        shape = RoundedCornerShape(16.dp),
-        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = if (selected) FolioTheme.colors.primaryContainer else FolioTheme.colors.surface,
-        ),
-    ) {
+    val atmos = FolioTheme.atmosphere
+    val interaction = rememberFolioInteraction()
     Column(
         modifier = Modifier
-            .padding(8.dp)
-            .fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .fillMaxWidth()
+            .folioPressable(interaction)
+            .graphicsLayer { alpha = if (fullyRead) 0.86f else 1f }
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(12.dp)),
+                .shadow(
+                    elevation = 8.dp * atmos.shadowScale,
+                    shape = FolioShapes.plate,
+                    ambientColor = atmos.shadowAmbient,
+                    spotColor = atmos.shadowSpot,
+                )
+                .clip(FolioShapes.plate),
         ) {
             MangaCover(
                 backend = backend,
@@ -138,21 +157,30 @@ internal fun MangaGridItem(
                 modifier = Modifier.fillMaxSize(),
                 dimmed = fullyRead,
             )
+            if (selected) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
+                        .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
+                )
+            }
             if (inSelectionMode) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
                         .background(
-                            if (selected) FolioTheme.colors.primary else FolioTheme.colors.surface.copy(alpha = 0.6f),
-                            RoundedCornerShape(8.dp),
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                            if (selected) FolioTheme.colors.primary else Color.Black.copy(alpha = 0.45f),
+                        ),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         if (selected) Icons.Filled.Check else Icons.Filled.Close,
                         contentDescription = null,
-                        tint = if (selected) FolioTheme.colors.onPrimary else FolioTheme.colors.onSurfaceVariant,
+                        tint = if (selected) FolioTheme.colors.onPrimary else Color.White,
                         modifier = Modifier.size(14.dp),
                     )
                 }
@@ -162,12 +190,12 @@ internal fun MangaGridItem(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
-                            .background(FolioTheme.colors.primary, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .background(FolioTheme.colors.primary, FolioShapes.pill)
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
                         Text(
                             text = unreadCount.toString(),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = FolioTheme.typography.labelSmall,
                             color = FolioTheme.colors.onPrimary,
                         )
                     }
@@ -176,8 +204,25 @@ internal fun MangaGridItem(
                     Icon(
                         Icons.Filled.Download,
                         contentDescription = "Downloaded",
-                        tint = FolioTheme.colors.tertiary,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).size(16.dp),
+                        tint = Color.White,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).size(15.dp),
+                    )
+                }
+            }
+            // Progress as a seam on the plate's foot — identical to the books shelf.
+            if (progress > 0f && progress < 1f) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .height(3.dp)
+                            .background(FolioTheme.colors.accentProgress)
                     )
                 }
             }
@@ -185,16 +230,17 @@ internal fun MangaGridItem(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(4.dp)
-                    .size(26.dp)
-                    .background(FolioTheme.colors.surface.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.40f))
                     .clickable { menuOpen = true },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Filled.MoreVert,
                     contentDescription = "Options",
-                    tint = FolioTheme.colors.onSurface.copy(alpha = 0.75f),
-                    modifier = Modifier.size(16.dp),
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp),
                 )
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
@@ -220,40 +266,33 @@ internal fun MangaGridItem(
                 }
             }
         }
-        if (progress > 0f) {
-            com.folio.reader.ui.components.FolioProgressBar(
-                progress = progress,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                color = FolioTheme.colors.primary,
-            )
-        }
+        Spacer(Modifier.height(FolioTokens.space2))
         Text(
             text = manga.title,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            style = FolioTheme.typography.labelLarge,
+            style = FolioTheme.typography.labelMedium,
             color = if (fullyRead) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
         )
         Text(
             text = manga.sourceName,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            style = FolioTheme.typography.bodySmall,
+            style = FolioTheme.typography.labelSmall,
             color = FolioTheme.colors.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+        // One caption line, matching the books shelf exactly.
         if (progress > 0f) {
             Text(
                 text = "${(progress * 100).toInt()}%",
                 style = FolioTheme.typography.labelSmall,
-                color = FolioTheme.colors.primary,
-                modifier = Modifier.padding(top = 4.dp),
+                color = FolioTheme.colors.accentProgress,
+                maxLines = 1,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
-    }
     }
 }
 
@@ -326,11 +365,29 @@ internal fun MangaListItem(
             )
         }
     } else {
-        androidx.compose.material3.Card(
-            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        ) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.width(48.dp).height(72.dp).clip(RoundedCornerShape(4.dp))) {
+        // A ruled row, not a card: the plate carries the object language and the
+        // hairline carries the separation.
+        val rowInteraction = rememberFolioInteraction()
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .folioPressable(rowInteraction, scaleTo = 0.99f)
+                    .combinedClickable(
+                        interactionSource = rowInteraction,
+                        indication = null,
+                        onClick = onClick,
+                        onLongClick = onLongClick,
+                    )
+                    .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(FolioTokens.coverInline)
+                        .height(FolioTokens.coverInline * FolioTokens.coverAspect)
+                        .clip(FolioShapes.plateSmall)
+                ) {
                     MangaCover(
                         backend = backend,
                         sourceId = manga.sourceId,
@@ -339,40 +396,59 @@ internal fun MangaListItem(
                         modifier = Modifier.fillMaxSize(),
                         dimmed = fullyRead,
                     )
+                    if (progress > 0f && progress < 1f) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(Color.Black.copy(alpha = 0.35f))
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(progress)
+                                    .height(2.dp)
+                                    .background(FolioTheme.colors.accentProgress)
+                            )
+                        }
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(Modifier.width(FolioTokens.space3))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         manga.title,
-                        style = FolioTheme.typography.titleMedium,
+                        style = FolioTheme.typography.titleSmall,
                         color = if (fullyRead) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(manga.sourceName, style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (statusLabel.isNotBlank()) {
-                        Text(
-                            statusLabel,
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (progress > 0f) {
-                    androidx.compose.material3.LinearProgressIndicator(
-                        modifier = Modifier.width(60.dp),
-                        progress = progress,
-                        color = FolioTheme.colors.primary,
+                    Text(
+                        listOf(manga.sourceName, statusLabel).filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (unreadCount > 0) {
+                    Text(
+                        "$unreadCount",
+                        style = FolioTheme.typography.titleSmall,
+                        color = FolioTheme.colors.accentDiscovery,
+                    )
+                    Spacer(Modifier.width(FolioTokens.space1))
                 }
                 MangaRowOptions(
                     fullyRead = fullyRead,
                     onMarkRead = onMarkRead,
                     onRemove = onRemove,
                     onCategories = onCategories,
-                    modifier = Modifier.padding(start = 8.dp),
                 )
             }
+            com.folio.reader.ui.components.FolioRule(
+                modifier = Modifier.padding(horizontal = FolioTokens.gutter)
+            )
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.folio.reader.ui.revisit
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +63,9 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.RevisitItem
 import com.folio.reader.model.RevisitType
+import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -259,7 +262,7 @@ fun RevisitItemsScreen(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize().padding(padding)
             ) {
@@ -284,25 +287,22 @@ private fun RevisitCard(
     modifier: Modifier = Modifier
 ) {
     val badge = item.revisitItem.type.toBadge()
-    Card(
-        modifier = modifier.fillMaxWidth().clickable { onItemClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = FolioTheme.colors.surface,
-            contentColor = FolioTheme.colors.onSurface
-        ),
-        shape = RoundedCornerShape(12.dp)
+    // The badge is the identity here, so it keeps its accent tint; the row itself
+    // sits on the page with a hairline, like every other list in the app.
+    Column(
+        modifier = modifier.fillMaxWidth().clickable { onItemClick() }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(vertical = 14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    color = badge.color.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(8.dp)
+                Box(
+                    modifier = Modifier
+                        .background(badge.color.copy(alpha = 0.15f), com.folio.reader.ui.theme.FolioShapes.pill)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -310,12 +310,11 @@ private fun RevisitCard(
                             badge.icon,
                             contentDescription = null,
                             tint = badge.color,
-                            modifier = Modifier.width(16.dp).height(16.dp)
+                            modifier = Modifier.width(15.dp).height(15.dp)
                         )
                         Text(
                             text = badge.label,
                             style = FolioTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
                             color = badge.color
                         )
                     }
@@ -350,25 +349,23 @@ private fun RevisitCard(
             }
 
             if (item.note != null && item.note.isNotBlank()) {
-                Surface(
-                    color = FolioTheme.colors.secondaryContainer,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .folioSunken(com.folio.reader.ui.theme.FolioShapes.inset)
+                        .padding(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(
                             Icons.Filled.Notes,
                             contentDescription = null,
-                            tint = FolioTheme.colors.onSecondaryContainer,
-                            modifier = Modifier.width(18.dp).height(18.dp)
+                            tint = FolioTheme.colors.accentAnnotation,
+                            modifier = Modifier.width(17.dp).height(17.dp)
                         )
                         Text(
                             text = item.note,
                             style = FolioTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSecondaryContainer,
+                            color = FolioTheme.colors.onSurface,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -383,8 +380,8 @@ private fun RevisitCard(
             ) {
                 Text(
                     text = item.book?.title ?: item.manga?.title ?: "",
-                    style = FolioTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    style = FolioTheme.typography.titleSmall,
+                    color = FolioTheme.colors.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -401,5 +398,6 @@ private fun RevisitCard(
                 }
             }
         }
+        com.folio.reader.ui.components.FolioRule()
     }
 }

@@ -23,7 +23,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.folio.reader.ui.components.folioPanel
+import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioTokens
 
+/**
+ * A theme pack, previewed as a **miniature of the app itself**: chrome band, page
+ * with heading and body lines, name beneath. Selection lifts the card to the raised
+ * material with an accent-lit rim, so choosing a theme feels like picking up an
+ * object rather than ticking a radio button.
+ */
 @Composable
 internal fun ThemePackCard(
     pack: com.folio.reader.ui.theme.ThemePack,
@@ -33,20 +45,24 @@ internal fun ThemePackCard(
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
     val chrome = com.folio.reader.ui.theme.AppPalette.byId(pack.appPaletteId).colors
     val page = com.folio.reader.settings.Theme.getPreset(pack.readerThemeId)
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(
-        com.folio.reader.ui.theme.FolioTokens.radiusControl
-    )
+    val shape = FolioShapes.inset
+    val interaction = rememberFolioInteraction()
     androidx.compose.foundation.layout.Column(
         modifier = Modifier
             .width(148.dp)
-            .background(colors.surface.copy(alpha = 0.55f), shape)
-            .border(
-                1.dp,
-                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
-                shape
+            .folioPressable(interaction, scaleTo = 0.96f)
+            .then(
+                if (selected) {
+                    Modifier.folioRaised(
+                        shape = shape,
+                        elevation = FolioTokens.elevationVeil,
+                        accent = colors.primary,
+                    )
+                } else {
+                    Modifier.folioPanel(shape)
+                }
             )
-            .clickable(onClick = onClick)
-            .clip(shape),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
     ) {
         // Mini app chrome: palette dot plus a title-bar line.
         Row(
@@ -107,6 +123,11 @@ internal fun ThemePackCard(
     }
 }
 
+/**
+ * A typeface pairing, shown as a specimen: the display face at 28sp doing what it
+ * actually does, over the pairing's name. Same selection language as the theme
+ * cards — the chosen one lifts.
+ */
 @Composable
 internal fun FontThemeCard(
     fontTheme: com.folio.reader.ui.theme.FontTheme,
@@ -114,26 +135,31 @@ internal fun FontThemeCard(
     onClick: () -> Unit,
 ) {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(
-        com.folio.reader.ui.theme.FolioTokens.radiusControl
-    )
+    val shape = FolioShapes.inset
+    val interaction = rememberFolioInteraction()
     androidx.compose.foundation.layout.Column(
         modifier = Modifier
             .width(132.dp)
-            .background(colors.surface.copy(alpha = 0.55f), shape)
-            .border(
-                1.dp,
-                if (selected) colors.primary else colors.outline.copy(alpha = 0.45f),
-                shape
+            .folioPressable(interaction, scaleTo = 0.96f)
+            .then(
+                if (selected) {
+                    Modifier.folioRaised(
+                        shape = shape,
+                        elevation = FolioTokens.elevationVeil,
+                        accent = colors.primary,
+                    )
+                } else {
+                    Modifier.folioPanel(shape)
+                }
             )
-            .clickable(onClick = onClick)
-            .padding(12.dp),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = "Ag",
             fontFamily = com.folio.reader.ui.theme.UiFonts.display(fontTheme, weight = 600, opticalSize = 28f),
-            fontSize = 28.sp,
+            fontSize = 30.sp,
             color = colors.onSurface,
         )
         Text(

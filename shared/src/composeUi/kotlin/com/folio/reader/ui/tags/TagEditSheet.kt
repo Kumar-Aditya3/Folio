@@ -44,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Tag
+import com.folio.reader.ui.components.folioPanel
+import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 
 internal val TagPresetColors = listOf(
@@ -75,16 +78,17 @@ internal fun TagDetailView(
     ) {
         item {
             val tagColor = detail.tag.color?.let { Color(it) } ?: FolioTheme.colors.primary
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = tagColor.copy(alpha = 0.1f)
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // The tag's own colour tints a well: the tag is the subject of
+                    // this screen, so its identity is the surface, not a badge.
+                    .folioSunken(FolioShapes.card, accent = tagColor)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         detail.tag.name,
                         style = FolioTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
                         color = tagColor
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -106,11 +110,11 @@ internal fun TagDetailView(
                 )
             }
             items(detail.books, key = { it.id }) { book ->
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onBookClick(book) },
-                    shape = RoundedCornerShape(8.dp)
+                        .folioPanel(FolioShapes.inset)
+                        .clickable { onBookClick(book) }
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -161,11 +165,11 @@ internal fun TagDetailView(
             }
             items(detail.highlights, key = { it.highlight.id }) { hw ->
                 val hlColor = hw.highlight.effectiveColor.let { Color(it) }
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onHighlightClick(hw.highlight, hw.book) },
-                    shape = RoundedCornerShape(8.dp)
+                        .folioPanel(FolioShapes.inset, accent = hlColor)
+                        .clickable { onHighlightClick(hw.highlight, hw.book) }
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Box(

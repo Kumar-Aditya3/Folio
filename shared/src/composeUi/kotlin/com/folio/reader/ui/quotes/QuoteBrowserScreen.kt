@@ -57,7 +57,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.model.Tag
+import com.folio.reader.ui.components.FolioCallout
+import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -285,7 +288,7 @@ private fun QuoteGrid(
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 280.dp),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(padding)
@@ -309,7 +312,7 @@ private fun QuoteList(
     onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     LazyColumn(
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(padding)
     ) {
@@ -322,6 +325,12 @@ private fun QuoteList(
     }
 }
 
+/**
+ * A saved passage, as a pull-quote rather than a card. The highlight's own colour
+ * becomes the leading rule, so the reader's chosen highlighter is what identifies
+ * the quote — the strongest available signal, and it was previously reduced to a
+ * 4dp strip on top of a grey box.
+ */
 @Composable
 private fun QuoteCard(
     item: QuoteDisplayItem,
@@ -329,36 +338,29 @@ private fun QuoteCard(
     onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
     val highlightColor = item.highlight?.effectiveColor
-    val borderColor = highlightColor?.let { androidx.compose.ui.graphics.Color(it) }
-        ?: FolioTheme.colors.primary
+    val accent = highlightColor?.let { androidx.compose.ui.graphics.Color(it) }
+        ?: FolioTheme.colors.accentAnnotation
 
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onQuoteClick(item) },
-        colors = CardDefaults.cardColors(
-            containerColor = FolioTheme.colors.surface,
-            contentColor = FolioTheme.colors.onSurface
-        ),
-        shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onQuoteClick(item) }
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(borderColor)
-        )
-        Column(modifier = Modifier.padding(16.dp)) {
+        FolioCallout(accent = accent) {
             Text(
                 text = "\u201C${item.quote.text}\u201D",
                 style = FolioTheme.typography.quote,
+                color = FolioTheme.colors.onSurface,
                 maxLines = 6,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = item.book.title,
                 style = FolioTheme.typography.titleSmall,
+                color = FolioTheme.colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -373,15 +375,16 @@ private fun QuoteCard(
             }
 
             if (item.note != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    color = FolioTheme.colors.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .folioSunken(com.folio.reader.ui.theme.FolioShapes.inset)
+                        .padding(10.dp)
                 ) {
                     Text(
                         text = item.note.content,
                         style = FolioTheme.typography.bodySmall,
-                        modifier = Modifier.padding(8.dp),
+                        color = FolioTheme.colors.onSurface,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -389,7 +392,7 @@ private fun QuoteCard(
             }
 
             if (item.highlight != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -418,38 +421,37 @@ private fun QuoteListItem(
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onEditTags: (QuoteDisplayItem) -> Unit = {}
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onQuoteClick(item) },
-        colors = CardDefaults.cardColors(
-            containerColor = FolioTheme.colors.surface,
-            contentColor = FolioTheme.colors.onSurface
-        ),
-        shape = RoundedCornerShape(8.dp)
+    // Compact form: the same leading-rule language as the card form, no box.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onQuoteClick(item) }
+            .padding(vertical = 4.dp)
     ) {
-        Row(modifier = Modifier.padding(12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
             val highlightColor = item.highlight?.effectiveColor
                 ?.let { androidx.compose.ui.graphics.Color(it) }
-                ?: FolioTheme.colors.primary
+                ?: FolioTheme.colors.accentAnnotation
             Box(
                 modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxWidth()
-                    .height(80.dp)
-                    .background(highlightColor, RoundedCornerShape(2.dp))
+                    .width(2.dp)
+                    .height(72.dp)
+                    .background(highlightColor.copy(alpha = 0.75f), RoundedCornerShape(1.dp))
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "\u201C${item.quote.text}\u201D",
                     style = FolioTheme.typography.quote.copy(fontSize = 15.sp, lineHeight = 21.sp),
+                    color = FolioTheme.colors.onSurface,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = item.book.title,
                     style = FolioTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium,
+                    color = FolioTheme.colors.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

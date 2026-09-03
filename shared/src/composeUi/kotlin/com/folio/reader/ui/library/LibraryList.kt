@@ -1,6 +1,7 @@
 package com.folio.reader.ui.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
@@ -49,8 +51,7 @@ fun BookList(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(top = com.folio.reader.ui.theme.FolioTokens.space2, bottom = com.folio.reader.ui.theme.FolioTokens.spaceMovement)
     ) {
         items(books) { book ->
             BookListItem(
@@ -66,6 +67,10 @@ fun BookList(
     }
 }
 
+/**
+ * A list-mode shelf row: plate, type, hairline. Selection tints the row's
+ * background rather than swapping a card colour, so the artwork stays legible.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookListItem(
@@ -77,88 +82,84 @@ fun BookListItem(
     onDeleteBook: (Book) -> Unit,
     finishEstimate: String? = null
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = onClick,
-            onLongClick = onLongClick
-        )
-    ) {
+    val interaction = com.folio.reader.ui.components.rememberFolioInteraction()
+    val colors = FolioTheme.colors
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioPressable(interaction, scaleTo = 0.99f)
+                .background(
+                    if (isSelected) colors.primary.copy(alpha = 0.14f)
+                    else androidx.compose.ui.graphics.Color.Transparent
+                )
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+                .padding(
+                    horizontal = com.folio.reader.ui.theme.FolioTokens.gutter,
+                    vertical = com.folio.reader.ui.theme.FolioTokens.space2,
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Thumbnail
-            Box(
-                modifier = Modifier
-                    .width(48.dp)
-                    .height(72.dp)
-                    .clip(RoundedCornerShape(4.dp))
-            ) {
-                BookCover(
-                    coverPath = book.coverPath,
-                    title = book.title,
-                    author = book.authors.firstOrNull() ?: "",
-                    small = true
-                )
-            }
+            com.folio.reader.ui.components.FolioCoverPlate(
+                coverPath = book.coverPath,
+                title = book.title,
+                author = book.displayAuthor,
+                width = com.folio.reader.ui.theme.FolioTokens.coverInline,
+                shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
+                elevation = 5.dp,
+                small = true,
+            )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(com.folio.reader.ui.theme.FolioTokens.space3))
 
-            // Info
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     book.title,
-                    style = FolioTheme.typography.titleMedium,
+                    style = FolioTheme.typography.titleSmall,
+                    color = colors.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     book.displayAuthor,
                     style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
+                    color = colors.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (book.normalizedProgress > 0) {
-                        Text(
-                            "${book.progressPercent}%",
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.primary
-                        )
-                    }
-                    if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING) {
-                        Text(
-                            book.status.name.lowercase().replaceFirstChar { it.uppercase() },
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant
-                        )
-                    }
-                    // §5.1 caption; absent when no projection exists.
-                    finishEstimate?.let {
-                        Text(
-                            it,
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                // One caption line, ordered by usefulness: progress, then the
+                // projection, then a notable status.
+                val caption = when {
+                    book.normalizedProgress > 0 && finishEstimate != null ->
+                        "${book.progressPercent}% · $finishEstimate"
+                    book.normalizedProgress > 0 -> "${book.progressPercent}%"
+                    book.status != BookStatus.UNREAD && book.status != BookStatus.READING ->
+                        book.status.name.lowercase().replaceFirstChar { it.uppercase() }
+                    else -> null
+                }
+                if (caption != null) {
+                    Text(
+                        caption,
+                        style = FolioTheme.typography.labelSmall,
+                        color = if (book.normalizedProgress > 0) colors.accentProgress
+                        else colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
-            // §2.6: rows use the bar, covers use the ring — never both.
+            // §2.6: rows use the bar, plates use the seam — never both here.
             if (book.normalizedProgress > 0 && book.normalizedProgress < 1) {
                 FolioProgressBar(
                     progress = book.normalizedProgress.toFloat(),
-                    modifier = Modifier.width(60.dp),
-                    color = FolioTheme.colors.primary
+                    modifier = Modifier.width(52.dp),
+                    color = colors.accentProgress
                 )
             }
 
@@ -166,9 +167,11 @@ fun BookListItem(
                 book = book,
                 onBookClick = { onClick() },
                 onDeleteBook = onDeleteBook,
-                modifier = Modifier.padding(start = 8.dp)
             )
         }
+        com.folio.reader.ui.components.FolioRule(
+            modifier = Modifier.padding(horizontal = com.folio.reader.ui.theme.FolioTokens.gutter)
+        )
     }
 }
 
@@ -184,8 +187,7 @@ fun BookCompactList(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        contentPadding = PaddingValues(top = com.folio.reader.ui.theme.FolioTokens.space2, bottom = com.folio.reader.ui.theme.FolioTokens.spaceMovement)
     ) {
         items(books) { book ->
             BookCompactItem(
@@ -212,52 +214,64 @@ fun BookCompactItem(
     onDeleteBook: (Book) -> Unit,
     finishEstimate: String? = null
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
+    val colors = FolioTheme.colors
+    Column {
+        Row(
             modifier = Modifier
-                .padding(start = 16.dp)
-                .width(32.dp)
-                .height(48.dp)
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .background(
+                    if (isSelected) colors.primary.copy(alpha = 0.14f)
+                    else androidx.compose.ui.graphics.Color.Transparent
+                )
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(
+                    horizontal = com.folio.reader.ui.theme.FolioTokens.gutter,
+                    vertical = com.folio.reader.ui.theme.FolioTokens.space1,
+                ),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            BookCover(
+            com.folio.reader.ui.components.FolioCoverPlate(
                 coverPath = book.coverPath,
                 title = book.title,
-                author = book.authors.firstOrNull() ?: "",
-                small = true
+                author = book.displayAuthor,
+                width = 30.dp,
+                shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
+                elevation = 3.dp,
+                small = true,
+            )
+
+            Spacer(Modifier.width(com.folio.reader.ui.theme.FolioTokens.space3))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    book.title,
+                    style = FolioTheme.typography.bodyMedium,
+                    color = colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val statusPart = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
+                    " · ${book.toCardData().statusLabel}" else ""
+                // §5.1 caption appended only when a projection exists.
+                val pacePart = finishEstimate?.let { " · $it" } ?: ""
+                Text(
+                    "${book.displayAuthor} · ${book.progressPercent}%$statusPart$pacePart",
+                    style = FolioTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            BookOptionsDropdown(
+                book = book,
+                onBookClick = { onClick() },
+                onDeleteBook = onDeleteBook,
             )
         }
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(book.title, style = FolioTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val statusPart = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
-                " · ${book.toCardData().statusLabel}" else ""
-            // §5.1 caption appended only when a projection exists.
-            val pacePart = finishEstimate?.let { " · $it" } ?: ""
-            Text(
-                "${book.displayAuthor} · ${book.progressPercent}%$statusPart$pacePart",
-                style = FolioTheme.typography.bodySmall,
-                color = FolioTheme.colors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        BookOptionsDropdown(
-            book = book,
-            onBookClick = { onClick() },
-            onDeleteBook = onDeleteBook,
-            modifier = Modifier.padding(end = 8.dp)
+        com.folio.reader.ui.components.FolioRule(
+            modifier = Modifier.padding(horizontal = com.folio.reader.ui.theme.FolioTokens.gutter)
         )
     }
 }

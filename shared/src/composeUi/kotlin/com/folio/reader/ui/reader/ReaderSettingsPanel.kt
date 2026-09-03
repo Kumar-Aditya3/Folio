@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -98,13 +99,13 @@ fun ReaderSettingsPanel(
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
     val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
-    val panelShape = RoundedCornerShape(topStart = 20.dp)
+    val panelShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
             .width(280.dp)
-            .glassPanel(panelShape)
+            .folioVeil(panelShape)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)

@@ -31,11 +31,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioChip
-import com.folio.reader.ui.components.FolioHeroCard
-import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.chartStagger
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.components.rememberEntryState
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.first
@@ -107,17 +110,25 @@ internal fun ChartBar(
 }
 
 /**
- * A bar chart of manga chapters read per day over the last 7 days, styled
- * identically to the books [WeekChart] but with chapter counts instead of minutes.
+ * Manga chapters per day over the last 7 days. Same well treatment as the books
+ * [WeekChart] — data sits *in* the page — with counts instead of minutes.
  */
 @Composable
 internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
-    FolioSectionCard(title = "Manga — last 7 days") {
+    Column {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            FolioEyebrow("Manga — last 7 days")
+        }
+        Spacer(Modifier.height(FolioTokens.space2))
         val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
         // §13.5: same entry sweep as the books week chart, keyed on the labels.
         val entry = rememberEntryProgress(labels)
         Row(
-            modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioSunken(FolioShapes.edgeStart)
+                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
+                .height(FolioTokens.chartHeight),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -155,10 +166,26 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
     }
 }
 
+/**
+ * Last 7 days, as a well cut into the page. Sinking the chart is what stops the
+ * one data visual on the screen from reading as another card in the stack; the
+ * bars grow out of the well's floor, which is where a bar chart belongs.
+ */
 @Composable
 internal fun WeekChart(week: List<StatDay>) {
-    FolioSectionCard(title = "Last 7 days") {
-        WeekBars(week)
+    Column {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            FolioSectionHead(title = "Last 7 days")
+        }
+        Spacer(Modifier.height(FolioTokens.space3))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioSunken(FolioShapes.edgeStart)
+                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
+        ) {
+            WeekBars(week)
+        }
     }
 }
 
@@ -225,18 +252,21 @@ internal fun ActivityHeatmap(
         HeatmapMode.MANGA -> mangaDays
     }
 
-    // §12.5: the year heatmap is Stats' hero surface (Rule 13) — accent-tinted
-    // gradient panel, cells scaled by intensity in `accentProgress`.
-    FolioHeroCard {
+    // §12.5: the year heatmap is Stats' one raised surface (Rule 13). It earns it
+    // by being the only genuinely *visual* artefact on the screen — 365 cells of
+    // the reader's own year. The asymmetric hero silhouette and the accent-lit rim
+    // separate it from every ruled list around it.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = FolioTokens.gutter)
+            .folioRaised(shape = FolioShapes.hero, accent = FolioTheme.colors.accentProgress)
+            .padding(FolioTokens.space3)
+    ) {
         Column {
-            Text(
-                text = "Activity",
-                style = FolioTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = FolioTheme.colors.onSurface
-            )
+            FolioSectionHead(title = "Your year", eyebrow = "Activity")
 
-            Spacer(Modifier.height(FolioTokens.space2))
+            Spacer(Modifier.height(FolioTokens.space3))
 
             // ── Segmented toggle ──────────────────────────────────────────
             Row(
@@ -248,7 +278,7 @@ internal fun ActivityHeatmap(
                 FolioChip(selected = mode == HeatmapMode.MANGA, onClick = { mode = HeatmapMode.MANGA }, label = "Manga")
             }
 
-            Spacer(Modifier.height(FolioTokens.space2))
+            Spacer(Modifier.height(FolioTokens.space3))
 
             if (days.isEmpty()) {
                 Text(
@@ -256,7 +286,7 @@ internal fun ActivityHeatmap(
                     style = FolioTheme.typography.bodyMedium,
                     color = FolioTheme.colors.onSurfaceVariant
                 )
-                return@FolioHeroCard
+                return@Column
             }
             val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
             val cellAccent = FolioTheme.colors.accentProgress

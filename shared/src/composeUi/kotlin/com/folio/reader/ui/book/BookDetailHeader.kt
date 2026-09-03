@@ -7,34 +7,48 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.Collection
 import com.folio.reader.model.Series
 import com.folio.reader.model.Tag
-import com.folio.reader.ui.components.BookCover
-import com.folio.reader.ui.components.ProgressRing
+import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioFigure
+import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 
+/**
+ * Book detail, opened as an **editorial title page**.
+ *
+ * The cover throws a halo onto the page and its dominant colour tints the author
+ * line and the progress figure, so the book's own artwork sets the temperature of
+ * its own screen. Title runs at `headlineLarge` beside the plate rather than under
+ * it; progress is a figure plus a seam, not a ring plus two labels.
+ *
+ * Metadata drops into a sunken well below — reference material sits *in* the page,
+ * not on another card.
+ */
 @Composable
 internal fun BookHeaderSection(
     book: Book,
@@ -52,155 +66,135 @@ internal fun BookHeaderSection(
     onAddTags: () -> Unit,
     onCoverClick: () -> Unit = {}
 ) {
+    val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = FolioTokens.gutter),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space4),
             verticalAlignment = Alignment.Top
         ) {
-            CoverImage(book = book, onCoverClick = onCoverClick)
+            FolioCoverPlate(
+                coverPath = book.coverPath,
+                title = book.title,
+                author = book.displayAuthor,
+                width = FolioTokens.coverFeature,
+                halo = accent,
+                elevation = 16.dp,
+                modifier = Modifier.clickable { onCoverClick() },
+            )
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceHair)
             ) {
                 Text(
                     text = book.title,
-                    style = FolioTheme.typography.headlineLarge,
+                    style = FolioTheme.typography.headlineMedium,
                     color = FolioTheme.colors.onSurface
                 )
 
                 book.subtitle?.takeIf { it.isNotBlank() }?.let {
                     Text(
                         text = it,
-                        style = FolioTheme.typography.titleMedium,
+                        style = FolioTheme.typography.bodyMedium,
                         color = FolioTheme.colors.onSurfaceVariant
                     )
                 }
 
                 Text(
                     text = book.displayAuthor,
-                    style = FolioTheme.typography.titleMedium,
-                    color = FolioTheme.colors.primary,
-                    fontWeight = FontWeight.Medium
+                    style = FolioTheme.typography.titleSmall,
+                    color = accent,
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ProgressRing(
-                        progress = book.normalizedProgress.toFloat(),
-                        modifier = Modifier.size(56.dp),
-                        strokeWidth = 5f
-                    )
+                Spacer(Modifier.height(FolioTokens.space2))
 
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = "${book.progressPercent}% complete",
-                            style = FolioTheme.typography.labelLarge,
-                            color = FolioTheme.colors.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = estimateReadingTime(book, wordsRead),
-                            style = FolioTheme.typography.bodySmall,
-                            color = FolioTheme.colors.onSurfaceVariant
-                        )
-                    }
-                }
+                // Progress as a figure with the estimate as its caption; the seam
+                // below carries the bar. §2.6 holds — one progress form here.
+                FolioFigure(
+                    value = book.progressPercent.toString(),
+                    unit = "%",
+                    caption = estimateReadingTime(book, wordsRead),
+                    accent = accent,
+                    emphasis = FigureScale.Quiet,
+                )
+                Spacer(Modifier.height(FolioTokens.space1))
+                FolioProgressBar(
+                    progress = book.normalizedProgress.toFloat(),
+                    color = accent,
+                )
             }
         }
 
         BookMetadataGrid(book = book)
 
-        BookChipsRow(
-            series = series,
-            collections = collections,
-            tags = tags,
-            onTagClick = onTagClick,
-            onSeriesClick = onSeriesClick,
-            onCollectionClick = onCollectionClick,
-            onAddTags = onAddTags
-        )
+        Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            BookChipsRow(
+                series = series,
+                collections = collections,
+                tags = tags,
+                onTagClick = onTagClick,
+                onSeriesClick = onSeriesClick,
+                onCollectionClick = onCollectionClick,
+                onAddTags = onAddTags
+            )
+        }
 
         book.description?.takeIf { it.isNotBlank() }?.let {
-            BookDescription(description = it)
-        }
-    }
-}
-
-@Composable
-private fun CoverImage(book: Book, onCoverClick: () -> Unit = {}) {
-    Box(
-        modifier = Modifier
-            .width(140.dp)
-            .aspectRatio(2f / 3f)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onCoverClick() }
-    ) {
-        BookCover(
-            coverPath = book.coverPath,
-            title = book.title,
-            author = book.authors.firstOrNull() ?: ""
-        )
-    }
-}
-
-@Composable
-private fun BookMetadataGrid(book: Book) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = FolioTheme.colors.surface,
-            contentColor = FolioTheme.colors.onSurface
-        ),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            MetadataRow("Publisher", book.publisher ?: "—")
-            MetadataRow("Language", book.language ?: "—")
-            MetadataRow("ISBN", book.isbn ?: "—")
-            MetadataRow("Pages/Chapters", "${book.chapterCount} chapters")
-            MetadataRow("Words", formatCount(book.totalWords))
-            book.publicationDate?.let {
-                MetadataRow("Published", it.toString().take(10))
+            Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+                BookDescription(description = it)
             }
         }
     }
 }
 
 @Composable
-private fun MetadataRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+private fun BookMetadataGrid(book: Book) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .folioSunken(FolioShapes.edgeStart)
+            .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
     ) {
-        Text(
-            text = label,
-            style = FolioTheme.typography.labelMedium,
-            color = FolioTheme.colors.onSurfaceVariant,
-            modifier = Modifier.width(96.dp)
-        )
-        Text(
-            text = value,
-            style = FolioTheme.typography.bodyMedium,
-            color = FolioTheme.colors.onSurface,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        MetadataRow("Publisher", book.publisher ?: "—")
+        MetadataRow("Language", book.language ?: "—")
+        MetadataRow("ISBN", book.isbn ?: "—")
+        MetadataRow("Chapters", "${book.chapterCount}")
+        MetadataRow("Words", formatCount(book.totalWords))
+        book.publicationDate?.let {
+            MetadataRow("Published", it.toString().take(10), last = true)
+        } ?: MetadataRow("Published", "—", last = true)
+    }
+}
+
+@Composable
+private fun MetadataRow(label: String, value: String, last: Boolean = false) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = FolioTokens.space2),
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+        ) {
+            Text(
+                text = label,
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+                modifier = Modifier.width(96.dp)
+            )
+            Text(
+                text = value,
+                style = FolioTheme.typography.titleSmall,
+                color = FolioTheme.colors.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (!last) FolioRule()
     }
 }
 
