@@ -102,6 +102,16 @@ contrast-guarded, so it is safe as a default). Off falls back to `accentProgress
 - Toggle off → hero is pixel-identical to the `accentProgress` version
 - Works in `LIGHT`, `midnightneon`, `rainbow` (§2.7)
 
+**Shipped 1.1.19; sampling amended 1.1.20.** The "value in 0.2..0.9" window and flat modal
+mean above did not survive contact with glow covers: a dark field with a bright bloom lost
+every bloom pixel (v > 0.9), the modal bin's mean landed on the dark field, failed the 4.5:1
+guard, and the hero washed into `accentProgress` — violating the first acceptance criterion.
+Shipped sampling keeps the same filters minus the upper cap (`s > 0.25`, `v ≥ 0.2`) and
+elects the modal bin by chroma salience — each qualifying pixel weighs `s·v²` — with the
+bin's salience-weighted mean colour winning. Paper-white and black-bar covers still lose on
+saturation/value alone; the bloom now speaks for the cover. The contrast guard (item 4) is
+untouched. Regression: `glowingCoverSpeaksForTheCover` in `CoverAccentTest`.
+
 ---
 
 ## 13.4 Effect 2 — Drifting gradient mesh behind the hero
