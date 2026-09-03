@@ -2,7 +2,10 @@ package com.folio.reader
 
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.theme.AppPalette
+import com.folio.reader.ui.theme.FolioTypography
 import com.folio.reader.ui.theme.ThemePack
+import androidx.compose.ui.text.font.FontWeight
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -147,6 +150,100 @@ class ThemeSchemeTest {
         }
     }
 
+    // ── §15 Rules 22–24: neutral hue variance, text split, weight ladder ───
+
+    // §15.5: palettes that are achromatic by design satisfy Rule 22 through the
+    // luminance clause instead of hue rotation. The list lives here, not in
+    // Theme.kt, so adding a palette to it is a visible, reviewable decision.
+    private val achromaticByDesign = setOf("light", "oled", "graphite")
+
+    @Test
+    fun neutralsVaryInHueNotOnlyLightness() {
+        for (palette in AppPalette.entries) {
+            val c = palette.colors
+            if (palette.id in achromaticByDesign) {
+                // L* is derived from relative luminance but perceptually even from
+                // true black to white, where a raw ΔY is not — the spec's own
+                // Graphite background/surface pair sits at ΔL* ≈ 4.4, while a 0.04
+                // raw ΔY would push OLED's card plane to mid-grey and destroy the
+                // true-black theme the spec preserves.
+                val dl = abs(lab(c.surface.toArgb()).first - lab(c.background.toArgb()).first)
+                assertTrue(dl >= 4.0,
+                    "${palette.id}: achromatic background/surface ΔL*=$dl — the planes are indistinguishable")
+            } else {
+                val hb = hueDegrees(c.background)
+                val hs = hueDegrees(c.surface)
+                assertTrue(hb != null && hs != null,
+                    "${palette.id}: background or surface is achromatic but not in the allowlist — " +
+                        "add it to achromaticByDesign or give the ramp a hue")
+                val d = hueDistance(hb!!, hs!!)
+                assertTrue(d >= 8.0,
+                    "${palette.id}: background/surface hue Δ=${"%.1f".format(d)}° — one hue at several lightnesses (§15 Finding A)")
+            }
+        }
+    }
+
+    @Test
+    fun primaryAndSecondaryTextAreDistinct() {
+        for (palette in AppPalette.entries) {
+            val c = palette.colors
+            assertTrue(c.onSurface != c.onSurfaceVariant,
+                "${palette.id}: onSurface and onSurfaceVariant are the same colour")
+            val dE = deltaE(c.onSurface, c.onSurfaceVariant)
+            assertTrue(dE >= 12.0,
+                "${palette.id}: onSurface vs onSurfaceVariant ΔE=$dE — secondary text competes with primary")
+        }
+    }
+
+    @Test
+    fun contrastTargetsPerPalette() {
+        // §15.2's minimum column, enforced on every palette; the target column
+        // (≥10:1, 5.5–7:1, 2–3:1) is what ramp tuning aims for above these floors.
+        for (palette in AppPalette.entries) {
+            val c = palette.colors
+            fun ratio(fg: androidx.compose.ui.graphics.Color, bg: androidx.compose.ui.graphics.Color) =
+                wcagRatio(fg.toArgb(), bg.toArgb())
+            val onSurface = ratio(c.onSurface, c.surface)
+            val onBackground = ratio(c.onBackground, c.background)
+            val onVariant = ratio(c.onSurfaceVariant, c.surface)
+            val outline = ratio(c.outline, c.surface)
+            assertTrue(onSurface >= 7.0,
+                "${palette.id}: onSurface/surface is ${"%.2f".format(onSurface)}:1 — below the 7:1 floor")
+            assertTrue(onBackground >= 7.0,
+                "${palette.id}: onBackground/background is ${"%.2f".format(onBackground)}:1 — below the 7:1 floor")
+            assertTrue(onVariant >= 4.5,
+                "${palette.id}: onSurfaceVariant/surface is ${"%.2f".format(onVariant)}:1 — below WCAG AA")
+            assertTrue(outline >= 1.5,
+                "${palette.id}: outline/surface is ${"%.2f".format(outline)}:1 — card rims vanish")
+            assertTrue(onVariant < onSurface,
+                "${palette.id}: onSurfaceVariant (${onVariant}:1) must sit below onSurface (${onSurface}:1) — " +
+                    "secondary text is deliberately subordinate")
+        }
+    }
+
+    @Test
+    fun typographySpansAtLeastThreeWeights() {
+        // Rule 24 + §15.3.1: display lightest, labels heaviest — the ladder that
+        // makes editorial hierarchy, not twelve styles of W600.
+        val t = FolioTypography()
+        for (style in listOf(t.displayLarge, t.displayMedium, t.displaySmall)) {
+            assertEquals(FontWeight.W300, style.fontWeight, "display styles must use the lightest weight (W300)")
+        }
+        for (style in listOf(t.headlineLarge, t.headlineMedium, t.headlineSmall,
+                t.titleLarge, t.titleMedium, t.titleSmall)) {
+            assertEquals(FontWeight.W600, style.fontWeight, "headline/title styles stay semibold")
+        }
+        for (style in listOf(t.bodyLarge, t.bodyMedium, t.bodySmall)) {
+            assertEquals(FontWeight.Normal, style.fontWeight, "body styles stay regular")
+        }
+        for (style in listOf(t.labelLarge, t.labelMedium, t.labelSmall)) {
+            assertEquals(FontWeight.W700, style.fontWeight, "label styles must use the heaviest weight (W700)")
+        }
+        val span = setOf(t.displaySmall.fontWeight, t.titleLarge.fontWeight,
+            t.bodyMedium.fontWeight, t.labelLarge.fontWeight)
+        assertTrue(span.size >= 3, "type scale spans ${span.size} weights — Rule 24 wants at least three")
+    }
+
     // ── colour math ─────────────────────────────────────────────────────────
 
     private fun deltaE(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Double {
@@ -176,6 +273,24 @@ class ThemeSchemeTest {
         val l1 = relLum(fg)
         val l2 = relLum(bg)
         return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    }
+
+    /** HSV hue in degrees [0, 360), or null when the colour carries no hue (≤ 1/255 of channel span). */
+    private fun hueDegrees(c: androidx.compose.ui.graphics.Color): Double? {
+        val mx = maxOf(c.red, c.green, c.blue)
+        val mn = minOf(c.red, c.green, c.blue)
+        if (mx - mn < 1.0 / 255.0) return null
+        val d = mx - mn
+        return when (mx) {
+            c.red -> 60.0 * (((c.green - c.blue) / d + 6.0) % 6.0)
+            c.green -> 60.0 * ((c.blue - c.red) / d + 2.0)
+            else -> 60.0 * ((c.red - c.green) / d + 4.0)
+        }
+    }
+
+    private fun hueDistance(a: Double, b: Double): Double {
+        val d = abs(a - b)
+        return minOf(d, 360.0 - d)
     }
 
     private fun relLum(argb: Int): Double {

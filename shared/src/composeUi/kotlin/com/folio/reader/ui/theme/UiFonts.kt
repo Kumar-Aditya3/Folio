@@ -60,12 +60,13 @@ object UiFonts {
     private fun load(fileName: String, weight: Int, italic: Boolean, optical: Float): FontFamily {
         val key = "$fileName:$weight:$italic:$optical"
         cache[key]?.let { return it }
-        if (cache.containsKey(key)) return FontFamily.Default
         val file = fontsDir?.resolve(fileName)?.takeIf { it.length() > 0L }
         val family = file?.let {
             runCatching { fileFontFamily(it.absolutePath, weight, italic, optical) }.getOrNull()
         }
-        cache[key] = family
+        // A missing or unloadable file falls back to Default on every load; the
+        // cache is a ConcurrentHashMap and cannot hold null sentinels.
+        if (family != null) cache[key] = family
         return family ?: FontFamily.Default
     }
 }
