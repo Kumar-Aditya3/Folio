@@ -53,6 +53,7 @@ import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
@@ -527,9 +528,10 @@ fun MangaDetailScreen(
 
             if (chapters.isEmpty() && refreshing) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    // Opening a manga from a source: the chapter list is the page, so
+                    // stand rows in at their real height. The list then fills in rather
+                    // than replacing a spinner with content and jumping the scroll.
+                    FolioRowListSkeleton(rows = 6)
                 }
             }
 

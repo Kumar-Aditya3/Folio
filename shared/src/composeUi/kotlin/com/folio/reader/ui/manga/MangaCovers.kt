@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,10 +17,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.ui.components.decodeCoverImage
+import com.folio.reader.ui.components.folioShimmer
 import com.folio.reader.ui.theme.FolioTheme
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
@@ -99,10 +100,14 @@ fun MangaCover(
                 tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(28.dp),
             )
-            else -> CircularProgressIndicator(
-                modifier = Modifier.size(22.dp),
-                strokeWidth = 2.dp,
-                color = colors.onSurfaceVariant,
+            // Pending: shimmer the whole plate rather than centre a spinner in it.
+            // A grid of spinners reports twenty separate activities; a grid of
+            // shimmering plates reports one grid still filling in, and it is the
+            // plate the cover is about to occupy.
+            else -> Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .folioShimmer(RectangleShape),
             )
         }
         if (dimmed && bitmap != null) {

@@ -155,25 +155,32 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         // stripe across the top of every light theme. Take it from the field
         // instead: paper gets a paper-white ground and dark icons, a dark field
         // keeps its deep ground and light icons.
+        //
+        // Held low on purpose. Nothing scrolls *under* this band — the app bars sit
+        // above their content, so what the scrim covers is the page's own field,
+        // which already contrasts with the icons the OS draws over it. Anything
+        // heavier is a painted band, and that band was most of what made the
+        // masthead read as a lid.
         barScrim = if (dark) {
-            deepen(colors.background, 0.30f).copy(alpha = 0.90f)
+            deepen(colors.background, 0.30f).copy(alpha = 0.46f)
         } else {
-            lift(colors.surface, 0.72f).copy(alpha = 0.86f)
+            lift(colors.surface, 0.72f).copy(alpha = 0.42f)
         },
-        // Bars sit over Compose content, so they can be actual glass. Two rules
-        // here, both learned the hard way:
+        // Bars sit over Compose content, so they can be actual glass. Three rules
+        // here, all learned the hard way:
         //
         //  - the tint is taken from the *field*, not from `surface`. A surface-
         //    coloured bar over a background-coloured page is a different object
         //    from the page no matter how low its alpha goes, which is exactly what
         //    made the collapsed masthead read as a grey lid;
-        //  - the alpha is capped well short of opaque, so what little sits behind
-        //    the bar still shows through. Depth is carried by the hairline and the
-        //    fade below it (FolioTopBar), not by the fill.
+        //  - the alpha stays nearer a third than a half. Past that the fill starts
+        //    describing its own rectangle, and the eye reads a rectangle as a panel;
+        //  - depth is carried by the hairline and the fade below it (FolioTopBar),
+        //    never by making the fill heavier.
         barGlass = if (dark) {
-            lerp(fieldTop, colors.surface, 0.35f).copy(alpha = 0.50f)
+            lerp(fieldTop, colors.surface, 0.35f).copy(alpha = 0.32f)
         } else {
-            lift(fieldTop, 0.42f).copy(alpha = 0.54f)
+            lift(fieldTop, 0.42f).copy(alpha = 0.36f)
         },
         hairline = if (dark) {
             lift(colors.outline, 0.05f).copy(alpha = 0.30f)

@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.ui.components.FolioSourceSectionSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
@@ -206,6 +207,15 @@ fun MangaBrowseScreen(
                                 },
                             )
                         }
+                    }
+                }
+                // Resolving the installed-source list happens before any section
+                // exists, so without this the reader gets "Preparing sources…" over a
+                // blank page. Headed rails stand in and are replaced by the real
+                // sections as each one registers.
+                if (preparing && globalResults.isEmpty()) {
+                    items(2, key = { "preparing-$it" }) {
+                        FolioSourceSectionSkeleton()
                     }
                 }
             }
