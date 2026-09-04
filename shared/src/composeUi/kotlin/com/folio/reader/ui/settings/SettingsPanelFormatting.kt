@@ -30,11 +30,9 @@ fun FormattingSettingsPanel(
     onReviewOverrides: (() -> Unit)? = null
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Text("Formatting", style = MaterialTheme.typography.titleLarge)
-
         // Formatting mode dropdown
         DropdownMenuButton(
             label = "Formatting mode",

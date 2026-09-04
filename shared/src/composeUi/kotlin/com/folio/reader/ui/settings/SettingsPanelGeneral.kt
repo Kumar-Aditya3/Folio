@@ -41,11 +41,9 @@ fun GeneralSettingsPanel(
     onPickMangaDownloadsLocation: () -> Unit = {}
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Text("General Settings", style = MaterialTheme.typography.titleLarge)
-
         // Theme packs: a curated chrome + page pair, applied together.
         Column(
             modifier = Modifier.fillMaxWidth(),

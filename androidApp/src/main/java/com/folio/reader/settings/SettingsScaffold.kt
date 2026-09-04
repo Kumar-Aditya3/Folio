@@ -21,6 +21,7 @@ import com.folio.reader.ui.theme.FolioTokens
 /** Route values for `settings/{category}` (§3.5 FOLIO_IMPLEMENTATION_SPEC). */
 object FolioSettingsCategory {
     const val THEMES = "themes"
+    const val DEFAULTS = "defaults"
     const val TYPOGRAPHY = "typography"
     const val LAYOUT = "layout"
     const val FORMATTING = "formatting"

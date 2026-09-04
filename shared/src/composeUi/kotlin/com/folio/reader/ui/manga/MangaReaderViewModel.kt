@@ -24,7 +24,21 @@ import kotlinx.coroutines.sync.withPermit
 
 enum class MangaReaderMode { WEBTOON, PAGED_LTR, PAGED_RTL, PAGED_VERTICAL }
 
-private const val KEY_READER_MODE = "manga.reader.mode"
+/** Global fallback for manga that has never selected its own reading mode. */
+const val KEY_MANGA_READER_DEFAULT_MODE = "manga.reader.mode"
+
+/**
+ * Resolves a manga reader mode without overwriting a manga's explicit choice.
+ * Existing manga settings are therefore stable; only manga without a saved mode
+ * follow a subsequently changed global default.
+ */
+fun resolveMangaReaderMode(
+    mangaModeName: String?,
+    defaultModeName: String?,
+): MangaReaderMode =
+    mangaModeName?.let { saved -> MangaReaderMode.entries.firstOrNull { it.name == saved } }
+        ?: defaultModeName?.let { saved -> MangaReaderMode.entries.firstOrNull { it.name == saved } }
+        ?: MangaReaderMode.WEBTOON
 
 data class ChapterSlot(
     val chapter: MangaChapter,
@@ -134,7 +148,7 @@ class MangaReaderViewModel(
         scope.launch { settingsRepo.setRaw(readerModeKey(id), newMode.name) }
     }
 
-    private fun readerModeKey(mangaId: String) = "$KEY_READER_MODE.$mangaId"
+    private fun readerModeKey(mangaId: String) = "$KEY_MANGA_READER_DEFAULT_MODE.$mangaId"
 
     fun toggleBookmark() {
         scope.launch {
@@ -165,9 +179,10 @@ class MangaReaderViewModel(
             // current default onto it so later default changes don't reach back.
             val modeKey = readerModeKey(manga.id)
             val savedName = settingsRepo.getRaw(modeKey)
-            val resolved = savedName?.let { name -> MangaReaderMode.entries.firstOrNull { it.name == name } }
-                ?: MangaReaderMode.entries.firstOrNull { it.name == settingsRepo.getRaw(KEY_READER_MODE) }
-                ?: MangaReaderMode.WEBTOON
+            val resolved = resolveMangaReaderMode(
+                mangaModeName = savedName,
+                defaultModeName = settingsRepo.getRaw(KEY_MANGA_READER_DEFAULT_MODE),
+            )
             mode.value = resolved
             if (savedName == null) {
                 runCatching { settingsRepo.setRaw(modeKey, resolved.name) }

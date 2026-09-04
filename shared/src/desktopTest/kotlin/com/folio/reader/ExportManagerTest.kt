@@ -216,7 +216,7 @@ class ExportManagerTest {
         assertNotNull2(restoredBook)
     }
 
-    private fun assertNotNull2(any: Any?) = kotlin.test.assertNotNull(any)
+    private fun assertNotNull2(any: Any?) { kotlin.test.assertNotNull(any) }
 
     @Test
     fun `annotation exports produce markdown json and csv`() = runBlocking {

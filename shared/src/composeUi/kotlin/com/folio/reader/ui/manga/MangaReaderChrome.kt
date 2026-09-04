@@ -28,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -203,11 +203,14 @@ internal fun ReaderControls(
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
             )
-            Slider(
+            FolioSlider(
                 value = if (rtl) (lastPage - currentPage).toFloat() else currentPage.toFloat(),
                 onValueChange = { onSeek(if (rtl) lastPage - it.toInt() else it.toInt()) },
                 valueRange = 0f..lastPage.toFloat(),
                 modifier = Modifier.weight(1f).padding(horizontal = FolioTokens.space2),
+                accent = Color.White,
+                background = Color.Black,
+                inactive = Color.White.copy(alpha = 0.28f),
             )
             Text(
                 if (rtl) "${currentPage + 1}" else "$pageCount",

@@ -9,16 +9,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -54,11 +58,10 @@ import com.folio.reader.ui.theme.rememberMotionEnabled
  *    so selection is legible by shape and by presence rather than by a few
  *    percent of tint.
  *
- * The capsule still occupies its own row in a Column rather than overlaying the
- * content: an overlay would hide the last list item on every screen, and fixing
- * that would mean bottom padding duplicated into a dozen scroll containers. The
- * row's background is transparent, so the field shows through and the capsule
- * still reads as floating.
+ * The capsule is anchored over the destination rather than occupying a layout
+ * row. A single safety inset is applied by the shell so the last interactive
+ * content does not land under it; no wallpaper or matching background wrapper is
+ * needed to simulate separation.
  *
  * `content()` stays at a single stable slot across bar↔non-bar transitions:
  * rendering the NavHost in two branches recreated it on every push and wiped each
@@ -73,17 +76,34 @@ fun FolioNavShell(
     content: @Composable () -> Unit
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
+    // The runway the capsule needs: the OS gesture/nav inset, the capsule itself
+    // and the air on both sides of it. Reserved once here so no screen has to
+    // know a floating bar exists.
+    val systemBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val contentBottomInset =
+        systemBottomInset + FolioTokens.navFloatHeight + FolioTokens.navFloatInset * 2
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f)) {
+    Box(modifier = modifier.fillMaxSize()) {
+        // One stable slot for the destination. The bar is a sibling overlay, so
+        // the capsule is genuinely detached — nothing paints a matching block
+        // behind it to fake the separation.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = if (showBottomBar) contentBottomInset else 0.dp),
+        ) {
             content()
         }
 
         if (showBottomBar) {
             Box(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    // Bottom: OS gesture bar. Sides: display cutouts in landscape,
+                    // then the app's own inset so the capsule never touches an edge.
                     .navigationBarsPadding()
+                    .displayCutoutPadding()
                     .padding(
                         horizontal = FolioTokens.space3,
                         vertical = FolioTokens.navFloatInset,
@@ -92,6 +112,9 @@ fun FolioNavShell(
             ) {
                 Row(
                     modifier = Modifier
+                        // Capped so the capsule stays a capsule on tablets and
+                        // large windows instead of stretching into a bar again.
+                        .widthIn(max = FolioTokens.navFloatMaxWidth)
                         .folioVeil(FolioShapes.nav)
                         .height(FolioTokens.navFloatHeight)
                         .padding(horizontal = 6.dp),

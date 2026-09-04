@@ -49,11 +49,9 @@ fun CloudSyncSettingsPanel(
     val isConnected = settings.firebaseApiKey.isNotBlank() && settings.firebaseProjectId.isNotBlank()
 
     Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Text("Cloud Sync", style = MaterialTheme.typography.titleLarge)
-
         // Real-time sync status card
         com.folio.reader.ui.components.SyncStatusCard(
             syncState = syncState,

@@ -131,10 +131,13 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         } else {
             lerp(colors.surfaceVariant, colors.background, 0.25f)
         },
+        // Reader controls can sit directly above a page rendered by a native
+        // surface. Keep the palette's surface character, but make the veil
+        // effectively opaque so page text never competes with menu text.
         veilFill = if (dark) {
-            deepen(colors.surface, 0.20f).copy(alpha = 0.82f)
+            deepen(colors.surface, 0.20f).copy(alpha = 0.97f)
         } else {
-            lift(colors.surface, 0.35f).copy(alpha = 0.86f)
+            lift(colors.surface, 0.35f).copy(alpha = 0.98f)
         },
         hairline = if (dark) {
             lift(colors.outline, 0.05f).copy(alpha = 0.30f)

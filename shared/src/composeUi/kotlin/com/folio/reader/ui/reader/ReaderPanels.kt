@@ -53,6 +53,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -143,6 +144,10 @@ fun TOCSidebar(
     // Glass, because it sits over the page. A 26dp leading sweep so the panel
     // reads as sliding in from the edge rather than being pasted on.
     val tocShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+    // Monochromatic palettes put `primary` within a hair of `surface`, so the
+    // current-chapter marker has to pass the contrast guard rather than trust the
+    // raw accent. Each theme keeps its own hue; only unreadable values move.
+    val accent = rememberLegibleAccent(FolioTheme.colors.primary)
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -170,7 +175,7 @@ fun TOCSidebar(
                     )
                 }
             }
-            HorizontalDivider(color = FolioTheme.colors.outline.copy(alpha = 0.5f))
+            HorizontalDivider(color = FolioTheme.colors.outlineVariant)
 
             val initialScrollIndex = (currentIndex - 1).coerceAtLeast(0)
             // Positioned on open only. While the panel stays open the list belongs
@@ -184,6 +189,11 @@ fun TOCSidebar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onChapterClick(index) }
+                            // The current row gets a wash of its own so the state is
+                            // visible without relying on the 3dp marker alone.
+                            .background(
+                                if (isCurrent) accent.copy(alpha = 0.12f) else Color.Transparent
+                            )
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -192,7 +202,7 @@ fun TOCSidebar(
                             Modifier
                                 .size(width = 3.dp, height = 18.dp)
                                 .background(
-                                    if (isCurrent) FolioTheme.colors.primary else Color.Transparent,
+                                    if (isCurrent) accent else Color.Transparent,
                                     RoundedCornerShape(2.dp)
                                 )
                         )
@@ -204,7 +214,7 @@ fun TOCSidebar(
                             style = FolioTheme.typography.bodySmall.copy(
                                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal
                             ),
-                            color = if (isCurrent) FolioTheme.colors.primary else FolioTheme.colors.onSurface.copy(alpha = 0.85f)
+                            color = if (isCurrent) accent else FolioTheme.colors.onSurface
                         )
                     }
                 }
@@ -244,9 +254,18 @@ fun AnnotationsSidebar(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Annotations", style = FolioTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            Text(
+                "Annotations",
+                style = FolioTheme.typography.titleLarge,
+                color = FolioTheme.colors.onSurface,
+                modifier = Modifier.weight(1f)
+            )
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = "Close annotations")
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Close annotations",
+                    tint = FolioTheme.colors.onSurfaceVariant
+                )
             }
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -326,6 +345,13 @@ fun AnnotationsSidebar(
 
 @Composable
 private fun SectionHeader(text: String, icon: ImageVector? = null) {
+    // `secondary` is a fill role in several palettes and lands close to the veil,
+    // so section headers take the guarded value.
+    val label = rememberLegibleAccent(
+        FolioTheme.colors.secondary,
+        fallback = FolioTheme.colors.onSurfaceVariant,
+        minRatio = 3.0,
+    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -336,13 +362,13 @@ private fun SectionHeader(text: String, icon: ImageVector? = null) {
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = FolioTheme.colors.secondary
+                tint = label
             )
         }
         Text(
             text = text,
             style = FolioTheme.typography.titleSmall,
-            color = FolioTheme.colors.secondary
+            color = label
         )
     }
 }
@@ -358,6 +384,7 @@ private fun AnnotationRow(
     onClick: () -> Unit = {},
     onDelete: () -> Unit
 ) {
+    val accent = rememberLegibleAccent(FolioTheme.colors.primary)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -373,10 +400,16 @@ private fun AnnotationRow(
         if (accentColor != null) {
             Box(Modifier.width(3.dp).height(32.dp).background(accentColor, RoundedCornerShape(2.dp)))
         } else if (leadingIcon != null) {
-            Icon(leadingIcon, contentDescription = null, tint = FolioTheme.colors.primary, modifier = Modifier.size(18.dp))
+            Icon(leadingIcon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = FolioTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(subtitle, style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant)
         }
         onNote?.let { action ->
@@ -388,7 +421,7 @@ private fun AnnotationRow(
                 Text(
                     text = if (note.isNullOrBlank()) "Note" else "Edit",
                     style = FolioTheme.typography.labelSmall,
-                    color = FolioTheme.colors.primary
+                    color = accent
                 )
             }
         }
@@ -410,7 +443,7 @@ private fun AnnotationRow(
                     Modifier
                         .width(2.dp)
                         .height(IntrinsicSize.Min)
-                        .background(FolioTheme.colors.primary, RoundedCornerShape(1.dp))
+                        .background(accent, RoundedCornerShape(1.dp))
                 )
                 Text(
                     text = note,

@@ -975,9 +975,17 @@ fun main(args: Array<String>) {
                                     // This screen edits the snapshot below and saves it back whole, so
                                     // it must be current: a value captured at startup would revert every
                                     // reading preference the reader changed since.
+                                    var mangaDefaultMode by remember {
+                                        mutableStateOf(com.folio.reader.ui.manga.MangaReaderMode.WEBTOON)
+                                    }
                                     LaunchedEffect(Unit) {
                                         runCatching {
                                             globalSettings = deps.settingsRepository.getGlobalSettings()
+                                            mangaDefaultMode = com.folio.reader.ui.manga.MangaReaderMode.entries.firstOrNull {
+                                                it.name == deps.settingsRepository.getRaw(
+                                                    com.folio.reader.ui.manga.KEY_MANGA_READER_DEFAULT_MODE
+                                                )
+                                            } ?: com.folio.reader.ui.manga.MangaReaderMode.WEBTOON
                                         }
                                     }
                                     var mangaDlLocation by remember {
@@ -1006,6 +1014,18 @@ fun main(args: Array<String>) {
                                         onExportBackup = { pickBackupDestination() },
                                         onImportBackup = { pickBackupSource() },
                                         onExportAnnotations = { format -> exportAnnotations(format) },
+                                        mangaDefaultMode = mangaDefaultMode,
+                                        onMangaDefaultModeChange = { mode ->
+                                            mangaDefaultMode = mode
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    deps.settingsRepository.setRaw(
+                                                        com.folio.reader.ui.manga.KEY_MANGA_READER_DEFAULT_MODE,
+                                                        mode.name,
+                                                    )
+                                                }
+                                            }
+                                        },
                                         mangaDownloadsLocation = mangaDlLocation,
                                         onPickMangaDownloadsLocation = {
                                             pickMangaDownloadsDir {

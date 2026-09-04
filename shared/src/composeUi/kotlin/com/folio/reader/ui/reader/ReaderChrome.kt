@@ -96,6 +96,7 @@ internal fun ReaderTopBar(
             Text(
                 text = bookTitle,
                 style = FolioTheme.typography.titleMedium,
+                color = FolioTheme.colors.onSurface,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -239,10 +240,13 @@ fun BottomProgressBar(
     onSeek: ((Float) -> Unit)? = null
 ) {
     val fraction = if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+    // Same glass as the top bar, so the two ends of the reader chrome are the
+    // same material; the raw 0.92 surface fill let page text bleed through.
+    val accent = com.folio.reader.ui.components.rememberLegibleAccent(FolioTheme.colors.primary)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(FolioTheme.colors.surface.copy(alpha = 0.92f))
+            .folioVeil(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -263,7 +267,7 @@ fun BottomProgressBar(
         ) {
             com.folio.reader.ui.components.FolioProgressBar(
                 progress = fraction,
-                color = FolioTheme.colors.primary
+                color = accent
             )
         }
         Row(
@@ -286,7 +290,7 @@ fun BottomProgressBar(
             Text(
                 text = "$currentPage / $totalPages",
                 style = FolioTheme.typography.labelMedium,
-                color = FolioTheme.colors.primary
+                color = accent
             )
         }
     }

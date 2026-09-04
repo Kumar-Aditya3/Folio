@@ -318,6 +318,9 @@ fun MoreRoute(
 @Composable
 fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> Unit) {
     when (category) {
+        com.folio.reader.settings.FolioSettingsCategory.DEFAULTS ->
+            com.folio.reader.settings.SettingsReaderDefaultsScreen(navModel, onBack)
+
         com.folio.reader.settings.FolioSettingsCategory.TYPOGRAPHY ->
             com.folio.reader.settings.SettingsTypographyScreen(navModel, onBack)
 

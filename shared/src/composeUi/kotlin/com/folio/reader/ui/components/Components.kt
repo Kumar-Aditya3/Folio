@@ -228,6 +228,11 @@ fun FolioChip(
  * That single change removes the "grey band on top of every screen" that made the
  * old build read as a scaffold. [titleStyle] still lets the §13.9 collapsing Home
  * hero migrate its title in at a smaller size.
+ *
+ * Top-level destinations pass no [navigationIcon], so they get the Folio mark in
+ * that slot: the four persistent screens (Folio, Home, Stats, More) then read as
+ * one product masthead rather than four unrelated screen titles, while pushed
+ * screens keep their back arrow exactly where it was.
  */
 @Composable
 fun FolioTopBar(
@@ -244,10 +249,14 @@ fun FolioTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (navigationIcon != null) navigationIcon()
+            if (navigationIcon != null) {
+                navigationIcon()
+            } else {
+                FolioMark()
+            }
             Text(
                 text = title,
                 style = titleStyle ?: FolioTheme.typography.headlineMedium,
@@ -260,6 +269,33 @@ fun FolioTopBar(
             )
             actions()
         }
+        // The boundary the bar has always claimed but never drew: a hairline that
+        // fades out toward the trailing edge, so the masthead is separated from the
+        // page without a shadow or a fill.
+        FolioRule()
+    }
+}
+
+/**
+ * The Folio mark: the wordmark's initial on a small tinted plate. Deliberately not
+ * an icon — a letterform in the product's own type reads as identity, where a
+ * generic book glyph reads as a category.
+ */
+@Composable
+private fun FolioMark(modifier: Modifier = Modifier) {
+    val colors = FolioTheme.colors
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .background(colors.primaryContainer, FolioShapes.inset),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "F",
+            style = FolioTheme.typography.titleMedium,
+            color = colors.onPrimaryContainer,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 

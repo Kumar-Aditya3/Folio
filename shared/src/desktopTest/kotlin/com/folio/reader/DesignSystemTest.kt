@@ -107,6 +107,36 @@ class DesignSystemTest {
     }
 
     @Test
+    fun veilStaysOpaqueEnoughForReaderMenus() {
+        // Reader bars and panels are drawn straight over rendered page text (and on
+        // desktop over a native browser surface). At the old 0.82/0.86 alphas the
+        // page bled through and menu labels lost contrast on every palette, so the
+        // veil keeps its material character but not its transparency.
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            assertTrue(
+                atmos.veilFill.alpha >= 0.95f,
+                "${palette.id}: veil alpha ${atmos.veilFill.alpha} lets page text through the " +
+                    "reader menus",
+            )
+        }
+    }
+
+    @Test
+    fun floatingNavCapsuleStaysACapsule() {
+        // The bar is detached, so it needs air on every side and a width ceiling —
+        // a full-bleed capsule is just a bar with rounded corners.
+        assertTrue(
+            FolioTokens.navFloatInset > FolioTokens.spaceHair,
+            "the floating nav needs a real inset, not a hairline",
+        )
+        assertTrue(
+            FolioTokens.navFloatMaxWidth > FolioTokens.navFloatHeight * 4,
+            "four items must fit inside the capsule's width ceiling",
+        )
+    }
+
+    @Test
     fun lightPalettesDoNotCastBlackShadows() {
         for (palette in AppPalette.entries.filter { !it.isDark }) {
             val atmos = atmosphereFor(palette.colors)
