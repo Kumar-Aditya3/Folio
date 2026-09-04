@@ -128,13 +128,18 @@ class DesignSystemTest {
         // sits over Compose content, so it must stay see-through even at full
         // collapse. This is the invariant that keeps the masthead from turning back
         // into the grey lid the redesign removed.
+        //
+        // The window sits low deliberately. Half-opaque was still enough fill for the
+        // collapsed bar to describe its own rectangle over the page, which is all the
+        // eye needs to call it a panel; a third reads as tinted glass. The floor is
+        // there so the bar does not vanish entirely and leave the title floating.
         for (palette in AppPalette.entries) {
             val atmos = atmosphereFor(palette.colors)
             assertTrue(
-                atmos.barGlass.alpha in 0.45f..0.80f,
+                atmos.barGlass.alpha in 0.22f..0.42f,
                 "${palette.id}: bar glass alpha ${atmos.barGlass.alpha} is outside the " +
-                    "0.45–0.80 glass window — below it the bar cannot hold status icons, " +
-                    "above it the bar reads as a solid lid",
+                    "0.22–0.42 glass window — below it the bar stops reading as a surface " +
+                    "at all, above it the bar reads as a solid lid",
             )
             assertTrue(
                 atmos.barGlass.alpha < atmos.veilFill.alpha,
@@ -166,10 +171,13 @@ class DesignSystemTest {
                         "(${"%.4f".format(scrim)}) — this is the black band over paper",
                 )
             }
-            // It is a scrim, not a band: the page has to show through it.
+            // It is a scrim, not a band: the page has to show through it. Kept well
+            // under half, because in this layout the only thing behind the scrim is
+            // the page's own field — a heavy one buys no contrast the field does not
+            // already give the OS icons, and costs a painted strip along the top.
             assertTrue(
-                atmos.barScrim.alpha < 0.95f,
-                "${palette.id}: status scrim alpha ${atmos.barScrim.alpha} is a solid band",
+                atmos.barScrim.alpha <= 0.55f,
+                "${palette.id}: status scrim alpha ${atmos.barScrim.alpha} is a painted band",
             )
         }
     }

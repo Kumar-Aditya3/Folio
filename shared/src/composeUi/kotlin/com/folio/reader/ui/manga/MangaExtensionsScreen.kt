@@ -49,6 +49,7 @@ import com.folio.reader.manga.ExtensionEntry
 import com.folio.reader.manga.ExtensionInstallStep
 import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
@@ -159,6 +160,14 @@ fun ExtensionsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
+                }
+            }
+            // Fetching a repository index is the slowest thing this screen does, and
+            // the toolbar's 20dp spinner is easy to miss. Rows stand in at their real
+            // height so the wait reads as a list arriving, not as an empty tab.
+            if (shown.isEmpty() && refreshing) {
+                item(key = "ext-skeleton") {
+                    FolioRowListSkeleton(rows = 7)
                 }
             }
             val shownEn = shown.filter { it.lang == "en" }

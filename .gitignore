@@ -120,3 +120,7 @@ mihon-main/
 # Device database pulls (adb) used for local debugging; *.db alone misses the
 # SQLite -shm/-wal companions.
 dbpull/
+
+# Personal bug-report captures (own library, highlights, stats). Kept locally
+# for reference; they are the reader's private reading life, not repo assets.
+screenshot/

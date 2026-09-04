@@ -155,16 +155,18 @@ fun FolioTopBar(
             .fillMaxWidth()
             .drawBehind {
                 // The OS icons need their own ground on every theme; the page does
-                // not need a band. The scrim is opaque only where the icons are and
-                // gone by the bar's foot, so there is no cut line across the screen.
+                // not need a band. The scrim decays fast — full strength only in the
+                // few pixels the icons actually occupy, and effectively gone by the
+                // bar's foot — so there is no cut line across the screen and no
+                // painted strip along the top of it.
                 if (statusPx > 0f) {
                     val mid = (statusPx / size.height).coerceIn(0.05f, 0.9f)
                     val a = statusColor.alpha
                     drawRect(
                         Brush.verticalGradient(
                             0f to statusColor.copy(alpha = a),
-                            mid to statusColor.copy(alpha = a * lerp(0.55f, 0.85f, f)),
-                            1f to statusColor.copy(alpha = a * lerp(0f, 0.55f, f)),
+                            mid to statusColor.copy(alpha = a * lerp(0.40f, 0.70f, f)),
+                            1f to statusColor.copy(alpha = a * lerp(0f, 0.32f, f)),
                         )
                     )
                 }
@@ -176,9 +178,9 @@ fun FolioTopBar(
                 if (f > 0.01f) {
                     drawRect(
                         Brush.verticalGradient(
-                            0f to veil.copy(alpha = veil.alpha * f * 0.88f),
-                            0.65f to veil.copy(alpha = veil.alpha * f * 0.52f),
-                            1f to veil.copy(alpha = veil.alpha * f * 0.26f),
+                            0f to veil.copy(alpha = veil.alpha * f * 0.85f),
+                            0.6f to veil.copy(alpha = veil.alpha * f * 0.44f),
+                            1f to veil.copy(alpha = veil.alpha * f * 0.16f),
                         )
                     )
                 }

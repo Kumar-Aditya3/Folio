@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +52,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBrowseItem
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.ui.components.FolioCoverRailSkeleton
+import com.folio.reader.ui.components.FolioSourceSectionSkeleton
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -128,6 +129,15 @@ internal fun SourceSearchResults(
                 }
             }
         }
+        // Before the installed-source list resolves there are no sections to draw
+        // at all, and a lone "Preparing sources…" line over a blank page reads as
+        // a dead end. Two headed rails stand in until the real sources arrive and
+        // replace them, so the shape of the answer is there from the first frame.
+        if (preparing && globalResults.isEmpty()) {
+            items(2, key = { "preparing-$it" }) {
+                FolioSourceSectionSkeleton()
+            }
+        }
         if (!preparing && finished == globalResults.size && totalItems == 0) {
             item {
                 com.folio.reader.ui.components.EmptyState(
@@ -167,81 +177,58 @@ internal fun GlobalSourceSection(
             label = "source-section-${result.source.id}",
         ) { loading ->
             when {
-                loading -> LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-            ) {
-                items(3) {
-                    Column(Modifier.width(96.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(0.68f)
-                                .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(10.dp)
-                                .background(
-                                    FolioTheme.colors.surfaceVariant,
-                                    RoundedCornerShape(4.dp),
-                                ),
+                // The source's name is already on screen — what has not arrived is
+                // its rail, so the placeholder is that rail at its real size. Covers
+                // then land in plates the reader has already been looking at.
+                loading -> FolioCoverRailSkeleton(count = 4)
+                else -> if (result.items.isEmpty() && result.error != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = FolioTheme.colors.error,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            result.error ?: "Search failed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = FolioTheme.colors.onSurfaceVariant,
                         )
                     }
-                }
-            }
-            else -> if (result.items.isEmpty() && result.error != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Warning,
-                        contentDescription = null,
-                        tint = FolioTheme.colors.error,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        result.error ?: "Search failed",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                    )
-                }
-            } else LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-            ) {
-                items(result.items, key = { it.url + it.title }) { item ->
-                    Column(
-                        modifier = Modifier
-                            .width(96.dp)
-                            .clickable { onOpenManga(item) },
-                    ) {
-                        Box(
+                } else LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+                ) {
+                    items(result.items, key = { it.url + it.title }) { item ->
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(0.68f)
-                                .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
+                                .width(FolioTokens.coverRailWidth)
+                                .clickable { onOpenManga(item) },
                         ) {
-                            MangaCover(
-                                backend = viewModel.backend,
-                                sourceId = result.source.id,
-                                thumbnailUrl = item.thumbnailUrl,
-                                modifier = Modifier.fillMaxSize(),
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(FolioTokens.coverPaneRatio)
+                                    .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
+                            ) {
+                                MangaCover(
+                                    backend = viewModel.backend,
+                                    sourceId = result.source.id,
+                                    thumbnailUrl = item.thumbnailUrl,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                            Spacer(Modifier.height(FolioTokens.spaceHair))
+                            Text(
+                                item.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = FolioTheme.colors.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            item.title,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
                     }
                 }
-            }
             }
         }
     }

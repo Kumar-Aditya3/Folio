@@ -1292,6 +1292,14 @@ object FolioTokens {
     val motionEmphasis = 320L     // Bottom sheet, full-screen transition
     val chipAutoDismiss = 4000L   // End-of-chapter chip dwell before fading out
 
+    /**
+     * One shimmer sweep across an unarrived pane. Fast on purpose: §13.4 holds the
+     * hero mesh at 18–30s precisely so it never reads as a loading state, and this
+     * is the opposite end of that scale. Past ~2s the band stops reading as
+     * activity and starts reading as a slow gradient animation.
+     */
+    val motionShimmer = 1200L
+
     // Progress ring diameter when decorating covers
     val ringSmall = 28.dp
     // Progress ring diameter on the Home daily-goal card
@@ -1350,6 +1358,15 @@ object FolioTokens {
     val coverShelf = 84.dp          // standard shelf/grid entry
     val coverInline = 52.dp         // inline list rows
     val coverAspect = 1.5f          // height = width × this (2:3 printed trim)
+
+    // ── Manga cover panes ──────────────────────────────────────────────────
+    // A shimmer skeleton is only worth having if covers land in the cells it
+    // already drew, so the pane's geometry lives here rather than as a literal
+    // repeated at every grid. `coverPaneRatio` is the `Modifier.aspectRatio`
+    // (width ÷ height) form of `coverAspect` above.
+    val coverPaneRatio = 0.68f      // manga cover tile, width ÷ height
+    val coverRailWidth = 96.dp      // pane width in a horizontal results rail
+    val coverGridMin = 110.dp       // adaptive-grid minimum pane width
 
     // Floating navigation capsule
     // 54/42 rather than 62/46: the capsule reads as a control, and a control that

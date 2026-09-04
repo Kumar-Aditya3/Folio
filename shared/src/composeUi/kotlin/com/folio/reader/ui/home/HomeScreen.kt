@@ -68,7 +68,6 @@ import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
-import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
@@ -121,9 +120,7 @@ fun HomeScreen(
     onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> }
 ) {
     when {
-        !state.loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            LoadingPlaceholder()
-        }
+        !state.loaded -> HomeSkeleton()
         !state.hasBooks && !state.hasManga ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(

@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -63,6 +62,8 @@ import com.folio.reader.manga.BrowseMode
 import com.folio.reader.manga.MangaBrowseItem
 import com.folio.reader.manga.MangaFilter
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioCoverGridSkeleton
+import com.folio.reader.ui.components.FolioCoverPaneSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
@@ -159,9 +160,12 @@ fun SourceBrowseScreen(
         Spacer(Modifier.height(FolioTokens.space2))
 
         when {
-            state.loading && state.items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            // Opening a source: draw the grid before the source answers, at the same
+            // adaptive columns the results will use. The first page then lands in
+            // cells the reader has already seen instead of replacing a spinner with
+            // a full screen of covers.
+            state.loading && state.items.isEmpty() ->
+                FolioCoverGridSkeleton(modifier = Modifier.fillMaxSize())
             state.error != null && state.items.isEmpty() ->
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -183,7 +187,7 @@ fun SourceBrowseScreen(
                 }
             else -> LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Adaptive(minSize = 110.dp),
+                columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(FolioTokens.space3),
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
@@ -204,9 +208,10 @@ fun SourceBrowseScreen(
                 if (state.hasNextPage) {
                     item {
                         LaunchedEffect(Unit) { viewModel.loadNextPage() }
-                        Box(Modifier.fillMaxWidth().padding(FolioTokens.space3), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                        }
+                        // The next page arrives as more panes, so the footer is a pane
+                        // rather than a spinner — the grid's rhythm carries on and the
+                        // cell the reader is scrolling toward is already the right size.
+                        FolioCoverPaneSkeleton()
                     }
                 }
             }
@@ -262,7 +267,7 @@ private fun BrowseGridItem(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(0.68f)
+                .aspectRatio(FolioTokens.coverPaneRatio)
                 .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
         ) {
             MangaCover(
