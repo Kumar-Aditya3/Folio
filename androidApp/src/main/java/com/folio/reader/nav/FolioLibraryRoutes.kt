@@ -21,7 +21,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
@@ -49,29 +52,57 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
     // §13.9 hero collapse: Home reports the fully-collapsed flip, the hero title
     // and the hero tint; the bar swaps its title to titleMedium and bleeds the
     // hero gradient upward while the collapse tracks the finger inside HomeScreen.
-    var heroCollapsed by remember { mutableStateOf(false) }
+    // §13.9 hero collapse: Home reports the fraction continuously, plus the hero title
+    // and the hero tint. The masthead cross-fades the wordmark out and the book's title
+    // in across the same scroll, gains its glass at the same rate, and takes a bleed of
+    // the hero's own colour — so the card does not dissolve into a bar that is still
+    // saying something else.
+    var heroCollapse by remember { mutableStateOf(0f) }
     var heroTitle by remember { mutableStateOf<String?>(null) }
     var heroTint by remember { mutableStateOf<Color?>(null) }
-    val bleedAlpha by animateFloatAsState(
-        targetValue = if (heroCollapsed) 1f else 0f,
-        animationSpec = tween(durationMillis = 220),
-        label = "heroBleed",
-    )
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
         Box {
+            val fraction = heroCollapse
             FolioTopBar(
-                title = if (heroCollapsed && heroTitle != null) heroTitle!! else "Home",
-                titleStyle = if (heroCollapsed && heroTitle != null) {
-                    MaterialTheme.typography.titleMedium
-                } else null
+                title = "Folio",
+                collapse = fraction,
+                titleContent = {
+                    Box {
+                        // The masthead carries the product name on Home and the screen's
+                        // name everywhere else. It used to be inverted — "Home" here and
+                        // "Folio" over the library — which read as two different apps.
+                        Text(
+                            text = "Folio",
+                            style = FolioTheme.typography.headlineMedium,
+                            color = FolioTheme.colors.onSurface,
+                            maxLines = 1,
+                            modifier = Modifier.graphicsLayer {
+                                alpha = (1f - fraction * 1.7f).coerceIn(0f, 1f)
+                            },
+                        )
+                        val migrated = heroTitle
+                        if (migrated != null) {
+                            Text(
+                                text = migrated,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = FolioTheme.colors.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.graphicsLayer {
+                                    alpha = ((fraction - 0.4f) / 0.6f).coerceIn(0f, 1f)
+                                },
+                            )
+                        }
+                    }
+                },
             )
-            if (heroTint != null && bleedAlpha > 0f) {
+            if (heroTint != null && fraction > 0.01f) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .graphicsLayer { alpha = bleedAlpha }
+                        .graphicsLayer { alpha = fraction }
                         .background(
                             Brush.verticalGradient(
                                 listOf(Color.Transparent, heroTint!!.copy(alpha = 0.12f))
@@ -99,7 +130,9 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     graph.mangaRepository,
                     graph.mangaChapterRepository,
                     graph.mangaCategoryRepository,
-                    graph.mangaBackend
+                    graph.mangaBackend,
+                    // §11.4: chapter pace for the manga predictions on Reading now.
+                    com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
                 )
             }
             val state by viewModel.state.collectAsState(initial = HomeUiState())
@@ -147,7 +180,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     }
                 },
                 onHeroCollapse = { collapsed, title, tint ->
-                    heroCollapsed = collapsed >= 1f
+                    heroCollapse = collapsed
                     heroTitle = title
                     heroTint = tint
                 }
@@ -257,7 +290,15 @@ fun LibraryRoute(
                 searchActive = navModel.mangaSearchActive,
                 onSearchActiveChange = { navModel.mangaSearchActive = it },
                 browseViewModel = navModel.mangaBrowseVM,
-                onImportLocal = { callbacks.onImportMangaChoice() }
+                onImportLocal = { callbacks.onImportMangaChoice() },
+                // One rail on the manga shelf too: the Books/Manga switch leads the
+                // category chips instead of sitting on a row of its own above them.
+                railLeading = {
+                    com.folio.reader.ui.library.LibraryModeSwitch(
+                        mode = navModel.libraryMode,
+                        onModeChange = { navModel.libraryMode = it },
+                    )
+                }
             )
         }
     )
@@ -266,6 +307,9 @@ fun LibraryRoute(
 @Composable
 fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) {
     val navController = navModel.navController ?: return
+    // Same scroll-linked masthead as Library and Home: the charts dissolve into the
+    // bar's glass instead of sliding under a fixed slab.
+    val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
     // StatisticsTabContent is embeddable and supplies no top bar of its own; the
     // Android host provides one (with the status-bar band) like the other tabs.
     // The screen paints nothing of its own: the app's `folioField` ground plane
@@ -273,8 +317,12 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
-        FolioTopBar(title = "Stats")
-        Box(modifier = Modifier.weight(1f)) {
+        FolioTopBar(title = "Stats", collapse = headerState.collapse)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .nestedScroll(headerState.nestedScrollConnection)
+        ) {
             StatisticsTabContent(
                 viewModel = navModel.statisticsVM,
                 onBookClick = onOpenBookDetail,

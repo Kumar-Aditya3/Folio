@@ -1,226 +1,221 @@
-# Folio — Personal EPUB Reader
+# Folio
 
-A local-first, cross-platform EPUB reading application with Firebase synchronization.
+A local-first reading app for EPUB books and manga, built with Kotlin Multiplatform and
+Compose Multiplatform. One shared codebase drives an Android app and a Windows desktop app.
+
+Folio works entirely offline. Your library, reading progress, highlights, and statistics live
+in a local SQLite database. Cloud sync exists but is opt-in and off by default.
 
 ## Features
 
-- **Offline-first**: Read entirely offline, sync when online
-- **Cross-platform**: Android + Desktop JVM (Windows/Linux/macOS via the same desktop target; no native Apple target yet)
-- **Precise reading positions**: spineIndex + paragraph index + scroll fraction locators
-- **Rich annotations**: Highlights, notes, bookmarks, quotes, revisit items
-- **Full-text search**: Across entire library
-- **Reading statistics**: Sessions, speed, heatmap, patterns
-- **Series & Collections**: Organize your library
-- **Customizable typography**: Fonts, themes, layouts, per-book overrides
-- **Firebase sync**: Anonymous/Email auth + Firestore metadata sync via REST v1 (works with just projectId + apiKey); EPUB file sync additionally requires a configured `storageBucket` and stays inactive otherwise
+**Reading**
+- EPUB 2 and 3 parsing with chapter-level HTML rendering
+- Typography control: font family and size, line and paragraph spacing, text width, margins,
+  alignment, hyphenation
+- Highlights, bookmarks, and notes with long-press selection
+- Scroll-position progress tracking that survives reflow after a typography change
+- Theme packs with paired typefaces, plus in-reader brightness and clock
 
-> **Status**: Advanced typography, pagination, and precise character-level selection highlights are partial or planned. Highlights currently capture whole paragraphs and there is no paginated layout engine yet.
+**Manga**
+- Chapter reader with its own page-based chrome, separate from the EPUB reader
+- Installs and runs Mihon/Tachiyomi extensions for online sources, including extension trust
+  verification before load
+- Background update checks for followed series via WorkManager
 
-## Architecture
+**Library and insights**
+- Books and Manga tabs with filters for reading state, series, and collections
+- Reading statistics: day streaks, session and binge averages, an activity heatmap filterable by
+  content type, per-title finish predictions, and reading-pattern classification
+- Tags, collections, and a quote browser over saved highlights
+
+**Sync (optional)**
+- Cross-device sync over the Firestore REST API with anonymous Identity Toolkit auth
+- No Firebase SDK and no account system; a Web API key is the only credential
+- Metadata-only by default; EPUB files and covers sync too if you configure a storage bucket
+
+## Platform support
+
+| | Android | Desktop |
+| --- | --- | --- |
+| Status | Primary target | Windows only |
+| Minimum | Android 7.0 (API 24) | Windows 10 x64 |
+| Built against | compileSdk 34 | JDK 17, JVM target 17 |
+
+Desktop is Windows-only in practice, not by preference: the reader's HTML surface uses JCEF and
+the build declares only `jcef-natives-windows-amd64`, while packaging targets MSI and EXE. The
+desktop code *compiles* on Linux and macOS — CI does exactly that — but it will not run there
+without adding the matching JCEF natives.
+
+
+## Project layout
 
 ```
 Folio/
-├── shared/              # Kotlin Multiplatform shared module
-│   ├── commonMain/      # Shared business logic
-│   ├── commonJvm/       # JVM-shared implementations (Android + Desktop)
-│   ├── androidMain/     # Android implementations
-│   └── desktopMain/     # Desktop (JVM) implementations
-├── androidApp/          # Android application
-└── desktopApp/          # Desktop (JVM) application
+├── shared/                     Kotlin Multiplatform module — most of the app lives here
+│   └── src/
+│       ├── commonMain/         Domain models, repositories, EPUB parser, sync engine
+│       ├── commonJvm/          JVM-only shared code (JDBC storage, book importer)
+│       ├── composeUi/          Shared Compose UI: home, library, reader, manga, settings, stats
+│       ├── androidMain/        Android platform bindings + vendored manga extension runtime
+│       ├── desktopMain/        Desktop platform bindings (JCEF HTML surface, file pickers)
+│       └── desktopTest/        Unit tests, run on JVM
+├── androidApp/                 Android entry point, navigation shell, DI graph, settings screens
+│   └── src/androidTest/        Instrumented tests
+├── desktopApp/                 Compose Desktop window, MSI/EXE packaging, same DI shape
+├── docs/                       Design specs, dependency plan, troubleshooting
+├── firestore.rules             Security rules for the optional sync backend
+└── gradle/libs.versions.toml   Single source of truth for every dependency version
 ```
 
-### Tech Stack
+The `shared` module sets `kotlin.mpp.applyDefaultHierarchyTemplate=false` and wires its source
+sets by hand, which is why `commonJvm` and `composeUi` exist as intermediate sets shared between
+Android and desktop rather than the default hierarchy's `jvmMain`.
 
-- **Kotlin Multiplatform (KMP)** + **Compose Multiplatform**
-- **Raw JDBC** (`org.xerial:sqlite-jdbc`) behind a small `Database` facade for persistence
-- **kotlinx.serialization** for JSON
-- **HttpURLConnection** against Firebase REST APIs (Firestore REST v1, Identity Toolkit) — no native SDK dependency for sync; Android SDK deps exist in the Android module but the sync path is REST
-- **Manual constructor injection** (`AppGraph` on Android, `FolioDesktopAppDependencies` on Desktop)
-- **Coil** for image loading
-- **Firebase** (Auth, Firestore; optional Storage for EPUB file sync when `storageBucket` is configured)
-
-## Building
+## Getting started
 
 ### Prerequisites
 
-- JDK 21+
-- Android SDK (for Android)
-- Gradle (wrapper will be generated)
+- **JDK 17.** This is what CI uses and what both modules target. Newer JDKs mostly work; note
+  that AGP's bundled lint crashes on JDK 25, which is why `checkReleaseBuilds = false` is set in
+  `androidApp/build.gradle.kts`.
+- **Android SDK** with platform 34, for Android builds only.
+- No Gradle install needed — use the committed wrapper.
 
-### Generate Gradle Wrapper
+Point Gradle at your SDK by creating `local.properties` in the repository root (it is gitignored):
 
-```bash
-gradle wrapper
+```properties
+# Forward slashes avoid Java properties escaping rules on Windows.
+sdk.dir=C:/Users/you/AppData/Local/Android/Sdk
 ```
 
-### Build Commands
+Android Studio writes this file for you when you open the project.
+
+### Build and run
 
 ```bash
-# Build all
-./gradlew build
-
-# Build shared module (desktop JVM target)
-.\gradlew.bat :shared:compileKotlinDesktop
-
-# Build Android debug APK
+# Android debug APK -> androidApp/build/outputs/apk/debug/
 ./gradlew :androidApp:assembleDebug
 
-# Install desktop distribution (run with ./gradlew :desktopApp:run)
-./gradlew :desktopApp:installDist
+# Install onto a connected device or running emulator
+./gradlew :androidApp:installDebug
 
-# Package desktop fat jar
-./gradlew :desktopApp:jar
+# Run the desktop app (Windows)
+./gradlew :desktopApp:run
+
+# Build a Windows installer -> desktopApp/build/compose/binaries/main/msi/
+./gradlew :desktopApp:packageMsi
 ```
 
-### Run Desktop App
+On Windows use `gradlew.bat` in place of `./gradlew`.
+
+### Tests
 
 ```bash
-./gradlew :desktopApp:run
+# Shared unit tests (JUnit 5)
+./gradlew :shared:desktopTest
+
+# Instrumented Android tests — needs a connected device or emulator
+./gradlew :androidApp:connectedAndroidTest
 ```
 
-## Project Structure
-
-### Shared Module (`shared/src/commonMain/kotlin/com/folio/reader/`)
-
-```
-model/           # Data models (Book, Chapter, ReadingPosition, etc.)
-epub/            # EPUB parsing (EpubParser, ParsedEpub)
-database/        # Raw JDBC schema + repository implementations
-sync/            # Sync engine, queue, conflict resolution
-search/          # Full-text search indexing
-statistics/      # Reading statistics calculation
-settings/        # Reader settings, themes, typography
-firebase/        # Firestore models & mappers
-importer/        # Book import flow
-ui/
-  ├── library/   # Library view models
-  ├── reader/    # Reader view models
-  └── statistics/# Statistics view models
-util/            # Hashing, JSON utils
-platform/        # Expect/actual platform abstractions
-di/              # Manual DI graph wiring (AppGraph / FolioDesktopAppDependencies in app entry points)
-```
-
-### Platform Implementations
-
-- **Android**: `shared/src/androidMain/` - File system, platform helpers (Firebase SDK deps present, but sync uses REST)
-- **Desktop (JVM)**: `shared/src/desktopMain/` (+ JVM-shared code in `commonJvm`) - File system, JSON settings, JDBC SQLite
-
-## Phase 1 Implementation Status
-
-- [x] Project structure & Gradle configuration
-- [x] SQLite database schema (raw JDBC, `CREATE TABLE IF NOT EXISTS`)
-- [x] Core data models (Book, Chapter, ReadingPosition, Annotations)
-- [x] EPUB parser (container.xml, OPF, NCX/NAV, cover extraction)
-- [x] Platform abstractions (FileSystem, HashUtil, SettingsStore)
-- [x] Repository interfaces & raw JDBC implementations
-- [x] Book importer (hash, parse, copy to library, index)
-- [x] ViewModels (Library, Reader, Statistics)
-- [x] Sync engine skeleton
-- [x] Manual constructor-injection graph (AppGraph / FolioDesktopAppDependencies)
-- [ ] Android UI (Compose)
-- [ ] Desktop UI (Compose)
-- [ ] Reader component (HTML rendering, pagination)
-- [ ] Settings UI
-- [ ] Firebase integration
+The instrumented suite runs against the app's real database in the app's own process and mutates
+it deliberately, restoring state afterwards. Run it on a test device, not one holding a library
+you care about.
 
 ## Configuration
 
-### Gradle Properties (`gradle/libs.versions.toml`)
+Both configuration files below are gitignored. Committed `.example` templates document every
+key, and the app runs fine with neither file present.
 
-```toml
-kotlin = "2.0.20"
-composeMultiplatform = "1.6.11"
-sqliteJdbc = "3.46.1.0"
-coil = "2.7.0"
+### Cloud sync
+
+Optional. Create a Firebase project, enable Anonymous authentication and Firestore, then supply
+the Project ID and Web API key one of three ways:
+
+1. In the app, under **Settings → Advanced** — highest precedence, and the only way that needs no
+   rebuild.
+2. On desktop, in a `.env` file at the repository root. Copy `.env.example` to get started.
+3. Via `FOLIO_FB_PROJECT_ID`, `FOLIO_FB_API_KEY`, and optionally `FOLIO_FB_STORAGE_BUCKET`
+   environment variables, or on Android via `folio_fb_project_id` / `folio_fb_api_key` string
+   resources.
+
+Deploy `firestore.rules` to your project before syncing. The rules confine every document to the
+authenticated user's own subtree, so an anonymous UID can only ever read and write its own data.
+
+Sync stays inactive until an API key is present, so a fresh clone will not talk to any server.
+
+### Release signing
+
+Copy `keystore.properties.example` to `keystore.properties` and fill in your own keystore
+details. Generate a keystore with:
+
+```bash
+keytool -genkeypair -v -keystore folio-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias folio
 ```
 
-(Koin/Ktor entries remain in the catalog but are unused; dependency wiring is manual.)
+When `keystore.properties` is absent the release `signingConfig` is skipped entirely and debug
+builds fall back to the standard debug keystore, so `assembleDebug` works on a clean clone.
 
-### Firebase Setup
+## Continuous integration
 
-1. Create Firebase project
-2. Add Android app with package `com.folio.reader`
-3. Add Desktop app (use same package)
-4. Enable Authentication (Anonymous, Email/Password) - used via the Identity Toolkit REST API (no Google sign-in)
-5. Enable Firestore Database
-6. Enable Cloud Storage only if you want EPUB file sync (requires setting `storageBucket`; metadata sync works with projectId + apiKey alone)
-7. Add `google-services.json` to `androidApp/`
-8. Configure Firestore rules (see `firestore.rules`)
+`.github/workflows/ci.yml` runs on pushes to `main` and on every pull request, using JDK 17
+(Temurin) on `ubuntu-latest`, split across two jobs:
 
-## Firestore Rules
+- **desktop-tests** — `:shared:desktopTest` (the shared unit suite), then `:desktopApp:compileKotlin`
+- **android-build** — `:androidApp:assembleDebug`
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-      
-      match /books/{bookId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-        
-        match /positions/{deviceId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
-        
-        match /highlights/{highlightId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
-        
-        match /notes/{noteId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
-        
-        match /bookmarks/{bookmarkId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
-        
-        match /readingCycles/{cycleId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
-      }
-      
-      match /readingSessions/{sessionId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /settings/{settingsId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /tags/{tagId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /collections/{collectionId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /series/{seriesId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /quotes/{quoteId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /revisitItems/{itemId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /devices/{deviceId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-      
-      match /syncState/{stateId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
-      }
-    }
-  }
-}
-```
+## Documentation
+
+Design and implementation notes live in [`docs/`](docs/):
+
+| Document | Contents |
+| --- | --- |
+| [`FOLIO_IMPLEMENTATION_SPEC.md`](docs/FOLIO_IMPLEMENTATION_SPEC.md) | Core architecture rules and testing strategy |
+| [`FOLIO_VISUAL_SPEC.md`](docs/FOLIO_VISUAL_SPEC.md) | Design tokens, component rules, surfaces |
+| [`FOLIO_MOTION_SPEC.md`](docs/FOLIO_MOTION_SPEC.md) | Animation and transition rules |
+| [`FOLIO_TYPOGRAPHY_SPEC.md`](docs/FOLIO_TYPOGRAPHY_SPEC.md) | Type scale and typeface pairing |
+| [`FOLIO_DEPENDENCY_PLAN.md`](docs/FOLIO_DEPENDENCY_PLAN.md) | Dependency choices and version policy |
+| [`TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common build and runtime problems |
+
+## Attribution
+
+Folio's manga support is built on code from **[Mihon]** and its predecessor **[Tachiyomi]**, both
+Apache-2.0. The vendored trees under `shared/src/androidMain/kotlin/` — `eu/kanade/`, `mihon/`,
+`tachiyomi/`, and `logcat/` — provide the extension runtime (loading, trust verification, install
+flow) and the HTTP source engine (OkHttp interceptors, Cloudflare and rate-limit handling, source
+and filter models), adapted to Folio's dependency graph. Extension compatibility means Folio can
+run existing Mihon extensions; it does not host or distribute any content itself.
+
+The `logcat` package derives from **[square/logcat]**. Injekt is consumed as a binary dependency
+from Mihon's fork. See [`NOTICE`](NOTICE) for full details.
+
+[Mihon]: https://github.com/mihonapp/mihon
+[Tachiyomi]: https://github.com/tachiyomiorg/tachiyomi
+[square/logcat]: https://github.com/square/logcat
+
+## Status
+
+A personal hobby project, developed in the open. It is usable day to day — that is what it was
+built for — but there is no release cadence, no support commitment, and APIs and schemas change
+whenever it suits the author. Issues and pull requests are welcome; slow or absent responses are
+likely.
 
 ## License
 
-MIT
+Licensed under the Apache License, Version 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+```
+Copyright 2026 The Folio Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```

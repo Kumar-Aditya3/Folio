@@ -16,12 +16,62 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.Clock
 
 // ---------- Browse / extensions ----------
+
+/**
+ * Languages a fresh install browses: English plus whatever the device is set to.
+ *
+ * Mihon's default and for the same reason — an extension like Webtoons publishes a
+ * separate source for every language it supports, so browsing all of them shows the
+ * same site ten times and hides the sources the reader can actually read.
+ */
+internal fun defaultSourceLanguages(): Set<String> =
+    setOf("en", java.util.Locale.getDefault().language.lowercase()).filter { it.isNotBlank() }.toSet()
+
+/**
+ * Applies the language filter. The local source always survives (it has no
+ * language), and a `all`-language source — the multi-language catalogues — is never
+ * filtered out.
+ *
+ * A filter that would hide every remote source is treated as a mistake rather than a
+ * preference: the unfiltered list comes back, so a reader who installs one
+ * French-only extension still sees it.
+ */
+internal fun filterSourcesByLanguage(
+    sources: List<MangaSourceInfo>,
+    languages: Set<String>,
+): List<MangaSourceInfo> {
+    if (languages.isEmpty()) return sources
+    val kept = sources.filter { source ->
+        source.isLocal || source.lang.lowercase() in languages || source.lang.equals("all", ignoreCase = true)
+    }
+    val remoteKept = kept.any { !it.isLocal }
+    val remoteExists = sources.any { !it.isLocal }
+    return if (remoteKept || !remoteExists) kept else sources
+}
+
+/**
+ * "TH" → "Thai". A row that says which language it is stops reading as a duplicate
+ * of the row above it; the raw code did not.
+ */
+fun languageLabel(lang: String): String {
+    if (lang.isBlank()) return ""
+    if (lang.equals("all", ignoreCase = true)) return "All languages"
+    val display = runCatching {
+        java.util.Locale.forLanguageTag(lang).getDisplayName(java.util.Locale.ENGLISH)
+    }.getOrNull()
+    return if (display.isNullOrBlank() || display.equals(lang, ignoreCase = true)) {
+        lang.uppercase()
+    } else {
+        display
+    }
+}
 
 class BrowseViewModel(
     val backend: MangaBackend,
@@ -33,6 +83,38 @@ class BrowseViewModel(
 
     val sources: StateFlow<List<MangaSourceInfo>> = backend.observeSources()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    /**
+     * Languages the browse list shows, as lowercase ISO codes.
+     *
+     * One extension publishes one source per language, so "Webtoons.com" arrives
+     * ten times over and reads as duplicated rows. Filtering by language is the
+     * same answer Mihon reached: the user picks what they can read, and the list
+     * goes back to one row per site.
+     */
+    val sourceLanguages = MutableStateFlow(defaultSourceLanguages())
+
+    /** Every language the installed sources offer, in display order. */
+    val availableLanguages: StateFlow<List<String>> = sources
+        .map { list -> list.filterNot { it.isLocal }.map { it.lang.lowercase() }.distinct().sorted() }
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    /** [sources] after the language filter — what the browse list and search use. */
+    val visibleSources: StateFlow<List<MangaSourceInfo>> =
+        combine(sources, sourceLanguages) { list, langs -> filterSourcesByLanguage(list, langs) }
+            .stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    fun setSourceLanguages(languages: Set<String>) {
+        val normalised = languages.map { it.lowercase() }.toSet()
+        sourceLanguages.value = normalised
+        scope.launch { backend.setSourceLanguages(normalised) }
+    }
+
+    fun toggleSourceLanguage(lang: String) {
+        val code = lang.lowercase()
+        val current = sourceLanguages.value
+        setSourceLanguages(if (code in current) current - code else current + code)
+    }
 
     val extensions: StateFlow<List<ExtensionEntry>> = backend.observeExtensions()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
@@ -131,8 +213,15 @@ class BrowseViewModel(
         globalJob = scope.launch {
             preparingSources.value = true
             // Sources load asynchronously as extensions unpack; an empty snapshot would
-            // silently search nothing. Await the first non-empty list instead.
-            val targets = if (sources.value.isNotEmpty()) sources.value else sources.first { it.isNotEmpty() }
+            // silently search nothing. Await the first non-empty list instead. The
+            // language filter applies here too: searching forty per-language copies of
+            // the same site is slower and no more useful than searching the ones the
+            // reader can read.
+            val targets = if (visibleSources.value.isNotEmpty()) {
+                visibleSources.value
+            } else {
+                visibleSources.first { it.isNotEmpty() }
+            }
             globalResults.value = targets.map { GlobalSourceResult(it) }
             searchArrival.value = emptyList()
             preparingSources.value = false
@@ -194,6 +283,11 @@ class BrowseViewModel(
     init {
         scope.launch { repos.value = backend.getRepos() }
         scope.launch { nsfw.value = backend.getShowNsfwSources() }
+        scope.launch {
+            // Nothing stored yet keeps the device default; the set is only ever
+            // written when the reader picks languages themselves.
+            backend.getSourceLanguages().takeIf { it.isNotEmpty() }?.let { sourceLanguages.value = it }
+        }
     }
 
     fun setNsfw(enabled: Boolean) {

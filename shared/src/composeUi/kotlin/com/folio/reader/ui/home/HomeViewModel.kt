@@ -13,6 +13,7 @@ import com.folio.reader.manga.MangaChapterRepository
 import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.manga.MangaNewChapterBadge
 import com.folio.reader.manga.MangaRepository
+import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.manga.MangaUpdateRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
@@ -21,9 +22,13 @@ import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
 import com.folio.reader.ui.components.currentStreak
 import com.folio.reader.ui.components.finishEstimate
+import com.folio.reader.ui.components.mangaFinishEstimate
+import com.folio.reader.ui.components.mangaFinishHorizon
+import com.folio.reader.ui.components.mangaPaceChaptersPerDay
 import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.statistics.StatisticsViewModel
+import com.folio.reader.ui.statistics.localSessions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -60,6 +65,16 @@ data class HomeUiState(
     val newChapters: List<MangaNewChapterBadge> = emptyList(),
     /** §11.4: manga Continue reading — recently read library manga, cap 3. */
     val mangaContinue: List<MangaContinueItem> = emptyList(),
+    /**
+     * Books **and** manga ranked together by last activity: the anchor is
+     * `readingNow.first()` and the shelf behind it is the rest.
+     *
+     * [hero] and [continueReading] still describe the books-only pipeline (Stats
+     * shares those rules), but Home renders this list instead, because "what am I
+     * reading?" has never had a format-shaped answer. Manga exclusions apply here
+     * exactly as they do on the manga cards.
+     */
+    val readingNow: List<ReadingNowItem> = emptyList(),
     /** §11.4: LATEST browse hits from the most recently read manga's source, cap 6. */
     val discover: List<MangaDiscoverItem> = emptyList(),
     /** True when the manga library is non-empty — Home renders for manga-only users. */
@@ -83,7 +98,50 @@ data class MangaContinueItem(
     val caption: String?,
     val progress: Float,
     /** Source web page, when the backend can produce one — drives the overflow item. */
-    val webUrl: String?
+    val webUrl: String?,
+    /** When this manga was last read — the key Reading now ranks books and manga by. */
+    val lastReadAt: Instant = Instant.DISTANT_PAST,
+    /** Long-form backlog projection for the Home anchor; null when the pace is too thin. */
+    val estimate: String? = null,
+    /** Short-form backlog projection for the shelf: "12 unread · ~4 days". */
+    val horizon: String? = null
+)
+
+/** Which library a Reading-now card came from. */
+enum class HomeItemKind { BOOK, MANGA }
+
+/**
+ * One card in Home's Reading now, whichever library it came from.
+ *
+ * Books and manga were two separate shelves with the same heading, which meant a
+ * reader halfway through a manga had to scroll past the books they had abandoned
+ * to reach it. One ranked list fixes the order; [kind] is what the UI switches on
+ * for the things that genuinely differ — the plate loads from the network for
+ * manga, and the primary tap opens a chapter rather than a book.
+ */
+data class ReadingNowItem(
+    val kind: HomeItemKind,
+    /** Book id or manga id. */
+    val id: String,
+    val title: String,
+    /** Author for a book, source name for a manga. */
+    val subtitle: String,
+    val progress: Float,
+    /** Long projection, shown by the anchor: "On pace to…". */
+    val estimate: String? = null,
+    /** Short caption for the shelf; books use their percentage instead. */
+    val caption: String? = null,
+    val coverPath: String? = null,
+    /** Network cover for manga; books always render from [coverPath]. */
+    val thumbnailUrl: String? = null,
+    val sourceId: Long = 0L,
+    val sourceName: String? = null,
+    /** Last-read chapter for manga — null sends the tap to the detail screen. */
+    val chapterId: String? = null,
+    /** Source web page for manga, when the backend can produce one. */
+    val webUrl: String? = null,
+    /** Last opened (books) or last read (manga) — the ranking key. */
+    val lastActivity: Instant = Instant.DISTANT_PAST
 )
 
 /** One Discover row (§11.4): a LATEST browse hit not already in the library. */
@@ -117,7 +175,12 @@ class HomeViewModel(
     private val mangaRepository: MangaRepository? = null,
     private val mangaChapterRepository: MangaChapterRepository? = null,
     private val mangaCategoryRepository: MangaCategoryRepository? = null,
-    private val mangaBackend: MangaBackend? = null
+    private val mangaBackend: MangaBackend? = null,
+    /**
+     * §11.4: only used for the chapter pace behind manga predictions. Null keeps
+     * the manga cards exactly as they were — captions, no projection.
+     */
+    private val mangaStatisticsRepository: MangaStatisticsRepository? = null
 ) {
     private val timeZone: TimeZone get() = TimeZone.currentSystemDefault()
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
@@ -180,13 +243,16 @@ class HomeViewModel(
 
         // §12.9: resolve the scope once per emission and reuse it for every
         // selection. Direct BOOK rows also cover sessions whose book row is gone.
+        // Sessions are also gated on the *local* library first (localSessions), so a
+        // book deleted on this device leaves Home's numbers without waiting for sync.
         val scope = exclusions?.let(::StatsScope)
         val excluded = if (scope == null) emptySet() else excludedBookIds(books, scope)
         val directBooks = exclusions
             ?.mapNotNull { (kind, id) -> if (kind == Scope.BOOK) id else null }
             ?.toSet()
             ?: emptySet()
-        val gatedSessions = sessions.filterNot { it.bookId in excluded || it.bookId in directBooks }
+        val gatedSessions = localSessions(sessions, books)
+            .filterNot { it.bookId in excluded || it.bookId in directBooks }
         val gatedInProgress = inProgress.filterNot { it.id in excluded }
         val gatedFinished = finished.filterNot { it.id in excluded }
         fun passes(book: Book) = book.id !in excluded && book.id !in directBooks
@@ -240,6 +306,8 @@ class HomeViewModel(
         val mangaContinue = buildMangaContinue(exclusions)
         val discover = buildDiscover(exclusions)
         val hasManga = mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
+        // One ranked list for the anchor and the shelf behind it.
+        val readingNow = buildReadingNow(heroBook, gatedInProgress, gatedSessions, mangaContinue)
 
         return HomeUiState(
             loaded = true,
@@ -260,10 +328,68 @@ class HomeViewModel(
             candidates = candidatePool,
             newChapters = newChapters,
             mangaContinue = mangaContinue,
+            readingNow = readingNow,
             discover = discover,
             exclusionsActive = exclusions?.isNotEmpty() == true,
             coverTint = coverTint
         )
+    }
+
+    /**
+     * §11.4/§12.4: books and manga in one list, newest activity first.
+     *
+     * The hero book is folded in explicitly because it can be a book that is *not*
+     * in progress (the fresh-library fallback), and the merge must not silently
+     * drop the one title the page is built around.
+     */
+    private fun buildReadingNow(
+        heroBook: Book?,
+        inProgress: List<Book>,
+        sessions: List<ReadingSession>,
+        manga: List<MangaContinueItem>
+    ): List<ReadingNowItem> {
+        val books = (listOfNotNull(heroBook) + inProgress)
+            .distinctBy { it.id }
+            .map { book ->
+                ReadingNowItem(
+                    kind = HomeItemKind.BOOK,
+                    id = book.id,
+                    title = book.displayTitle,
+                    subtitle = book.displayAuthor,
+                    progress = book.normalizedProgress.toFloat(),
+                    estimate = finishEstimate(
+                        book.totalWords,
+                        book.normalizedProgress,
+                        sessions.filter { it.bookId == book.id },
+                        sessions
+                    ),
+                    coverPath = book.coverPath,
+                    lastActivity = book.lastOpenedAt ?: book.updatedAt
+                )
+            }
+        val mangaRows = manga.map { item ->
+            ReadingNowItem(
+                kind = HomeItemKind.MANGA,
+                id = item.mangaId,
+                title = item.title,
+                subtitle = item.sourceName,
+                progress = item.progress,
+                estimate = item.estimate,
+                // The projection is the more useful caption; the chapter name is the
+                // fallback for a manga with nothing unread left to project.
+                caption = item.horizon ?: item.caption,
+                coverPath = item.coverPath,
+                thumbnailUrl = item.thumbnailUrl,
+                sourceId = item.sourceId,
+                sourceName = item.sourceName,
+                chapterId = item.chapterId,
+                webUrl = item.webUrl,
+                lastActivity = item.lastReadAt
+            )
+        }
+        return (books + mangaRows)
+            .sortedByDescending { it.lastActivity }
+            .take(READING_NOW_CAP)
     }
 
     /**
@@ -281,6 +407,15 @@ class HomeViewModel(
         val scope = exclusions?.let(::StatsScope)
         val progress = chapterRepo.observeProgress().first()
         val unread = chapterRepo.observeUnreadCounts().first()
+        // §11.4 predictions: chapters/day over the same seven-day window the book
+        // pace uses, resolved against the same exclusions so a hidden manga cannot
+        // inflate the projection for a visible one. Absent repository or a failed
+        // query means no projection — never a guessed one.
+        val chaptersPerDay = mangaStatisticsRepository?.let { repo ->
+            runCatching {
+                mangaPaceChaptersPerDay(repo.getStatistics(exclusions ?: emptySet()).weekReadChapters)
+            }.getOrNull()
+        }
         val rows = mutableListOf<MangaContinueItem>()
         for (item in history.observeRecent(RECENT_POOL).first().distinctBy { it.mangaId }) {
             if (rows.size >= MANGA_CONTINUE_CAP) break
@@ -301,7 +436,10 @@ class HomeViewModel(
                 progress = (progress[entry.id] ?: 0f).coerceIn(0f, 1f),
                 webUrl = mangaBackend?.let { backend ->
                     runCatching { backend.sourceWebUrl(entry.sourceId, entry.url) }.getOrNull()
-                }
+                },
+                lastReadAt = item.readAt,
+                estimate = mangaFinishEstimate(unread[entry.id] ?: 0, chaptersPerDay),
+                horizon = mangaFinishHorizon(unread[entry.id] ?: 0, chaptersPerDay)
             )
         }
         return rows
@@ -385,6 +523,11 @@ class HomeViewModel(
         private const val CANDIDATE_CAP = 6
         /** Manga surfaced in the manga Continue-reading card (§11.4). */
         private const val MANGA_CONTINUE_CAP = 3
+        /**
+         * Cards in the merged Reading now: the anchor plus the shelf behind it.
+         * Six is where the shelf stops being a shelf and starts being a library.
+         */
+        private const val READING_NOW_CAP = 6
         /** History pool scanned before the cap, so filtered rows don't starve the card. */
         private const val RECENT_POOL = 25
         /** Browse hits surfaced in Discover (§11.4). */

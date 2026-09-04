@@ -30,6 +30,36 @@ import kotlinx.datetime.todayIn
 /** A single day of reading, used by both the week chart and the activity heatmap. */
 data class StatDay(val date: LocalDate, val minutes: Long)
 
+/**
+ * Manga sessions are written by the manga reader with a `manga-page…` locator; book
+ * sessions carry an EPUB CFI. The discriminator lives here so the split is defined
+ * once for the charts, the totals and the local-truth filter below.
+ */
+internal fun ReadingSession.isMangaSession(): Boolean =
+    startPosition.contentLocator.startsWith("manga-page")
+
+/**
+ * Sessions whose subject still exists **on this device**.
+ *
+ * A session outlives its book: deleting the book drops its rows locally, but the
+ * next sync-down restores them from the account, and sessions recorded on another
+ * device arrive for books that were never here. Either way the numbers stop
+ * describing the library in front of the user. Gating on the live book rows is what
+ * makes a local delete land in stats straight away, with no sync round in between.
+ *
+ * Manga sessions pass through: their subject lives in the manga tables, not in
+ * [Book], so the book list says nothing about them.
+ */
+internal fun localSessions(
+    sessions: List<ReadingSession>,
+    books: List<Book>,
+): List<ReadingSession> {
+    val localIds = books.mapTo(HashSet(books.size)) { it.id }
+    return sessions.filter { session ->
+        session.isMangaSession() || session.bookId in localIds
+    }
+}
+
 /** A book still being read, reduced to what the list needs to show. */
 data class ReadingInProgress(
     val id: String,
@@ -137,8 +167,14 @@ class StatisticsViewModel(
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
 
     /**
-     * Reading sessions are synced across devices, so the history here is the whole
-     * account's, not this handset's — which is the point of showing it.
+     * Reading sessions arrive from every device on the account, so the raw history
+     * outlives the local library: deleting a book here removes its rows, but the
+     * next sync-down hands the same sessions back, and a book that only ever
+     * existed on another device never had a row to begin with.
+     *
+     * Stats answer for the library the user can actually see, so a session only
+     * counts while the thing it was read from is still on this device. That makes a
+     * local delete take effect immediately — no sync round needed.
      *
      * §11.2: when a [StatsExclusionRepository] is wired, the same [StatsScope]
      * predicate filters both the sessions and the book lists before any number
@@ -156,7 +192,7 @@ class StatisticsViewModel(
             // the whole library, not just the reading/finished subsets.
             bookRepository.getAllBooks()
         ) { sessions, inProgress, finished, books ->
-            buildState(sessions, inProgress, finished, books)
+            buildState(localSessions(sessions, books), inProgress, finished, books)
         }
     } else {
         combine(
@@ -178,7 +214,8 @@ class StatisticsViewModel(
                 if (kind == Scope.BOOK) id else null
             }.toSet()
             buildState(
-                sessions.filterNot { it.bookId in excluded || it.bookId in directBooks },
+                localSessions(sessions, allBooks)
+                    .filterNot { it.bookId in excluded || it.bookId in directBooks },
                 inProgress.filterNot { it.id in excluded },
                 finished.filterNot { it.id in excluded },
                 allBooks
@@ -313,11 +350,9 @@ class StatisticsViewModel(
             .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
-        // Split sessions into book vs manga by the contentLocator discriminator.
-        // Manga reader writes sessions with startPosition.contentLocator starting with "manga-page".
-        val (mangaSessions, bookSessions) = sessions.partition {
-            it.startPosition.contentLocator.startsWith("manga-page")
-        }
+        // Split sessions into book vs manga by the contentLocator discriminator
+        // ([isMangaSession]): the manga reader writes `manga-page…` locators.
+        val (mangaSessions, bookSessions) = sessions.partition { it.isMangaSession() }
         val bookMinutesByDay = bookSessions
             .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }

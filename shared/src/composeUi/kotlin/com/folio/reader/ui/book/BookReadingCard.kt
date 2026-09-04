@@ -221,7 +221,7 @@ internal fun StatsRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = FolioTokens.gutter),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(

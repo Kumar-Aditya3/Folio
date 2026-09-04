@@ -189,12 +189,17 @@ fun BookDetailScreen(
                 }
 
                 item {
-                    BookReadingSection(
-                        sessions = sessions,
-                        highlights = highlights,
-                        totalWords = b.totalWords,
-                        progress = b.normalizedProgress,
-                    )
+                    // The card carries the page's side margin like every other block
+                    // here; without it the panel ran under both screen edges and its
+                    // rim was clipped away.
+                    Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+                        BookReadingSection(
+                            sessions = sessions,
+                            highlights = highlights,
+                            totalWords = b.totalWords,
+                            progress = b.normalizedProgress,
+                        )
+                    }
                 }
 
                 if (b.cloudState != CloudState.LOCAL_ONLY) {
@@ -256,7 +261,7 @@ private fun CloudStatusSection(cloudState: CloudState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = FolioTokens.gutter),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {

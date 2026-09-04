@@ -77,13 +77,19 @@ thorium-reader-develop/
 .env
 keystore.properties
 *.keystore
+*.jks
 *.db
+*.db-shm
+*.db-wal
 
 # One-off diagnostics and session artifacts
 .kotlin/
 graphify-out/
 bin/
 *.ps1
+*.err
+probe*
+shot*.png
 screen_*.png
 phone_*.png
 desktop_*.png

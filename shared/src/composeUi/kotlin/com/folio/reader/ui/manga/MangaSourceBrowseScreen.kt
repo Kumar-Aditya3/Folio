@@ -172,6 +172,13 @@ fun SourceBrowseScreen(
                         Button(onClick = { viewModel.reload(state.mode, state.query, state.filters) }) {
                             Text("Retry")
                         }
+                        // A bot check is not a network error: it needs a browser the
+                        // reader can touch, and the reload happens by itself once the
+                        // site hands over its clearance cookie.
+                        Spacer(Modifier.height(FolioTokens.space2))
+                        MangaChallengePrompt(
+                            onCleared = { viewModel.reload(state.mode, state.query, state.filters) },
+                        )
                     }
                 }
             else -> LazyVerticalGrid(

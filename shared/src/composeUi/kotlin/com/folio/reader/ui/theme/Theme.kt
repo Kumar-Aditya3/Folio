@@ -1278,6 +1278,14 @@ object FolioTokens {
     // Navigation bar height
     val barHeight = 56.dp
 
+    /**
+     * How far the masthead's glass fades out under its hairline. Small on
+     * purpose: enough that the bar's foot dissolves into the page, not enough to
+     * become a second band. Anything past ~14dp starts reading as a toolbar
+     * shadow again.
+     */
+    val barGlassFade = 10.dp
+
     // Motion durations – no literal durations elsewhere in new code
     val motionFast = 120L         // State flips: chip select, checkbox toggle
     val motionStandard = 220L     // Enter/exit, crossfade, panel slide
@@ -1344,7 +1352,9 @@ object FolioTokens {
     val coverAspect = 1.5f          // height = width × this (2:3 printed trim)
 
     // Floating navigation capsule
-    val navFloatHeight = 62.dp
+    // 54/42 rather than 62/46: the capsule reads as a control, and a control that
+    // is 62dp tall over a page reads as a bar that has been rounded off.
+    val navFloatHeight = 54.dp
     val navFloatInset = 12.dp
 
     /**

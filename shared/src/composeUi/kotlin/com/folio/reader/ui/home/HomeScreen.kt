@@ -1,10 +1,11 @@
-package com.folio.reader.ui.home
+﻿package com.folio.reader.ui.home
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,7 +35,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +56,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.model.Book
 import com.folio.reader.ui.components.EmptyState
@@ -55,6 +64,7 @@ import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioFigure
+import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
@@ -66,12 +76,14 @@ import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.rememberFolioInteraction
-import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 
 /**
  * Home, recomposed as a reading room rather than a dashboard.
@@ -137,54 +149,68 @@ fun HomeScreen(
                     }
                 }
             }
-            val fullyCollapsed = remember { derivedStateOf { collapse.value >= 1f } }
+            // §11.4: a manga card cannot draw its cover without a backend, so on
+            // desktop the merged list degrades to exactly the books-only shelf it
+            // was before rather than rendering empty plates.
+            val readingNow = if (mangaBackend == null) {
+                state.readingNow.filter { it.kind == HomeItemKind.BOOK }
+            } else {
+                state.readingNow
+            }
+            val anchorItem = readingNow.firstOrNull()
             // The hero tint is computed here so the host top bar can bleed the
             // same colour upward (§13.9); the hero itself re-derives it cheaply
-            // from the accent cache.
-            val heroTint = if (state.coverTint && state.hero != null) {
-                rememberCoverAccent(state.hero.coverPath, FolioTheme.colors.accentProgress)
+            // from the accent cache. A manga with only a network thumbnail has no
+            // local file to sample, so it lands on the fallback accent.
+            val heroTint = if (state.coverTint && anchorItem != null) {
+                rememberCoverAccent(anchorItem.coverPath, FolioTheme.colors.accentProgress)
             } else null
             val fallbackTint = FolioTheme.colors.accentProgress
-            LaunchedEffect(fullyCollapsed.value, state.hero?.id, state.coverTint) {
-                onHeroCollapse(
-                    if (fullyCollapsed.value) 1f else 0f,
-                    state.hero?.title,
-                    heroTint ?: fallbackTint
-                )
+            // §13.9: the collapse is reported *continuously*, not as a flip at the
+            // end. The bar cross-fades "Folio" out and the book's title in over the
+            // same 160dp the hero recedes across, so the two halves of the effect
+            // move together instead of the title snapping in after the fact.
+            LaunchedEffect(anchorItem?.id, heroTint, fallbackTint) {
+                snapshotFlow { collapse.value }.collect { fraction ->
+                    onHeroCollapse(fraction, anchorItem?.title, heroTint ?: fallbackTint)
+                }
+            }
+            // One tap contract for both libraries: a book opens in the reader, a
+            // manga opens its last-read chapter, and a manga with no chapter yet
+            // opens its detail screen instead of failing silently.
+            val openItem: (ReadingNowItem) -> Unit = { item ->
+                when (item.kind) {
+                    HomeItemKind.BOOK -> onOpenBook(item.id)
+                    HomeItemKind.MANGA -> {
+                        val chapter = item.chapterId
+                        if (chapter != null) onOpenMangaReader(item.id, chapter)
+                        else onOpenMangaDetail(item.id)
+                    }
+                }
             }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 // No uniform arrangement: each block owns the space beneath it, so
                 // related things sit close and unrelated things get a real break.
-                contentPadding = PaddingValues(bottom = FolioTokens.spaceMovement)
+                // No bottom runway here either: the closing well absorbs the floating
+                // capsule's clearance itself (see [ThisWeekWell]), so the end of Home
+                // lands on a surface with a mark on it instead of ~120dp of empty page.
             ) {
                 item {
-                    ReadingNowAnchor(state, collapse, heroTint, onOpenBook, onOpenLibrary)
+                    ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, openItem, onOpenLibrary)
                     Spacer(Modifier.height(FolioTokens.spaceBeat))
                 }
                 item {
                     LedgerStrip(state, onOpenStats, onOpenExclusions)
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
                 }
-                if (state.continueReading.isNotEmpty()) {
+                // The shelf is the rest of the same ranked list — books and manga
+                // interleaved by when they were last read, not grouped by format.
+                val shelf = readingNow.drop(1)
+                if (shelf.isNotEmpty()) {
                     item {
-                        ContinueShelf(state.continueReading, onOpenBook)
-                        Spacer(Modifier.height(FolioTokens.spaceMovement))
-                    }
-                }
-                // §11.4: manga Continue reading — separate shelf, never merged into
-                // the books one. Primary tap opens the reader; the overflow item is
-                // the only path to the source's web page.
-                if (state.mangaContinue.isNotEmpty() && mangaBackend != null) {
-                    item {
-                        MangaContinueCard(
-                            items = state.mangaContinue,
-                            backend = mangaBackend,
-                            onOpenReader = onOpenMangaReader,
-                            onOpenDetail = onOpenMangaDetail,
-                            onOpenSourceWeb = onOpenSourceWeb
-                        )
+                        ContinueShelf(shelf, mangaBackend, openItem, onOpenSourceWeb)
                         Spacer(Modifier.height(FolioTokens.spaceMovement))
                     }
                 }
@@ -209,7 +235,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(FolioTokens.spaceMovement))
                     }
                 }
-                item { ThisWeekWell(state, onOpenStats) }
+                item { ThisWeekWell(state, onOpenStats, LocalFolioBarInset.current) }
             }
         }
     }
@@ -235,15 +261,15 @@ fun HomeScreen(
  */
 @Composable
 private fun ReadingNowAnchor(
-    state: HomeUiState,
+    item: ReadingNowItem?,
+    backend: MangaBackend?,
     collapse: State<Float>,
     heroTint: Color?,
-    onOpenBook: (String) -> Unit,
+    onOpen: (ReadingNowItem) -> Unit,
     onOpenLibrary: () -> Unit
 ) {
-    val hero = state.hero
     val colors = FolioTheme.colors
-    if (hero == null) {
+    if (item == null) {
         // §12.9 designed empty: an invitation set in type, not an empty card.
         Column(
             modifier = Modifier
@@ -276,6 +302,19 @@ private fun ReadingNowAnchor(
             // Inset on the trailing side only: the plane runs off the leading edge,
             // which is what makes it read as a spread rather than a card.
             .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
+            // §13.9: the anchor recedes as **one object** — it steps back a little,
+            // lifts, and dissolves while its title migrates into the bar. Scaling
+            // only the cover inside a plane that kept its full size is what made the
+            // artwork slide away from its own container and open a hole in the middle
+            // of the card: the animation and the surface disagreed.
+            .graphicsLayer {
+                val scale = androidx.compose.ui.util.lerp(1f, 0.96f, fraction)
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin(0.3f, 0f)
+                translationY = -fraction * 12.dp.toPx()
+                alpha = androidx.compose.ui.util.lerp(1f, 0.32f, fraction)
+            }
             .folioPressable(interaction)
             .folioRaised(
                 shape = FolioShapes.heroBleed,
@@ -289,7 +328,7 @@ private fun ReadingNowAnchor(
                 ),
                 FolioShapes.heroBleed,
             )
-            .clickable(interactionSource = interaction, indication = null) { onOpenBook(hero.id) }
+            .clickable(interactionSource = interaction, indication = null) { onOpen(item) }
             .padding(
                 start = FolioTokens.gutter,
                 end = FolioTokens.space3,
@@ -304,21 +343,28 @@ private fun ReadingNowAnchor(
                 Box(
                     modifier = Modifier
                         .offset(x = -(FolioTokens.gutter - FolioTokens.space1))
-                        .graphicsLayer {
-                            val scale = androidx.compose.ui.util.lerp(1f, 0.62f, collapse.value)
-                            scaleX = scale
-                            scaleY = scale
-                            transformOrigin = TransformOrigin(0f, 0f)
-                        }
                 ) {
-                    FolioCoverPlate(
-                        coverPath = hero.coverPath,
-                        title = hero.title,
-                        author = hero.author,
-                        width = FolioTokens.coverAnchor,
-                        halo = tint,
-                        elevation = 16.dp,
-                    )
+                    // Manga plates load over the network and books load from a file:
+                    // one switch, both in the same object language.
+                    if (item.kind == HomeItemKind.MANGA && backend != null) {
+                        MangaPlate(
+                            backend = backend,
+                            sourceId = item.sourceId,
+                            thumbnailUrl = item.thumbnailUrl,
+                            coverPath = item.coverPath,
+                            width = FolioTokens.coverAnchor,
+                            elevation = 16.dp,
+                        )
+                    } else {
+                        FolioCoverPlate(
+                            coverPath = item.coverPath,
+                            title = item.title,
+                            author = item.subtitle,
+                            width = FolioTokens.coverAnchor,
+                            halo = tint,
+                            elevation = 16.dp,
+                        )
+                    }
                 }
                 Spacer(Modifier.width(FolioTokens.space2))
                 // Matched to the plate's height and distributed, so the title sits at
@@ -333,15 +379,15 @@ private fun ReadingNowAnchor(
                     Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceHair)) {
                         FolioEyebrow("Reading now", accent = tint)
                         Text(
-                            hero.title,
+                            item.title,
                             style = FolioTheme.typography.headlineMedium,
                             color = colors.onSurface,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (hero.author.isNotBlank()) {
+                        if (item.subtitle.isNotBlank()) {
                             Text(
-                                hero.author,
+                                item.subtitle,
                                 style = FolioTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant,
                                 maxLines = 1,
@@ -350,11 +396,35 @@ private fun ReadingNowAnchor(
                         }
                     }
                     // Progress as a figure at the composition's foot; the estimate is
-                    // its caption and the seam below spans the full measure.
+                    // its caption and the seam below spans the full measure. Manga
+                    // project off unread chapters instead of words, phrased the same
+                    // way, so the anchor reads identically either way.
+                    // The band the old composition left empty. `SpaceBetween` on a
+                    // 222dp column with a two-line title and a one-line author opened
+                    // a ~70dp hole in the middle of the card, which is why the anchor
+                    // read as unfinished. It now carries the one fact the card was
+                    // missing — when this was last picked up — over a hairline in the
+                    // cover's own colour, which also ties the type back to the plate.
+                    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                        FolioRule(accent = tint)
+                        val meta = listOfNotNull(
+                            lastActivityLabel(item.lastActivity),
+                            if (item.kind == HomeItemKind.MANGA) item.caption else null,
+                        )
+                        if (meta.isNotEmpty()) {
+                            Text(
+                                meta.joinToString("  \u00b7  "),
+                                style = FolioTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     FolioFigure(
-                        value = "${(hero.progress * 100).toInt()}",
+                        value = "${(item.progress * 100).toInt()}",
                         unit = "%",
-                        caption = hero.finishEstimate ?: "Just started",
+                        caption = item.estimate ?: "Just started",
                         accent = tint,
                         emphasis = FigureScale.Quiet,
                     )
@@ -376,7 +446,7 @@ private fun ReadingNowAnchor(
                 Spacer(Modifier.width(FolioTokens.space3))
                 // §2.6: one progress form in this view — the seam.
                 FolioProgressBar(
-                    progress = hero.progress,
+                    progress = item.progress,
                     color = tint,
                     modifier = Modifier.weight(1f),
                 )
@@ -479,9 +549,19 @@ private fun LedgerStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclu
  *
  * Progress lives *on* the plate as a seam across its foot rather than as a ring
  * below it, so the covers form an unbroken line and the eye reads artwork first.
+ *
+ * §11.4: books and manga share the rail. The caption is the only place they
+ * diverge — a book states its percentage, a manga states its backlog and how long
+ * that backlog will take — and a manga keeps its overflow route to the source's
+ * web page, which has no book equivalent.
  */
 @Composable
-private fun ContinueShelf(books: List<ReadingInProgress>, onOpenBook: (String) -> Unit) {
+private fun ContinueShelf(
+    items: List<ReadingNowItem>,
+    backend: MangaBackend?,
+    onOpen: (ReadingNowItem) -> Unit,
+    onOpenSourceWeb: (String) -> Unit
+) {
     Column {
         FolioSectionHead(
             title = "Continue reading",
@@ -492,9 +572,11 @@ private fun ContinueShelf(books: List<ReadingInProgress>, onOpenBook: (String) -
             contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
-            items(books.size) { index ->
-                val book = books[index]
+            items(items.size) { index ->
+                val entry = items[index]
+                val isManga = entry.kind == HomeItemKind.MANGA
                 val interaction = rememberFolioInteraction()
+                var menuOpen by remember { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
                         .width(FolioTokens.coverShelf)
@@ -502,50 +584,115 @@ private fun ContinueShelf(books: List<ReadingInProgress>, onOpenBook: (String) -
                         .clickable(
                             interactionSource = interaction,
                             indication = null
-                        ) { onOpenBook(book.id) }
+                        ) { onOpen(entry) }
                 ) {
-                    FolioCoverPlate(
-                        coverPath = book.coverPath,
-                        title = book.title,
-                        author = book.author,
-                        width = FolioTokens.coverShelf,
-                        small = true,
-                        overlay = {
-                            if (book.progress > 0f) {
-                                Box(
-                                    Modifier
-                                        .align(Alignment.BottomStart)
-                                        .fillMaxWidth()
-                                        .height(3.dp)
-                                        .background(Color.Black.copy(alpha = 0.35f))
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth(book.progress)
-                                            .height(3.dp)
-                                            .background(FolioTheme.colors.accentProgress)
-                                    )
-                                }
-                            }
-                        },
-                    )
+                    if (isManga && backend != null) {
+                        MangaPlate(
+                            backend = backend,
+                            sourceId = entry.sourceId,
+                            thumbnailUrl = entry.thumbnailUrl,
+                            coverPath = entry.coverPath,
+                            width = FolioTokens.coverShelf,
+                            overlay = { ProgressSeam(entry.progress) },
+                        )
+                    } else {
+                        FolioCoverPlate(
+                            coverPath = entry.coverPath,
+                            title = entry.title,
+                            author = entry.subtitle,
+                            width = FolioTokens.coverShelf,
+                            small = true,
+                            overlay = { ProgressSeam(entry.progress) },
+                        )
+                    }
                     Spacer(Modifier.height(FolioTokens.space2))
-                    Text(
-                        book.title,
-                        style = FolioTheme.typography.labelMedium,
-                        color = FolioTheme.colors.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${(book.progress * 100).toInt()}%",
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.accentProgress,
-                        maxLines = 1,
+                    ShelfCaption(entry, isManga, menuOpen, { menuOpen = it }, onOpenSourceWeb)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The two lines under a shelf plate: the title, then the one number that matters
+ * for that kind. A book's percentage is its own progress; a manga's is its
+ * backlog, so the manga caption is the projection ("12 unread · ~4 days") tinted
+ * `accentDiscovery` — the same hue the rest of the manga surfaces use.
+ *
+ * The overflow lives here rather than on the plate so a mis-tap never opens a
+ * browser instead of the reader.
+ */
+@Composable
+private fun ShelfCaption(
+    entry: ReadingNowItem,
+    isManga: Boolean,
+    menuOpen: Boolean,
+    onMenuOpenChange: (Boolean) -> Unit,
+    onOpenSourceWeb: (String) -> Unit
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                entry.title,
+                style = FolioTheme.typography.labelMedium,
+                color = FolioTheme.colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                entry.caption ?: "${(entry.progress * 100).toInt()}%",
+                style = FolioTheme.typography.labelSmall,
+                color = if (isManga) {
+                    FolioTheme.colors.accentDiscovery
+                } else {
+                    FolioTheme.colors.accentProgress
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        val web = entry.webUrl
+        if (isManga && web != null) {
+            Box {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "Open on ${entry.sourceName}",
+                    tint = FolioTheme.colors.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onMenuOpenChange(true) }
+                )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }) {
+                    DropdownMenuItem(
+                        text = { Text("Open on ${entry.sourceName}") },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            onOpenSourceWeb(web)
+                        }
                     )
                 }
             }
         }
+    }
+}
+
+/** The plate's progress seam: 3dp across its foot, over a scrim so pale art still shows it. */
+@Composable
+private fun BoxScope.ProgressSeam(progress: Float) {
+    if (progress <= 0f) return
+    Box(
+        Modifier
+            .align(Alignment.BottomStart)
+            .fillMaxWidth()
+            .height(3.dp)
+            .background(Color.Black.copy(alpha = 0.35f))
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(progress)
+                .height(3.dp)
+                .background(FolioTheme.colors.accentProgress)
+        )
     }
 }
 
@@ -625,7 +772,7 @@ private fun BecauseYouFinishedShelf(
  * bar chart.
  */
 @Composable
-private fun ThisWeekWell(state: HomeUiState, onOpenStats: () -> Unit) {
+private fun ThisWeekWell(state: HomeUiState, onOpenStats: () -> Unit, bottomInset: Dp = 0.dp) {
     val colors = FolioTheme.colors
     Column(
         modifier = Modifier
@@ -659,6 +806,21 @@ private fun ThisWeekWell(state: HomeUiState, onOpenStats: () -> Unit) {
             week = state.week,
             modifier = Modifier.fillMaxWidth().height(FolioTokens.sparkHeight * 1.4f)
         )
+        // The floating capsule's clearance, held *inside* the well. The page therefore
+        // ends on a surface rather than on dead scroll, and the leaf sits in the band
+        // to the leading side of the capsule as a closing mark.
+        if (bottomInset > 0.dp) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(bottomInset),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                FolioLogoMark(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .graphicsLayer { alpha = 0.28f }
+                )
+            }
+        }
     }
 }
 
@@ -701,3 +863,23 @@ private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
 
 private fun formatMinutes(total: Long): String =
     if (total >= 60) "${total / 60}h ${total % 60}m" else "${total}m"
+
+/**
+ * "When did I last pick this up?" in the fewest words that are still true.
+ *
+ * Null for an item that has never been opened, so the anchor's middle band stays out
+ * of the way rather than claiming a date it does not have.
+ */
+private fun lastActivityLabel(instant: Instant): String? {
+    if (instant == Instant.DISTANT_PAST) return null
+    val days = (Clock.System.now() - instant).inWholeDays
+    return when {
+        days <= 0L -> "Read today"
+        days == 1L -> "Read yesterday"
+        days < 7L -> "Read $days days ago"
+        days < 14L -> "Read last week"
+        days < 60L -> "Read ${days / 7} weeks ago"
+        days < 365L -> "Read ${days / 30} months ago"
+        else -> "Read over a year ago"
+    }
+}

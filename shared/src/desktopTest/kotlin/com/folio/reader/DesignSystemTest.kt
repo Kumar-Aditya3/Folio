@@ -123,6 +123,58 @@ class DesignSystemTest {
     }
 
     @Test
+    fun appBarsAreGlassNotLids() {
+        // The reader veil is near-opaque on purpose (see above), but the *app* bar
+        // sits over Compose content, so it must stay see-through even at full
+        // collapse. This is the invariant that keeps the masthead from turning back
+        // into the grey lid the redesign removed.
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            assertTrue(
+                atmos.barGlass.alpha in 0.45f..0.80f,
+                "${palette.id}: bar glass alpha ${atmos.barGlass.alpha} is outside the " +
+                    "0.45–0.80 glass window — below it the bar cannot hold status icons, " +
+                    "above it the bar reads as a solid lid",
+            )
+            assertTrue(
+                atmos.barGlass.alpha < atmos.veilFill.alpha,
+                "${palette.id}: the app bar must be more transparent than the reader veil",
+            )
+        }
+    }
+
+    @Test
+    fun statusScrimFollowsThePaletteNotAFixedInk() {
+        // A single dark ink band across the top of every theme is what put a black
+        // stripe over the light palettes. The scrim now derives from the field, so
+        // it must land on the same side of the lightness split as the palette —
+        // that is what lets MainActivity flip the OS icons by `isDark` alone and
+        // still get contrast.
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val scrim = luminance(atmos.barScrim)
+            if (palette.isDark) {
+                assertTrue(
+                    scrim < 0.25,
+                    "${palette.id}: dark palette derived a light status scrim " +
+                        "(${"%.4f".format(scrim)}) — the light OS icons would disappear",
+                )
+            } else {
+                assertTrue(
+                    scrim > 0.45,
+                    "${palette.id}: light palette derived a dark status scrim " +
+                        "(${"%.4f".format(scrim)}) — this is the black band over paper",
+                )
+            }
+            // It is a scrim, not a band: the page has to show through it.
+            assertTrue(
+                atmos.barScrim.alpha < 0.95f,
+                "${palette.id}: status scrim alpha ${atmos.barScrim.alpha} is a solid band",
+            )
+        }
+    }
+
+    @Test
     fun floatingNavCapsuleStaysACapsule() {
         // The bar is detached, so it needs air on every side and a width ceiling —
         // a full-bleed capsule is just a bar with rounded corners.

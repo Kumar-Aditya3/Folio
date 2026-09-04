@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioEyebrow
@@ -47,6 +48,7 @@ import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
 
 /**
  * The More hub, as a **table of contents** rather than nested boxes.
@@ -75,15 +77,18 @@ fun SettingsHubScreen(
     onOpenHistory: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        FolioTopBar(title = "More")
+        val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+        FolioTopBar(title = "More", collapse = headerState.collapse)
         val colors = FolioTheme.colors
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(headerState.nestedScrollConnection),
             contentPadding = PaddingValues(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,
                 top = FolioTokens.space2,
-                bottom = FolioTokens.spaceMovement,
+                bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
             ),
         ) {
             item {
@@ -91,14 +96,14 @@ fun SettingsHubScreen(
                     HubRow(
                         icon = Icons.Filled.Equalizer,
                         title = "Reader defaults",
-                        subtitle = "Starting modes for prose and manga",
+                        subtitle = "What a new book or manga starts with",
                         accent = colors.accentProgress,
                         onClick = { onOpenSettings(FolioSettingsCategory.DEFAULTS) }
                     )
                     HubRow(
                         icon = Icons.Filled.TextFields,
                         title = "Typography",
-                        subtitle = "Font, size, spacing",
+                        subtitle = "Typeface, size and spacing for prose",
                         accent = colors.accentProgress,
                         onClick = { onOpenSettings(FolioSettingsCategory.TYPOGRAPHY) }
                     )

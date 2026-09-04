@@ -155,6 +155,14 @@ class StatisticsPhaseCTest {
         )
     }
 
+    /** The manga reader's own locator shape — what tells the two kinds of session apart. */
+    private fun mangaSession(mangaId: String, minutes: Long): ReadingSession =
+        session(mangaId, minutes).let { base ->
+            base.copy(
+                startPosition = base.startPosition.copy(contentLocator = "manga-page-1"),
+            )
+        }
+
     private fun tag(id: String, name: String) = Tag(id = id, name = name)
 
     private fun viewModel(
@@ -250,6 +258,52 @@ class StatisticsPhaseCTest {
 
         assertEquals(listOf("b"), state.topBooks.map { it.id })
         assertEquals(listOf("Kept"), state.genres.map { it.label })
+        Unit
+    }
+
+    // ── local truth ─────────────────────────────────────────────────────────────
+    // Sessions arrive from every device on the account, so the raw history outlives
+    // the local library. Stats describe the library in front of the reader: a book
+    // deleted here stops counting immediately, with no sync round in between.
+
+    @Test
+    fun `sessions for a book that is not on this device do not count`() = runBlocking {
+        val books = listOf(book("a"))
+        // "ghost" was deleted locally (or only ever read on another device): the row
+        // is gone, the session is not.
+        val sessions = listOf(session("a", 30), session("ghost", 20))
+
+        val state = viewModel(books, sessions).state.first()
+
+        assertEquals(30L * 60_000, state.timeThisWeekMs)
+        assertEquals(1, state.sessionsThisWeek)
+        assertEquals(listOf("a"), state.topBooks.map { it.id })
+        Unit
+    }
+
+    @Test
+    fun `the local gate also applies under an exclusion scope`() = runBlocking {
+        val exclusions = FakeExclusionRepo()
+        val books = listOf(book("a"))
+        val sessions = listOf(session("a", 30), session("ghost", 20))
+
+        val state = viewModel(books, sessions, exclusions = exclusions).state.first()
+
+        assertEquals(30L * 60_000, state.timeThisWeekMs)
+        Unit
+    }
+
+    @Test
+    fun `manga sessions survive the local book gate`() = runBlocking {
+        // A manga's subject lives in the manga tables, so the book list says nothing
+        // about it — gating on books would have silently deleted manga reading time.
+        val sessions = listOf(mangaSession("manga-1", 25))
+
+        val state = viewModel(books = emptyList(), sessions = sessions).state.first()
+
+        assertEquals(25L * 60_000, state.timeThisWeekMs)
+        assertEquals(1, state.sessionsThisWeek)
+        assertTrue(state.hasData)
         Unit
     }
 }

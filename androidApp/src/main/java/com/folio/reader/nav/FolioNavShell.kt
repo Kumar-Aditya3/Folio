@@ -29,10 +29,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,8 @@ import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.rememberMotionEnabled
 
 /**
@@ -59,9 +63,11 @@ import com.folio.reader.ui.theme.rememberMotionEnabled
  *    percent of tint.
  *
  * The capsule is anchored over the destination rather than occupying a layout
- * row. A single safety inset is applied by the shell so the last interactive
- * content does not land under it; no wallpaper or matching background wrapper is
- * needed to simulate separation.
+ * row, and the destination keeps its full height: the page passes *behind* the
+ * glass. The runway it needs is published as [LocalFolioBarInset] so scrolling
+ * surfaces can add it to their own `contentPadding`; padding the whole
+ * destination instead left a dead band the capsule sat on, which is the opposite
+ * of floating.
  *
  * `content()` stays at a single stable slot across bar↔non-bar transitions:
  * rendering the NavHost in two branches recreated it on every push and wiped each
@@ -84,18 +90,39 @@ fun FolioNavShell(
         systemBottomInset + FolioTokens.navFloatHeight + FolioTokens.navFloatInset * 2
 
     Box(modifier = modifier.fillMaxSize()) {
-        // One stable slot for the destination. The bar is a sibling overlay, so
-        // the capsule is genuinely detached — nothing paints a matching block
-        // behind it to fake the separation.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = if (showBottomBar) contentBottomInset else 0.dp),
+        // One stable slot for the destination, at full height. The capsule is a
+        // sibling overlay *over* it, so the page runs behind the glass instead of
+        // stopping at a reserved band — that band is what made the capsule read
+        // as a bar with a margin, and it sliced shelves off mid-cover.
+        //
+        // The runway is published instead of imposed: scrolling surfaces add
+        // LocalFolioBarInset to their own contentPadding, so their last row still
+        // clears the glass while everything above it passes underneath.
+        CompositionLocalProvider(
+            LocalFolioBarInset provides if (showBottomBar) contentBottomInset else 0.dp,
         ) {
-            content()
+            Box(modifier = Modifier.fillMaxSize()) {
+                content()
+            }
         }
 
         if (showBottomBar) {
+            // A soft dissolve under the capsule, in the page's own field colour: content
+            // scrolling out at the bottom fades instead of being cut off by the glass.
+            // It is the same idea as the masthead gaining glass on scroll, at the other
+            // end of the page.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(contentBottomInset)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            1f to FolioTheme.atmosphere.fieldBottom.copy(alpha = 0.80f),
+                        )
+                    )
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -115,9 +142,13 @@ fun FolioNavShell(
                         // Capped so the capsule stays a capsule on tablets and
                         // large windows instead of stretching into a bar again.
                         .widthIn(max = FolioTokens.navFloatMaxWidth)
-                        .folioVeil(FolioShapes.nav)
+                        // A true pill (radius = half the height) and genuinely
+                        // translucent: the page moving underneath is what tells the
+                        // eye this is glass floating over it rather than a rounded
+                        // slab parked at the bottom of the window.
+                        .folioVeil(FolioShapes.pill, fillAlpha = 0.90f)
                         .height(FolioTokens.navFloatHeight)
-                        .padding(horizontal = 6.dp),
+                        .padding(horizontal = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -146,9 +177,14 @@ fun FolioNavShell(
 }
 
 /**
- * One capsule item. Selected: accent pill, accent icon, label visible. Unselected:
- * icon only in `onSurfaceVariant`. The width animates so the capsule breathes as
- * the selection moves rather than snapping — and freezes under reduce-motion.
+ * One capsule item. Selected: a soft accent pill, accent icon, label visible.
+ * Unselected: icon only in `onSurfaceVariant`. The width animates so the capsule
+ * breathes as the selection moves rather than snapping — and freezes under
+ * reduce-motion.
+ *
+ * Sizes are deliberately smaller than a Material bar's: at 20dp the icon reads as
+ * a mark rather than a button face, which is what keeps the capsule from looking
+ * like a toolbar that happens to have rounded ends.
  */
 @Composable
 private fun FolioNavItem(
@@ -159,7 +195,7 @@ private fun FolioNavItem(
     val colors = FolioTheme.colors
     val motion = rememberMotionEnabled()
     val interaction = rememberFolioInteraction()
-    val targetWidth = if (selected) 94.dp else 56.dp
+    val targetWidth = if (selected) 86.dp else 50.dp
     val width by animateDpAsState(
         targetValue = targetWidth,
         animationSpec = if (motion) {
@@ -177,11 +213,11 @@ private fun FolioNavItem(
     Box(
         modifier = Modifier
             .width(width)
-            .height(46.dp)
+            .height(42.dp)
             .folioPressable(interaction, scaleTo = 0.93f)
             .clip(FolioShapes.pill)
             .background(
-                if (selected) colors.accentProgress.copy(alpha = 0.16f) else Color.Transparent,
+                if (selected) colors.accentProgress.copy(alpha = 0.14f) else Color.Transparent,
                 FolioShapes.pill,
             )
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
@@ -197,14 +233,14 @@ private fun FolioNavItem(
                     item.icon,
                     contentDescription = item.label,
                     tint = if (selected) colors.accentProgress else colors.onSurfaceVariant,
-                    modifier = Modifier.size(if (selected) 22.dp else 24.dp),
+                    modifier = Modifier.size(if (selected) 19.dp else 21.dp),
                 )
             }
             if (labelAlpha > 0f) {
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(5.dp))
                 Text(
                     text = item.label,
-                    style = FolioTheme.typography.labelMedium,
+                    style = FolioTheme.typography.labelSmall,
                     color = colors.accentProgress,
                     maxLines = 1,
                     modifier = Modifier.graphicsLayer { alpha = labelAlpha },

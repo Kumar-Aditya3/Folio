@@ -20,7 +20,11 @@ import kotlin.math.roundToInt
 @Composable
 fun TypographySettingsPanel(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit
+    onSettingsChange: (ReaderSettings) -> Unit,
+    /** Books keeping their own type values from an earlier open (§ ReaderDefaultsPanel). */
+    overrideCount: Int = 0,
+    /** Drops those, so the values below take effect in books already opened. */
+    onApplyToOpenedBooks: (() -> Unit)? = null
 ) {
     val colors = FolioTheme.colors
     val accent = rememberLegibleAccent(colors.primary)
@@ -30,6 +34,16 @@ fun TypographySettingsPanel(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // Without this line the panel reads as "type for my reading", and a book
+        // already open ignoring it reads as a bug rather than as the per-book
+        // ownership it is. The preview above shows the effect immediately.
+        Text(
+            "How prose books are set: the typeface and spacing a book is given the first time " +
+                "you open it. Manga is images, so none of this applies there.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant
+        )
+
         // Font family dropdown
         DropdownMenuButton(
             label = "Font family",
@@ -126,6 +140,15 @@ fun TypographySettingsPanel(
         ) {
             Text("Reset to defaults")
         }
+
+        InheritanceEscapeHatch(
+            count = overrideCount,
+            noun = "book",
+            confirmBody = "Their own typeface, size, weight and spacing are dropped, so the " +
+                "values above apply there too. Page theme, margins, positions, highlights and " +
+                "notes are untouched.",
+            onApply = onApplyToOpenedBooks,
+        )
     }
 }
 

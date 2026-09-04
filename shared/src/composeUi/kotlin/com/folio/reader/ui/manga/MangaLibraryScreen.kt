@@ -55,6 +55,7 @@ import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -73,6 +74,12 @@ fun MangaLibraryScreen(
     onSearchActiveChange: (Boolean) -> Unit = {},
     browseViewModel: BrowseViewModel? = null,
     onOpenSource: (MangaSourceInfo, String) -> Unit = { _, _ -> },
+    /**
+     * Leading element on the shelf's own chip rail — the host passes the Books/Manga
+     * switch here so manga has one rail rather than a mode row stacked over a
+     * category row. Null keeps the rail exactly as it was.
+     */
+    railLeading: (@Composable () -> Unit)? = null,
 ) {
     val visible by viewModel.visible.collectAsState()
     val unread by viewModel.unreadCounts.collectAsState()
@@ -161,7 +168,11 @@ fun MangaLibraryScreen(
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (railLeading != null) {
+                    item { railLeading() }
+                }
                 items(categories) { category ->
                     FolioChip(
                         selected = selectedCategory == category.id,
@@ -266,7 +277,7 @@ fun MangaLibraryScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     top = FolioTokens.space2,
-                    bottom = FolioTokens.spaceMovement,
+                    bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
             ) {
                 items(visible, key = { it.id }) { manga ->
@@ -305,7 +316,7 @@ fun MangaLibraryScreen(
                     start = FolioTokens.gutter,
                     end = FolioTokens.gutter,
                     top = FolioTokens.space3,
-                    bottom = FolioTokens.spaceMovement,
+                    bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat),

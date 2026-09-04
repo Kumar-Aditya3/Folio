@@ -44,6 +44,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
@@ -110,7 +112,11 @@ fun MangaDetailScreen(
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // The chapter list reports its scroll to the masthead, which gains its glass and
+    // takes the manga's title as the identity block below scrolls out of sight — the
+    // same migration Home's hero makes into its bar.
+    val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    Column(Modifier.fillMaxSize().nestedScroll(headerState.nestedScrollConnection)) {
         if (chapterSelectionMode) {
             // Chapter selection swaps the regular chrome for bulk actions in the same
             // bar — no extra block, no layout shift below.
@@ -144,8 +150,22 @@ fun MangaDetailScreen(
         } else {
         FolioTopBar(
             // The title/author/status block below already carries the identity; a top-bar
-            // title just repeats it.
+            // title just repeats it — until that block scrolls away, at which point the
+            // title migrates up here.
             title = "",
+            collapse = headerState.collapse,
+            titleContent = {
+                Text(
+                    text = m.title,
+                    style = FolioTheme.typography.titleMedium,
+                    color = FolioTheme.colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.graphicsLayer {
+                        alpha = ((headerState.collapse - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                    },
+                )
+            },
             navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
@@ -412,6 +432,11 @@ fun MangaDetailScreen(
             error?.let { message ->
                 item {
                     Text(message, color = FolioTheme.colors.error, style = MaterialTheme.typography.bodyMedium)
+                }
+                item {
+                    // A bot check is not a network error: it needs a browser view, and
+                    // clearing it reloads the chapter list by itself.
+                    MangaChallengePrompt(onCleared = { viewModel.refresh() })
                 }
             }
 

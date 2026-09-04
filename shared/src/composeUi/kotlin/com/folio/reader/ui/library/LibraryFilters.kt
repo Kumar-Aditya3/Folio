@@ -20,6 +20,11 @@ import com.folio.reader.ui.theme.FolioTokens
  * Status / series / collection filter chips for the books shelf
  * (§6 split of LibraryScreen.kt). These are filters, not navigation,
  * so chips are the mandated control (§3.4 step 2).
+ *
+ * [leading] takes the Books/Manga switch, so the mode control and the filters share
+ * one rail. They used to be two stacked rows above the shelf, which — with the bar
+ * and the status band over them — put four bands of chrome between the top of the
+ * screen and the first cover.
  */
 @Composable
 internal fun LibraryFilterChips(
@@ -30,13 +35,17 @@ internal fun LibraryFilterChips(
     collectionFilterOpen: Boolean,
     onFilterChange: (LibraryViewModel.FilterState) -> Unit,
     onSeriesFilterOpen: (Boolean) -> Unit,
-    onCollectionFilterOpen: (Boolean) -> Unit
+    onCollectionFilterOpen: (Boolean) -> Unit,
+    leading: (@Composable () -> Unit)? = null
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (leading != null) {
+            item { leading() }
+        }
         item {
             com.folio.reader.ui.components.FolioChip(
                 selected = filter.statuses.contains(BookStatus.READING),
