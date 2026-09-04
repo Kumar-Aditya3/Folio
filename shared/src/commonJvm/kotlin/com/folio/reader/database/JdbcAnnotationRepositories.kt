@@ -48,6 +48,10 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
                 it.setString(1, tagId); it.executeUpdate()
             }
         }
+        // Hard-deleted above, so the tag is gone from this device immediately. The
+        // DELETE payload stays "{}" on purpose: the id rides on entityId, and
+        // SyncEngine.pushTag turns it into an isDeleted tombstone (like book deletes)
+        // so the deletion reaches the cloud instead of resurrecting on next sync-down.
         db.onEntityChanged?.invoke("tag", tagId, "DELETE", "{}")
     }
 

@@ -344,7 +344,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = plural(entry.readChapters, "chapter"),
+                            text = shortMinutes(entry.readMinutes),
                             style = FolioTheme.typography.labelMedium,
                             color = FolioTheme.colors.accentProgress,
                         )

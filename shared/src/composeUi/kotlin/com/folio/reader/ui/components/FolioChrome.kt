@@ -150,6 +150,11 @@ fun FolioTopBar(
     val statusPx = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
     val statusColor = atmos.barScrim
     val veil = atmos.barGlass
+    // Specular catch for the masthead's mirror finish — the atmosphere's own rim
+    // light, so a dark field emits at the crown and paper catches a white sheen.
+    // Purely additive over the veil; it never touches barGlass's alpha, so the §15
+    // glass window (DesignSystemTest.appBarsAreGlassNotLids) still holds.
+    val sheen = atmos.rimLight
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -181,6 +186,18 @@ fun FolioTopBar(
                             0f to veil.copy(alpha = veil.alpha * f * 0.85f),
                             0.6f to veil.copy(alpha = veil.alpha * f * 0.44f),
                             1f to veil.copy(alpha = veil.alpha * f * 0.16f),
+                        )
+                    )
+                    // The mirror finish: a thin specular band along the crown that fades
+                    // by ~38% of the bar's height, so the collapsed masthead reads as
+                    // polished glass reflecting the light above rather than a flat tint.
+                    // Tied to `f` exactly like the veil — it appears only once content is
+                    // passing underneath, which is the only time a bar needs to read as a
+                    // surface at all.
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to sheen.copy(alpha = sheen.alpha * 0.30f * f),
+                            0.38f to Color.Transparent,
                         )
                     )
                 }

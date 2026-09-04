@@ -202,10 +202,12 @@ class SyncEngine(
         for (item in pending) {
             // Early releases represented hard deletes with an empty payload. The
             // current transport cannot reconstruct such an entity, so drop these
-            // stale entries. Book deletes are the exception: they push a tombstone
-            // so the deletion reaches other devices. Current soft-deleted
-            // annotations include their entity payload.
-            if (item.operation == SyncOperation.DELETE && item.payload == "{}" && item.entityType != "book") {
+            // stale entries. Book and tag deletes are the exception: they push an
+            // id-only tombstone (built from entityId) so the deletion reaches other
+            // devices. Current soft-deleted annotations include their entity payload.
+            if (item.operation == SyncOperation.DELETE && item.payload == "{}" &&
+                item.entityType != "book" && item.entityType != "tag"
+            ) {
                 syncRepository.markSynced(item.id)
                 continue
             }
@@ -379,6 +381,24 @@ class SyncEngine(
     }
 
     private suspend fun pushTag(item: SyncQueueItem) {
+        if (item.operation == SyncOperation.DELETE) {
+            // Tombstone: the local row is already hard-deleted, so only the id
+            // travels (on entityId, exactly like pushBook). Writing an isDeleted
+            // marker instead of decoding the empty payload lets the deletion reach
+            // the cloud "at a later time" rather than throwing and resurrecting the
+            // tag on the next sync-down. Fresh updatedAt so it wins last-write-wins.
+            firestoreSync.upsertTag(
+                FsTag(
+                    id = item.entityId,
+                    name = "",
+                    createdAt = 0L,
+                    deviceId = deviceId,
+                    updatedAt = Clock.System.now().toEpochMilliseconds(),
+                    isDeleted = true
+                )
+            )
+            return
+        }
         val tag = Json.Default.decodeFromString(Tag.serializer(), item.payload)
         firestoreSync.upsertTag(
             FsTag(
@@ -719,6 +739,16 @@ class SyncEngine(
         for (remote in fetchedTags) {
             if (remote.deviceId == deviceId) continue
             val local = localTags[remote.id]
+            if (remote.isDeleted) {
+                // Cloud tombstone: another device deleted this tag. Remove the local
+                // copy if present and never re-insert it, so a deleted tag stays gone
+                // instead of resurrecting on the next sync-down. deleteTag has no
+                // emitSyncEvent flag and always emits, but the local != null guard (and
+                // the self-device skip above) bounds that echo to at most one per
+                // device, so the fleet converges rather than ping-ponging tombstones.
+                if (local != null) runCatching { tagRepository.deleteTag(local.id) }
+                continue
+            }
             val remoteMs = remote.updatedAt.takeIf { it > 0 } ?: remote.createdAt
             if (local == null) {
                 runCatching {

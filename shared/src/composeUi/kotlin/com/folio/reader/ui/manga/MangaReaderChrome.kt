@@ -3,11 +3,13 @@ package com.folio.reader.ui.manga
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -39,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -134,14 +137,32 @@ internal fun ReaderControls(
     onSeek: (Int) -> Unit,
     onBack: () -> Unit,
 ) {
-    val overlayColor = Color.Black.copy(alpha = 0.72f)
+    // Immersive glass over the art, not a flat black lid. The base is a vertical
+    // gradient — heavier at the OS-status edge for icon legibility, lighter toward
+    // the page — and the mirror finish is a thin white specular band along the crown,
+    // since the light source is above and both bars catch it at their top edge. The
+    // art stays perceivable through the ~0.70 glass while the bar still dominates.
+    val glassTop = Brush.verticalGradient(
+        0f to Color.Black.copy(alpha = 0.86f),
+        1f to Color.Black.copy(alpha = 0.70f),
+    )
+    val glassBottom = Brush.verticalGradient(
+        0f to Color.Black.copy(alpha = 0.70f),
+        1f to Color.Black.copy(alpha = 0.86f),
+    )
+    val sheen = Brush.verticalGradient(
+        0f to Color.White.copy(alpha = 0.16f),
+        0.55f to Color.Transparent,
+    )
+    val hairline = Color.White.copy(alpha = 0.10f)
 
     Column(Modifier.fillMaxSize()) {
         com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(overlayColor)
+                .background(glassTop)
+                .background(sheen)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -187,12 +208,16 @@ internal fun ReaderControls(
             }
         }
 
+        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
+
         Spacer(Modifier.weight(1f))
 
+        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(overlayColor)
+                .background(glassBottom)
+                .background(sheen)
                 .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
