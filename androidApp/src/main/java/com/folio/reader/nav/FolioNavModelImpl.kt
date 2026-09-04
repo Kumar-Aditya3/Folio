@@ -44,6 +44,19 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
     var mangaSearchActive by mutableStateOf(false)
     var annotationFormat by mutableStateOf("json")
     var mangaDownloadsLocation by mutableStateOf("")
+    var mangaDefaultMode by mutableStateOf(com.folio.reader.ui.manga.MangaReaderMode.WEBTOON)
+
+    fun updateMangaDefaultMode(mode: com.folio.reader.ui.manga.MangaReaderMode) {
+        mangaDefaultMode = mode
+        activity.appScope.launch(Dispatchers.IO) {
+            runCatching {
+                graph.settingsRepository.setRaw(
+                    com.folio.reader.ui.manga.KEY_MANGA_READER_DEFAULT_MODE,
+                    mode.name,
+                )
+            }
+        }
+    }
 
     // ── View models shared across destinations ───────────────────────────────
     val libraryVM by lazy {

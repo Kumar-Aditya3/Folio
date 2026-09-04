@@ -89,6 +89,13 @@ fun SettingsHubScreen(
             item {
                 HubSection("Reading", colors.accentProgress) {
                     HubRow(
+                        icon = Icons.Filled.Equalizer,
+                        title = "Reader defaults",
+                        subtitle = "Starting modes for prose and manga",
+                        accent = colors.accentProgress,
+                        onClick = { onOpenSettings(FolioSettingsCategory.DEFAULTS) }
+                    )
+                    HubRow(
                         icon = Icons.Filled.TextFields,
                         title = "Typography",
                         subtitle = "Font, size, spacing",

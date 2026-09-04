@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,8 +54,10 @@ import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -395,10 +396,10 @@ private fun GoalEditDialog(
                 Text(
                     "${sliderValue.toInt()} minutes",
                     style = FolioTheme.typography.headlineSmall,
-                    color = FolioTheme.colors.primary,
+                    color = rememberLegibleAccent(FolioTheme.colors.primary),
                 )
                 Spacer(Modifier.height(FolioTokens.space2))
-                Slider(
+                FolioSlider(
                     value = sliderValue,
                     onValueChange = { sliderValue = it },
                     valueRange = 5f..300f,

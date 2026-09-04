@@ -51,6 +51,8 @@ fun SettingsScreen(
     onExportBackup: () -> Unit = {},
     onImportBackup: () -> Unit = {},
     onExportAnnotations: (String) -> Unit = {},
+    mangaDefaultMode: com.folio.reader.ui.manga.MangaReaderMode = com.folio.reader.ui.manga.MangaReaderMode.WEBTOON,
+    onMangaDefaultModeChange: (com.folio.reader.ui.manga.MangaReaderMode) -> Unit = {},
     mangaDownloadsLocation: String? = null,
     onPickMangaDownloadsLocation: () -> Unit = {}
 ) {
@@ -106,6 +108,10 @@ fun SettingsScreen(
                                         onImportFont,
                                         mangaDownloadsLocation,
                                         onPickMangaDownloadsLocation
+                                    )
+
+                                    SettingsCategory.DEFAULTS -> ReaderDefaultsPanel(
+                                        settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
 
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
@@ -188,6 +194,10 @@ fun SettingsScreen(
                                         onPickMangaDownloadsLocation
                                     )
 
+                                    SettingsCategory.DEFAULTS -> ReaderDefaultsPanel(
+                                        settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
+                                    )
+
                                     SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
@@ -224,6 +234,7 @@ fun SettingsScreen(
 // Settings categories enum
 enum class SettingsCategory(val displayName: String) {
     GENERAL("General"),
+    DEFAULTS("Reader defaults"),
     TYPOGRAPHY("Typography"),
     LAYOUT("Layout"),
     FORMATTING("Formatting"),

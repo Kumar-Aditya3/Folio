@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -37,6 +38,21 @@ internal fun QuickChoiceRow(
     onSelect: (String) -> Unit,
     overrideDot: Boolean = false
 ) {
+    // The selected pill is filled with `primary`, so its label must be `onPrimary`
+    // and the fill itself must clear the panel it sits on. Guarding here keeps
+    // every palette's own hue while making the selection unambiguous.
+    val selectedFill = rememberLegibleAccent(
+        FolioTheme.colors.primary,
+        fallback = FolioTheme.colors.onSurface,
+        minRatio = 3.0,
+    )
+    // The label is guarded against the fill that actually renders, so a palette
+    // whose primary had to move does not end up with an unreadable onPrimary.
+    val selectedLabel = rememberLegibleAccent(
+        FolioTheme.colors.onPrimary,
+        background = selectedFill,
+        fallback = FolioTheme.colors.onPrimary,
+    )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -53,7 +69,7 @@ internal fun QuickChoiceRow(
                         .weight(1f)
                         .clip(RoundedCornerShape(9.dp))
                         .background(
-                            if (isSel) FolioTheme.colors.primary else FolioTheme.colors.surfaceVariant
+                            if (isSel) selectedFill else FolioTheme.colors.surfaceVariant
                         )
                         .clickable { onSelect(value) }
                         .padding(vertical = 9.dp),
@@ -62,7 +78,7 @@ internal fun QuickChoiceRow(
                     Text(
                         text = title,
                         style = FolioTheme.typography.labelMedium,
-                        color = if (isSel) FolioTheme.colors.onPrimary else FolioTheme.colors.onSurface,
+                        color = if (isSel) selectedLabel else FolioTheme.colors.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center
@@ -80,6 +96,14 @@ internal fun QuickChoiceRow(
  */
 @Composable
 internal fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: Boolean, modifier: Modifier = Modifier) {
+    // The preview renders the reading theme's own colours, so its selection ring
+    // has to clear *that* background rather than the app surface.
+    val ring = rememberLegibleAccent(
+        FolioTheme.colors.primary,
+        background = Color(theme.background),
+        fallback = FolioTheme.colors.onSurface,
+        minRatio = 3.0,
+    )
     Row(
         modifier = modifier
             .heightIn(min = 52.dp)
@@ -87,7 +111,7 @@ internal fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: 
             .background(Color(theme.background))
             .border(
                 width = if (selected) 2.dp else 1.dp,
-                color = if (selected) FolioTheme.colors.primary else FolioTheme.colors.outline,
+                color = if (selected) ring else FolioTheme.colors.outline,
                 shape = RoundedCornerShape(12.dp)
             )
             .padding(horizontal = 12.dp, vertical = 9.dp),

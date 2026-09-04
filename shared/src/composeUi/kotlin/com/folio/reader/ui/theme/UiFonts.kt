@@ -57,6 +57,22 @@ object UiFonts {
     fun text(theme: FontTheme = FontTheme.CLASSIC, weight: Int = 400): FontFamily =
         load(theme.textFile, weight, false, 0f)
 
+    /**
+     * A font loaded straight from a file in the installed fonts directory —
+     * the bundled and user-imported reader faces, whose [fileName] is relative
+     * to the same directory. Null when the file is missing or unloadable, so
+     * callers can fall back to a system family instead of silently rendering
+     * Default and making every serif preview look identical.
+     */
+    fun fromFile(fileName: String, weight: Int = 400): FontFamily? {
+        val key = "$fileName:$weight:false:0.0"
+        cache[key]?.let { return it }
+        val file = fontsDir?.resolve(fileName)?.takeIf { it.length() > 0L } ?: return null
+        val family = runCatching { fileFontFamily(file.absolutePath, weight, false, 0f) }.getOrNull()
+        if (family != null) cache[key] = family
+        return family
+    }
+
     private fun load(fileName: String, weight: Int, italic: Boolean, optical: Float): FontFamily {
         val key = "$fileName:$weight:$italic:$optical"
         cache[key]?.let { return it }

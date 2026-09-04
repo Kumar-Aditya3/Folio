@@ -1346,6 +1346,13 @@ object FolioTokens {
     // Floating navigation capsule
     val navFloatHeight = 62.dp
     val navFloatInset = 12.dp
+
+    /**
+     * Width ceiling for the floating nav capsule. Four items need ~360dp at most;
+     * beyond that the capsule would stretch back into a full-width bar on tablets
+     * and large windows, which is exactly what it is not.
+     */
+    val navFloatMaxWidth = 420.dp
 }
 
 object FolioTheme {
@@ -1366,7 +1373,12 @@ object FolioTheme {
     ) {
         CompositionLocalProvider(
             LocalFolioColors provides colors,
-            LocalFolioTypography provides typography
+            LocalFolioTypography provides typography,
+            // Material3 defaults LocalContentColor to pure black, and Folio's
+            // panels are not wrapped in `Surface`, so every unstyled Text/Icon
+            // rendered black — unreadable on any dark palette. Anchor the default
+            // to the palette's own foreground instead.
+            androidx.compose.material3.LocalContentColor provides colors.onSurface
         ) {
             androidx.compose.material3.MaterialTheme(
                 colorScheme = colors.toColorScheme(),

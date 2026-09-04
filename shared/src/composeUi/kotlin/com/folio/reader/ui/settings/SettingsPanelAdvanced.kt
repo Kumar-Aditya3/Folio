@@ -31,7 +31,6 @@ fun AdvancedSettingsPanel(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Advanced Settings", style = MaterialTheme.typography.titleLarge)
         Text(
             "Backup/restore and annotation export", style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

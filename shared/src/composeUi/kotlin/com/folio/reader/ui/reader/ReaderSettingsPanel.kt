@@ -48,8 +48,13 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberLegibleAccent
+import com.folio.reader.ui.settings.readerFontFamily
+import com.folio.reader.ui.settings.readerFontLabel
+import com.folio.reader.ui.settings.readerFontOptions
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -100,6 +105,7 @@ fun ReaderSettingsPanel(
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
     val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
     val panelShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+    val accentText = rememberLegibleAccent(FolioTheme.colors.primary)
 
     Column(
         modifier = Modifier
@@ -115,9 +121,17 @@ fun ReaderSettingsPanel(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Reading settings", style = FolioTheme.typography.titleMedium)
+            Text(
+                "Reading settings",
+                style = FolioTheme.typography.titleMedium,
+                color = FolioTheme.colors.onSurface
+            )
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, contentDescription = "Close")
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Close",
+                    tint = FolioTheme.colors.onSurfaceVariant
+                )
             }
         }
 
@@ -161,8 +175,10 @@ fun ReaderSettingsPanel(
                 IconButton(
                     onClick = { apply(settings.copy(fontSize = (settings.fontSize - 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
                     modifier = Modifier.background(FolioTheme.colors.surfaceVariant, RoundedCornerShape(8.dp))
-                ) { Text("A−", style = FolioTheme.typography.titleSmall) }
-                androidx.compose.material3.Slider(
+                ) {
+                    Text("A−", style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface)
+                }
+                FolioSlider(
                     value = settings.fontSize,
                     onValueChange = { apply(settings.copy(fontSize = it)) },
                     valueRange = MIN_FONT_SIZE_SP..MAX_FONT_SIZE_SP,
@@ -171,7 +187,9 @@ fun ReaderSettingsPanel(
                 IconButton(
                     onClick = { apply(settings.copy(fontSize = (settings.fontSize + 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
                     modifier = Modifier.background(FolioTheme.colors.surfaceVariant, RoundedCornerShape(8.dp))
-                ) { Text("A+", style = FolioTheme.typography.titleMedium) }
+                ) {
+                    Text("A+", style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface)
+                }
             }
         }
 
@@ -212,11 +230,16 @@ fun ReaderSettingsPanel(
                     Text(
                         actualFontName(settings.fontFamily),
                         style = FolioTheme.typography.bodyMedium,
+                        color = FolioTheme.colors.onSurface,
                         fontFamily = com.folio.reader.ui.components.systemFontFamily(
                             actualFontName(settings.fontFamily)
                         )
                     )
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null)
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = FolioTheme.colors.onSurfaceVariant
+                    )
                 }
                 DropdownMenu(
                     expanded = fontMenuOpen,
@@ -233,7 +256,7 @@ fun ReaderSettingsPanel(
                                     actualFontName(font),
                                     fontFamily = com.folio.reader.ui.components.systemFontFamily(actualFontName(font)),
                                     fontWeight = if (font == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (font == settings.fontFamily) FolioTheme.colors.primary
+                                    color = if (font == settings.fontFamily) accentText
                                     else FolioTheme.colors.onSurface
                                 )
                             },
@@ -295,7 +318,7 @@ fun ReaderSettingsPanel(
                                 Icon(
                                     Icons.Filled.Check,
                                     contentDescription = "Selected",
-                                    tint = FolioTheme.colors.primary,
+                                    tint = accentText,
                                     modifier = Modifier.size(16.dp)
                                 )
                             } else {
@@ -327,7 +350,7 @@ fun ReaderSettingsPanel(
                                     .background(Color(argb))
                                     .border(
                                         width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) FolioTheme.colors.primary else FolioTheme.colors.outline,
+                                        color = if (selected) accentText else FolioTheme.colors.outline,
                                         shape = RoundedCornerShape(7.dp)
                                     )
                                     .clickable {
@@ -349,9 +372,9 @@ fun ReaderSettingsPanel(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Light", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
-                        Text("${(brightness.value * 100).toInt()}%", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.primary)
+                        Text("${(brightness.value * 100).toInt()}%", style = FolioTheme.typography.labelLarge, color = accentText)
                     }
-                    androidx.compose.material3.Slider(
+                    FolioSlider(
                         value = brightness.value,
                         onValueChange = { brightness.set(it) },
                         valueRange = 0.05f..1f
@@ -373,9 +396,9 @@ fun ReaderSettingsPanel(
                         Text("Line spacing", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
                         OverrideDot("lineHeight" in overriddenFields)
                     }
-                    Text("%.1f".format(settings.lineHeight), style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.primary)
+                    Text("%.1f".format(settings.lineHeight), style = FolioTheme.typography.labelLarge, color = accentText)
                 }
-                androidx.compose.material3.Slider(
+                FolioSlider(
                     value = settings.lineHeight,
                     onValueChange = { apply(settings.copy(lineHeight = it)) },
                     valueRange = 1f..3f
@@ -396,9 +419,9 @@ fun ReaderSettingsPanel(
                         Text("Margins", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
                         OverrideDot("margins" in overriddenFields)
                     }
-                    Text("${settings.margins.left.toInt()} dp", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.primary)
+                    Text("${settings.margins.left.toInt()} dp", style = FolioTheme.typography.labelLarge, color = accentText)
                 }
-                androidx.compose.material3.Slider(
+                FolioSlider(
                     value = settings.margins.left,
                     onValueChange = {
                         apply(settings.copy(margins = settings.margins.copy(left = it, right = it)))
@@ -430,7 +453,7 @@ fun ReaderSettingsPanel(
                 Text(
                     "All settings",
                     style = FolioTheme.typography.labelLarge,
-                    color = FolioTheme.colors.primary
+                    color = accentText
                 )
             }
         }

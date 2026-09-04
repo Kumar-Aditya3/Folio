@@ -95,33 +95,64 @@ private fun contrastRatio(a: Color, b: Color): Double {
 }
 
 /**
- * §13.3 contrast guard, non-negotiable: a cover may tint the hero but it may
- * never make the hero unreadable — blend toward [fallback] until ≥4.5:1 against
- * [surface]; if even [fallback] misses the bar on that surface, finish toward
- * the better-contrasting pure extreme so the invariant holds unconditionally.
+ * The general legibility guard: return [color] when it already clears [minRatio]
+ * against [background], otherwise blend it toward [fallback] in tenths until it
+ * does; if even [fallback] misses the bar on that background, finish toward
+ * whichever pure extreme reads better so the invariant holds unconditionally
+ * (the better extreme is always ≥5.6:1 — the black/white crossover sits at the
+ * midpoint of the two).
+ *
+ * This is the single place the app enforces "an accent may tint a thing, but it
+ * may never make that thing invisible". Monochromatic palettes (SAKURA and
+ * friends) put `primary` and `surface` within a hair of each other in luminance,
+ * so any accent-on-surface text or icon must pass through here.
  */
-internal fun guardCoverContrast(color: Color, surface: Color, fallback: Color): Color {
-    if (contrastRatio(color, surface) >= 4.5) return color
+fun legibleOn(
+    color: Color,
+    background: Color,
+    fallback: Color,
+    minRatio: Double = 4.5,
+): Color {
+    if (contrastRatio(color, background) >= minRatio) return color
     for (step in 1..10) {
         val blended = lerp(color, fallback, step / 10f)
-        if (contrastRatio(blended, surface) >= 4.5) return blended
+        if (contrastRatio(blended, background) >= minRatio) return blended
     }
-    // Even the fallback misses 4.5:1 on this surface — finish blending toward
-    // whichever pure extreme reads better. The better extreme is always ≥5.6:1
-    // (the black/white crossover sits at the midpoint of the two), so the
-    // non-negotiable invariant holds for any surface, any fallback.
     val anchor =
-        if (contrastRatio(Color.Black, surface) >= contrastRatio(Color.White, surface)) {
+        if (contrastRatio(Color.Black, background) >= contrastRatio(Color.White, background)) {
             Color.Black
         } else {
             Color.White
         }
     for (step in 1..10) {
         val blended = lerp(fallback, anchor, step / 10f)
-        if (contrastRatio(blended, surface) >= 4.5) return blended
+        if (contrastRatio(blended, background) >= minRatio) return blended
     }
     return anchor
 }
+
+/**
+ * [legibleOn] against the live palette surface, falling back to `onSurface`
+ * (or `onSurfaceVariant` for the 3:1 large-text/icon tier) unless told otherwise.
+ * The common case for accent-tinted labels, eyebrows, figures and icons.
+ */
+@Composable
+fun rememberLegibleAccent(
+    accent: Color,
+    background: Color = FolioTheme.colors.surface,
+    fallback: Color = FolioTheme.colors.onSurface,
+    minRatio: Double = 4.5,
+): Color = remember(accent, background, fallback, minRatio) {
+    legibleOn(accent, background, fallback, minRatio)
+}
+
+/**
+ * §13.3 contrast guard, non-negotiable: a cover may tint the hero but it may
+ * never make the hero unreadable. A thin alias over [legibleOn] at the 4.5:1
+ * body-text tier.
+ */
+internal fun guardCoverContrast(color: Color, surface: Color, fallback: Color): Color =
+    legibleOn(color, surface, fallback, 4.5)
 
 /**
  * Dominant cover colour for the Home hero, or [fallback] when there is no
