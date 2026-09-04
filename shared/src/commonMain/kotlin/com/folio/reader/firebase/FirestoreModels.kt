@@ -310,7 +310,8 @@ data class FsTag(
     val color: Int? = null,
     val createdAt: Long,
     val deviceId: String = "",
-    val updatedAt: Long = createdAt
+    val updatedAt: Long = createdAt,
+    val isDeleted: Boolean = false
 )
 
 @Serializable

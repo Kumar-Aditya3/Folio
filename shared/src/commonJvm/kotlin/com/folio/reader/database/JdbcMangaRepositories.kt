@@ -1318,11 +1318,11 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         }
         val top = mutableListOf<com.folio.reader.manga.MangaTopEntry>()
         conn.prepareStatement(
-            "SELECT c.manga_id, m.title, COUNT(*) c FROM manga_chapters c JOIN manga_library m ON m.id = c.manga_id " +
-                "WHERE c.read = 1" + notIn("c.manga_id") + " GROUP BY c.manga_id ORDER BY c DESC LIMIT 5"
+            "SELECT m.id, m.title, SUM(s.duration_ms)/60000 AS minutes FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id" +
+                whereNotIn("m.id") + " GROUP BY m.id, m.title HAVING minutes > 0 ORDER BY minutes DESC, m.id ASC LIMIT 5"
         ).use { st ->
             bindExclusions(st, 1)
-            st.executeQuery().use { rs -> while (rs.next()) top += com.folio.reader.manga.MangaTopEntry(rs.getString(1), rs.getString(2), rs.getInt(3)) }
+            st.executeQuery().use { rs -> while (rs.next()) top += com.folio.reader.manga.MangaTopEntry(rs.getString(1), rs.getString(2), rs.getLong(3)) }
         }
         com.folio.reader.manga.MangaStatistics(
             libraryCount = libraryCount, completedCount = completedCount, readChapters = readChapters,

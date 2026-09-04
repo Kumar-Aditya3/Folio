@@ -29,10 +29,12 @@ import com.folio.reader.ui.statistics.ReadingInProgress
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.statistics.StatisticsViewModel
 import com.folio.reader.ui.statistics.localSessions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
@@ -473,14 +475,27 @@ class HomeViewModel(
             val inLibraryTitles = mangaRepo.observeLibrary().first()
                 .map { it.title.trim().lowercase() }
                 .toSet()
-            backend.fetchBrowse(entry.sourceId, page = 1, mode = BrowseMode.LATEST)
-                .items
+            val browsePage = withTimeoutOrNull(DISCOVER_FETCH_TIMEOUT_MS) {
+                backend.fetchBrowse(entry.sourceId, page = 1, mode = BrowseMode.LATEST)
+            }
+            // Slowness, unlike failure, is not handled by runCatching: without a
+            // timeout this await can hold Home's loaded=true for OkHttp's full
+            // two-minute call timeout. On timeout fall back to the last cached rows
+            // (even if stale) so Discover degrades gracefully instead of stalling;
+            // the labeled return still writes the fallback to the cache below.
+            if (browsePage == null) return@runCatching discoverCache?.second ?: emptyList()
+            browsePage.items
                 .filter { it.title.trim().lowercase() !in inLibraryTitles }
                 .take(DISCOVER_CAP)
                 .map {
                     MangaDiscoverItem(entry.sourceId, entry.sourceName, it.url, it.title, it.thumbnailUrl)
                 }
-        }.getOrDefault(emptyList())
+        }.getOrElse { error ->
+            // runCatching absorbs CancellationException, which would mis-cache a
+            // cancelled Home emission as an empty Discover result; rethrow it.
+            if (error is CancellationException) throw error
+            emptyList()
+        }
         discoverCache = now to fetched
         return fetched
     }
@@ -532,10 +547,19 @@ class HomeViewModel(
         private const val RECENT_POOL = 25
         /** Browse hits surfaced in Discover (§11.4). */
         private const val DISCOVER_CAP = 6
+        /**
+         * Bound on the live Discover browse call: OkHttp's own call timeout is two
+         * minutes, which would otherwise hold Home's loaded=true that long on a bad
+         * network. Discover degrades to cache/empty instead of stalling the surface.
+         */
+        private const val DISCOVER_FETCH_TIMEOUT_MS = 6_000L
         /** Successful Discover results are reused for six hours (§11.4). */
         private val DISCOVER_TTL = 6.days
-        /** Failed/empty Discover fetches retry after five minutes, not six hours. */
-        private val DISCOVER_NEGATIVE_TTL = 5.minutes
+        /**
+         * Failed/empty/timed-out Discover fetches retry after thirty minutes, not
+         * five, so an offline reader does not re-pay the stall on every Home visit.
+         */
+        private val DISCOVER_NEGATIVE_TTL = 30.minutes
 
         /**
          * The Discover cache must outlive Home's composition — HomeRoute recreates

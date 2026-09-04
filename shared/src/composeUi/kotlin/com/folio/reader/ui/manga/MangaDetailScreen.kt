@@ -1,8 +1,10 @@
 package com.folio.reader.ui.manga
 
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -117,6 +120,8 @@ fun MangaDetailScreen(
     // takes the manga's title as the identity block below scrolls out of sight — the
     // same migration Home's hero makes into its bar.
     val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    // Hoisted so the masthead knows when the inline action block (item 1) scrolls out.
+    val listState = rememberLazyListState()
     Column(Modifier.fillMaxSize().nestedScroll(headerState.nestedScrollConnection)) {
         if (chapterSelectionMode) {
             // Chapter selection swaps the regular chrome for bulk actions in the same
@@ -171,6 +176,31 @@ fun MangaDetailScreen(
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },
             actions = {
+                // Continue persists in the masthead once the inline action block below
+                // scrolls out, so resuming is always one tap away — the same migration
+                // the title makes. Keyed off the list (item 1 gone), not the 56dp
+                // collapse, since the inline button sits further down and would overlap.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = listState.firstVisibleItemIndex > 1 && displayChapters.isNotEmpty(),
+                    enter = fadeIn(tween(160)) + expandHorizontally(),
+                    exit = fadeOut(tween(160)) + shrinkHorizontally(),
+                ) {
+                    IconButton(onClick = {
+                        scope.launch {
+                            val target = viewModel.nextChapterToRead() ?: displayChapters.firstOrNull()
+                            if (target != null) {
+                                viewModel.recordHistory(target.id)
+                                onRead(m, target)
+                            }
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = if (chapters.any { it.read }) "Continue reading" else "Start reading",
+                            tint = FolioTheme.colors.primary,
+                        )
+                    }
+                }
                 IconButton(onClick = {
                     if (!m.inLibrary) categoryPrompt = true
                     viewModel.toggleInLibrary()
@@ -316,6 +346,7 @@ fun MangaDetailScreen(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(FolioTokens.space3),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),

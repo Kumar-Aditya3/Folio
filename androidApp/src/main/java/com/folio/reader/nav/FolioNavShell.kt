@@ -1,10 +1,16 @@
 package com.folio.reader.nav
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -205,10 +211,33 @@ private fun FolioNavItem(
         },
         label = "navItemWidth",
     )
-    val labelAlpha by animateFloatAsState(
-        targetValue = if (selected) 1f else 0f,
-        animationSpec = if (motion) spring(stiffness = 900f) else snap(),
-        label = "navLabelAlpha",
+    // Icon size animates on the same spring as the box width, so the mark
+    // settles into its selected size instead of popping 21dp -> 19dp in one frame.
+    val iconSize by animateDpAsState(
+        targetValue = if (selected) 19.dp else 21.dp,
+        animationSpec = if (motion) {
+            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 700f)
+        } else {
+            snap()
+        },
+        label = "navIconSize",
+    )
+    // Same idiom as FolioSegmented: the pill fill and the icon ink cross-fade
+    // between states rather than switching on a single frame.
+    val pillFill by animateColorAsState(
+        targetValue = if (selected) colors.accentProgress.copy(alpha = 0.14f) else Color.Transparent,
+        animationSpec = if (motion) spring(stiffness = 700f) else snap(),
+        label = "navPillFill",
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (selected) colors.accentProgress else colors.onSurfaceVariant,
+        animationSpec = if (motion) spring(stiffness = 700f) else snap(),
+        label = "navIconTint",
+    )
+    val labelColor by animateColorAsState(
+        targetValue = colors.accentProgress,
+        animationSpec = if (motion) spring(stiffness = 700f) else snap(),
+        label = "navLabelColor",
     )
     Box(
         modifier = Modifier
@@ -216,10 +245,7 @@ private fun FolioNavItem(
             .height(42.dp)
             .folioPressable(interaction, scaleTo = 0.93f)
             .clip(FolioShapes.pill)
-            .background(
-                if (selected) colors.accentProgress.copy(alpha = 0.14f) else Color.Transparent,
-                FolioShapes.pill,
-            )
+            .background(pillFill, FolioShapes.pill)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -232,19 +258,44 @@ private fun FolioNavItem(
                 Icon(
                     item.icon,
                     contentDescription = item.label,
-                    tint = if (selected) colors.accentProgress else colors.onSurfaceVariant,
-                    modifier = Modifier.size(if (selected) 19.dp else 21.dp),
+                    tint = iconTint,
+                    modifier = Modifier.size(iconSize),
                 )
             }
-            if (labelAlpha > 0f) {
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    text = item.label,
-                    style = FolioTheme.typography.labelSmall,
-                    color = colors.accentProgress,
-                    maxLines = 1,
-                    modifier = Modifier.graphicsLayer { alpha = labelAlpha },
-                )
+            // The label's *slot* grows 0 -> full width in step with its alpha and
+            // the box-width spring. Entering at full width in one frame used to
+            // shove the centred icon toward the leading edge before the text was
+            // even visible; expandHorizontally keeps the reflow continuous.
+            AnimatedVisibility(
+                visible = selected,
+                enter = expandHorizontally(
+                    animationSpec = if (motion) {
+                        spring(stiffness = 700f, visibilityThreshold = IntSize.VisibilityThreshold)
+                    } else {
+                        snap()
+                    },
+                ) + fadeIn(
+                    animationSpec = if (motion) spring(stiffness = 900f) else snap(),
+                ),
+                exit = shrinkHorizontally(
+                    animationSpec = if (motion) {
+                        spring(stiffness = 700f, visibilityThreshold = IntSize.VisibilityThreshold)
+                    } else {
+                        snap()
+                    },
+                ) + fadeOut(
+                    animationSpec = if (motion) spring(stiffness = 900f) else snap(),
+                ),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = item.label,
+                        style = FolioTheme.typography.labelSmall,
+                        color = labelColor,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

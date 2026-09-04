@@ -110,7 +110,7 @@ data class MangaCategory(
 data class MangaTopEntry(
     val mangaId: String,
     val title: String,
-    val readChapters: Int,
+    val readMinutes: Long,
 )
 
 data class MangaStatistics(
