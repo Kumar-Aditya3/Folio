@@ -42,6 +42,10 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -70,6 +74,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -130,6 +135,12 @@ fun LibraryScreen(
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     var overflowOpen by remember { mutableStateOf(false) }
     var mangaOverflowOpen by remember { mutableStateOf(false) }
+    // View mode, sort and (manga) shelf filters live in their own "Display" menu.
+    // They used to share the overflow with Tags, Revisit, Browse sources, history
+    // and both backup routes, which made a twenty-item menu that ran the height of
+    // the screen — the manga one especially.
+    var displayOpen by remember { mutableStateOf(false) }
+    var mangaDisplayOpen by remember { mutableStateOf(false) }
     var seriesFilterOpen by remember { mutableStateOf(false) }
     var collectionFilterOpen by remember { mutableStateOf(false) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
@@ -175,6 +186,40 @@ fun LibraryScreen(
     ).collectAsState(initial = null as List<Book>?)
 
     val mangaMode = libraryMode == LibraryMode.MANGA && mangaContent != null
+    // The masthead collapses off whatever the shelf below it consumed, so the grid
+    // dissolves into the bar the way Home's hero does instead of sliding under a
+    // fixed slab of chrome.
+    val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    // A green tick with a red "1" on it was the loudest object in the bar and said
+    // nothing a reader can act on. The badge now appears only when sync actually
+    // wants attention.
+    val syncNeedsAttention = syncState != null && syncState.isConfigured && (
+        syncState.isSyncing ||
+            syncState.lastError != null ||
+            syncState.quotaLimited ||
+            (syncState.pendingUploadCount + syncState.pendingDownloadCount) > 0
+        )
+
+    // The books rail: the Books/Manga switch, then the status and grouping filters,
+    // on one scrollable row. Built here so the masthead can fold it away as a unit.
+    val railContent: (@Composable () -> Unit)? =
+        if (mangaMode) null else ({
+            LibraryFilterChips(
+                filter = filter,
+                allSeries = allSeries,
+                allCollections = allCollections,
+                seriesFilterOpen = seriesFilterOpen,
+                collectionFilterOpen = collectionFilterOpen,
+                onFilterChange = { filter = it },
+                onSeriesFilterOpen = { seriesFilterOpen = it },
+                onCollectionFilterOpen = { collectionFilterOpen = it },
+                leading = if (mangaContent != null) {
+                    ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
+                } else {
+                    null
+                },
+            )
+        })
 
     Column(modifier = Modifier.fillMaxSize()) {
         when {
@@ -237,9 +282,13 @@ fun LibraryScreen(
             }
             else -> {
             com.folio.reader.ui.components.FolioTopBar(
-                title = "Folio",
+                // The screen's own name. "Folio" belongs on Home, where the mark and
+                // the wordmark form the masthead; repeating it here left the library
+                // as the only top-level screen that never said what it was.
+                title = "Library",
+                collapse = headerState.collapse,
                 actions = {
-                    if (syncState != null) {
+                    if (syncState != null && syncNeedsAttention) {
                         com.folio.reader.ui.components.SyncStatusBadge(
                             syncState = syncState,
                             onClick = onSyncNow
@@ -251,33 +300,25 @@ fun LibraryScreen(
                     IconButton(onClick = { if (mangaMode) onMangaImportClick() else onImportClick() }) {
                         Icon(Icons.Filled.Add, contentDescription = "Import")
                     }
-                    if (showSettingsAction) {
-                        IconButton(onClick = onSettingsClick) {
-                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                        }
-                    }
+                    // Settings moved into the overflow. Five action slots plus the mark
+                    // left the masthead ~80dp for its own name, which is how "Library"
+                    // became "Lib…"; a destination belongs in a menu, not on the rail.
+                    // Display: how the shelf is drawn and ordered. Splitting this out
+                    // of the overflow is what got both menus back to a readable length.
                     Box {
-                        IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        IconButton(onClick = { if (mangaMode) mangaDisplayOpen = true else displayOpen = true }) {
+                            Icon(Icons.Filled.Tune, contentDescription = "Display and sort")
                         }
                         if (mangaMode) {
-                            DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Grid view") },
-                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.GRID) },
-                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.GRID) },
+                            DropdownMenu(expanded = mangaDisplayOpen, onDismissRequest = { mangaDisplayOpen = false }) {
+                                com.folio.reader.ui.components.FolioMenuLabel("View")
+                                ViewModeRow(
+                                    selected = mangaViewMode.ordinal,
+                                    onSelect = { index ->
+                                        onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.entries[index])
+                                    },
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("List view") },
-                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.LIST) },
-                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.LIST) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Compact view") },
-                                    leadingIcon = { ViewCheck(mangaViewMode == com.folio.reader.ui.manga.MangaViewMode.COMPACT) },
-                                    onClick = { mangaOverflowOpen = false; onMangaViewModeChange(com.folio.reader.ui.manga.MangaViewMode.COMPACT) },
-                                )
-                                HorizontalDivider()
+                                com.folio.reader.ui.components.FolioMenuLabel("Sort")
                                 com.folio.reader.ui.manga.MangaSortBy.entries.forEach { o ->
                                     val active = mangaLibraryViewModel?.sortBy?.value == o
                                     DropdownMenuItem(
@@ -286,12 +327,12 @@ fun LibraryScreen(
                                         },
                                         leadingIcon = { ViewCheck(active) },
                                         onClick = {
-                                            mangaOverflowOpen = false
+                                            mangaDisplayOpen = false
                                             mangaLibraryViewModel?.sortBy?.value = o
                                         },
                                     )
                                 }
-                                HorizontalDivider()
+                                com.folio.reader.ui.components.FolioMenuLabel("Filter")
                                 com.folio.reader.ui.manga.MangaLibFilter.entries.forEach { f ->
                                     val active = f in mangaActiveFilters
                                     DropdownMenuItem(
@@ -303,13 +344,68 @@ fun LibraryScreen(
                                         onClick = { mangaLibraryViewModel?.toggleFilter(f) },
                                     )
                                 }
+                            }
+                        } else {
+                            DropdownMenu(expanded = displayOpen, onDismissRequest = { displayOpen = false }) {
+                                val bookFriendlyNames = linkedMapOf(
+                                    LibraryViewModel.SortBy.LAST_OPENED to "Recently opened",
+                                    LibraryViewModel.SortBy.DATE_ADDED to "Date added",
+                                    LibraryViewModel.SortBy.TITLE to "Title",
+                                    LibraryViewModel.SortBy.AUTHOR to "Author",
+                                    LibraryViewModel.SortBy.PROGRESS to "Progress",
+                                    LibraryViewModel.SortBy.READING_TIME to "Length",
+                                    LibraryViewModel.SortBy.COMPLETION_DATE to "Completion date",
+                                    LibraryViewModel.SortBy.FILE_SIZE to "File size",
+                                )
+                                com.folio.reader.ui.components.FolioMenuLabel("View")
+                                ViewModeRow(
+                                    selected = booksViewMode.ordinal,
+                                    onSelect = { index ->
+                                        onBooksViewModeChange(LibraryViewModel.ViewMode.entries[index])
+                                    },
+                                )
+                                com.folio.reader.ui.components.FolioMenuLabel("Sort")
+                                bookFriendlyNames.forEach { (option, label) ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                label,
+                                                color = if (option == sortBy) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
+                                            )
+                                        },
+                                        leadingIcon = { ViewCheck(option == sortBy) },
+                                        onClick = { displayOpen = false; sortBy = option },
+                                    )
+                                }
                                 HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(if (sortAscending) "Ascending" else "Descending") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (sortAscending) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = FolioTheme.colors.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = { displayOpen = false; sortAscending = !sortAscending },
+                                )
+                            }
+                        }
+                    }
+                    // Overflow: destinations and one-off actions only.
+                    Box {
+                        IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        if (mangaMode) {
+                            DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
                                 DropdownMenuItem(
                                     text = { Text("Browse sources") },
                                     onClick = { mangaOverflowOpen = false; onMangaBrowseClick() },
                                 )
-                                // Downloads moved to the chip row on the manga shelf (with a
-                                // live queue count) — the overflow item was redundant.
+                                // Downloads live on the manga rail (with a live queue
+                                // count) — the overflow item was redundant.
                                 DropdownMenuItem(
                                     text = { Text("Reading history") },
                                     onClick = { mangaOverflowOpen = false; onMangaHistoryClick() },
@@ -326,68 +422,30 @@ fun LibraryScreen(
                                 }
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Import Mihon backup") },
+                                    text = { Text("Import backup") },
                                     onClick = { mangaOverflowOpen = false; onMangaBackupImport() },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Export Mihon backup") },
+                                    text = { Text("Export backup") },
                                     onClick = { mangaOverflowOpen = false; onMangaBackupExport() },
                                 )
+                                if (showSettingsAction) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("Settings") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Settings,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        },
+                                        onClick = { mangaOverflowOpen = false; onSettingsClick() },
+                                    )
+                                }
                             }
                         } else {
                             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                                val bookFriendlyNames = linkedMapOf(
-                                    LibraryViewModel.SortBy.LAST_OPENED to "Recently opened",
-                                    LibraryViewModel.SortBy.DATE_ADDED to "Date added",
-                                    LibraryViewModel.SortBy.TITLE to "Title",
-                                    LibraryViewModel.SortBy.AUTHOR to "Author",
-                                    LibraryViewModel.SortBy.PROGRESS to "Progress",
-                                    LibraryViewModel.SortBy.READING_TIME to "Length",
-                                    LibraryViewModel.SortBy.COMPLETION_DATE to "Completion date",
-                                    LibraryViewModel.SortBy.FILE_SIZE to "File size",
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Grid view") },
-                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.GRID) },
-                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.GRID) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("List view") },
-                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.LIST) },
-                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.LIST) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Compact view") },
-                                    leadingIcon = { ViewCheck(booksViewMode == LibraryViewModel.ViewMode.COMPACT) },
-                                    onClick = { overflowOpen = false; onBooksViewModeChange(LibraryViewModel.ViewMode.COMPACT) },
-                                )
-                                HorizontalDivider()
-                                bookFriendlyNames.forEach { (option, label) ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                label,
-                                                color = if (option == sortBy) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
-                                            )
-                                        },
-                                        leadingIcon = { ViewCheck(option == sortBy) },
-                                        onClick = { overflowOpen = false; sortBy = option },
-                                    )
-                                }
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text(if (sortAscending) "Ascending" else "Descending") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Filled.KeyboardArrowDown,
-                                            contentDescription = null,
-                                            tint = if (sortAscending) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.primary,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    },
-                                    onClick = { overflowOpen = false; sortAscending = !sortAscending },
-                                )
-                                HorizontalDivider()
                                 DropdownMenuItem(
                                     text = { Text("Tags") },
                                     onClick = { overflowOpen = false; onTagManagerClick() }
@@ -396,87 +454,88 @@ fun LibraryScreen(
                                     text = { Text("Revisit Items") },
                                     onClick = { overflowOpen = false; onRevisitClick() }
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("Quotes") },
+                                    onClick = { overflowOpen = false; onQuoteBrowserClick() }
+                                )
+                                // Desktop reaches Stats from here; the Android host has
+                                // it in the nav capsule and passes null.
+                                if (onOpenStats != null) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("Stats") },
+                                        onClick = { overflowOpen = false; onOpenStats() }
+                                    )
+                                }
+                                if (showSettingsAction) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("Settings") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Settings,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        },
+                                        onClick = { overflowOpen = false; onSettingsClick() },
+                                    )
+                                }
                             }
                         }
                     }
-                }
+                },
+                // One rail instead of three stacked rows. The Books/Manga switch leads
+                // the same scrollable row the filters live on, and the whole row folds
+                // up under the bar as the shelf scrolls. In manga mode the shelf's own
+                // rail carries the switch (MangaLibraryScreen.railLeading), so there is
+                // still exactly one row either way.
+                rail = railContent,
             )
             }
         }
 
-            // Books/Manga narrows *this* shelf (Rule 4: chips filter, never navigate),
-            // so the pair only renders where a manga surface actually exists. Home
-            // passes mangaContent = null and used to draw a Manga chip anyway, whose
-            // tap hit the default no-op onLibraryModeChange and did nothing at all.
-            if (mangaContent != null || onOpenStats != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = com.folio.reader.ui.theme.FolioTokens.gutter)
-                        .padding(top = com.folio.reader.ui.theme.FolioTokens.space1),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (mangaContent != null) {
-                        com.folio.reader.ui.components.FolioChip(
-                            selected = !mangaMode,
-                            onClick = {
-                                if (mangaMode) onLibraryModeChange(LibraryMode.BOOKS)
-                            },
-                            label = "Books",
-                        )
-                        com.folio.reader.ui.components.FolioChip(
-                            selected = mangaMode,
-                            onClick = {
-                                if (!mangaMode) onLibraryModeChange(LibraryMode.MANGA)
-                            },
-                            label = "Manga",
-                        )
-                    }
-                    // Stats is a destination, not a filter (Rule 4): its chip navigates.
-                    if (onOpenStats != null) {
-                        com.folio.reader.ui.components.FolioChip(
-                            selected = false,
-                            onClick = onOpenStats,
-                            label = "Stats",
-                        )
-                    }
-                }
-            }
-
+        // The shelf passes its scroll up to the masthead through nested scroll, so no
+        // grid or list had to hoist its own state to get the collapse.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .nestedScroll(headerState.nestedScrollConnection)
+        ) {
             androidx.compose.animation.Crossfade(
                 targetState = libraryMode,
                 modifier = Modifier.fillMaxSize(),
             ) { mode ->
-            if (mode == LibraryMode.MANGA) {
-                mangaContent?.invoke()
-            } else {
-                LibraryContent(
-                    books = books,
-                    viewMode = booksViewMode,
-                    sortBy = sortBy,
-                    sortAscending = sortAscending,
-                    filter = filter,
-                    allSeries = allSeries,
-                    allCollections = allCollections,
-                    selectedBooks = selectedBooks,
-                    isSelectionMode = isSelectionMode,
-                    finishEstimates = finishEstimates,
-                    onViewMode = onBooksViewModeChange,
-                    onSortChange = { sortBy = it },
-                    onDirectionChange = { sortAscending = it },
-                    onFilterChange = { filter = it },
-                    onSeriesFilterOpen = { seriesFilterOpen = it },
-                    onCollectionFilterOpen = { collectionFilterOpen = it },
-                    seriesFilterOpen = seriesFilterOpen,
-                    collectionFilterOpen = collectionFilterOpen,
-                    onBookClick = { if (isSelectionMode) viewModel.toggleSelection(it.id) else onBookDetailClick(it) },
-                    onBookLongClick = { viewModel.toggleSelection(it.id) },
-                    onDeleteBook = { bookToDelete = it },
-                    onImportClick = onImportClick
-                )
+                if (mode == LibraryMode.MANGA) {
+                    mangaContent?.invoke()
+                } else {
+                    LibraryContent(
+                        books = books,
+                        viewMode = booksViewMode,
+                        sortBy = sortBy,
+                        sortAscending = sortAscending,
+                        filter = filter,
+                        allSeries = allSeries,
+                        allCollections = allCollections,
+                        selectedBooks = selectedBooks,
+                        isSelectionMode = isSelectionMode,
+                        finishEstimates = finishEstimates,
+                        onViewMode = onBooksViewModeChange,
+                        onSortChange = { sortBy = it },
+                        onDirectionChange = { sortAscending = it },
+                        onFilterChange = { filter = it },
+                        onSeriesFilterOpen = { seriesFilterOpen = it },
+                        onCollectionFilterOpen = { collectionFilterOpen = it },
+                        seriesFilterOpen = seriesFilterOpen,
+                        collectionFilterOpen = collectionFilterOpen,
+                        onBookClick = { if (isSelectionMode) viewModel.toggleSelection(it.id) else onBookDetailClick(it) },
+                        onBookLongClick = { viewModel.toggleSelection(it.id) },
+                        onDeleteBook = { bookToDelete = it },
+                        onImportClick = onImportClick
+                    )
+                }
             }
-            }
+        }
         }
 }
 
@@ -506,21 +565,10 @@ private fun LibraryContent(
     onImportClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Filter chips are owned by LibraryFilters.kt (§6). The inline copy that
-        // used to live here was the "conflicting overloads" hazard from the last
-        // split: a moved composable must be deleted from its source file.
-        LibraryFilterChips(
-            filter = filter,
-            allSeries = allSeries,
-            allCollections = allCollections,
-            seriesFilterOpen = seriesFilterOpen,
-            collectionFilterOpen = collectionFilterOpen,
-            onFilterChange = onFilterChange,
-            onSeriesFilterOpen = onSeriesFilterOpen,
-            onCollectionFilterOpen = onCollectionFilterOpen
-        )
-        Spacer(Modifier.height(com.folio.reader.ui.theme.FolioTokens.space1))
-
+        // The filter chips now ride the masthead's rail (LibraryScreen's `railContent`),
+        // where they fold away with it as the shelf scrolls, so the shelf itself starts
+        // straight at the content. The filter/sort parameters below are still the ones
+        // the rail and the Display menu write through.
         if (books == null) {
             com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
         } else if (books.isEmpty()) {
@@ -569,6 +617,76 @@ private fun LibraryContent(
                     selectedBooks,
                     isSelectionMode,
                     finishEstimates
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The Books/Manga switch.
+ *
+ * Public because the manga shelf carries it on *its* rail: in manga mode the shelf
+ * already needs a row for categories, downloads and the collection editor, so the
+ * switch joins that row instead of adding a second one above it.
+ *
+ * A segmented track rather than two chips: the choice is exclusive, and one track
+ * costs a third of the width two chips did — which is what let the rail hold the
+ * switch and the filters at once.
+ */
+@Composable
+fun LibraryModeSwitch(
+    mode: LibraryMode,
+    onModeChange: (LibraryMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    com.folio.reader.ui.components.FolioSegmented(
+        options = listOf("Books", "Manga"),
+        selectedIndex = if (mode == LibraryMode.MANGA) 1 else 0,
+        onSelect = { index ->
+            onModeChange(if (index == 1) LibraryMode.MANGA else LibraryMode.BOOKS)
+        },
+        modifier = modifier,
+    )
+}
+
+/**
+ * View mode as one row of three marks at the head of the Display menu, instead of
+ * three menu items with tick icons. The choice is visual, so the control is too —
+ * and it saves two thirds of the vertical space those items used.
+ */
+@Composable
+private fun ViewModeRow(selected: Int, onSelect: (Int) -> Unit) {
+    val shape = com.folio.reader.ui.theme.FolioShapes.pill
+    val icons = listOf(
+        Icons.Filled.GridView,
+        Icons.AutoMirrored.Filled.ViewList,
+        Icons.Filled.ViewAgenda,
+    )
+    val labels = listOf("Grid view", "List view", "Compact view")
+    Row(
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icons.forEachIndexed { index, icon ->
+            val active = index == selected
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(shape)
+                    .background(
+                        if (active) FolioTheme.colors.primary.copy(alpha = 0.18f) else Color.Transparent,
+                        shape,
+                    )
+                    .clickable { onSelect(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = labels[index],
+                    tint = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

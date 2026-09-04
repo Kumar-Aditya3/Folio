@@ -53,6 +53,7 @@ import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
 
 /**
  * The books shelf, rebuilt as a **shelf** rather than a grid of database rows.
@@ -100,7 +101,7 @@ fun BookGrid(
             start = FolioTokens.gutter,
             end = FolioTokens.gutter,
             top = FolioTokens.space3,
-            bottom = FolioTokens.spaceMovement,
+            bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
         ),
         verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat),
         horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)

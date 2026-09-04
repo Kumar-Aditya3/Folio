@@ -9,6 +9,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import com.folio.reader.manga.MangaChallenges
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import eu.kanade.tachiyomi.util.system.isOutdated
 import eu.kanade.tachiyomi.util.system.toast
@@ -47,13 +48,21 @@ class CloudflareInterceptor(
             val oldCookie = cookieManager.get(request.url)
                 .firstOrNull { it.name == "cf_clearance" }
             resolveWithWebView(request, oldCookie)
+            // Whatever was blocking this host is gone; drop any prompt the UI is
+            // still showing for it.
+            MangaChallenges.clearedFor(request.url.host)
 
             return chain.proceed(request)
         }
         // Because OkHttp's enqueue only handles IOExceptions, wrap the exception so that
         // we don't crash the entire app
         catch (e: CloudflareBypassException) {
-            throw IOException("Could not bypass Cloudflare challenge", e)
+            // A headless WebView can only clear challenges that clear themselves. A
+            // Turnstile checkbox or an image puzzle needs a human, and an OkHttp
+            // interceptor has no window to show one in — so publish the blocked URL
+            // and let the browse UI open a WebView the reader can actually touch.
+            MangaChallenges.record(request.url.toString(), request.header("User-Agent"))
+            throw IOException(MangaChallenges.BLOCKED_MESSAGE, e)
         } catch (e: Exception) {
             throw IOException(e)
         }

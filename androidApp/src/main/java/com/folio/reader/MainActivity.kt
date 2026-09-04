@@ -219,17 +219,37 @@ class MainActivity : ComponentActivity() {
             // made the two bleed into each other.
             val isReadingScreen =
                 currentRoute == FolioRoutes.READER || currentRoute == FolioRoutes.MANGA_READER
-            LaunchedEffect(isReadingScreen) {
-                // Outside the reader the status bar sits on the theme's dark ink
-                // band, so icons are always light there; readers own their bars.
+            val appPalette = AppPalette.byId(model.globalSettings.appThemeId)
+            // A source behind an interactive bot check needs a window with a finger in
+            // it, which an OkHttp interceptor does not have. Registering the opener
+            // here (and dropping it on dispose) is what lets shared browse code offer
+            // "solve in browser view" without knowing anything about Android.
+            androidx.compose.runtime.DisposableEffect(appPalette, model.globalSettings.fontThemeId) {
+                com.folio.reader.manga.MangaChallenges.solver = { challenge ->
+                    startActivity(
+                        com.folio.reader.manga.ChallengeWebViewActivity.intent(
+                            context = this@MainActivity,
+                            challenge = challenge,
+                            paletteId = appPalette.id,
+                            fontThemeId = model.globalSettings.fontThemeId,
+                        )
+                    )
+                }
+                onDispose { com.folio.reader.manga.MangaChallenges.solver = null }
+            }
+            LaunchedEffect(isReadingScreen, appPalette) {
+                // Outside the reader the status bar sits on the *page*, whose scrim
+                // now follows the palette, so the icons have to invert with it:
+                // dark icons over a light theme, light icons over a dark one.
+                // Readers own their bars.
                 if (!isReadingScreen) {
                     androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
-                        .isAppearanceLightStatusBars = false
+                        .isAppearanceLightStatusBars = !appPalette.isDark
                 }
             }
 
             FolioTheme.AppTheme(
-                palette = AppPalette.byId(model.globalSettings.appThemeId),
+                palette = appPalette,
                 fontTheme = FontTheme.byId(model.globalSettings.fontThemeId)
             ) {
                 // The app's ground plane. `folioField` replaces the flat

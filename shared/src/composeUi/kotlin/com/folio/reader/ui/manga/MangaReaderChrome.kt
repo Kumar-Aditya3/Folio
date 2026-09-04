@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioSlider
+import com.folio.reader.ui.settings.readableLabel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -65,22 +66,22 @@ internal fun ReaderSettingsDialog(
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ReaderModeChip(
-                        label = "Webtoon (continuous vertical)",
+                        label = MangaReaderMode.WEBTOON.readableLabel(),
                         selected = mode == MangaReaderMode.WEBTOON,
                         onClick = { onModeChange(MangaReaderMode.WEBTOON) },
                     )
                     ReaderModeChip(
-                        label = "Paged (left to right)",
+                        label = MangaReaderMode.PAGED_LTR.readableLabel(),
                         selected = mode == MangaReaderMode.PAGED_LTR,
                         onClick = { onModeChange(MangaReaderMode.PAGED_LTR) },
                     )
                     ReaderModeChip(
-                        label = "Paged (right to left)",
+                        label = MangaReaderMode.PAGED_RTL.readableLabel(),
                         selected = mode == MangaReaderMode.PAGED_RTL,
                         onClick = { onModeChange(MangaReaderMode.PAGED_RTL) },
                     )
                     ReaderModeChip(
-                        label = "Paged (vertical)",
+                        label = MangaReaderMode.PAGED_VERTICAL.readableLabel(),
                         selected = mode == MangaReaderMode.PAGED_VERTICAL,
                         onClick = { onModeChange(MangaReaderMode.PAGED_VERTICAL) },
                     )
@@ -136,7 +137,7 @@ internal fun ReaderControls(
     val overlayColor = Color.Black.copy(alpha = 0.72f)
 
     Column(Modifier.fillMaxSize()) {
-        com.folio.reader.ui.components.FolioStatusBarBand()
+        com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
         Row(
             modifier = Modifier
                 .fillMaxWidth()

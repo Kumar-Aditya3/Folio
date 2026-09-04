@@ -68,7 +68,7 @@ internal fun ReaderTopBar(
     onToggleReaderPanel: () -> Unit
 ) {
     Column(Modifier.fillMaxWidth()) {
-        com.folio.reader.ui.components.FolioStatusBarBand()
+        com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
         Row(
             modifier = Modifier
                 .fillMaxWidth()

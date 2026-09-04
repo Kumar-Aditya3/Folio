@@ -1,4 +1,4 @@
-package com.folio.reader
+﻿package com.folio.reader
 
 import com.folio.reader.database.BookRepository
 import com.folio.reader.database.ReadingSessionRepository
@@ -26,12 +26,15 @@ import com.folio.reader.manga.MangaPageRef
 import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.manga.MangaStatistics
+import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.CloudState
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
+import com.folio.reader.ui.home.HomeItemKind
 import com.folio.reader.ui.home.HomeViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +46,7 @@ import kotlinx.datetime.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.hours
 
 /**
  * §11.4 Phase 9: the manga Continue-reading card (cap 3, library-only,
@@ -234,6 +238,15 @@ class HomeMangaCardsTest {
         }
     }
 
+    /** Chapter pace source for the §11.4 manga predictions. */
+    private class FakeMangaStatsRepo(private val week: List<Int>) : MangaStatisticsRepository {
+        var lastExclusions: Set<Pair<Scope, String>>? = null
+        override suspend fun getStatistics(exclusions: Set<Pair<Scope, String>>): MangaStatistics {
+            lastExclusions = exclusions
+            return MangaStatistics(weekReadChapters = week)
+        }
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private fun entry(id: String, sourceId: Long = 10L, inLibrary: Boolean = true): MangaEntry =
@@ -250,14 +263,27 @@ class HomeMangaCardsTest {
     private fun historyRow(
         mangaId: String,
         chapterId: String? = "ch-$mangaId",
-        chapterName: String? = "Chapter of $mangaId"
+        chapterName: String? = "Chapter of $mangaId",
+        readAt: kotlinx.datetime.Instant = Clock.System.now()
     ): MangaHistoryItem =
         MangaHistoryItem(
             mangaId = mangaId,
             chapterId = chapterId,
-            readAt = Clock.System.now(),
+            readAt = readAt,
             chapterName = chapterName
         )
+
+    /** An in-progress book whose last-open time can be placed against manga history. */
+    private fun book(id: String, lastOpenedAt: kotlinx.datetime.Instant): Book = Book(
+        id = id,
+        title = "Book $id",
+        authors = listOf("Author $id"),
+        epubHash = "hash-$id",
+        epubFileSize = 1_000L,
+        addedAt = lastOpenedAt,
+        lastOpenedAt = lastOpenedAt,
+        status = BookStatus.READING
+    )
 
     private fun homeViewModel(
         books: List<Book> = emptyList(),
@@ -266,7 +292,8 @@ class HomeMangaCardsTest {
         history: FakeHistoryRepo? = null,
         chapters: FakeChapterRepo? = null,
         categories: FakeCategoryRepo? = null,
-        backend: MangaBackend? = null
+        backend: MangaBackend? = null,
+        stats: MangaStatisticsRepository? = null
     ): HomeViewModel = HomeViewModel(
         bookRepository = FakeBookRepo(books),
         sessionRepository = FakeSessionRepo(),
@@ -275,7 +302,8 @@ class HomeMangaCardsTest {
         mangaHistoryRepository = history,
         mangaChapterRepository = chapters,
         mangaCategoryRepository = categories,
-        mangaBackend = backend
+        mangaBackend = backend,
+        mangaStatisticsRepository = stats
     )
 
     // ── §11.4 acceptance ─────────────────────────────────────────────────────
@@ -429,6 +457,93 @@ class HomeMangaCardsTest {
         HomeViewModel.resetDiscoverCache()
         viewModel.state.first()
         assertEquals(2, backend.browseCount)
+        Unit
+    }
+
+    // ── Reading now: one ranked list across both libraries ──────────────────────
+
+    @Test
+    fun `reading now interleaves books and manga by last activity`() = runBlocking {
+        val now = Clock.System.now()
+        val state = homeViewModel(
+            books = listOf(
+                book("older-book", now - 3.hours),
+                book("newest-book", now)
+            ),
+            mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
+            history = FakeHistoryRepo(listOf(historyRow("m1", readAt = now - 1.hours))),
+            chapters = FakeChapterRepo()
+        ).state.first()
+
+        assertEquals(
+            listOf("newest-book", "m1", "older-book"),
+            state.readingNow.map { it.id },
+            "the manga must sort between the two books, not after them"
+        )
+        assertEquals(
+            listOf(HomeItemKind.BOOK, HomeItemKind.MANGA, HomeItemKind.BOOK),
+            state.readingNow.map { it.kind }
+        )
+        Unit
+    }
+
+    @Test
+    fun `reading now carries the manga backlog projection`() = runBlocking {
+        val stats = FakeMangaStatsRepo(List(7) { 2 })
+        val state = homeViewModel(
+            mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
+            history = FakeHistoryRepo(listOf(historyRow("m1", chapterName = null))),
+            chapters = FakeChapterRepo(unreadMap = mapOf("m1" to 12)),
+            stats = stats
+        ).state.first()
+
+        val card = state.readingNow.single()
+        // 12 unread at 2 chapters/day ⇒ six days.
+        assertEquals("12 unread · ~6 days", card.caption)
+        assertTrue(
+            card.estimate!!.startsWith("On pace to clear 12 unread in ~6 days"),
+            "the anchor form should match the book estimate's phrasing, got: ${card.estimate}"
+        )
+        Unit
+    }
+
+    @Test
+    fun `a manga with no pace states the backlog without inventing a date`() = runBlocking {
+        val state = homeViewModel(
+            mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
+            history = FakeHistoryRepo(listOf(historyRow("m1", chapterName = null))),
+            chapters = FakeChapterRepo(unreadMap = mapOf("m1" to 5)),
+            stats = FakeMangaStatsRepo(List(7) { 0 })
+        ).state.first()
+
+        assertEquals("5 unread", state.readingNow.single().caption)
+        assertEquals("5 unread", state.readingNow.single().estimate)
+        Unit
+    }
+
+    @Test
+    fun `excluded manga never reach reading now`() = runBlocking {
+        val state = homeViewModel(
+            exclusions = FakeExclusionRepo(setOf(Scope.MANGA to "m1")),
+            mangaRepo = FakeMangaRepo().apply {
+                upsert(entry("m1"))
+                upsert(entry("m2"))
+            },
+            history = FakeHistoryRepo(listOf(historyRow("m1"), historyRow("m2"))),
+            chapters = FakeChapterRepo()
+        ).state.first()
+
+        assertEquals(listOf("m2"), state.readingNow.map { it.id })
+        Unit
+    }
+
+    @Test
+    fun `without manga repositories reading now is books only`() = runBlocking {
+        val now = Clock.System.now()
+        val state = homeViewModel(books = listOf(book("b1", now))).state.first()
+
+        assertEquals(listOf("b1"), state.readingNow.map { it.id })
+        assertTrue(state.readingNow.all { it.kind == HomeItemKind.BOOK })
         Unit
     }
 }

@@ -47,7 +47,9 @@ fun SyncStatusBadge(
         else -> Triple(
             Icons.Filled.CheckCircle,
             "Synced",
-            FolioTheme.colors.primary
+            // Quiet when there is nothing to do: a filled tick in the accent was the
+            // brightest object in the top bar and reported "nothing happened".
+            FolioTheme.colors.onSurfaceVariant
         )
     }
 
@@ -60,15 +62,12 @@ fun SyncStatusBadge(
         BadgedBox(
             badge = {
                 if (pendingCount > 0 && syncState.isConfigured && !syncState.quotaLimited) {
+                    // A dot, not a count: the number was not actionable and a red "1"
+                    // over the tick read as an error.
                     Badge(
-                        containerColor = FolioTheme.colors.error,
-                        contentColor = FolioTheme.colors.onError
-                    ) {
-                        Text(
-                            text = if (pendingCount > 99) "99+" else pendingCount.toString(),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
+                        modifier = Modifier.size(7.dp),
+                        containerColor = FolioTheme.colors.primary,
+                    )
                 }
             }
         ) {
@@ -76,7 +75,7 @@ fun SyncStatusBadge(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = tint,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(21.dp)
             )
         }
     }

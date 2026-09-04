@@ -1,4 +1,4 @@
-package com.folio.reader.ui.home
+﻿package com.folio.reader.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,24 +16,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -41,7 +33,6 @@ import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaNewChapterBadge
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioRule
-import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.manga.MangaCover
@@ -61,7 +52,7 @@ import com.folio.reader.ui.theme.atmosphere
 
 /** Plate treatment for a network-loaded manga cover: same object language, own loader. */
 @Composable
-private fun MangaPlate(
+internal fun MangaPlate(
     backend: MangaBackend,
     sourceId: Long,
     thumbnailUrl: String?,
@@ -95,117 +86,13 @@ private fun MangaPlate(
     }
 }
 
-/**
- * §11.4 manga Continue reading — a shelf matching the books shelf exactly, with
- * progress as a seam on the plate's foot. The overflow item is the only path to
- * the source's web page; the primary tap always opens the reader.
- */
-@Composable
-internal fun MangaContinueCard(
-    items: List<MangaContinueItem>,
-    backend: MangaBackend,
-    onOpenReader: (String, String) -> Unit,
-    onOpenDetail: (String) -> Unit,
-    onOpenSourceWeb: (String) -> Unit
-) {
-    Column {
-        FolioSectionHead(
-            title = "Continue reading",
-            eyebrow = "Manga",
-            accent = FolioTheme.colors.accentDiscovery,
-            modifier = Modifier.padding(horizontal = FolioTokens.gutter),
-        )
-        Spacer(Modifier.height(FolioTokens.space3))
-        LazyRow(
-            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
-        ) {
-            items(items.size) { index ->
-                val item = items[index]
-                var menuOpen by remember { mutableStateOf(false) }
-                val interaction = rememberFolioInteraction()
-                Column(
-                    modifier = Modifier
-                        .width(FolioTokens.coverShelf)
-                        .folioPressable(interaction)
-                        .clickable(interactionSource = interaction, indication = null) {
-                            val chapter = item.chapterId
-                            if (chapter != null) onOpenReader(item.mangaId, chapter)
-                            else onOpenDetail(item.mangaId)
-                        }
-                ) {
-                    MangaPlate(
-                        backend = backend,
-                        sourceId = item.sourceId,
-                        thumbnailUrl = item.thumbnailUrl,
-                        coverPath = item.coverPath,
-                        width = FolioTokens.coverShelf,
-                        overlay = {
-                            if (item.progress > 0f) {
-                                Box(
-                                    Modifier
-                                        .align(Alignment.BottomStart)
-                                        .fillMaxWidth()
-                                        .height(3.dp)
-                                        .background(Color.Black.copy(alpha = 0.35f))
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth(item.progress)
-                                            .height(3.dp)
-                                            .background(FolioTheme.colors.accentProgress)
-                                    )
-                                }
-                            }
-                        },
-                    )
-                    Spacer(Modifier.height(FolioTokens.space2))
-                    Row(verticalAlignment = Alignment.Top) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                item.title,
-                                style = FolioTheme.typography.labelMedium,
-                                color = FolioTheme.colors.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            item.caption?.let { caption ->
-                                Text(
-                                    caption,
-                                    style = FolioTheme.typography.labelSmall,
-                                    color = FolioTheme.colors.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        if (item.webUrl != null) {
-                            Box {
-                                Icon(
-                                    Icons.Filled.MoreVert,
-                                    contentDescription = "Open on ${item.sourceName}",
-                                    tint = FolioTheme.colors.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .clickable { menuOpen = true }
-                                )
-                                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Open on ${item.sourceName}") },
-                                        onClick = {
-                                            menuOpen = false
-                                            onOpenSourceWeb(item.webUrl)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// §11.4 manga Continue reading used to live here as its own shelf. It is gone on
+// purpose: manga now rank alongside books in Home's Reading now (see
+// ReadingNowItem), so a second "Continue reading" heading further down the page
+// would have been the same question asked twice.
+//
+// MangaPlate survives because the merged shelf and anchor still need a
+// network-loaded cover in the plate language.
 
 /**
  * §11.4 "New chapters": up to 6 library manga with unread chapters, newest check

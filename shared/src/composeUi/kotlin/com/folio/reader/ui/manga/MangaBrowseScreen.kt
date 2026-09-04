@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
@@ -25,7 +26,11 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,7 +63,9 @@ fun MangaBrowseScreen(
     onOpenManga: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    val sources by viewModel.sources.collectAsState()
+    val sources by viewModel.visibleSources.collectAsState()
+    val availableLanguages by viewModel.availableLanguages.collectAsState()
+    val enabledLanguages by viewModel.sourceLanguages.collectAsState()
     val extensions by viewModel.extensions.collectAsState()
     val refreshing by viewModel.refreshingIndex.collectAsState()
     val globalQuery by viewModel.globalQuery.collectAsState()
@@ -67,6 +74,7 @@ fun MangaBrowseScreen(
     val searchActive by viewModel.searchActive.collectAsState()
     val preparing by viewModel.preparingSources.collectAsState()
     var queryText by remember { mutableStateOf(viewModel.globalQuery.value) }
+    var languageMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize()) {
@@ -78,6 +86,55 @@ fun MangaBrowseScreen(
             actions = {
                 IconButton(onClick = { viewModel.toggleSearch() }) {
                     Icon(Icons.Filled.Search, contentDescription = "Search all sources")
+                }
+                if (availableLanguages.size > 1) {
+                    // The language filter is what keeps one site from filling the list
+                    // with a row per language it publishes.
+                    Box {
+                        IconButton(onClick = { languageMenuOpen = true }) {
+                            Icon(Icons.Filled.Translate, contentDescription = "Source languages")
+                        }
+                        DropdownMenu(
+                            expanded = languageMenuOpen,
+                            onDismissRequest = { languageMenuOpen = false },
+                        ) {
+                            val allOn = enabledLanguages.containsAll(availableLanguages)
+                            DropdownMenuItem(
+                                text = { Text(if (allOn) "Only my languages" else "All languages") },
+                                onClick = {
+                                    viewModel.setSourceLanguages(
+                                        if (allOn) defaultSourceLanguages() else availableLanguages.toSet(),
+                                    )
+                                },
+                            )
+                            HorizontalDivider()
+                            availableLanguages.forEach { lang ->
+                                val on = lang in enabledLanguages
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            languageLabel(lang),
+                                            color = if (on) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (on) {
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = FolioTheme.colors.primary,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Spacer(Modifier.size(18.dp))
+                                        }
+                                    },
+                                    // Stays open: picking languages is a several-taps job.
+                                    onClick = { viewModel.toggleSourceLanguage(lang) },
+                                )
+                            }
+                        }
+                    }
                 }
                 if (viewModel.supportsExtensions) {
                     IconButton(onClick = { viewModel.refreshIndex() }) {
@@ -159,6 +216,11 @@ fun MangaBrowseScreen(
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
                 item {
+                    // A blocked source shows up here too: the reader may have hit the
+                    // check inside a source and come back to Browse.
+                    MangaChallengePrompt()
+                }
+                item {
                     Text(
                         "SOURCES",
                         style = MaterialTheme.typography.labelSmall,
@@ -170,36 +232,41 @@ fun MangaBrowseScreen(
                         SourceRow(source = source, onClick = { onOpenSource(source, "") })
                     }
                 }
-                val englishSources = sources.filter { !it.isLocal && it.lang == "en" }
-                val otherSources = sources.filter { !it.isLocal && it.lang != "en" }
-                if (englishSources.isNotEmpty()) {
-                    item(key = "hdr-en") {
+                // One group per language, English first: the same site publishing ten
+                // language editions used to arrive as ten identical-looking rows in a
+                // single "other languages" pile.
+                val remote = sources.filterNot { it.isLocal }
+                val grouped = remote
+                    .groupBy { it.lang.lowercase() }
+                    .toList()
+                    .sortedWith(
+                        compareByDescending<Pair<String, List<MangaSourceInfo>>> { it.first == "en" }
+                            .thenBy { languageLabel(it.first) },
+                    )
+                grouped.forEach { (lang, group) ->
+                    item(key = "hdr-$lang") {
                         Text(
-                            "ENGLISH",
+                            languageLabel(lang).uppercase(),
                             style = MaterialTheme.typography.labelSmall,
                             color = FolioTheme.colors.primary,
                             modifier = Modifier.padding(top = FolioTokens.space2),
                         )
                     }
-                    englishSources.forEach { source ->
+                    group.sortedBy { it.name.lowercase() }.forEach { source ->
                         item(key = "src-${source.id}") {
                             SourceRow(source = source, onClick = { onOpenSource(source, "") })
                         }
                     }
                 }
-                if (otherSources.isNotEmpty()) {
-                    item(key = "hdr-other") {
+                if (remote.isNotEmpty() && availableLanguages.any { it !in enabledLanguages }) {
+                    item(key = "lang-hint") {
                         Text(
-                            "OTHER LANGUAGES",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = FolioTheme.colors.primary,
+                            "Some sources are hidden by the language filter — open the " +
+                                "translate menu above to add languages.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = FolioTheme.colors.onSurfaceVariant,
                             modifier = Modifier.padding(top = FolioTokens.space2),
                         )
-                    }
-                    otherSources.forEach { source ->
-                        item(key = "src-${source.id}") {
-                            SourceRow(source = source, onClick = { onOpenSource(source, "") })
-                        }
                     }
                 }
                 if (viewModel.supportsExtensions) {
@@ -277,7 +344,7 @@ private fun SourceRow(source: MangaSourceInfo, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (source.isLocal) "CBZ, ZIP and image folders" else source.lang.uppercase(),
+                text = if (source.isLocal) "CBZ, ZIP and image folders" else languageLabel(source.lang),
                 style = MaterialTheme.typography.bodySmall,
                 color = FolioTheme.colors.onSurfaceVariant,
             )

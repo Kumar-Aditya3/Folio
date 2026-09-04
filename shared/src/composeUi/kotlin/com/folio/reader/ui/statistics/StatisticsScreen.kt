@@ -61,6 +61,7 @@ import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
@@ -112,7 +113,7 @@ fun StatisticsTabContent(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            bottom = FolioTokens.spaceMovement
+            bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current
         ),
     ) {
         // ── Rule 8 — an exclusion the user cannot see is invisible behavior ──

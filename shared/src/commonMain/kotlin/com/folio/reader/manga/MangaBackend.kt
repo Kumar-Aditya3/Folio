@@ -69,4 +69,19 @@ interface MangaBackend {
     suspend fun setShowNsfwSources(enabled: Boolean)
 
     suspend fun getShowNsfwSources(): Boolean
+
+    /**
+     * Source languages the user wants to browse, as lowercase ISO codes.
+     *
+     * One extension publishes one source *per language* — Webtoons alone ships a
+     * dozen — so an unfiltered browse list repeats the same site until it reads as
+     * duplicated rows. An empty set means "nothing recorded yet"; callers fall back
+     * to their own default (see `BrowseViewModel.defaultSourceLanguages`).
+     *
+     * Defaulted here because only the extension-capable backend has anything to
+     * store: the local source has no language.
+     */
+    suspend fun getSourceLanguages(): Set<String> = emptySet()
+
+    suspend fun setSourceLanguages(languages: Set<String>) = Unit
 }

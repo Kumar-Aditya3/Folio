@@ -207,7 +207,10 @@ fun RevisitItemsScreen(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = FolioTheme.colors.surface,
+                        // No fill: the same at-rest rule FolioTopBar follows. An opaque
+                        // surface here made the bar a grey lid over the page.
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
                         titleContentColor = FolioTheme.colors.onSurface
                     )
                 )

@@ -112,3 +112,62 @@ internal fun currentStreak(readDays: Set<LocalDate>, today: LocalDate): Int {
     }
     return streak
 }
+
+/**
+ * Chapters per day, averaged over the same seven-day window the word-count pace
+ * uses, or null when the week is too thin to extrapolate from.
+ *
+ * Manga has no word count, so the unit of progress is the chapter. Two chapters
+ * across a week is noise, not a pace — below that the caller shows nothing rather
+ * than a projection it would have to apologise for.
+ */
+fun mangaPaceChaptersPerDay(weekReadChapters: List<Int>): Double? {
+    if (weekReadChapters.isEmpty()) return null
+    val perDay = weekReadChapters.sum() / weekReadChapters.size.toDouble()
+    return if (perDay >= 0.3) perDay else null
+}
+
+/**
+ * Days before the unread backlog is cleared at the current chapter pace, or null
+ * when there is nothing to project.
+ */
+private fun mangaRemainingDays(unreadChapters: Int, chaptersPerDay: Double?): Long? {
+    if (unreadChapters <= 0) return null
+    val pace = chaptersPerDay ?: return null
+    if (pace <= 0.0) return null
+    val days = unreadChapters / pace
+    if (!days.isFinite() || days <= 0.0) return null
+    return days.toLong().coerceAtLeast(1)
+}
+
+/**
+ * Compact manga form for shelves: "12 unread · ~4 days", falling back to the
+ * unread count alone when the pace cannot carry a projection, and to null when
+ * there is nothing left to read.
+ *
+ * Deliberately the same horizon vocabulary as [finishHorizon]: a reader should not
+ * have to learn two dialects of "how long is left" because one shelf holds EPUBs
+ * and the other holds chapters.
+ */
+fun mangaFinishHorizon(unreadChapters: Int, chaptersPerDay: Double?): String? {
+    if (unreadChapters <= 0) return null
+    val unread = "$unreadChapters unread"
+    val days = mangaRemainingDays(unreadChapters, chaptersPerDay) ?: return unread
+    return "$unread · ${horizonPhrase(days)}"
+}
+
+/**
+ * The long manga form for the Home anchor, matching [finishEstimate]'s phrasing so
+ * the hero reads identically whether it is a book or a manga.
+ */
+fun mangaFinishEstimate(unreadChapters: Int, chaptersPerDay: Double?): String? {
+    val wholeDays = mangaRemainingDays(unreadChapters, chaptersPerDay)
+        ?: return if (unreadChapters > 0) "$unreadChapters unread" else null
+    val date = (Clock.System.now() + wholeDays.toInt().days)
+        .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
+    val months = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    val target = if (wholeDays <= 365) "${months[date.monthNumber - 1]} ${date.dayOfMonth}"
+        else "${months[date.monthNumber - 1]} ${date.year}"
+    return "On pace to clear $unreadChapters unread in ${horizonPhrase(wholeDays)} · around $target"
+}
+

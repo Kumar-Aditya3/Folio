@@ -122,6 +122,10 @@ class AndroidMangaBackend(
         extensionManager.installedExtensionsFlow.map { extensions ->
             val remote = extensions
                 .flatMap { ext -> ext.sources.map { it.toInfo(ext) } }
+                // Two extensions can expose the same source id (an old copy left
+                // installed alongside a fork). One row per id: the browse list keys
+                // its items by source id, and a duplicate key is a crash there.
+                .distinctBy { it.id }
             listOf(localAdapter.sourceInfo) + remote
         }.flowOn(kotlinx.coroutines.Dispatchers.IO)
 
@@ -305,6 +309,9 @@ class AndroidMangaBackend(
                 installed.none { it.pkgName == ext.pkgName } &&
                     untrusted.none { it.pkgName == ext.pkgName }
             }
+            // Two repositories carrying the same extension listed it twice, which is
+            // the other half of the "duplicates" the extensions screen showed.
+            .distinctBy { it.pkgName }
             .forEach { ext ->
                 entries += ExtensionEntry(
                     pkgName = ext.pkgName,
@@ -388,6 +395,18 @@ class AndroidMangaBackend(
 
     override suspend fun getShowNsfwSources(): Boolean = showNsfw.value
 
+    override suspend fun getSourceLanguages(): Set<String> =
+        settings.getRaw(KEY_SOURCE_LANGS)
+            ?.split(',')
+            ?.map { it.trim().lowercase() }
+            ?.filter { it.isNotEmpty() }
+            ?.toSet()
+            .orEmpty()
+
+    override suspend fun setSourceLanguages(languages: Set<String>) {
+        settings.setRaw(KEY_SOURCE_LANGS, languages.map { it.lowercase() }.sorted().joinToString(","))
+    }
+
     // ---------- Helpers ----------
 
     private suspend fun loadRepos(): List<MangaRepoInfo> {
@@ -465,6 +484,7 @@ class AndroidMangaBackend(
     companion object {
         private const val KEY_REPOS = "manga.repos"
         private const val KEY_NSFW = "manga.nsfw"
+        private const val KEY_SOURCE_LANGS = "manga.sourcelangs"
 
         /** Default community extension repository (Keiyoushi, full new-format catalog). */
         val DEFAULT_REPO = MangaRepoInfo(

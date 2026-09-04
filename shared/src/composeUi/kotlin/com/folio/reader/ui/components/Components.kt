@@ -220,97 +220,43 @@ fun FolioChip(
     }
 }
 
-/**
- * The screen's masthead. Editorial, not Material: the title carries the display
- * face at `headlineMedium`, the bar has **no fill of its own** so the page's field
- * runs behind it, and a hairline marks the boundary instead of a shadow.
- *
- * That single change removes the "grey band on top of every screen" that made the
- * old build read as a scaffold. [titleStyle] still lets the §13.9 collapsing Home
- * hero migrate its title in at a smaller size.
- *
- * Top-level destinations pass no [navigationIcon], so they get the Folio mark in
- * that slot: the four persistent screens (Folio, Home, Stats, More) then read as
- * one product masthead rather than four unrelated screen titles, while pushed
- * screens keep their back arrow exactly where it was.
- */
-@Composable
-fun FolioTopBar(
-    title: String,
-    modifier: Modifier = Modifier,
-    titleStyle: androidx.compose.ui.text.TextStyle? = null,
-    navigationIcon: (@Composable () -> Unit)? = null,
-    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
-) {
-    val colors = FolioTheme.colors
-    Column(modifier = modifier.fillMaxWidth()) {
-        FolioStatusBarBand()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(com.folio.reader.ui.theme.FolioTokens.barHeight)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (navigationIcon != null) {
-                navigationIcon()
-            } else {
-                FolioMark()
-            }
-            Text(
-                text = title,
-                style = titleStyle ?: FolioTheme.typography.headlineMedium,
-                color = colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 10.dp)
-            )
-            actions()
-        }
-        // The boundary the bar has always claimed but never drew: a hairline that
-        // fades out toward the trailing edge, so the masthead is separated from the
-        // page without a shadow or a fill.
-        FolioRule()
-    }
-}
+// FolioTopBar and the Folio mark moved to FolioChrome.kt when the masthead
+// gained its scroll-linked collapse (glass on scroll, folding rail). Every call
+// site keeps the same signature: the new arguments are defaulted.
 
 /**
- * The Folio mark: the wordmark's initial on a small tinted plate. Deliberately not
- * an icon — a letterform in the product's own type reads as identity, where a
- * generic book glyph reads as a category.
+ * Ground behind the OS status bar on non-reader screens.
+ *
+ * Takes the atmosphere's own scrim and fades it out by its bottom edge, so the
+ * notification icons get something to sit on without a hard stripe being drawn
+ * across the page. A flat fill of the theme's darkest ink is what put a black
+ * band over the top of every *light* theme. Zero-height on desktop, where there
+ * is no OS bar.
+ *
+ * [inkBand] keeps that old solid ink fill for the readers: while a page is open
+ * the system icons are forced light, so they need dark ground on any theme.
  */
 @Composable
-private fun FolioMark(modifier: Modifier = Modifier) {
-    val colors = FolioTheme.colors
-    Box(
-        modifier = modifier
-            .size(32.dp)
-            .background(colors.primaryContainer, FolioShapes.inset),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "F",
-            style = FolioTheme.typography.titleMedium,
-            color = colors.onPrimaryContainer,
-            fontWeight = FontWeight.Bold,
-        )
+fun FolioStatusBarBand(modifier: Modifier = Modifier, inkBand: Boolean = false) {
+    val scrim = if (inkBand) {
+        com.folio.reader.ui.theme.FolioTheme.colors.statusBar
+    } else {
+        com.folio.reader.ui.theme.FolioTheme.atmosphere.barScrim
     }
-}
-
-/**
- * Darker themed band behind the OS status bar on non-reader screens, so the
- * notification icons always sit on the theme's own ink instead of blending into
- * the background. Zero-height on desktop, where there is no OS bar.
- */
-@Composable
-fun FolioStatusBarBand(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsTopHeight(WindowInsets.statusBars)
-            .background(com.folio.reader.ui.theme.FolioTheme.colors.statusBar)
+            .background(
+                if (inkBand) {
+                    Brush.verticalGradient(0f to scrim, 1f to scrim)
+                } else {
+                    Brush.verticalGradient(
+                        0f to scrim,
+                        1f to scrim.copy(alpha = scrim.alpha * 0.40f),
+                    )
+                },
+            ),
     )
 }
 

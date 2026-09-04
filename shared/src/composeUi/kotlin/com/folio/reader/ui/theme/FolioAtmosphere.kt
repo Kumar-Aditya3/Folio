@@ -49,6 +49,18 @@ data class FolioAtmosphere(
     val sunkenFill: Color,
     /** Translucent fill for bars, nav and sheets that sit over content. */
     val veilFill: Color,
+    /**
+     * Ground under the OS status icons. Follows the field, not a fixed ink band:
+     * a light palette gets a light ground (with dark icons over it), a dark one
+     * gets a dark ground. Drawn with the alpha carried here.
+     */
+    val barScrim: Color,
+    /**
+     * Glass fill for the app's top bar and nav. Deliberately far more
+     * transparent than [veilFill] — a bar over *Compose* content should let that
+     * content show through, and only the reader's native surface needs opacity.
+     */
+    val barGlass: Color,
     /** Hairline colour for structural rules and dividers. */
     val hairline: Color,
 )
@@ -138,6 +150,30 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
             deepen(colors.surface, 0.20f).copy(alpha = 0.97f)
         } else {
             lift(colors.surface, 0.35f).copy(alpha = 0.98f)
+        },
+        // The status icons need a ground, but a fixed dark ink band put a black
+        // stripe across the top of every light theme. Take it from the field
+        // instead: paper gets a paper-white ground and dark icons, a dark field
+        // keeps its deep ground and light icons.
+        barScrim = if (dark) {
+            deepen(colors.background, 0.30f).copy(alpha = 0.90f)
+        } else {
+            lift(colors.surface, 0.72f).copy(alpha = 0.86f)
+        },
+        // Bars sit over Compose content, so they can be actual glass. Two rules
+        // here, both learned the hard way:
+        //
+        //  - the tint is taken from the *field*, not from `surface`. A surface-
+        //    coloured bar over a background-coloured page is a different object
+        //    from the page no matter how low its alpha goes, which is exactly what
+        //    made the collapsed masthead read as a grey lid;
+        //  - the alpha is capped well short of opaque, so what little sits behind
+        //    the bar still shows through. Depth is carried by the hairline and the
+        //    fade below it (FolioTopBar), not by the fill.
+        barGlass = if (dark) {
+            lerp(fieldTop, colors.surface, 0.35f).copy(alpha = 0.50f)
+        } else {
+            lift(fieldTop, 0.42f).copy(alpha = 0.54f)
         },
         hairline = if (dark) {
             lift(colors.outline, 0.05f).copy(alpha = 0.30f)

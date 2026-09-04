@@ -613,7 +613,7 @@ fun main(args: Array<String>) {
 
         fun importMangaBackup() {
             java.awt.EventQueue.invokeLater {
-                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose Mihon backup", java.awt.FileDialog.LOAD)
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose backup", java.awt.FileDialog.LOAD)
                 dialog.isVisible = true
                 val file = dialog.file?.let { File(dialog.directory, it) }
                 if (file != null && file.exists()) {
@@ -628,14 +628,14 @@ fun main(args: Array<String>) {
 
         fun exportMangaBackup() {
             java.awt.EventQueue.invokeLater {
-                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Export Mihon backup", java.awt.FileDialog.SAVE)
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Export backup", java.awt.FileDialog.SAVE)
                 dialog.setFile("folio_manga.backup")
                 dialog.isVisible = true
                 val file = dialog.file?.let { File(dialog.directory, it) }
                 if (file != null) {
                     appScope.launch(Dispatchers.IO) {
                         runCatching { mangaBackupManager.exportToMihonBackup(file) }
-                            .onSuccess { c -> appScope.launch(Dispatchers.Main) { importStatus = "Exported $c manga to Mihon backup" } }
+                            .onSuccess { c -> appScope.launch(Dispatchers.Main) { importStatus = "Exported $c manga to backup" } }
                             .onFailure { e -> appScope.launch(Dispatchers.Main) { importStatus = "Backup export failed: ${e.message}" } }
                     }
                 }
@@ -940,6 +940,15 @@ fun main(args: Array<String>) {
                                                 searchActive = mangaSearchActive,
                                                 onSearchActiveChange = { mangaSearchActive = it },
                                                 browseViewModel = mangaLibBrowseVM,
+                                                // The Books/Manga switch rides the manga
+                                                // shelf's own chip rail here, so the shelf
+                                                // keeps a single row of chrome.
+                                                railLeading = {
+                                                    com.folio.reader.ui.library.LibraryModeSwitch(
+                                                        mode = libraryMode,
+                                                        onModeChange = { libraryMode = it },
+                                                    )
+                                                },
                                             )
                                         },
                                         onOpenStats = { pushScreen(Screen.Stats) }

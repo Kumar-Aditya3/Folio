@@ -101,7 +101,7 @@ internal fun FolioNavModelImpl.handleMangaBackupExport(uri: Uri) {
                 tmp.inputStream().use { input -> input.copyTo(output) }
             }
             activity.appScope.launch(Dispatchers.Main) {
-                activity.importStatus = "Exported $count manga to Mihon backup"
+                activity.importStatus = "Exported $count manga to backup"
             }
         } catch (e: Exception) {
             activity.appScope.launch(Dispatchers.Main) { activity.importStatus = "Backup export failed: ${e.message}" }

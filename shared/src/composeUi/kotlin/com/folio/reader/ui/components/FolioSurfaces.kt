@@ -161,17 +161,23 @@ fun Modifier.folioSunken(
 }
 
 /**
- * Glass over content: bars, floating navigation, sheets. Near-opaque on purpose —
- * Android cannot blur a separate native surface (the reader page), so
+ * Glass over content: bars, floating navigation, sheets. Near-opaque by default on
+ * purpose — Android cannot blur a separate native surface (the reader page), so
  * translucency alone would let text bleed through at full contrast. The glass is
  * carried by the rim and the sheen.
+ *
+ * [fillAlpha] overrides that for glass that sits over *Compose* content only, where
+ * a little transparency is what makes the surface read as glass rather than as a
+ * panel: the floating nav capsule uses it so the page is visible through it.
  */
 @Composable
 fun Modifier.folioVeil(
     shape: Shape = FolioShapes.card,
     elevation: Dp = FolioTokens.elevationVeil,
+    fillAlpha: Float? = null,
 ): Modifier {
     val atmos = FolioTheme.atmosphere
+    val fill = if (fillAlpha != null) atmos.veilFill.copy(alpha = fillAlpha) else atmos.veilFill
     return this
         .shadow(
             elevation = atmos.scaled(elevation),
@@ -179,7 +185,7 @@ fun Modifier.folioVeil(
             ambientColor = atmos.shadowAmbient,
             spotColor = atmos.shadowSpot,
         )
-        .background(atmos.veilFill, shape)
+        .background(fill, shape)
         .background(
             brush = Brush.verticalGradient(
                 listOf(atmos.rimLight.copy(alpha = atmos.rimLight.alpha * 0.35f), Color.Transparent),

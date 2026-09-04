@@ -41,6 +41,11 @@ object FolioSettingsCategory {
  * information and costs 32dp of measure. Controls now sit on the field, and any
  * live preview keeps its own surface because a preview genuinely *is* a separate
  * object.
+ *
+ * The preview leads. Beneath the controls it was below the fold on a phone: the
+ * Typography screen has seven of them, so every slider moved something the reader
+ * could not see, and the whole category looked inert. Above them, one drag proves
+ * what the screen is for.
  */
 @Composable
 fun SettingsCategoryScaffold(
@@ -68,10 +73,10 @@ fun SettingsCategoryScaffold(
             ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceMovement)
         ) {
-            item { content() }
             if (livePreviewSettings != null) {
                 item { SettingsLivePreview(livePreviewSettings) }
             }
+            item { content() }
         }
     }
 }
