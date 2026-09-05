@@ -25,6 +25,8 @@ import com.folio.reader.ui.theme.folioBarTopInset
 /** Route values for `settings/{category}` (§3.5 FOLIO_IMPLEMENTATION_SPEC). */
 object FolioSettingsCategory {
     const val THEMES = "themes"
+    const val TRANSPARENCY = "transparency"
+    const val CUSTOM_THEME = "custom_theme"
     const val DEFAULTS = "defaults"
     const val TYPOGRAPHY = "typography"
     const val LAYOUT = "layout"

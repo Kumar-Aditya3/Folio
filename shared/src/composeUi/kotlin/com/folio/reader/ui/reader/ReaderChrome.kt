@@ -44,6 +44,7 @@ import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.readerVeilAlpha
 
 /**
  * The reader's top bar: back, title, clock and the right-side actions. On
@@ -77,6 +78,7 @@ internal fun ReaderTopBar(
                 .folioVeil(
                     shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
                     elevation = FolioTokens.elevationVeil,
+                    fillAlpha = FolioTheme.readerVeilAlpha,
                 )
                 .height(56.dp)
                 .padding(horizontal = 4.dp),
@@ -186,7 +188,7 @@ internal fun ReaderFloatingRail(
         modifier = Modifier
             .padding(start = 12.dp)
             .width(56.dp)
-            .folioVeil(RoundedCornerShape(24.dp))
+            .folioVeil(RoundedCornerShape(24.dp), fillAlpha = FolioTheme.readerVeilAlpha)
             .padding(vertical = 12.dp)
     ) {
         Column(
@@ -246,7 +248,10 @@ fun BottomProgressBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioVeil(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .folioVeil(
+                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                fillAlpha = FolioTheme.readerVeilAlpha,
+            )
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {

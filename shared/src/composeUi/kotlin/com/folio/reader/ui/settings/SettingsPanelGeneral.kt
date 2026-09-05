@@ -88,13 +88,16 @@ fun GeneralSettingsPanel(
                         pack = pack,
                         selected = settings.appThemeId == pack.appPaletteId &&
                             settings.themeId == pack.readerThemeId &&
-                            settings.customTheme == null,
+                            settings.customTheme == null &&
+                            settings.customAppTheme == null,
                         onClick = {
+                            // Picking a pack is how you leave a custom theme behind.
                             onSettingsChange(
                                 settings.copy(
                                     appThemeId = pack.appPaletteId,
                                     themeId = pack.readerThemeId,
                                     customTheme = null,
+                                    customAppTheme = null,
                                 )
                             )
                         },

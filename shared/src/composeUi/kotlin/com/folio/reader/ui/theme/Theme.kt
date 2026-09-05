@@ -1396,11 +1396,13 @@ object FolioTheme {
         darkTheme: Boolean = false,
         colors: FolioColors = if (darkTheme) DarkFolioColors else LightFolioColors,
         typography: FolioTypography = FolioTypography(),
+        opacity: FolioSurfaceOpacity = FolioSurfaceOpacity.Default,
         content: @Composable () -> Unit
     ) {
         CompositionLocalProvider(
             LocalFolioColors provides colors,
             LocalFolioTypography provides typography,
+            LocalFolioSurfaceOpacity provides opacity,
             // Material3 defaults LocalContentColor to pure black, and Folio's
             // panels are not wrapped in `Surface`, so every unstyled Text/Icon
             // rendered black — unreadable on any dark palette. Anchor the default
@@ -1416,14 +1418,29 @@ object FolioTheme {
         }
     }
 
+    /**
+     * [colors] and [isDark] are overridable so a user's custom palette can stand
+     * in for [palette] without inventing a synthetic `AppPalette` enum entry; the
+     * previews in Appearance settings use the same door to show one theme inside
+     * another.
+     */
     @Composable
     fun AppTheme(
         palette: AppPalette,
         fontTheme: FontTheme = FontTheme.CLASSIC,
+        colors: FolioColors = palette.colors,
+        isDark: Boolean = palette.isDark,
+        opacity: FolioSurfaceOpacity = FolioSurfaceOpacity.Default,
         content: @Composable () -> Unit
     ) {
         val typo = FolioTypography(fontTheme)
-        MaterialTheme(darkTheme = palette.isDark, colors = palette.colors, typography = typo, content = content)
+        MaterialTheme(
+            darkTheme = isDark,
+            colors = colors,
+            typography = typo,
+            opacity = opacity,
+            content = content
+        )
     }
 }
 

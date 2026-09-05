@@ -69,6 +69,8 @@ import com.folio.reader.ui.revisit.RevisitItemsScreen
 import com.folio.reader.ui.revisit.RevisitItemsViewModel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.ui.theme.toFolioColors
 import androidx.compose.animation.togetherWith
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -858,7 +860,17 @@ fun main(args: Array<String>) {
             // The app chrome follows the app's own light/dark choice. A reading theme
             // describes the page and nothing else — feeding themeId in here is what
             // made the two bleed into each other.
-            FolioTheme.AppTheme(palette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId), fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId)) {
+            val appPalette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)
+            // A custom theme replaces the pack's colours wholesale; its own
+            // background lightness, not the pack's, decides the app's polarity.
+            val customAppTheme = globalSettings.customAppTheme
+            FolioTheme.AppTheme(
+                palette = appPalette,
+                fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId),
+                colors = customAppTheme?.toFolioColors() ?: appPalette.colors,
+                isDark = customAppTheme?.isDark ?: appPalette.isDark,
+                opacity = globalSettings.surfaceOpacity()
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background

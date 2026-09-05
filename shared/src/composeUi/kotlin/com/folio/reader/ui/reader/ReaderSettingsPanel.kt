@@ -57,6 +57,7 @@ import com.folio.reader.ui.settings.readerFontLabel
 import com.folio.reader.ui.settings.readerFontOptions
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.readerVeilAlpha
 
 /** Smallest reader text size in sp — unchanged; users liked the low end. */
 private const val MIN_FONT_SIZE_SP = 12f
@@ -111,7 +112,7 @@ fun ReaderSettingsPanel(
         modifier = Modifier
             .fillMaxHeight()
             .width(280.dp)
-            .folioVeil(panelShape)
+            .folioVeil(panelShape, fillAlpha = FolioTheme.readerVeilAlpha)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)

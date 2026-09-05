@@ -113,6 +113,12 @@ fun SettingsScreen(
                                         onPickMangaDownloadsLocation
                                     )
 
+                                    SettingsCategory.CUSTOM_THEME ->
+                                        CustomThemeSettingsPanel(settings, onSettingsChange)
+
+                                    SettingsCategory.TRANSPARENCY ->
+                                        TransparencySettingsPanel(settings, onSettingsChange)
+
                                     SettingsCategory.DEFAULTS -> ReaderDefaultsPanel(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
@@ -209,6 +215,12 @@ fun SettingsScreen(
                                         onPickMangaDownloadsLocation
                                     )
 
+                                    SettingsCategory.CUSTOM_THEME ->
+                                        CustomThemeSettingsPanel(settings, onSettingsChange)
+
+                                    SettingsCategory.TRANSPARENCY ->
+                                        TransparencySettingsPanel(settings, onSettingsChange)
+
                                     SettingsCategory.DEFAULTS -> ReaderDefaultsPanel(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
@@ -262,6 +274,8 @@ fun SettingsScreen(
 // Settings categories enum
 enum class SettingsCategory(val displayName: String) {
     GENERAL("General"),
+    CUSTOM_THEME("Custom theme"),
+    TRANSPARENCY("Transparency"),
     DEFAULTS("Reader defaults"),
     TYPOGRAPHY("Typography"),
     LAYOUT("Layout"),

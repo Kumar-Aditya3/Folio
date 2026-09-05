@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
@@ -144,8 +146,22 @@ fun SettingsHubScreen(
                         title = "Themes",
                         subtitle = "Theme packs, typeface pairing, fonts",
                         accent = colors.accentDiscovery,
-                        last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.THEMES) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Colorize,
+                        title = "Custom theme",
+                        subtitle = "Author your own palette and gradient",
+                        accent = colors.accentDiscovery,
+                        onClick = { onOpenSettings(FolioSettingsCategory.CUSTOM_THEME) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Opacity,
+                        title = "Transparency",
+                        subtitle = "How solid bars, cards and reader controls are",
+                        accent = colors.accentDiscovery,
+                        last = true,
+                        onClick = { onOpenSettings(FolioSettingsCategory.TRANSPARENCY) }
                     )
                 }
             }

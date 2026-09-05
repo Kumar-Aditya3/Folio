@@ -56,6 +56,7 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.readerVeilAlpha
 
 private fun Int.argbHex(): String = "#" + toUInt().toString(16).padStart(8, '0').drop(2)
 
@@ -152,7 +153,7 @@ fun TOCSidebar(
         modifier = Modifier
             .fillMaxHeight()
             .width(260.dp)
-            .folioVeil(tocShape)
+            .folioVeil(tocShape, fillAlpha = FolioTheme.readerVeilAlpha)
     ) {
         Row(
             modifier = Modifier
@@ -247,7 +248,10 @@ fun AnnotationsSidebar(
         modifier = Modifier
             .fillMaxHeight()
             .width(300.dp)
-            .folioVeil(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
+            .folioVeil(
+                RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp),
+                fillAlpha = FolioTheme.readerVeilAlpha,
+            )
             .padding(vertical = 16.dp)
     ) {
         Row(
