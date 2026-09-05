@@ -37,13 +37,12 @@ val LocalFolioBarInset = compositionLocalOf { 0.dp }
 val LocalFolioTopInset = compositionLocalOf { 0.dp }
 
 /**
- * The masthead's at-rest height: the OS status icons, the bar row, and — when the
- * screen hangs a `rail` under its title — that rail plus the 6dp it is padded by.
+ * The masthead's height: the OS status icons, the bar row, and — when the screen
+ * hangs a `rail` under its title — that rail plus the 6dp it is padded by.
  *
- * At-rest on purpose. Once content scrolls the bar grows a hairline and a 10dp
- * glass fade; a `contentPadding` that tracked them would translate every item
- * 11dp mid-scroll. In the overlay that growth paints over content which is
- * already moving, which is what the fade is for.
+ * Exact at every collapse and every opacity-knob position: the bar's hairline and
+ * glass fade paint inside its own footprint (FolioTopBar), so nothing placed at
+ * this inset is ever overlapped by chrome.
  *
  * Desktop resolves `WindowInsets.statusBars` to zero, so this is `barHeight` there.
  */
