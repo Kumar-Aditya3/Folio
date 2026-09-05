@@ -179,13 +179,10 @@ fun Modifier.folioVeil(
 ): Modifier {
     val atmos = FolioTheme.atmosphere
     // A caller that names its own alpha has already accounted for its context
-    // (the nav capsule, the reader's sheets), so it scales that value itself;
-    // everything else is an app panel and follows the panel preference.
-    val fill = if (fillAlpha != null) {
-        atmos.veilFill.copy(alpha = fillAlpha)
-    } else {
-        atmos.veilFill.copy(alpha = atmos.veilFill.alpha * FolioTheme.surfaceOpacity.panel)
-    }
+    // (the nav capsule, the reader's sheets); everything else is an app panel and
+    // takes the panel preference, which is the alpha itself rather than a factor
+    // on it — see FolioSurfaceOpacity.
+    val fill = atmos.veilFill.copy(alpha = fillAlpha ?: FolioTheme.surfaceOpacity.panel)
     return this
         .shadow(
             elevation = atmos.scaled(elevation),

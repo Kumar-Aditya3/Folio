@@ -43,7 +43,21 @@ class MangaDownloadManager(
         val old = storage
         if (old === newStorage || old.describe() == newStorage.describe()) return@withContext true
         runCatching { migrate(old, newStorage, onProgress) }
-            .onSuccess { storage = newStorage }
+            .onSuccess {
+                storage = newStorage
+                // A user-picked folder lives on shared storage, where Android's media
+                // scanner would sweep every page of every chapter into the phone's
+                // gallery. An empty `.nomedia` at the root tells it not to. Only
+                // written when absent, because this also runs on every launch when a
+                // stored location is restored. Best effort: failing to write the
+                // marker is no reason to refuse a folder the migration already
+                // proved works.
+                runCatching {
+                    if (NOMEDIA !in newStorage.listFiles("")) {
+                        newStorage.write("", NOMEDIA, ByteArray(0))
+                    }
+                }
+            }
             .isSuccess
     }
 
@@ -196,4 +210,9 @@ class MangaDownloadManager(
     }
 
     private fun String.sanitize(): String = replace(Regex("[^A-Za-z0-9._:-]"), "_")
+
+    private companion object {
+        /** Android's marker for "media scanner, skip this directory tree". */
+        const val NOMEDIA = ".nomedia"
+    }
 }

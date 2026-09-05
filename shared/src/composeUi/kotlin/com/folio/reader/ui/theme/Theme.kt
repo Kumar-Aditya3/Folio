@@ -1396,7 +1396,11 @@ object FolioTheme {
         darkTheme: Boolean = false,
         colors: FolioColors = if (darkTheme) DarkFolioColors else LightFolioColors,
         typography: FolioTypography = FolioTypography(),
-        opacity: FolioSurfaceOpacity = FolioSurfaceOpacity.Default,
+        // Inherited, not reset. Screens legitimately re-enter the theme to swap
+        // palettes mid-tree (the reader re-themes its chrome, the Appearance
+        // previews show one theme inside another). Defaulting to `Default` made
+        // every such nesting silently throw the user's opacity away.
+        opacity: FolioSurfaceOpacity = LocalFolioSurfaceOpacity.current,
         content: @Composable () -> Unit
     ) {
         CompositionLocalProvider(
@@ -1430,7 +1434,7 @@ object FolioTheme {
         fontTheme: FontTheme = FontTheme.CLASSIC,
         colors: FolioColors = palette.colors,
         isDark: Boolean = palette.isDark,
-        opacity: FolioSurfaceOpacity = FolioSurfaceOpacity.Default,
+        opacity: FolioSurfaceOpacity = LocalFolioSurfaceOpacity.current,
         content: @Composable () -> Unit
     ) {
         val typo = FolioTypography(fontTheme)

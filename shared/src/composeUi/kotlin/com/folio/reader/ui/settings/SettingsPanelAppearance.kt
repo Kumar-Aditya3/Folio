@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.CustomAppTheme
 import com.folio.reader.settings.ReaderSettings
@@ -56,6 +57,7 @@ import com.folio.reader.ui.theme.readerVeilAlpha
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.toArgbInt
 import com.folio.reader.ui.theme.toFolioColors
+import com.folio.reader.ui.theme.topBarFill
 import kotlin.math.roundToInt
 
 /**
@@ -104,21 +106,30 @@ fun AppearanceMockup(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .height(228.dp)
+                // Big enough to judge. At the old 228dp the reader page — the one
+                // surface people actually tune — was a sliver, and translucency
+                // reads only when there is enough behind the glass to see through it.
+                .height(320.dp)
                 .clip(shape)
                 // The page. This is the gradient and its three accent pools, so a
                 // custom palette's background shows exactly as it will in the app.
                 .folioField()
                 .border(1.dp, atmos.hairline, shape)
         ) {
-            Column(Modifier.fillMaxSize()) {
-                MockTopBar(focus = focus == MockupFocus.TOP_BAR)
+            // The page runs the miniature's full height and is deliberately *not*
+            // inset for the bars — they are drawn over it, exactly as the real shell
+            // overlays a scrolling library. This is the whole point: with nothing
+            // passing underneath them, a see-through bar and a solid one look
+            // identical, which is why the old Column layout made the top-bar and
+            // nav sliders look like they did nothing.
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MockShelfRow(height = 74.dp)
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     MockContentCard(
                         modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -126,11 +137,55 @@ fun AppearanceMockup(
                     )
                     MockReaderSheet(
                         readerTheme = readerTheme,
-                        modifier = Modifier.width(104.dp).fillMaxHeight(),
+                        modifier = Modifier.weight(1.15f).fillMaxHeight(),
                         focus = focus == MockupFocus.READER,
                     )
                 }
-                MockNavCapsule(focus = focus == MockupFocus.NAV_BAR)
+                MockShelfRow(height = 64.dp)
+            }
+            MockTopBar(
+                modifier = Modifier.align(Alignment.TopCenter),
+                focus = focus == MockupFocus.TOP_BAR,
+            )
+            MockNavCapsule(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                focus = focus == MockupFocus.NAV_BAR,
+            )
+        }
+    }
+}
+
+/**
+ * A row of covers: the ground the bars float over.
+ *
+ * Covers rather than grey blocks because the bars are translucent over *colour* in
+ * the real app, and grey tells you nothing about how a tint reads through glass.
+ */
+@Composable
+private fun MockShelfRow(height: Dp, modifier: Modifier = Modifier) {
+    val colors = FolioTheme.colors
+    Row(
+        modifier = modifier.fillMaxWidth().height(height),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf(
+            colors.accentProgress,
+            colors.accentDiscovery,
+            colors.accentStreak,
+            colors.primary,
+        ).forEach { tint ->
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    Modifier.fillMaxWidth().weight(1f)
+                        .background(tint.copy(alpha = 0.85f), FolioShapes.plateSmall)
+                )
+                Box(
+                    Modifier.fillMaxWidth(0.8f).height(4.dp)
+                        .background(colors.onSurfaceVariant.copy(alpha = 0.5f), CircleShape)
+                )
             }
         }
     }
@@ -138,27 +193,30 @@ fun AppearanceMockup(
 
 /** The masthead, painted with the same three-stop decay as [com.folio.reader.ui.components.FolioTopBar]. */
 @Composable
-private fun MockTopBar(focus: Boolean) {
+private fun MockTopBar(modifier: Modifier = Modifier, focus: Boolean) {
     val colors = FolioTheme.colors
     val atmos = FolioTheme.atmosphere
-    val o = FolioTheme.surfaceOpacity.topBar
-    val veil = atmos.barGlass.copy(alpha = atmos.barGlass.alpha * o)
-    val scrim = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * o)
+    // The miniature always depicts a screen that has been scrolled — that is the
+    // state in which a top bar has anything behind it — so it takes the fill at
+    // full collapse. The knob is the crown's alpha, not a factor on it.
+    val fill = FolioTheme.surfaceOpacity.topBarFill(1f)
+    val veil = atmos.barGlass
+    val scrim = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * fill.scrim)
     val sheen = atmos.rimLight
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
                     0f to scrim,
-                    0.35f to veil.copy(alpha = veil.alpha * 0.85f),
-                    0.75f to veil.copy(alpha = veil.alpha * 0.44f),
-                    1f to veil.copy(alpha = veil.alpha * 0.16f),
+                    0.35f to veil.copy(alpha = fill.crown),
+                    0.75f to veil.copy(alpha = fill.waist),
+                    1f to veil.copy(alpha = fill.foot),
                 )
             )
             .background(
                 Brush.verticalGradient(
-                    0f to sheen.copy(alpha = sheen.alpha * 0.30f),
+                    0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
                     0.38f to Color.Transparent,
                 )
             )
@@ -189,7 +247,7 @@ private fun MockTopBar(focus: Boolean) {
         Box(
             Modifier.fillMaxWidth().height(FolioTokens.barGlassFade).background(
                 Brush.verticalGradient(
-                    listOf(veil.copy(alpha = veil.alpha * 0.45f), Color.Transparent)
+                    listOf(veil.copy(alpha = fill.crown * 0.45f), Color.Transparent)
                 )
             )
         )
@@ -257,67 +315,81 @@ private fun MockReaderSheet(readerTheme: Theme, modifier: Modifier = Modifier, f
     ) {
         // The page underneath, so the reader panel's translucency is legible.
         Column(
-            modifier = Modifier.fillMaxSize().padding(7.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxSize().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 text = "Chapter",
-                style = FolioTheme.typography.labelSmall,
+                style = FolioTheme.typography.labelMedium,
                 color = Color(readerTheme.headingText),
                 maxLines = 1,
             )
-            repeat(7) { i ->
+            repeat(10) { i ->
                 Box(
                     Modifier
-                        .fillMaxWidth(if (i % 3 == 2) 0.66f else 1f)
-                        .height(3.dp)
-                        .background(ink.copy(alpha = 0.45f), CircleShape)
+                        .fillMaxWidth(if (i % 3 == 2) 0.7f else 1f)
+                        .height(4.dp)
+                        .background(ink.copy(alpha = 0.5f), CircleShape)
                 )
             }
         }
-        // The reader's settings sheet, anchored to the bottom like the real one.
+        // The reader's settings sheet, anchored to the bottom like the real one. It
+        // deliberately covers several lines of the page: that overlap is the only
+        // way "how transparent is this" is a question the preview can answer.
+        val sheetShape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .folioVeil(
-                    RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
-                    fillAlpha = FolioTheme.readerVeilAlpha,
-                )
-                .focusRing(focus, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                .padding(horizontal = 8.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+                .folioVeil(sheetShape, fillAlpha = FolioTheme.readerVeilAlpha)
+                .focusRing(focus, sheetShape)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = "Aa",
-                style = FolioTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium,
-                color = colors.onSurface,
-            )
-            Box(
-                Modifier.fillMaxWidth().height(5.dp)
-                    .background(colors.surfaceContainerHighest, CircleShape)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Box(
-                    Modifier.fillMaxWidth(0.45f).fillMaxHeight()
-                        .background(colors.primary, CircleShape)
+                Text(
+                    text = "Aa",
+                    style = FolioTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.onSurface,
                 )
+                Text(
+                    text = "Text size",
+                    style = FolioTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            listOf(0.45f, 0.7f).forEach { filled ->
+                Box(
+                    Modifier.fillMaxWidth().height(6.dp)
+                        .background(colors.surfaceContainerHighest, CircleShape)
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(filled).fillMaxHeight()
+                            .background(colors.primary, CircleShape)
+                    )
+                }
             }
         }
     }
 }
 
-/** The floating nav capsule, at the same 0.90 base alpha the shell uses. */
+/** The floating nav capsule, at the same fill alpha the shell gives it. */
 @Composable
-private fun MockNavCapsule(focus: Boolean) {
+private fun MockNavCapsule(modifier: Modifier = Modifier, focus: Boolean) {
     val colors = FolioTheme.colors
     Box(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+        modifier = modifier.fillMaxWidth().padding(bottom = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
-                .folioVeil(FolioShapes.pill, fillAlpha = 0.90f * FolioTheme.surfaceOpacity.navBar)
+                .folioVeil(FolioShapes.pill, fillAlpha = FolioTheme.surfaceOpacity.navBar)
                 .focusRing(focus, FolioShapes.pill)
                 .padding(horizontal = 12.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -376,8 +448,10 @@ fun TransparencySettingsPanel(
             focus = focus,
         )
         Text(
-            text = "Drag a slider to highlight the surface it controls. " +
-                "Values below 100% let the page show through.",
+            text = "Drag a slider to highlight the surface it controls in the preview. " +
+                "Each value is the surface's own opacity: 100% is solid and nothing " +
+                "behind it shows through, while the designed glass look sits partway " +
+                "along — which is where “Reset” puts it.",
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
@@ -411,8 +485,9 @@ fun TransparencySettingsPanel(
             onChange = { onSettingsChange(settings.copy(readerChromeOpacity = it)) },
         )
         Text(
-            text = "Reader controls sit over the page you are reading, so lowering " +
-                "this one trades legibility for immersion.",
+            text = "In-reader bars, the side rail and the reader's own sheets. 100% is " +
+                "fully solid so nothing bleeds through; low values trade legibility " +
+                "for immersion.",
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
@@ -421,9 +496,9 @@ fun TransparencySettingsPanel(
             onClick = {
                 onSettingsChange(
                     settings.copy(
-                        topBarOpacity = 1f,
-                        navBarOpacity = 1f,
-                        panelOpacity = 1f,
+                        topBarOpacity = FolioSurfaceOpacity.BAR_GLASS,
+                        navBarOpacity = FolioSurfaceOpacity.NAV_GLASS,
+                        panelOpacity = FolioSurfaceOpacity.PANEL_GLASS,
                         readerChromeOpacity = 1f,
                     )
                 )

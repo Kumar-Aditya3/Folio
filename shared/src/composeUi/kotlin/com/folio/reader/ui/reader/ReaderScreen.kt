@@ -27,6 +27,7 @@ import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.readerVeilAlpha
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,7 +137,8 @@ fun ReaderScreen(
         fg = appColors.onSurface.hex(),
         accent = appColors.primary.hex(),
         surface = appColors.surfaceVariant.hex(),
-        isDark = appIsDark
+        isDark = appIsDark,
+        veilAlpha = FolioTheme.readerVeilAlpha
     )
     val quickFontNames = remember(settings.customFonts) {
         (listOf(
