@@ -208,12 +208,14 @@ fun FolioTopBar(
                             0.38f to Color.Transparent,
                         )
                     )
-                    // The bar's lower boundary — hairline, then the glass fade under
-                    // it — painted inside the masthead's own footprint. As Column
-                    // children they grew the bar 11dp past folioBarTopInset, and the
-                    // overhang cut across whatever was pinned at that inset (chip
-                    // rails, search fields) — permanently once the opacity knob
-                    // passes the glass point and presence is 1 at rest.
+                    // The bar's lower boundary — glass fade thickening down into a
+                    // hairline at the bar's very edge — painted inside the masthead's
+                    // own footprint. As Column children they grew the bar 11dp past
+                    // folioBarTopInset and overhung what was pinned there; higher up
+                    // inside, the hairline would cut through the row's own content —
+                    // a 40dp button centered in the 56dp row dips to 48dp — so the
+                    // rule lives in the last dp, where only transparent padding
+                    // reaches.
                     val fadePx = FolioTokens.barGlassFade.toPx()
                     val rulePx = 1.dp.toPx()
                     drawRect(
@@ -231,7 +233,7 @@ fun FolioTopBar(
                                 atmos.hairline.copy(alpha = 0.10f * fill.presence),
                             )
                         ),
-                        topLeft = Offset(0f, size.height - fadePx - rulePx),
+                        topLeft = Offset(0f, size.height - rulePx),
                         size = Size(size.width, rulePx),
                     )
                 }
