@@ -27,13 +27,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.folioBarTopInset
 
 /**
  * Full settings surface used by the desktop app and as a fallback host. The
@@ -59,22 +62,22 @@ fun SettingsScreen(
     var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
     var showPreview by remember { mutableStateOf(true) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        com.folio.reader.ui.components.FolioTopBar(
-            title = "Settings",
-            navigationIcon = {
-                IconButton(onClick = onBackPress) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-            }
-        )
+    // The masthead floats *over* the page instead of sitting above it as a sibling:
+    // a bar with nothing behind it but the page's own flat field has nothing to
+    // refract, which is why the glass read as invisible. Overlaying it and paying
+    // the inset as the scroller's `contentPadding` puts real settings under it.
+    val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    val topInset = folioBarTopInset()
 
+    Box(modifier = Modifier.fillMaxSize()) {
         // Responsive: phones get a horizontal category chip bar + full-width
         // content; tablets/desktop keep the two-panel layout.
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val isCompact = maxWidth < 640.dp
             if (isCompact) {
-                Column(modifier = Modifier.fillMaxSize()) {
+                // The chip rail never scrolls vertically, so it clears the bar with
+                // outer padding; only the pane below it pays contentPadding.
+                Column(modifier = Modifier.fillMaxSize().padding(top = topInset)) {
                     // Category chips — horizontally scrollable
                     LazyRow(
                         modifier = Modifier
@@ -95,7 +98,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            ,
+                            .nestedScroll(headerState.nestedScrollConnection),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -144,12 +147,17 @@ fun SettingsScreen(
                 }
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
-                    // Categories sidebar
+                    // Categories sidebar. Not a scroller, so it pays the inset as
+                    // padding on its items rather than as contentPadding — placed
+                    // *after* its background so the panel's tint still runs to the
+                    // top edge and gives the glass something real to refract
+                    // instead of a seam across the rail.
                     Column(
                         modifier = Modifier
                             .width(200.dp)
                             .fillMaxHeight()
                             .background(FolioTheme.colors.surfaceContainerHighest)
+                            .padding(top = topInset)
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -175,12 +183,19 @@ fun SettingsScreen(
 
                     // Settings content — LazyColumn keyed on category so switching tabs
                     // always rebuilds a fresh, scrollable list (weight fills remaining width).
+                    // The one scroller here, so it is the one that pays the masthead's
+                    // inset as contentPadding: rows travel under the glass.
                     LazyColumn(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            ,
-                        contentPadding = PaddingValues(24.dp),
+                            .nestedScroll(headerState.nestedScrollConnection),
+                        contentPadding = PaddingValues(
+                            start = 24.dp,
+                            top = topInset + 24.dp,
+                            end = 24.dp,
+                            bottom = 24.dp
+                        ),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         item(key = selectedCategory.name) {
@@ -228,6 +243,19 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // Drawn last so it sits *over* the page: the detail pane and the sidebar's
+        // tint both run beneath it, which is the only thing glass can refract.
+        com.folio.reader.ui.components.FolioTopBar(
+            title = "Settings",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+            navigationIcon = {
+                IconButton(onClick = onBackPress) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+        )
     }
 }
 

@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaHistoryEntry
@@ -44,8 +45,10 @@ import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -59,9 +62,48 @@ fun MangaHistoryScreen(
     val scope = rememberCoroutineScope()
     var confirmClear by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize()) {
+    val headerState = rememberFolioHeaderState()
+    val topInset = folioBarTopInset()
+
+    Box(Modifier.fillMaxSize()) {
+        if (entries.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = topInset),
+                contentAlignment = Alignment.Center,
+            ) {
+                EmptyState(
+                    icon = Icons.Filled.History,
+                    headline = "No reading history",
+                    body = "Chapters you mark as read will appear here.",
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.space3,
+                    top = topInset + FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    bottom = FolioTokens.space3,
+                ),
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+            ) {
+                items(entries, key = { it.mangaId }) { entry ->
+                    HistoryRow(
+                        backend = backend,
+                        entry = entry,
+                        onClick = { onOpenManga(entry) },
+                    )
+                }
+            }
+        }
+
         FolioTopBar(
             title = "History",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -75,29 +117,6 @@ fun MangaHistoryScreen(
                 }
             },
         )
-
-        if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    icon = Icons.Filled.History,
-                    headline = "No reading history",
-                    body = "Chapters you mark as read will appear here.",
-                )
-            }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(FolioTokens.space3),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-            ) {
-                items(entries, key = { it.mangaId }) { entry ->
-                    HistoryRow(
-                        backend = backend,
-                        entry = entry,
-                        onClick = { onOpenManga(entry) },
-                    )
-                }
-            }
-        }
     }
 
     if (confirmClear) {

@@ -41,12 +41,16 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
@@ -56,6 +60,8 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.LocalFolioTopInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -151,112 +157,135 @@ fun MangaLibraryScreen(
         browseVm.globalSearch(if (trimmed.length >= 2) trimmed else "")
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (searchActive) {
-            MangaSearchHeader(
-                scope = searchScope,
-                onScopeChange = { next ->
-                    if (next != searchScope) viewModel.searchScope.value = next
-                },
-                query = query,
-                onQueryChange = { viewModel.query.value = it },
-                sourcesAvailable = browseViewModel != null,
-                onClose = { onSearchActiveChange(false) },
-            )
-        } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (railLeading != null) {
-                    item { railLeading() }
-                }
-                items(categories) { category ->
-                    FolioChip(
-                        selected = selectedCategory == category.id,
-                        onClick = { viewModel.selectCategory(category.id) },
-                        label = category.name,
-                    )
-                }
-                item {
-                    FolioChip(
-                        selected = false,
-                        onClick = { manageCollectionsOpen = true },
-                        label = "Edit",
-                    )
-                }
-                item {
-                    // Queue entry point for the whole manga side (it replaced the
-                    // overflow-menu item): a live count while anything is queued or
-                    // downloading, plain otherwise so storage settings stay reachable.
-                    FolioChip(
-                        selected = false,
-                        onClick = onOpenDownloads,
-                        label = if (activeDownloads > 0) "Downloads · $activeDownloads" else "Downloads",
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-        }
+    // The shelf runs full-bleed to the top of the window and the masthead floats over
+    // it, so covers genuinely pass behind the glass. The rail and the new-chapters
+    // notice float with it as one grounded band: they are chrome, and chrome that lets
+    // rows show through its own search field reads as noise rather than as depth.
+    val barInset = LocalFolioTopInset.current
+    // Measured on the furniture, never on the bar: the bar grows a hairline and a 10dp
+    // fade once it collapses, and an inset that tracked them would walk every cover up
+    // the screen under the reader's finger.
+    var furniturePx by remember { mutableIntStateOf(0) }
+    val topInset = barInset + with(LocalDensity.current) { furniturePx.toDp() }
 
-        if (!searchActive) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = updatingLibrary || showNewChaptersNotice,
-                enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(tween(200)),
-                exit = androidx.compose.animation.fadeOut(tween(300)),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = FolioTokens.space3)
-                        .glassPanel(RoundedCornerShape(FolioTokens.radiusChip))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .zIndex(1f)
+                .fillMaxWidth()
+                .padding(top = barInset)
+                .background(FolioTheme.atmosphere.fieldTop)
+                .onSizeChanged { furniturePx = it.height },
+        ) {
+            if (searchActive) {
+                MangaSearchHeader(
+                    scope = searchScope,
+                    onScopeChange = { next ->
+                        if (next != searchScope) viewModel.searchScope.value = next
+                    },
+                    query = query,
+                    onQueryChange = { viewModel.query.value = it },
+                    sourcesAvailable = browseViewModel != null,
+                    onClose = { onSearchActiveChange(false) },
+                )
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (updatingLibrary) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = FolioTheme.colors.onSurfaceVariant,
+                    if (railLeading != null) {
+                        item { railLeading() }
+                    }
+                    items(categories) { category ->
+                        FolioChip(
+                            selected = selectedCategory == category.id,
+                            onClick = { viewModel.selectCategory(category.id) },
+                            label = category.name,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Checking for new chapters…",
-                            style = FolioTheme.typography.labelMedium,
-                            color = FolioTheme.colors.onSurfaceVariant,
+                    }
+                    item {
+                        FolioChip(
+                            selected = false,
+                            onClick = { manageCollectionsOpen = true },
+                            label = "Edit",
                         )
-                    } else {
-                        Icon(
-                            Icons.Filled.LibraryAddCheck,
-                            contentDescription = null,
-                            tint = FolioTheme.colors.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        val chapterWord = if (newChapters == 1) "chapter" else "chapters"
-                        Text(
-                            if (updatedSeriesCount.size == 1) "$newChapters new $chapterWord"
-                            else "$newChapters new $chapterWord in ${updatedSeriesCount.size} series",
-                            style = FolioTheme.typography.labelMedium,
-                            color = FolioTheme.colors.onSurface,
+                    }
+                    item {
+                        // Queue entry point for the whole manga side (it replaced the
+                        // overflow-menu item): a live count while anything is queued or
+                        // downloading, plain otherwise so storage settings stay reachable.
+                        FolioChip(
+                            selected = false,
+                            onClick = onOpenDownloads,
+                            label = if (activeDownloads > 0) "Downloads · $activeDownloads" else "Downloads",
                         )
                     }
                 }
                 Spacer(Modifier.height(4.dp))
             }
+
+            if (!searchActive) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = updatingLibrary || showNewChaptersNotice,
+                    enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(tween(200)),
+                    exit = androidx.compose.animation.fadeOut(tween(300)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = FolioTokens.space3)
+                            .glassPanel(RoundedCornerShape(FolioTokens.radiusChip))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (updatingLibrary) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = FolioTheme.colors.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Checking for new chapters…",
+                                style = FolioTheme.typography.labelMedium,
+                                color = FolioTheme.colors.onSurfaceVariant,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.LibraryAddCheck,
+                                contentDescription = null,
+                                tint = FolioTheme.colors.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            val chapterWord = if (newChapters == 1) "chapter" else "chapters"
+                            Text(
+                                if (updatedSeriesCount.size == 1) "$newChapters new $chapterWord"
+                                else "$newChapters new $chapterWord in ${updatedSeriesCount.size} series",
+                                style = FolioTheme.typography.labelMedium,
+                                color = FolioTheme.colors.onSurface,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
         }
 
         val browseVm = browseViewModel
         if (searchingSources && browseVm != null) {
-            SourceSearchResults(
-                viewModel = browseVm,
-                onOpenManga = onOpenManga,
-                onOpenSource = { source -> onOpenSource(source, query.trim()) },
-            )
+            Box(Modifier.fillMaxSize().padding(top = topInset)) {
+                SourceSearchResults(
+                    viewModel = browseVm,
+                    onOpenManga = onOpenManga,
+                    onOpenSource = { source -> onOpenSource(source, query.trim()) },
+                )
+            }
         } else if (visible.isEmpty() && !isSelectionMode) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 if (searchActive && query.isNotBlank()) {
                     com.folio.reader.ui.components.EmptyState(
                         icon = Icons.Filled.Search,
@@ -276,7 +305,7 @@ fun MangaLibraryScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    top = FolioTokens.space2,
+                    top = FolioTokens.space2 + topInset,
                     bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
             ) {
@@ -315,7 +344,7 @@ fun MangaLibraryScreen(
                 contentPadding = PaddingValues(
                     start = FolioTokens.gutter,
                     end = FolioTokens.gutter,
-                    top = FolioTokens.space3,
+                    top = FolioTokens.space3 + topInset,
                     bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),

@@ -1,30 +1,19 @@
 package com.folio.reader.ui.library
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -32,7 +21,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -46,47 +34,40 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.automirrored.filled.ViewList
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
-import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.LocalFolioTopInset
+import com.folio.reader.ui.theme.folioBarTopInset
 
 /** Top-level library category: books (EPUB) and manga are separate collections. */
 enum class LibraryMode { BOOKS, MANGA }
@@ -202,32 +183,45 @@ fun LibraryScreen(
 
     // The books rail: the Books/Manga switch, then the status and grouping filters,
     // on one scrollable row. Built here so the masthead can fold it away as a unit.
+    // Measured on the content, not the folding box the masthead wraps it in — that
+    // one reports a shrinking height as the shelf scrolls, by design.
+    var railPx by remember { mutableIntStateOf(0) }
     val railContent: (@Composable () -> Unit)? =
         if (mangaMode) null else ({
-            LibraryFilterChips(
-                filter = filter,
-                allSeries = allSeries,
-                allCollections = allCollections,
-                seriesFilterOpen = seriesFilterOpen,
-                collectionFilterOpen = collectionFilterOpen,
-                onFilterChange = { filter = it },
-                onSeriesFilterOpen = { seriesFilterOpen = it },
-                onCollectionFilterOpen = { collectionFilterOpen = it },
-                leading = if (mangaContent != null) {
-                    ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
-                } else {
-                    null
-                },
-            )
+            Box(Modifier.onSizeChanged { railPx = it.height }) {
+                LibraryFilterChips(
+                    filter = filter,
+                    allSeries = allSeries,
+                    allCollections = allCollections,
+                    seriesFilterOpen = seriesFilterOpen,
+                    collectionFilterOpen = collectionFilterOpen,
+                    onFilterChange = { filter = it },
+                    onSeriesFilterOpen = { seriesFilterOpen = it },
+                    onCollectionFilterOpen = { collectionFilterOpen = it },
+                    leading = if (mangaContent != null) {
+                        ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
+                    } else {
+                        null
+                    },
+                )
+            }
         })
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // Published rather than imposed, exactly like LocalFolioBarInset at the bottom
+    // edge: the shelves add it to their own contentPadding so their first row
+    // clears the glass while everything past it scrolls underneath. They are
+    // reached through the opaque `mangaContent` lambda, so it could not be passed.
+    val topInset = folioBarTopInset(if (mangaMode) 0.dp else with(LocalDensity.current) { railPx.toDp() })
+
+    Box(modifier = Modifier.fillMaxSize()) {
         when {
             mangaMode && mangaSelActive -> {
                 // Selection mode swaps the regular chrome for bulk actions in the same
                 // bar — no extra block, no layout shift below.
                 com.folio.reader.ui.components.FolioTopBar(
                     title = "${mangaSelIds.size} selected",
+                    collapse = headerState.collapse,
+                    modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
                     navigationIcon = {
                         IconButton(onClick = { mangaLibraryViewModel?.clearSelection() }) {
                             Icon(Icons.Filled.Close, contentDescription = "Clear selection")
@@ -253,6 +247,8 @@ fun LibraryScreen(
                 // Books bulk-selection swaps the same bar, so the tab row below never moves.
                 com.folio.reader.ui.components.FolioTopBar(
                     title = "${selectedBooks.size} selected",
+                    collapse = headerState.collapse,
+                    modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
                     navigationIcon = {
                         IconButton(onClick = { viewModel.clearSelection() }) {
                             Icon(Icons.Filled.Close, contentDescription = "Clear selection")
@@ -287,6 +283,7 @@ fun LibraryScreen(
                 // as the only top-level screen that never said what it was.
                 title = "Library",
                 collapse = headerState.collapse,
+                modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
                 actions = {
                     if (syncState != null && syncNeedsAttention) {
                         com.folio.reader.ui.components.SyncStatusBadge(
@@ -496,15 +493,15 @@ fun LibraryScreen(
         }
 
         // The shelf passes its scroll up to the masthead through nested scroll, so no
-        // grid or list had to hoist its own state to get the collapse.
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .nestedScroll(headerState.nestedScrollConnection)
-        ) {
+        // grid or list had to hoist its own state to get the collapse. It now runs
+        // full-bleed to the top of the window with the masthead floating over it —
+        // the only arrangement in which there is anything behind the glass to see.
+        CompositionLocalProvider(LocalFolioTopInset provides topInset) {
             androidx.compose.animation.Crossfade(
                 targetState = libraryMode,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
             ) { mode ->
                 if (mode == LibraryMode.MANGA) {
                     mangaContent?.invoke()
@@ -536,7 +533,7 @@ fun LibraryScreen(
                 }
             }
         }
-        }
+    }
 }
 
 @Composable

@@ -178,9 +178,9 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         //  - depth is carried by the hairline and the fade below it (FolioTopBar),
         //    never by making the fill heavier.
         barGlass = if (dark) {
-            lerp(fieldTop, colors.surface, 0.35f).copy(alpha = 0.32f)
+            lerp(fieldTop, colors.surface, 0.35f).copy(alpha = 0.36f)
         } else {
-            lift(fieldTop, 0.42f).copy(alpha = 0.36f)
+            lift(fieldTop, 0.42f).copy(alpha = 0.40f)
         },
         hairline = if (dark) {
             lift(colors.outline, 0.05f).copy(alpha = 0.30f)

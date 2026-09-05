@@ -44,11 +44,13 @@ import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.folioBarTopInset
 
 /**
  * The More hub, as a **table of contents** rather than nested boxes.
@@ -76,10 +78,14 @@ fun SettingsHubScreen(
     onOpenDownloads: () -> Unit,
     onOpenHistory: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
-        FolioTopBar(title = "More", collapse = headerState.collapse)
-        val colors = FolioTheme.colors
+    val headerState = rememberFolioHeaderState()
+    // The bar's at-rest height: status icons plus the bar row. Paid by the list
+    // alone, and static — tracking the scrolled glass would translate every row
+    // mid-scroll.
+    val topInset = folioBarTopInset()
+    val colors = FolioTheme.colors
+
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -87,7 +93,7 @@ fun SettingsHubScreen(
             contentPadding = PaddingValues(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,
-                top = FolioTokens.space2,
+                top = topInset + FolioTokens.space2,
                 bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
             ),
         ) {
@@ -229,6 +235,15 @@ fun SettingsHubScreen(
                 }
             }
         }
+
+        // Last, so it is on top of the list rather than a sibling above it: the
+        // rows now pass under the glass, which is the only thing that makes a
+        // translucent bar read as a bar.
+        FolioTopBar(
+            title = "More",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
     }
 }
 

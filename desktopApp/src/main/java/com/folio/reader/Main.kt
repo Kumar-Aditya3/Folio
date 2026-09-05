@@ -1,7 +1,6 @@
 package com.folio.reader
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
@@ -19,6 +18,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -956,15 +956,38 @@ fun main(args: Array<String>) {
                                 }
 
                                 is Screen.Stats -> {
-                                    // StatisticsTabContent supplies no chrome of its own.
-                                    Column(modifier = Modifier.fillMaxSize()) {
-                                        com.folio.reader.ui.components.FolioTopBar(title = "Stats")
-                                        StatisticsTabContent(
-                                            viewModel = statisticsVM,
-                                            onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
-                                            settingsRepository = deps.settingsRepository,
-                                            initialGoalMinutes = globalSettings.dailyGoalMinutes,
-                                            mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
+                                    // StatisticsTabContent supplies no chrome of its own: the host
+                                    // publishes the masthead's runway and the charts pay it as their
+                                    // own top contentPadding, so they run to the top of the window
+                                    // and travel *under* the glass.
+                                    val statsHeader =
+                                        com.folio.reader.ui.components.rememberFolioHeaderState()
+                                    // Desktop resolves `WindowInsets.statusBars` to zero, so this is
+                                    // the bar row's own height and nothing more.
+                                    val statsTopInset = com.folio.reader.ui.theme.folioBarTopInset()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .nestedScroll(statsHeader.nestedScrollConnection)
+                                    ) {
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            com.folio.reader.ui.theme.LocalFolioTopInset provides statsTopInset
+                                        ) {
+                                            StatisticsTabContent(
+                                                viewModel = statisticsVM,
+                                                onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
+                                                settingsRepository = deps.settingsRepository,
+                                                initialGoalMinutes = globalSettings.dailyGoalMinutes,
+                                                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
+                                            )
+                                        }
+                                        // Drawn last so it floats over the charts, and driven by their
+                                        // scroll — with no collapse value the bar never painted its
+                                        // glass at all.
+                                        com.folio.reader.ui.components.FolioTopBar(
+                                            title = "Stats",
+                                            collapse = statsHeader.collapse,
+                                            modifier = Modifier.align(Alignment.TopCenter)
                                         )
                                     }
                                 }

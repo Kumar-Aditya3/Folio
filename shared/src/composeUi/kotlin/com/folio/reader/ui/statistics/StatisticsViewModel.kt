@@ -278,10 +278,18 @@ class StatisticsViewModel(
         return combine(quotesFlow, booksFlow) { quotes, books ->
             val bookMap = books.associateBy { it.id }
             val entries = ArrayList<RecentQuote>(quotes.size + 8)
+            val highlights = highlightRepository
 
             // --- Saved quotes ---
             for (q in quotes) {
                 val book = bookMap[q.bookId] ?: continue
+                // The shadow-quote leak again: a highlight writes a `quote-<id>` row
+                // that outlives it, and `quotes` has no is_deleted column to
+                // tombstone it with — so resolve and skip.
+                if (highlights != null && q.highlightId.isNotBlank()) {
+                    val source = highlights.getHighlight(q.highlightId)
+                    if (source == null || source.isDeleted) continue
+                }
                 entries.add(
                     RecentQuote(
                         id = q.id,

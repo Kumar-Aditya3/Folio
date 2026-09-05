@@ -52,7 +52,8 @@ fun BookList(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            top = com.folio.reader.ui.theme.FolioTokens.space2,
+            top = com.folio.reader.ui.theme.FolioTokens.space2 +
+                com.folio.reader.ui.theme.LocalFolioTopInset.current,
             bottom = com.folio.reader.ui.theme.FolioTokens.spaceMovement +
                 com.folio.reader.ui.theme.LocalFolioBarInset.current
         )
@@ -192,7 +193,8 @@ fun BookCompactList(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            top = com.folio.reader.ui.theme.FolioTokens.space2,
+            top = com.folio.reader.ui.theme.FolioTokens.space2 +
+                com.folio.reader.ui.theme.LocalFolioTopInset.current,
             bottom = com.folio.reader.ui.theme.FolioTokens.spaceMovement +
                 com.folio.reader.ui.theme.LocalFolioBarInset.current
         )

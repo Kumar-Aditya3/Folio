@@ -46,14 +46,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioSourceSectionSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -78,106 +84,40 @@ fun MangaBrowseScreen(
     var languageMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxSize()) {
-        FolioTopBar(
-            title = "Browse",
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                IconButton(onClick = { viewModel.toggleSearch() }) {
-                    Icon(Icons.Filled.Search, contentDescription = "Search all sources")
-                }
-                if (availableLanguages.size > 1) {
-                    // The language filter is what keeps one site from filling the list
-                    // with a row per language it publishes.
-                    Box {
-                        IconButton(onClick = { languageMenuOpen = true }) {
-                            Icon(Icons.Filled.Translate, contentDescription = "Source languages")
-                        }
-                        DropdownMenu(
-                            expanded = languageMenuOpen,
-                            onDismissRequest = { languageMenuOpen = false },
-                        ) {
-                            val allOn = enabledLanguages.containsAll(availableLanguages)
-                            DropdownMenuItem(
-                                text = { Text(if (allOn) "Only my languages" else "All languages") },
-                                onClick = {
-                                    viewModel.setSourceLanguages(
-                                        if (allOn) defaultSourceLanguages() else availableLanguages.toSet(),
-                                    )
-                                },
-                            )
-                            HorizontalDivider()
-                            availableLanguages.forEach { lang ->
-                                val on = lang in enabledLanguages
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            languageLabel(lang),
-                                            color = if (on) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        if (on) {
-                                            Icon(
-                                                Icons.Filled.Check,
-                                                contentDescription = null,
-                                                tint = FolioTheme.colors.primary,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        } else {
-                                            Spacer(Modifier.size(18.dp))
-                                        }
-                                    },
-                                    // Stays open: picking languages is a several-taps job.
-                                    onClick = { viewModel.toggleSourceLanguage(lang) },
-                                )
-                            }
-                        }
-                    }
-                }
-                if (viewModel.supportsExtensions) {
-                    IconButton(onClick = { viewModel.refreshIndex() }) {
-                        if (refreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh extension index")
-                        }
-                    }
-                }
-            },
-        )
+    val headerState = rememberFolioHeaderState()
+    // The masthead is overlaid on the list rather than stacked above it, so source
+    // rows pass under its glass. A translucent veil over the page's own flat,
+    // unchanging field is indistinguishable from a slightly different flat field,
+    // which is why the bar read as invisible however its alpha was tuned.
+    val barInset = folioBarTopInset()
+    // The furniture this screen hangs under the bar — here only the search field,
+    // and only while it is open. Measured, not guessed, and measured on the
+    // furniture alone: the bar grows a hairline and a 10dp fade once it collapses,
+    // and a padding that tracked them would walk every row up the screen under the
+    // reader's finger.
+    var furniturePx by remember { mutableStateOf(0) }
+    val topInset = barInset + with(LocalDensity.current) { furniturePx.toDp() }
 
-        if (searchActive) {
-            LaunchedEffect(searchActive, queryText) {
-                kotlinx.coroutines.delay(350)
-                val trimmed = queryText.trim()
-                viewModel.globalSearch(if (trimmed.length >= 2) trimmed else "")
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = queryText,
-                    onValueChange = { queryText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search all sources") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.width(FolioTokens.space1))
-                IconButton(onClick = { queryText = "" }, enabled = queryText.isNotBlank()) {
-                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                }
-            }
-            Spacer(Modifier.height(FolioTokens.space1))
+    if (searchActive) {
+        LaunchedEffect(searchActive, queryText) {
+            kotlinx.coroutines.delay(350)
+            val trimmed = queryText.trim()
+            viewModel.globalSearch(if (trimmed.length >= 2) trimmed else "")
         }
+    }
 
+    Box(Modifier.fillMaxSize()) {
         if (searchActive && globalQuery.isNotBlank()) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.space3,
+                    top = topInset + FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    bottom = FolioTokens.space3,
+                ),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
             ) {
                 val finished = globalResults.count { !it.loading }
@@ -221,8 +161,15 @@ fun MangaBrowseScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.space3,
+                    top = topInset + FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    bottom = FolioTokens.space3,
+                ),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
                 item {
@@ -326,6 +273,114 @@ fun MangaBrowseScreen(
                 }
             }
         }
+
+        // Furniture the screen hangs under the masthead, overlaid with it so results
+        // still run behind the glass. Always composed, even with the search field
+        // closed: an empty layer measures zero, which is what retracts the padding.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = barInset)
+                // Its own ground: an OutlinedTextField's container is transparent, so
+                // results passing under it would render text on text. Applied after the
+                // top padding on purpose — painted up behind the masthead it would block
+                // the very rows the bar's glass exists to show through.
+                .background(FolioTheme.atmosphere.fieldTop)
+                .onSizeChanged { furniturePx = it.height },
+        ) {
+            if (searchActive) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = queryText,
+                        onValueChange = { queryText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Search all sources") },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.width(FolioTokens.space1))
+                    IconButton(onClick = { queryText = "" }, enabled = queryText.isNotBlank()) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                    }
+                }
+                Spacer(Modifier.height(FolioTokens.space1))
+            }
+        }
+
+        FolioTopBar(
+            title = "Browse",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+            navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            },
+            actions = {
+                IconButton(onClick = { viewModel.toggleSearch() }) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search all sources")
+                }
+                if (availableLanguages.size > 1) {
+                    // The language filter is what keeps one site from filling the list
+                    // with a row per language it publishes.
+                    Box {
+                        IconButton(onClick = { languageMenuOpen = true }) {
+                            Icon(Icons.Filled.Translate, contentDescription = "Source languages")
+                        }
+                        DropdownMenu(
+                            expanded = languageMenuOpen,
+                            onDismissRequest = { languageMenuOpen = false },
+                        ) {
+                            val allOn = enabledLanguages.containsAll(availableLanguages)
+                            DropdownMenuItem(
+                                text = { Text(if (allOn) "Only my languages" else "All languages") },
+                                onClick = {
+                                    viewModel.setSourceLanguages(
+                                        if (allOn) defaultSourceLanguages() else availableLanguages.toSet(),
+                                    )
+                                },
+                            )
+                            HorizontalDivider()
+                            availableLanguages.forEach { lang ->
+                                val on = lang in enabledLanguages
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            languageLabel(lang),
+                                            color = if (on) FolioTheme.colors.primary else FolioTheme.colors.onSurface,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (on) {
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = FolioTheme.colors.primary,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Spacer(Modifier.size(18.dp))
+                                        }
+                                    },
+                                    // Stays open: picking languages is a several-taps job.
+                                    onClick = { viewModel.toggleSourceLanguage(lang) },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (viewModel.supportsExtensions) {
+                    IconButton(onClick = { viewModel.refreshIndex() }) {
+                        if (refreshing) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh extension index")
+                        }
+                    }
+                }
+            },
+        )
     }
 }
 

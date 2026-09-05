@@ -82,6 +82,13 @@ class QuoteBrowserViewModel(
                         val chapters = getChaptersForBook(quote.bookId)
                         val chapter = chapters.find { it.id == quote.chapterId }
                         val highlight = quote.highlightId.takeIf { it.isNotBlank() }?.let { getHighlight(it) }
+                        // A highlight auto-creates a shadow quote (id = "quote-<highlightId>")
+                        // that outlives it: `quotes` has no is_deleted column, so soft-deleting
+                        // the highlight left its text sitting here forever. Filtered, not
+                        // deleted — restoreHighlight has to keep working.
+                        if (quote.highlightId.isNotBlank() && (highlight == null || highlight.isDeleted)) {
+                            return@mapNotNull null
+                        }
                         val note = quote.highlightId.takeIf { it.isNotBlank() }?.let { getHighlight(it)?.noteId }?.let { getNote(it) }
                             ?: if (quote.note != null) Note(
                                 id = "inline-${quote.id}",
