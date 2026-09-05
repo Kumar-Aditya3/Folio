@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -207,6 +208,32 @@ fun FolioTopBar(
                             0.38f to Color.Transparent,
                         )
                     )
+                    // The bar's lower boundary — hairline, then the glass fade under
+                    // it — painted inside the masthead's own footprint. As Column
+                    // children they grew the bar 11dp past folioBarTopInset, and the
+                    // overhang cut across whatever was pinned at that inset (chip
+                    // rails, search fields) — permanently once the opacity knob
+                    // passes the glass point and presence is 1 at rest.
+                    val fadePx = FolioTokens.barGlassFade.toPx()
+                    val rulePx = 1.dp.toPx()
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to veil.copy(alpha = fill.crown * 0.45f),
+                            1f to Color.Transparent,
+                        ),
+                        topLeft = Offset(0f, size.height - fadePx),
+                        size = Size(size.width, fadePx),
+                    )
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(
+                                atmos.hairline.copy(alpha = 0.55f * fill.presence),
+                                atmos.hairline.copy(alpha = 0.10f * fill.presence),
+                            )
+                        ),
+                        topLeft = Offset(0f, size.height - fadePx - rulePx),
+                        size = Size(size.width, rulePx),
+                    )
                 }
             }
     ) {
@@ -266,22 +293,6 @@ fun FolioTopBar(
             ) {
                 rail()
             }
-        }
-        // The boundary the bar has always claimed but never drew — and now only
-        // draws once it has something to separate.
-        if (fill.presence > 0.01f) {
-            FolioRule(modifier = Modifier.graphicsLayer { alpha = fill.presence })
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(FolioTokens.barGlassFade)
-                    .background(
-                        Brush.verticalGradient(
-                            0f to veil.copy(alpha = fill.crown * 0.45f),
-                            1f to Color.Transparent,
-                        )
-                    )
-            )
         }
     }
 }
