@@ -1,10 +1,8 @@
 package com.folio.reader.ui.manga
 
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,16 +39,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
@@ -61,10 +68,12 @@ import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun MangaDetailScreen(
@@ -96,7 +105,6 @@ fun MangaDetailScreen(
         }
     }
     val scope = rememberCoroutineScope()
-    var filterOpen by remember { mutableStateOf(false) }
     val allCategories by viewModel.allCategories.collectAsState()
     val myCategoryIds by viewModel.myCategoryIds.collectAsState()
     var categoryPickerOpen by remember { mutableStateOf(false) }
@@ -120,14 +128,72 @@ fun MangaDetailScreen(
     // takes the manga's title as the identity block below scrolls out of sight — the
     // same migration Home's hero makes into its bar.
     val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
-    // Hoisted so the masthead knows when the inline action block (item 1) scrolls out.
-    val listState = rememberLazyListState()
-    Column(Modifier.fillMaxSize().nestedScroll(headerState.nestedScrollConnection)) {
+
+    // Categories and tags ride in the masthead's rail slot instead of as a row of their
+    // own, so they fold up under the bar on scroll and the chapter list is the only
+    // full-bleed content — which is what makes the bar's glass actually visible.
+    var railPx by remember { mutableIntStateOf(0) }
+    val rail: (@Composable () -> Unit)? =
+        if (!m.inLibrary) null else ({
+            Box(Modifier.onSizeChanged { railPx = it.height }) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = FolioTokens.space3),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(allCategories.filter { it.id in myCategoryIds }) { category ->
+                        FolioChip(selected = true, onClick = { categoryPickerOpen = true }, label = category.name)
+                    }
+                    item {
+                        FolioChip(selected = false, onClick = { categoryPickerOpen = true }, label = "Categories")
+                    }
+                    items(tags) { tag ->
+                        FolioChip(selected = true, onClick = { tagPickerOpen = true }, label = tag.name)
+                    }
+                    item {
+                        FolioChip(selected = false, onClick = { tagPickerOpen = true }, label = "Tags")
+                    }
+                }
+            }
+        })
+    // At-rest, deliberately: the rail folds away as the bar collapses, and a shrinking
+    // inset would drag every chapter row up mid-scroll.
+    val topInset = folioBarTopInset(with(LocalDensity.current) { railPx.toDp() })
+    // Resume sits in the action stack with the other series-level buttons, and hands
+    // itself to the masthead as it slides under it. The handoff is driven by where the
+    // inline button actually is — not by the bar's collapse fraction, which finishes
+    // after 56dp of scroll while the button is still mid-page — so the two copies
+    // cross-fade exactly at the bar's edge and resuming is never absent from the screen.
+    //
+    // Held in a float state read only inside layout/draw lambdas: reading it in
+    // composition would recompose the whole bar on every scroll frame.
+    val density = LocalDensity.current
+    val barBottomPx = with(density) { topInset.toPx() }
+    val handoffPx = with(density) { 56.dp.toPx() }
+    val resumeLiftPx = with(density) { 12.dp.toPx() }
+    val resumeTopPx = remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    val resumeMorph: () -> Float = {
+        val gap = resumeTopPx.floatValue - barBottomPx
+        ((handoffPx - gap) / handoffPx).coerceIn(0f, 1f)
+    }
+    val continueLabel = if (chapters.any { it.read }) "Continue" else "Start"
+    val launchContinue: () -> Unit = {
+        scope.launch {
+            val target = viewModel.nextChapterToRead() ?: displayChapters.firstOrNull()
+            if (target != null) {
+                viewModel.recordHistory(target.id)
+                onRead(m, target)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
         if (chapterSelectionMode) {
             // Chapter selection swaps the regular chrome for bulk actions in the same
             // bar — no extra block, no layout shift below.
             FolioTopBar(
                 title = "${selectedChapterIds.size} selected",
+                modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
                 navigationIcon = {
                     IconButton(onClick = { viewModel.clearChapterSelection() }) {
                         Icon(Icons.Filled.Close, contentDescription = "Clear selection")
@@ -154,139 +220,119 @@ fun MangaDetailScreen(
                 },
             )
         } else {
-        FolioTopBar(
-            // The title/author/status block below already carries the identity; a top-bar
-            // title just repeats it — until that block scrolls away, at which point the
-            // title migrates up here.
-            title = "",
-            collapse = headerState.collapse,
-            titleContent = {
-                Text(
-                    text = m.title,
-                    style = FolioTheme.typography.titleMedium,
-                    color = FolioTheme.colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.graphicsLayer {
-                        alpha = ((headerState.collapse - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                    },
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                // Continue persists in the masthead once the inline action block below
-                // scrolls out, so resuming is always one tap away — the same migration
-                // the title makes. Keyed off the list (item 1 gone), not the 56dp
-                // collapse, since the inline button sits further down and would overlap.
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = listState.firstVisibleItemIndex > 1 && displayChapters.isNotEmpty(),
-                    enter = fadeIn(tween(160)) + expandHorizontally(),
-                    exit = fadeOut(tween(160)) + shrinkHorizontally(),
-                ) {
-                    IconButton(onClick = {
-                        scope.launch {
-                            val target = viewModel.nextChapterToRead() ?: displayChapters.firstOrNull()
-                            if (target != null) {
-                                viewModel.recordHistory(target.id)
-                                onRead(m, target)
+            FolioTopBar(
+                // The title/author/status block below already carries the identity; a top-bar
+                // title just repeats it — until that block scrolls away, at which point the
+                // title migrates up here.
+                title = "",
+                modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
+                collapse = headerState.collapse,
+                rail = rail,
+                titleContent = {
+                    Text(
+                        text = m.title,
+                        style = FolioTheme.typography.titleMedium,
+                        color = FolioTheme.colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.graphicsLayer {
+                            alpha = ((headerState.collapse - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                        },
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+                actions = {
+                    // Resume unfurls into the bar as the inline copy slides under it: the
+                    // slot's width tracks the handoff so the title yields room instead of a
+                    // button appearing on top of it. Clipped horizontally and scaled rather
+                    // than translated, so nothing spills past the slot mid-morph.
+                    Box(
+                        modifier = Modifier
+                            .clipToBounds()
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(constraints)
+                                val width = (placeable.width * resumeMorph()).roundToInt()
+                                layout(width, placeable.height) {
+                                    placeable.placeRelative(width - placeable.width, 0)
+                                }
                             }
-                        }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = if (chapters.any { it.read }) "Continue reading" else "Start reading",
-                            tint = FolioTheme.colors.primary,
+                            .graphicsLayer {
+                                val f = resumeMorph()
+                                alpha = f
+                                val scale = 0.92f + 0.08f * f
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                    ) {
+                        ResumeReadingButton(
+                            label = continueLabel,
+                            enabled = displayChapters.isNotEmpty(),
+                            // Only the copy the user can actually see responds, so the
+                            // collapsed slot can never take a tap meant for the title.
+                            onClick = { if (resumeMorph() > 0.5f) launchContinue() },
                         )
                     }
-                }
-                IconButton(onClick = {
-                    if (!m.inLibrary) categoryPrompt = true
-                    viewModel.toggleInLibrary()
-                }) {
-                    Icon(
-                        imageVector = if (m.inLibrary) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
-                        contentDescription = if (m.inLibrary) "In library — tap to remove" else "Add to library",
-                        tint = if (m.inLibrary) FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = { viewModel.refresh() }) {
-                    if (refreshing) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    IconButton(onClick = {
+                        if (!m.inLibrary) categoryPrompt = true
+                        viewModel.toggleInLibrary()
+                    }) {
+                        Icon(
+                            imageVector = if (m.inLibrary) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
+                            contentDescription = if (m.inLibrary) "In library — tap to remove" else "Add to library",
+                            tint = if (m.inLibrary) FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant,
+                        )
                     }
-                }
-                IconButton(onClick = { viewModel.toggleSort() }) {
-                    Icon(Icons.Filled.Sort, contentDescription = "Sort order")
-                }
-                Box {
-                    IconButton(onClick = { filterOpen = true }) {
-                        Icon(Icons.Filled.FilterList, contentDescription = "Filter chapters")
-                    }
-                    DropdownMenu(expanded = filterOpen, onDismissRequest = { filterOpen = false }) {
-                        ChapterFilter.entries.forEach { f ->
+                    // Everything that is not "keep reading" — refresh, ordering, the chapter
+                    // filter, bulk marks — sits behind one overflow, grouped by dividers.
+                    Box {
+                        var moreOpen by remember { mutableStateOf(false) }
+                        IconButton(onClick = { moreOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                             DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (chapterFilter == f) {
-                                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(6.dp))
-                                        }
-                                        Text(f.label)
+                                text = { Text(if (refreshing) "Refreshing…" else "Refresh chapters") },
+                                leadingIcon = {
+                                    if (refreshing) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Filled.Refresh, contentDescription = null)
                                     }
                                 },
-                                onClick = {
-                                    filterOpen = false
-                                    viewModel.setChapterFilter(f)
-                                },
+                                onClick = { moreOpen = false; viewModel.refresh() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (sortAscending) "Oldest first" else "Newest first") },
+                                leadingIcon = { Icon(Icons.Filled.Sort, contentDescription = null) },
+                                onClick = { moreOpen = false; viewModel.toggleSort() },
+                            )
+                            HorizontalDivider()
+                            ChapterFilter.entries.forEach { filter ->
+                                DropdownMenuItem(
+                                    text = { Text(filter.label) },
+                                    leadingIcon = {
+                                        if (chapterFilter == filter) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = { moreOpen = false; viewModel.setChapterFilter(filter) },
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Mark all as read") },
+                                leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
+                                onClick = { moreOpen = false; viewModel.markAllRead(true) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Mark all as unread") },
+                                leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
+                                onClick = { moreOpen = false; viewModel.markAllRead(false) },
                             )
                         }
                     }
-                }
-                Box {
-                    var moreOpen by remember { mutableStateOf(false) }
-                    IconButton(onClick = { moreOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
-                    }
-                    DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Mark all as read") },
-                            leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                            onClick = { moreOpen = false; viewModel.markAllRead(true) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Mark all as unread") },
-                            leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
-                            onClick = { moreOpen = false; viewModel.markAllRead(false) },
-                        )
-                    }
-                }
-            },
-        )
-        }
-
-        if (m.inLibrary) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = FolioTokens.space3),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(allCategories.filter { it.id in myCategoryIds }) { category ->
-                    FolioChip(selected = true, onClick = { categoryPickerOpen = true }, label = category.name)
-                }
-                item {
-                    FolioChip(selected = false, onClick = { categoryPickerOpen = true }, label = "Categories")
-                }
-                items(tags) { tag ->
-                    FolioChip(selected = true, onClick = { tagPickerOpen = true }, label = tag.name)
-                }
-                item {
-                    FolioChip(selected = false, onClick = { tagPickerOpen = true }, label = "Tags")
-                }
-            }
-            Spacer(Modifier.height(4.dp))
+                },
+            )
         }
 
         if (categoryPickerOpen) {
@@ -327,7 +373,7 @@ fun MangaDetailScreen(
             visible = refreshNoticeVisible && refreshNotice != null,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(200)),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.align(Alignment.TopCenter).zIndex(1f).fillMaxWidth(),
         ) {
             Box(
                 modifier = Modifier.fillMaxWidth(),
@@ -338,7 +384,7 @@ fun MangaDetailScreen(
                     style = FolioTheme.typography.labelLarge,
                     color = FolioTheme.colors.onSurface,
                     modifier = Modifier
-                        .padding(top = FolioTokens.space2)
+                        .padding(top = topInset + FolioTokens.space2)
                         .glassPanel(RoundedCornerShape(FolioTokens.radiusChip))
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 )
@@ -346,9 +392,15 @@ fun MangaDetailScreen(
         }
 
         LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(FolioTokens.space3),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(headerState.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                start = FolioTokens.space3,
+                top = topInset + FolioTokens.space3,
+                end = FolioTokens.space3,
+                bottom = FolioTokens.space3,
+            ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
         ) {
             item {
@@ -420,42 +472,36 @@ fun MangaDetailScreen(
                             Text("Add to library", maxLines = 1)
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    val target = viewModel.nextChapterToRead()
-                                        ?: displayChapters.firstOrNull()
-                                    if (target != null) {
-                                        viewModel.recordHistory(target.id)
-                                        onRead(m, target)
-                                    }
-                                }
+                    // Between the library toggle and the download queue: resuming is a
+                    // series-level action like its neighbours, not chrome. It reports its own
+                    // position so the masthead knows when to take over, and lifts as it fades
+                    // so the two copies read as one control moving rather than two swapping.
+                    ResumeReadingButton(
+                        label = continueLabel,
+                        enabled = displayChapters.isNotEmpty(),
+                        onClick = { if (resumeMorph() < 0.5f) launchContinue() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { resumeTopPx.floatValue = it.positionInWindow().y }
+                            .graphicsLayer {
+                                val f = resumeMorph()
+                                alpha = 1f - f
+                                translationY = -resumeLiftPx * f
                             },
-                            enabled = displayChapters.isNotEmpty(),
-                            modifier = Modifier.weight(1f),
+                    )
+                    // Downloads are online-source-only: a local series is already on disk in
+                    // full, and queueing it would just extract the archive into duplicate
+                    // page files. Queues every unread chapter; disabled once caught up so it
+                    // never dead-clicks.
+                    if (downloadsAvailable && !m.isLocal) {
+                        OutlinedButton(
+                            onClick = { viewModel.downloadUnread() },
+                            enabled = chapters.any { !it.read },
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Icon(Icons.Filled.Download, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text(
-                                if (chapters.any { it.read }) "Continue" else "Start reading",
-                                maxLines = 1,
-                            )
-                        }
-                        // Downloads only make sense for online sources: a local series is
-                        // already on disk in full, and queueing it would just extract the
-                        // archive into duplicate per-page files.
-                        if (downloadsAvailable && !m.isLocal) {
-                            // Queues every unread chapter; disabled when everything is read
-                            // so a fully-caught-up series doesn't dead-click.
-                            OutlinedButton(
-                                onClick = { viewModel.downloadUnread() },
-                                enabled = chapters.any { !it.read },
-                            ) {
-                                Icon(Icons.Filled.Download, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Download unread", maxLines = 1)
-                            }
+                            Text("Download unread", maxLines = 1)
                         }
                     }
                 }
@@ -587,5 +633,24 @@ fun MangaDetailScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ResumeReadingButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp),
+    ) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(label, maxLines = 1)
     }
 }

@@ -44,14 +44,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.folioBarTopInset
 
 @Composable
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -225,54 +230,29 @@ fun DownloadsScreen(
     val chapterNames by viewModel.chapterNames.collectAsState()
     val storageDescription by viewModel.storageDescription.collectAsState()
 
-    Column(Modifier.fillMaxSize()) {
-        FolioTopBar(
-            title = "Downloads",
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                // A sweep icon reads as "clean up"; the previous ✕ looked like "close screen".
-                IconButton(onClick = { viewModel.clearFinished() }) {
-                    Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear finished")
-                }
-            },
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2)
-                .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
-                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.Folder,
-                contentDescription = null,
-                tint = FolioTheme.colors.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(FolioTokens.space3))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Download location",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                )
-                Text(
-                    storageDescription,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            TextButton(onClick = onPickLocation) {
-                Text("Change", style = MaterialTheme.typography.labelMedium)
-            }
-        }
+    val headerState = rememberFolioHeaderState()
+    // The masthead — bar plus the download-location card — overlays the queue rather
+    // than sitting above it, so rows pass under both. The card is glass itself, and
+    // glass only reads as glass once something is moving behind it: a veil over the
+    // page's own flat, unchanging field is indistinguishable from a slightly
+    // different flat field.
+    val barInset = folioBarTopInset()
+    // The card's height is its button plus two lines of type, which no formula
+    // predicts, so it is measured — on the card and not on the whole masthead,
+    // because the bar grows a hairline and a 10dp fade once it collapses and a
+    // padding that tracked them would walk every row up the screen under the
+    // reader's finger.
+    var furniturePx by remember { mutableStateOf(0) }
+    val topInset = barInset + with(LocalDensity.current) { furniturePx.toDp() }
+
+    Box(Modifier.fillMaxSize()) {
         if (queue.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // Non-scrolling, so it takes the masthead's room as an outer padding:
+            // content padding on a Box that does not scroll buys nothing.
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = topInset),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     "No downloads in the queue.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -281,8 +261,15 @@ fun DownloadsScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(FolioTokens.space3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.space3,
+                    top = topInset + FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    bottom = FolioTokens.space3,
+                ),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
             ) {
                 items(queue, key = { it.id }) { download ->
@@ -349,5 +336,65 @@ fun DownloadsScreen(
                 }
             }
         }
+
+        // The furniture the screen hangs under the masthead, overlaid with it so the
+        // queue still runs behind the glass. Its measured height is what the queue's
+        // top padding clears.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = barInset)
+                .onSizeChanged { furniturePx = it.height },
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2)
+                    .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                    .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Folder,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(FolioTokens.space3))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Download location",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    Text(
+                        storageDescription,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(onClick = onPickLocation) {
+                    Text("Change", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+
+        FolioTopBar(
+            title = "Downloads",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+            navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            },
+            actions = {
+                // A sweep icon reads as "clean up"; the previous ✕ looked like "close screen".
+                IconButton(onClick = { viewModel.clearFinished() }) {
+                    Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear finished")
+                }
+            },
+        )
     }
 }

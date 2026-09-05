@@ -43,6 +43,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.ExtensionEntry
@@ -52,8 +55,11 @@ import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioBarTopInset
 
 @Composable
 fun ExtensionsScreen(
@@ -93,64 +99,31 @@ fun ExtensionsScreen(
             .distinctBy { it.pkgName }
             .filter { it.name.contains(extQuery, ignoreCase = true) }
 
-    Column(Modifier.fillMaxSize()) {
-        FolioTopBar(
-            title = "Extensions",
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                IconButton(onClick = { viewModel.refreshIndex() }) {
-                    if (refreshing) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-                    }
-                }
-            },
-        )
+    val headerState = rememberFolioHeaderState()
+    // The masthead — bar plus the furniture this screen hangs under it — overlays the
+    // list rather than sitting above it, so extension rows pass under the glass. A
+    // translucent veil over the page's own flat, unchanging field is
+    // indistinguishable from a slightly different flat field, which is why the bar
+    // read as invisible however its alpha was tuned.
+    val barInset = folioBarTopInset()
+    // Chips, a switch row and a text field: no formula predicts that stack, so it is
+    // measured. Measured on the furniture and not on the whole masthead, because the
+    // bar grows a hairline and a 10dp fade once it collapses, and a padding that
+    // tracked them would walk every row up the screen under the reader's finger.
+    var furniturePx by remember { mutableStateOf(0) }
+    val topInset = barInset + with(LocalDensity.current) { furniturePx.toDp() }
 
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = FolioTokens.space3),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
-        ) {
-            item { FolioChip(selected = tab == 0, onClick = { tab = 0 }, label = "Installed (${installed.size})") }
-            item { FolioChip(selected = tab == 1, onClick = { tab = 1 }, label = "Available (${available.size})") }
-            item { FolioChip(selected = tab == 2, onClick = { tab = 2 }, label = "Untrusted (${untrusted.size})") }
-        }
-        Spacer(Modifier.height(FolioTokens.space1))
-        if (viewModel.supportsExtensions) {
-            val nsfw by viewModel.nsfw.collectAsState()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { viewModel.setNsfw(!nsfw) }
-                    .padding(horizontal = FolioTokens.space3),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(checked = nsfw, onCheckedChange = { viewModel.setNsfw(it) })
-                Text(
-                    "Show NSFW extensions",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = FolioTheme.colors.onSurface,
-                )
-            }
-        }
-        Spacer(Modifier.height(FolioTokens.space1))
-        OutlinedTextField(
-            value = extQuery,
-            onValueChange = { extQuery = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = FolioTokens.space3),
-            placeholder = { Text("Search extensions") },
-            singleLine = true,
-        )
-        Spacer(Modifier.height(FolioTokens.space2))
-
+    Box(Modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(FolioTokens.space3),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(headerState.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                start = FolioTokens.space3,
+                top = topInset + FolioTokens.space3,
+                end = FolioTokens.space3,
+                bottom = FolioTokens.space3,
+            ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
         ) {
             if (shown.isEmpty() && tab == 1 && !refreshing) {
@@ -257,6 +230,78 @@ fun ExtensionsScreen(
                 }
             }
         }
+
+        // The furniture the screen hangs under the masthead, overlaid with it so the
+        // list still runs behind the glass. Its measured height is what the list's
+        // top padding clears.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = barInset)
+                // Its own ground: the search field's Material container is transparent,
+                // so extensions passing under it would render text on text. Applied after
+                // the top padding so it never paints up behind the masthead and blocks the
+                // rows the bar's glass exists to show through.
+                .background(FolioTheme.atmosphere.fieldTop)
+                .onSizeChanged { furniturePx = it.height },
+        ) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = FolioTokens.space3),
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
+            ) {
+                item { FolioChip(selected = tab == 0, onClick = { tab = 0 }, label = "Installed (${installed.size})") }
+                item { FolioChip(selected = tab == 1, onClick = { tab = 1 }, label = "Available (${available.size})") }
+                item { FolioChip(selected = tab == 2, onClick = { tab = 2 }, label = "Untrusted (${untrusted.size})") }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            if (viewModel.supportsExtensions) {
+                val nsfw by viewModel.nsfw.collectAsState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.setNsfw(!nsfw) }
+                        .padding(horizontal = FolioTokens.space3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = nsfw, onCheckedChange = { viewModel.setNsfw(it) })
+                    Text(
+                        "Show NSFW extensions",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FolioTheme.colors.onSurface,
+                    )
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            OutlinedTextField(
+                value = extQuery,
+                onValueChange = { extQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = FolioTokens.space3),
+                placeholder = { Text("Search extensions") },
+                singleLine = true,
+            )
+            Spacer(Modifier.height(FolioTokens.space2))
+        }
+
+        FolioTopBar(
+            title = "Extensions",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+            navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            },
+            actions = {
+                IconButton(onClick = { viewModel.refreshIndex() }) {
+                    if (refreshing) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    }
+                }
+            },
+        )
     }
 
     if (showAddRepo) {

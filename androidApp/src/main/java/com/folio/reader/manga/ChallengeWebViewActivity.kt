@@ -147,6 +147,10 @@ private fun ChallengeContent(
     var solved by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Exempt from the overlay masthead every other screen uses: the body is an Android
+        // WebView, which dispatches no Compose nested-scroll events (that would need the
+        // AndroidX-only nestedScrollInterop), so `collapse` could never advance and the
+        // glass would be permanently off. Stacked chrome is the honest layout here.
         FolioTopBar(
             title = host,
             navigationIcon = {

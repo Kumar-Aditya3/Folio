@@ -117,12 +117,13 @@ fun HomeScreen(
     onOpenMangaReader: (String, String) -> Unit = { _, _ -> },
     onOpenSourceWeb: (String) -> Unit = {},
     onOpenDiscover: (MangaDiscoverItem) -> Unit = {},
-    onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> }
+    onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> },
+    topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
 ) {
     when {
-        !state.loaded -> HomeSkeleton()
+        !state.loaded -> HomeSkeleton(Modifier.padding(top = topInset))
         !state.hasBooks && !state.hasManga ->
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Filled.MenuBook,
                     headline = "Your library is empty — import an EPUB to start.",
@@ -188,11 +189,10 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                // No uniform arrangement: each block owns the space beneath it, so
-                // related things sit close and unrelated things get a real break.
-                // No bottom runway here either: the closing well absorbs the floating
-                // capsule's clearance itself (see [ThisWeekWell]), so the end of Home
-                // lands on a surface with a mark on it instead of ~120dp of empty page.
+                // No uniform arrangement: each block owns the space beneath it. No
+                // bottom runway either — the closing well absorbs the floating
+                // capsule's clearance itself (see [ThisWeekWell]).
+                contentPadding = PaddingValues(top = topInset),
             ) {
                 item {
                     ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, openItem, onOpenLibrary)

@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import com.folio.reader.manga.MangaEntry
@@ -36,6 +37,7 @@ import com.folio.reader.ui.library.LibraryScreen
 import com.folio.reader.ui.library.LibraryViewModel
 import com.folio.reader.ui.statistics.StatisticsTabContent
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -60,10 +62,13 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
     var heroCollapse by remember { mutableStateOf(0f) }
     var heroTitle by remember { mutableStateOf<String?>(null) }
     var heroTint by remember { mutableStateOf<Color?>(null) }
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Box {
+    // Overlay: the page runs to the top of the window and the masthead floats over
+    // it, so the hero genuinely passes behind the glass as it collapses into the bar.
+    Box(modifier = Modifier.fillMaxSize()) {
+        // align stays HERE, on the box that wraps the bar alone: the hero tint below
+        // uses matchParentSize, which resolves against this box. Hoisting align to
+        // the full-screen one would size that tint to the viewport and flood the page.
+        Box(modifier = Modifier.align(Alignment.TopCenter).zIndex(1f)) {
             val fraction = heroCollapse
             FolioTopBar(
                 title = "Folio",
@@ -111,7 +116,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 )
             }
         }
-        Box(modifier = Modifier.weight(1f)) {
+        Box(modifier = Modifier.fillMaxSize()) {
             val viewModel = remember {
                 HomeViewModel(
                     graph.bookRepository,
@@ -138,6 +143,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             val state by viewModel.state.collectAsState(initial = HomeUiState())
             HomeScreen(
                 state = state,
+                topInset = folioBarTopInset(),
                 onOpenBook = { navController.navigate(FolioDestination.reader(it)) },
                 onOpenBookDetail = { navController.navigate(FolioDestination.bookDetail(it)) },
                 onImportClick = { navModel.callbacks.onImportEpubs() },
@@ -314,26 +320,36 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
     // Android host provides one (with the status-bar band) like the other tabs.
     // The screen paints nothing of its own: the app's `folioField` ground plane
     // shows through, so Stats sits in the same environment as every other tab.
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        FolioTopBar(title = "Stats", collapse = headerState.collapse)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .nestedScroll(headerState.nestedScrollConnection)
+    //
+    // Overlay, not a row: the charts run to the top of the window and the masthead
+    // floats over them, which is the only way its glass has something behind it.
+    Box(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.folio.reader.ui.theme.LocalFolioTopInset provides
+                com.folio.reader.ui.theme.folioBarTopInset()
         ) {
-            StatisticsTabContent(
-                viewModel = navModel.statisticsVM,
-                onBookClick = onOpenBookDetail,
-                settingsRepository = navModel.graph.settingsRepository,
-                initialGoalMinutes = navModel.globalSettings.dailyGoalMinutes,
-                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database),
-                onOpenExclusions = {
-                    navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
-                }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection)
+            ) {
+                StatisticsTabContent(
+                    viewModel = navModel.statisticsVM,
+                    onBookClick = onOpenBookDetail,
+                    settingsRepository = navModel.graph.settingsRepository,
+                    initialGoalMinutes = navModel.globalSettings.dailyGoalMinutes,
+                    mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database),
+                    onOpenExclusions = {
+                        navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
+                    }
+                )
+            }
         }
+        FolioTopBar(
+            title = "Stats",
+            collapse = headerState.collapse,
+            modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter),
+        )
     }
 }
 

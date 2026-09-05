@@ -56,6 +56,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.BrowseMode
@@ -66,8 +69,11 @@ import com.folio.reader.ui.components.FolioCoverGridSkeleton
 import com.folio.reader.ui.components.FolioCoverPaneSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.launch
 
 @Composable
@@ -93,81 +99,37 @@ fun SourceBrowseScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        FolioTopBar(
-            title = viewModel.source.name,
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                IconButton(onClick = { searchActive = !searchActive }) {
-                    Icon(Icons.Filled.Search, contentDescription = "Search")
-                }
-                if (filterTemplate.isNotEmpty()) {
-                    IconButton(onClick = { showFilters = true }) {
-                        Icon(Icons.Filled.FilterList, contentDescription = "Filters")
-                    }
-                }
-            },
-        )
+    val headerState = rememberFolioHeaderState()
+    // The masthead — bar plus the mode chips, and the search field while it is open —
+    // overlays the grid rather than sitting above it, so covers pass under the glass.
+    // A translucent veil over the page's own flat, unchanging field is
+    // indistinguishable from a slightly different flat field, which is why the bar
+    // read as invisible however its alpha was tuned.
+    val barInset = folioBarTopInset()
+    // A chip row's height is type-driven, so it is measured rather than guessed.
+    // Measured on the furniture and not on the whole masthead: the bar grows a
+    // hairline and a 10dp fade once it collapses, and a padding that tracked them
+    // would walk every cover up the screen under the reader's finger.
+    var furniturePx by remember { mutableStateOf(0) }
+    val topInset = barInset + with(LocalDensity.current) { furniturePx.toDp() }
 
-        if (searchActive) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search ${viewModel.source.name}") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.width(FolioTokens.space1))
-                IconButton(onClick = { viewModel.reload(BrowseMode.POPULAR, searchQuery, state.filters) }) {
-                    Icon(Icons.Filled.Check, contentDescription = "Run search")
-                }
-            }
-            Spacer(Modifier.height(FolioTokens.space1))
-        }
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = FolioTokens.space3),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
-        ) {
-            item {
-                FolioChip(
-                    selected = state.mode == BrowseMode.POPULAR && state.query.isBlank(),
-                    onClick = { viewModel.reload(BrowseMode.POPULAR, "", null) },
-                    label = "Popular",
-                )
-            }
-            if (viewModel.source.supportsLatest) {
-                item {
-                    FolioChip(
-                        selected = state.mode == BrowseMode.LATEST && state.query.isBlank(),
-                        onClick = { viewModel.reload(BrowseMode.LATEST, "", null) },
-                        label = "Latest",
-                    )
-                }
-            }
-            if (state.query.isNotBlank()) {
-                item {
-                    FolioChip(selected = true, onClick = {}, label = "“${state.query}”")
-                }
-            }
-        }
-        Spacer(Modifier.height(FolioTokens.space2))
-
+    Box(Modifier.fillMaxSize()) {
         when {
             // Opening a source: draw the grid before the source answers, at the same
             // adaptive columns the results will use. The first page then lands in
             // cells the reader has already seen instead of replacing a spinner with
             // a full screen of covers.
             state.loading && state.items.isEmpty() ->
-                FolioCoverGridSkeleton(modifier = Modifier.fillMaxSize())
+                // Non-scrolling, so it takes the masthead's room as an outer padding:
+                // content padding on a placeholder that does not scroll buys nothing.
+                FolioCoverGridSkeleton(
+                    modifier = Modifier.fillMaxSize().padding(top = topInset),
+                )
             state.error != null && state.items.isEmpty() ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(top = topInset),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.Warning, contentDescription = null, tint = FolioTheme.colors.error)
                         Spacer(Modifier.height(FolioTokens.space1))
@@ -188,8 +150,15 @@ fun SourceBrowseScreen(
             else -> LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(FolioTokens.space3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = FolioTokens.space3,
+                    top = topInset + FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    bottom = FolioTokens.space3,
+                ),
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
             ) {
@@ -216,6 +185,90 @@ fun SourceBrowseScreen(
                 }
             }
         }
+
+        // The furniture the screen hangs under the masthead, overlaid with it so
+        // covers still run behind the glass. Its measured height — which grows and
+        // shrinks as the search field opens and closes — is what the grid's top
+        // padding clears.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = barInset)
+                // Its own ground: the search field's Material container is transparent, so
+                // covers passing under it would render straight through the query text.
+                // Applied after the top padding so it never paints up behind the masthead
+                // and blocks the rows the bar's glass exists to show through.
+                .background(FolioTheme.atmosphere.fieldTop)
+                .onSizeChanged { furniturePx = it.height },
+        ) {
+            if (searchActive) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Search ${viewModel.source.name}") },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.width(FolioTokens.space1))
+                    IconButton(onClick = { viewModel.reload(BrowseMode.POPULAR, searchQuery, state.filters) }) {
+                        Icon(Icons.Filled.Check, contentDescription = "Run search")
+                    }
+                }
+                Spacer(Modifier.height(FolioTokens.space1))
+            }
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = FolioTokens.space3),
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
+            ) {
+                item {
+                    FolioChip(
+                        selected = state.mode == BrowseMode.POPULAR && state.query.isBlank(),
+                        onClick = { viewModel.reload(BrowseMode.POPULAR, "", null) },
+                        label = "Popular",
+                    )
+                }
+                if (viewModel.source.supportsLatest) {
+                    item {
+                        FolioChip(
+                            selected = state.mode == BrowseMode.LATEST && state.query.isBlank(),
+                            onClick = { viewModel.reload(BrowseMode.LATEST, "", null) },
+                            label = "Latest",
+                        )
+                    }
+                }
+                if (state.query.isNotBlank()) {
+                    item {
+                        FolioChip(selected = true, onClick = {}, label = "“${state.query}”")
+                    }
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space2))
+        }
+
+        FolioTopBar(
+            title = viewModel.source.name,
+            collapse = headerState.collapse,
+            modifier = Modifier.align(Alignment.TopCenter),
+            navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            },
+            actions = {
+                IconButton(onClick = { searchActive = !searchActive }) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search")
+                }
+                if (filterTemplate.isNotEmpty()) {
+                    IconButton(onClick = { showFilters = true }) {
+                        Icon(Icons.Filled.FilterList, contentDescription = "Filters")
+                    }
+                }
+            },
+        )
     }
 
     if (showFilters) {

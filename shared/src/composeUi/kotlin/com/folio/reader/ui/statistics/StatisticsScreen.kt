@@ -113,6 +113,7 @@ fun StatisticsTabContent(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            top = com.folio.reader.ui.theme.LocalFolioTopInset.current,
             bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current
         ),
     ) {
