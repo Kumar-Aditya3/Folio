@@ -13,7 +13,9 @@ data class OverlayColors(
     val fg: String,
     val accent: String,
     val surface: String,   // panel tint (#rrggbb)
-    val isDark: Boolean
+    val isDark: Boolean,
+    /** Panel fill alpha, mirroring `FolioTheme.readerVeilAlpha` on the Compose side. */
+    val veilAlpha: Float = 1f
 )
 
 object OverlayUi {
@@ -29,9 +31,12 @@ object OverlayUi {
         .replace('\r', ' ')
 
     private fun shell(title: String, bodyHtml: String, c: OverlayColors, width: Int = 300, kind: String = ""): String {
-        // Near-opaque fill, mirroring the Compose glassPanel: a see-through tint let
-        // the page bleed through at full contrast and labels dissolved into it.
-        val fill = c.bg + if (c.isDark) "DB" else "E3"
+        // The user's in-reader transparency, as a #rrggbbaa suffix. Desktop draws
+        // these panels in the page instead of in Compose, so the preference has to
+        // be threaded here by hand or it would only ever apply on Android.
+        val alphaHex = ((c.veilAlpha.coerceIn(0f, 1f) * 255f).toInt()).toString(16)
+            .padStart(2, '0')
+        val fill = c.bg + alphaHex
         val sheen = if (c.isDark)
             "linear-gradient(rgba(255,255,255,0.14),rgba(255,255,255,0.04) 50%,rgba(255,255,255,0.08))"
         else

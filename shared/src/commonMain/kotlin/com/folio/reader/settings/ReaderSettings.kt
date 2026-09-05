@@ -57,11 +57,17 @@ data class ReaderSettings(
      * exactly as it does to a built-in pack.
      */
     val customAppTheme: CustomAppTheme? = null,
-    /** How solid the app's glass surfaces are, 0 = fully see-through, 1 = as designed. */
-    val topBarOpacity: Float = 1f,
-    val navBarOpacity: Float = 1f,
-    val panelOpacity: Float = 1f,
-    /** Reader bars, rails, drawers and the reader settings sheet. */
+    /**
+     * How solid the app's glass surfaces are: the fill alpha itself, where 1 is
+     * a solid surface nothing bleeds through. The designed glass look therefore
+     * sits *partway* along each range, which is why these defaults are not 1 —
+     * they mirror `FolioSurfaceOpacity.BAR_GLASS`/`NAV_GLASS`/`PANEL_GLASS`,
+     * duplicated here because this module cannot see the compose layer.
+     */
+    val topBarOpacity: Float = 0.35f,
+    val navBarOpacity: Float = 0.9f,
+    val panelOpacity: Float = 0.97f,
+    /** Reader bars, rails, drawers and the reader settings sheet; solid by default. */
     val readerChromeOpacity: Float = 1f
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {

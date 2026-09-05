@@ -153,7 +153,10 @@ fun FolioNavShell(
                         // translucent: the page moving underneath is what tells the
                         // eye this is glass floating over it rather than a rounded
                         // slab parked at the bottom of the window.
-                        .folioVeil(FolioShapes.pill, fillAlpha = 0.90f * FolioTheme.surfaceOpacity.navBar)
+                        // The preference *is* the fill alpha; its default (0.9) is the
+                        // designed capsule, so 100% is a solid pill and the floor is a
+                        // whisper of one. See FolioSurfaceOpacity.
+                        .folioVeil(FolioShapes.pill, fillAlpha = FolioTheme.surfaceOpacity.navBar)
                         .height(FolioTokens.navFloatHeight)
                         .padding(horizontal = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,

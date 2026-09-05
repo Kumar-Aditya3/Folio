@@ -50,6 +50,7 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.ui.theme.topBarFill
 import kotlin.math.roundToInt
 
 /**
@@ -149,11 +150,12 @@ fun FolioTopBar(
     val atmos = FolioTheme.atmosphere
     val f = collapse.coerceIn(0f, 1f)
     val statusPx = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
-    // The user's top-bar preference scales the designed alphas rather than
-    // replacing them, so the §15 glass window still governs the ceiling.
-    val barOpacity = FolioTheme.surfaceOpacity.topBar
-    val statusColor = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * barOpacity)
-    val veil = atmos.barGlass.copy(alpha = atmos.barGlass.alpha * barOpacity)
+    // The user's top-bar preference *is* the crown's alpha, not a factor on the
+    // designed one: scaling a 0.36 `barGlass` could only ever go down, so the
+    // slider ran from invisible to nearly invisible and its ends looked the same.
+    val fill = FolioTheme.surfaceOpacity.topBarFill(f)
+    val statusColor = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * fill.scrim)
+    val veil = atmos.barGlass
     // Specular catch for the masthead's mirror finish — the atmosphere's own rim
     // light, so a dark field emits at the crown and paper catches a white sheen.
     // Purely additive over the veil; it never touches barGlass's alpha, so the §15
@@ -180,27 +182,28 @@ fun FolioTopBar(
                     )
                 }
                 // Glass, but only once something is passing underneath — and never a
-                // flat slab. The fill decays toward the bar's foot, so the collapsed
-                // masthead reads as the page's own field thickening under the status
-                // icons instead of the grey lid the redesign removed. Depth below is
-                // the hairline's job, not the fill's.
-                if (f > 0.01f) {
+                // flat slab, unless the reader has explicitly asked for one. The fill
+                // decays toward the bar's foot so the collapsed masthead reads as the
+                // page's own field thickening under the status icons instead of the
+                // grey lid the redesign removed; that decay flattens out as the
+                // preference approaches 100%, where the bar is meant to be a bar.
+                if (fill.presence > 0.01f) {
                     drawRect(
                         Brush.verticalGradient(
-                            0f to veil.copy(alpha = veil.alpha * f * 0.85f),
-                            0.6f to veil.copy(alpha = veil.alpha * f * 0.44f),
-                            1f to veil.copy(alpha = veil.alpha * f * 0.16f),
+                            0f to veil.copy(alpha = fill.crown),
+                            0.6f to veil.copy(alpha = fill.waist),
+                            1f to veil.copy(alpha = fill.foot),
                         )
                     )
                     // The mirror finish: a thin specular band along the crown that fades
                     // by ~38% of the bar's height, so the collapsed masthead reads as
                     // polished glass reflecting the light above rather than a flat tint.
-                    // Tied to `f` exactly like the veil — it appears only once content is
-                    // passing underneath, which is the only time a bar needs to read as a
-                    // surface at all.
+                    // Tied to the bar's presence exactly like the veil — it appears only
+                    // once the bar is a surface at all, which is the only time it needs
+                    // to read as one.
                     drawRect(
                         Brush.verticalGradient(
-                            0f to sheen.copy(alpha = sheen.alpha * 0.30f * f),
+                            0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
                             0.38f to Color.Transparent,
                         )
                     )
@@ -266,16 +269,15 @@ fun FolioTopBar(
         }
         // The boundary the bar has always claimed but never drew — and now only
         // draws once it has something to separate.
-        if (f > 0.01f) {
-            FolioRule(modifier = Modifier.graphicsLayer { alpha = f })
+        if (fill.presence > 0.01f) {
+            FolioRule(modifier = Modifier.graphicsLayer { alpha = fill.presence })
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(FolioTokens.barGlassFade)
-                    .graphicsLayer { alpha = f }
                     .background(
                         Brush.verticalGradient(
-                            0f to veil.copy(alpha = veil.alpha * 0.45f),
+                            0f to veil.copy(alpha = fill.crown * 0.45f),
                             1f to Color.Transparent,
                         )
                     )
