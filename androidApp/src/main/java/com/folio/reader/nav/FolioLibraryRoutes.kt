@@ -400,6 +400,12 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
         com.folio.reader.settings.FolioSettingsCategory.THEMES ->
             com.folio.reader.settings.SettingsThemesScreen(navModel, onBack)
 
+        com.folio.reader.settings.FolioSettingsCategory.CUSTOM_THEME ->
+            com.folio.reader.settings.SettingsCustomThemeScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.TRANSPARENCY ->
+            com.folio.reader.settings.SettingsTransparencyScreen(navModel, onBack)
+
         com.folio.reader.settings.FolioSettingsCategory.CLOUD_SYNC ->
             com.folio.reader.settings.SettingsCloudSyncScreen(navModel, onBack)
 

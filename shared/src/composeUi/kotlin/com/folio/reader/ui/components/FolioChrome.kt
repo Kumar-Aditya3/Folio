@@ -49,6 +49,7 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.surfaceOpacity
 import kotlin.math.roundToInt
 
 /**
@@ -148,8 +149,11 @@ fun FolioTopBar(
     val atmos = FolioTheme.atmosphere
     val f = collapse.coerceIn(0f, 1f)
     val statusPx = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
-    val statusColor = atmos.barScrim
-    val veil = atmos.barGlass
+    // The user's top-bar preference scales the designed alphas rather than
+    // replacing them, so the §15 glass window still governs the ceiling.
+    val barOpacity = FolioTheme.surfaceOpacity.topBar
+    val statusColor = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * barOpacity)
+    val veil = atmos.barGlass.copy(alpha = atmos.barGlass.alpha * barOpacity)
     // Specular catch for the masthead's mirror finish — the atmosphere's own rim
     // light, so a dark field emits at the crown and paper catches a white sheen.
     // Purely additive over the veil; it never touches barGlass's alpha, so the §15

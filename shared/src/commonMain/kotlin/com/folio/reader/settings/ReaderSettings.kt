@@ -49,7 +49,20 @@ data class ReaderSettings(
     /** Hours between background manga chapter update checks; 0 = updates off (§11.3). */
     val mangaUpdateIntervalHours: Int = 0,
     /** §13.3: tint the Home hero from the current book's cover. Contrast-guarded, so on by default. */
-    val homeCoverTint: Boolean = true
+    val homeCoverTint: Boolean = true,
+    /**
+     * User-authored app palette. When present it replaces the palette named by
+     * [appThemeId] everywhere; the atmosphere (field gradient, colour pools,
+     * shadows) is re-derived from it, so the gradient applies to custom colours
+     * exactly as it does to a built-in pack.
+     */
+    val customAppTheme: CustomAppTheme? = null,
+    /** How solid the app's glass surfaces are, 0 = fully see-through, 1 = as designed. */
+    val topBarOpacity: Float = 1f,
+    val navBarOpacity: Float = 1f,
+    val panelOpacity: Float = 1f,
+    /** Reader bars, rails, drawers and the reader settings sheet. */
+    val readerChromeOpacity: Float = 1f
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(
@@ -254,6 +267,41 @@ val LayoutMode.normalized: LayoutMode
         LayoutMode.FOCUS -> LayoutMode.CONTINUOUS
         else -> this
     }
+
+/**
+ * A user-authored app palette, kept deliberately small: six roles that carry
+ * meaning, with the other ~30 structural roles derived from them at the UI layer
+ * (see `CustomAppTheme.toFolioColors`). Editing six colours is a design task;
+ * editing forty is data entry.
+ *
+ * The three accents are the ones the page's colour pools are drawn from, so
+ * changing them changes the background gradient too — which is the point.
+ */
+@Serializable
+data class CustomAppTheme(
+    val name: String = "Custom",
+    /** Page ground. Its lightness decides whether the whole theme reads dark. */
+    val background: Int = 0xFFFFFFFF.toInt(),
+    /** Cards, bars and sheets. */
+    val surface: Int = 0xFFF2F2F2.toInt(),
+    /** Interactive colour: selection, switches, focus rings. */
+    val primary: Int = 0xFF1A73E8.toInt(),
+    /** Progress/continuity accent — also the first background pool. */
+    val accentProgress: Int = 0xFF0B57D0.toInt(),
+    /** Discovery accent — the second pool. */
+    val accentDiscovery: Int = 0xFF006C63.toInt(),
+    /** Streak/urgency accent — the third pool. */
+    val accentStreak: Int = 0xFFB3261E.toInt()
+) {
+    /** Matches the atmosphere's own threshold so lighting and text agree. */
+    val isDark: Boolean
+        get() {
+            val r = ((background shr 16) and 0xFF) / 255f
+            val g = ((background shr 8) and 0xFF) / 255f
+            val b = (background and 0xFF) / 255f
+            return (r * 0.2126f + g * 0.7152f + b * 0.0722f) < 0.45f
+        }
+}
 
 @Serializable
 data class Theme(

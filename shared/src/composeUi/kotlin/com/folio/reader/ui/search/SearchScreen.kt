@@ -48,6 +48,7 @@ import com.folio.reader.database.SearchRepository
 import com.folio.reader.model.Book
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.surfaceOpacity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -242,7 +243,11 @@ fun SearchScreen(
                 .fillMaxWidth()
                 // Glass, like every other bar in the app: an opaque surface slab here
                 // was the one lid left over the search field.
-                .background(FolioTheme.atmosphere.barGlass)
+                .background(
+                    FolioTheme.atmosphere.barGlass.let {
+                        it.copy(alpha = it.alpha * FolioTheme.surfaceOpacity.topBar)
+                    }
+                )
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp),

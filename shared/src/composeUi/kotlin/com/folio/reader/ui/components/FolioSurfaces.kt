@@ -33,6 +33,7 @@ import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.surfaceOpacity
 import kotlin.math.min
 
 /**
@@ -177,7 +178,14 @@ fun Modifier.folioVeil(
     fillAlpha: Float? = null,
 ): Modifier {
     val atmos = FolioTheme.atmosphere
-    val fill = if (fillAlpha != null) atmos.veilFill.copy(alpha = fillAlpha) else atmos.veilFill
+    // A caller that names its own alpha has already accounted for its context
+    // (the nav capsule, the reader's sheets), so it scales that value itself;
+    // everything else is an app panel and follows the panel preference.
+    val fill = if (fillAlpha != null) {
+        atmos.veilFill.copy(alpha = fillAlpha)
+    } else {
+        atmos.veilFill.copy(alpha = atmos.veilFill.alpha * FolioTheme.surfaceOpacity.panel)
+    }
     return this
         .shadow(
             elevation = atmos.scaled(elevation),

@@ -55,6 +55,7 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.surfaceOpacity
 
 /**
  * Navigation as a **floating capsule** rather than a full-width Material bar.
@@ -152,7 +153,7 @@ fun FolioNavShell(
                         // translucent: the page moving underneath is what tells the
                         // eye this is glass floating over it rather than a rounded
                         // slab parked at the bottom of the window.
-                        .folioVeil(FolioShapes.pill, fillAlpha = 0.90f)
+                        .folioVeil(FolioShapes.pill, fillAlpha = 0.90f * FolioTheme.surfaceOpacity.navBar)
                         .height(FolioTokens.navFloatHeight)
                         .padding(horizontal = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,

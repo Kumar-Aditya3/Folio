@@ -46,6 +46,8 @@ import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FontTheme
+import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.ui.theme.toFolioColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -220,6 +222,13 @@ class MainActivity : ComponentActivity() {
             val isReadingScreen =
                 currentRoute == FolioRoutes.READER || currentRoute == FolioRoutes.MANGA_READER
             val appPalette = AppPalette.byId(model.globalSettings.appThemeId)
+            // A custom theme replaces the pack's colours wholesale; its own
+            // background lightness, not the pack's, decides the app's polarity.
+            val customAppTheme = model.globalSettings.customAppTheme
+            val appColors = remember(customAppTheme, appPalette) {
+                customAppTheme?.toFolioColors() ?: appPalette.colors
+            }
+            val appDark = customAppTheme?.isDark ?: appPalette.isDark
             // A source behind an interactive bot check needs a window with a finger in
             // it, which an OkHttp interceptor does not have. Registering the opener
             // here (and dropping it on dispose) is what lets shared browse code offer
@@ -237,20 +246,23 @@ class MainActivity : ComponentActivity() {
                 }
                 onDispose { com.folio.reader.manga.MangaChallenges.solver = null }
             }
-            LaunchedEffect(isReadingScreen, appPalette) {
+            LaunchedEffect(isReadingScreen, appDark) {
                 // Outside the reader the status bar sits on the *page*, whose scrim
                 // now follows the palette, so the icons have to invert with it:
                 // dark icons over a light theme, light icons over a dark one.
                 // Readers own their bars.
                 if (!isReadingScreen) {
                     androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
-                        .isAppearanceLightStatusBars = !appPalette.isDark
+                        .isAppearanceLightStatusBars = !appDark
                 }
             }
 
             FolioTheme.AppTheme(
                 palette = appPalette,
-                fontTheme = FontTheme.byId(model.globalSettings.fontThemeId)
+                fontTheme = FontTheme.byId(model.globalSettings.fontThemeId),
+                colors = appColors,
+                isDark = appDark,
+                opacity = model.globalSettings.surfaceOpacity()
             ) {
                 // The app's ground plane. `folioField` replaces the flat
                 // background fill with the theme's atmosphere — a vertical wash
