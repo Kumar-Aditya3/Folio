@@ -1,6 +1,7 @@
 package com.folio.reader.manga
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Platform manga engine. Android's implementation runs the vendored Mihon runtime
@@ -48,6 +49,13 @@ interface MangaBackend {
     // ---- Extension management (no-ops / empty on platforms without extensions) ----
 
     fun observeExtensions(): Flow<List<ExtensionEntry>>
+
+    /**
+     * Human-readable failures from the last extension-index refresh, one per repo
+     * that could not be fetched ("Keiyoushi: HTTP 500"). Empty when every repo
+     * answered; defaulted because only the extension-capable backend has fetches.
+     */
+    fun observeExtensionRepoErrors(): Flow<List<String>> = flowOf(emptyList())
 
     suspend fun refreshExtensionIndex()
 

@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import mihon.data.dalvik.DelegateLastClassLoaderCompat
 import tachiyomi.core.common.util.system.logcat
@@ -37,6 +38,9 @@ import java.io.File
  * one with higher version code will be used.
  */
 internal object ExtensionLoader {
+
+    /** Startup guard: one extension load may take at most this long before it is dropped as Error. */
+    private const val EXTENSION_LOAD_TIMEOUT_MS = 15_000L
 
     private const val EXTENSION_FEATURE = "tachiyomi.extension"
     private const val METADATA_SOURCE_CLASS = "tachiyomi.extension.class"
@@ -155,10 +159,17 @@ internal object ExtensionLoader {
 
         if (extPkgs.isEmpty()) return emptyList()
 
-        // Load each extension concurrently and wait for completion
+        // Load each extension concurrently and wait for completion. A wedged APK
+        // (e.g. a truncated private .ext) must not stall startup: each load gets a
+        // bounded window and degrades to Error past it, instead of hanging init.
         return runBlocking(Dispatchers.IO) {
-            val deferred = extPkgs.map {
-                async { loadExtension(context, it) }
+            val deferred = extPkgs.map { pkg ->
+                async {
+                    runCatching {
+                        withTimeoutOrNull(EXTENSION_LOAD_TIMEOUT_MS) { loadExtension(context, pkg) }
+                            ?: LoadResult.Error
+                    }.getOrElse { LoadResult.Error }
+                }
             }
             deferred.awaitAll()
         }

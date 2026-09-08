@@ -341,6 +341,11 @@ class AndroidMangaBackend(
         extensionManager.findAvailableExtensions()
     }
 
+    override fun observeExtensionRepoErrors(): Flow<List<String>> =
+        extensionManager.repoFetchErrors.map { errors ->
+            errors.map { "${it.repoName}: ${it.reason}" }
+        }
+
     override suspend fun getRepos(): List<MangaRepoInfo> = repos.value
 
     override suspend fun setRepos(newRepos: List<MangaRepoInfo>) {

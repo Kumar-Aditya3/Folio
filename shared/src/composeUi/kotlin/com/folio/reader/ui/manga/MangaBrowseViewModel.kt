@@ -119,6 +119,10 @@ class BrowseViewModel(
     val extensions: StateFlow<List<ExtensionEntry>> = backend.observeExtensions()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
 
+    /** Per-repo failures from the last index refresh ("Keiyoushi: HTTP 500") — empty when all repos answered. */
+    val extensionRepoErrors: StateFlow<List<String>> = backend.observeExtensionRepoErrors()
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
+
     val repos = MutableStateFlow<List<MangaRepoInfo>>(emptyList())
     val refreshingIndex = MutableStateFlow(false)
     val installStates = MutableStateFlow<Map<String, ExtensionInstallStep>>(emptyMap())
