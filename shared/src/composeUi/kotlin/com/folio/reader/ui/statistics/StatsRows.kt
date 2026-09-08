@@ -291,7 +291,9 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                 FolioFigure(
                     value = stats.readChapters.toString(),
                     label = "Chapters read",
-                    caption = plural(stats.completedCount, "series completed"),
+                    // "series" is invariant in English and "downloaded" is an
+                    // adjective — neither takes a plural s, so no pluralizer here.
+                    caption = "${stats.completedCount} series completed",
                     accent = FolioTheme.colors.accentProgress,
                     emphasis = FigureScale.Quiet,
                     modifier = Modifier.weight(1f),
@@ -299,7 +301,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                 FolioFigure(
                     value = formatDuration(stats.totalReadMinutes * 60_000L),
                     label = "Reading time",
-                    caption = plural(stats.downloadedChapters, "downloaded"),
+                    caption = "${stats.downloadedChapters} downloaded",
                     accent = FolioTheme.colors.accentProgress,
                     emphasis = FigureScale.Quiet,
                     modifier = Modifier.weight(1f),
@@ -515,5 +517,10 @@ internal fun shortMinutes(minutes: Long): String = when {
 private fun formatCount(value: Long): String =
     value.toString().reversed().chunked(3).joinToString(",").reversed()
 
+/**
+ * "3 sessions" / "1 session". Only for nouns that pluralize with a plain s —
+ * invariant words ("series") and adjectival captions ("downloaded") must be
+ * written out directly or they render as "serieses" / "downloadeds".
+ */
 private fun plural(count: Int, word: String): String =
     "$count $word" + if (count == 1) "" else "s"

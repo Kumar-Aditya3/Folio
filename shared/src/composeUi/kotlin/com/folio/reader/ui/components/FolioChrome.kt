@@ -94,6 +94,16 @@ class FolioHeaderState internal constructor(
     val collapse: Float
         get() = if (!enabled || rangePx <= 0f) 0f else (offset / rangePx).coerceIn(0f, 1f)
 
+    /**
+     * Snap back to the at-rest, expanded state. The offset is otherwise a sticky
+     * accumulator with no reset path, so a screen that swaps the scrollable beneath
+     * the bar (Library's Books/Manga shelves) inherits the old shelf's collapse and
+     * arrives with its rail still folded away.
+     */
+    fun reset() {
+        offset = 0f
+    }
+
     /** Attach to the container that holds the scrolling content. */
     val nestedScrollConnection: NestedScrollConnection = object : NestedScrollConnection {
         override fun onPostScroll(
