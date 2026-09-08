@@ -172,6 +172,13 @@ fun LibraryScreen(
     // dissolves into the bar the way Home's hero does instead of sliding under a
     // fixed slab of chrome.
     val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    // The collapse is a sticky accumulator, so a shelf scrolled down hands its
+    // collapse to the shelf that replaces it — the Books/Manga switch would arrive
+    // still folded under the bar exactly when it is the thing you need. Raising the
+    // masthead on every shelf swap re-anchors it; the shelf keeps its own scroll.
+    androidx.compose.runtime.LaunchedEffect(libraryMode) {
+        headerState.reset()
+    }
     // A green tick with a red "1" on it was the loudest object in the bar and said
     // nothing a reader can act on. The badge now appears only when sync actually
     // wants attention.
