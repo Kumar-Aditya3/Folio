@@ -1270,9 +1270,9 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         }
         var readChapters = 0; var unreadChapters = 0; var downloadedChapters = 0; var bookmarkedChapters = 0
         conn.prepareStatement(
-            "SELECT SUM(CASE WHEN read=1 THEN 1 ELSE 0 END), SUM(CASE WHEN read=0 THEN 1 ELSE 0 END), " +
-                "SUM(CASE WHEN downloaded_pages>0 THEN 1 ELSE 0 END), SUM(CASE WHEN bookmarked=1 THEN 1 ELSE 0 END) " +
-                "FROM manga_chapters" + whereNotIn("manga_id")
+            "SELECT SUM(CASE WHEN c.read=1 THEN 1 ELSE 0 END), SUM(CASE WHEN c.read=0 THEN 1 ELSE 0 END), " +
+                "SUM(CASE WHEN c.downloaded_pages>0 THEN 1 ELSE 0 END), SUM(CASE WHEN c.bookmarked=1 THEN 1 ELSE 0 END) " +
+                "FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1" + whereNotIn("c.manga_id")
         ).use { st ->
             bindExclusions(st, 1)
             st.executeQuery().use { rs ->
@@ -1280,7 +1280,10 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
             }
         }
         var notesCount = 0
-        conn.prepareStatement("SELECT COUNT(*) FROM manga_notes" + whereNotIn("manga_id")).use { st ->
+        conn.prepareStatement(
+            "SELECT COUNT(*) FROM manga_notes n JOIN manga_library m ON n.manga_id = m.id AND m.favorite = 1" +
+                whereNotIn("n.manga_id")
+        ).use { st ->
             bindExclusions(st, 1)
             st.executeQuery().use { rs ->
                 if (rs.next()) notesCount = rs.getInt(1)
@@ -1296,8 +1299,9 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         }
         var readActiveDays = 0
         conn.prepareStatement(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters WHERE read = 1" + notIn("manga_id") +
-                " GROUP BY date(updated_at/1000,'unixepoch','localtime'))"
+            "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
+                "WHERE c.read = 1" + notIn("c.manga_id") +
+                " GROUP BY date(c.updated_at/1000,'unixepoch','localtime'))"
         ).use { st ->
             bindExclusions(st, 1)
             st.executeQuery().use { rs -> if (rs.next()) readActiveDays = rs.getInt(1) }
@@ -1309,7 +1313,8 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
             val day = java.time.LocalDate.now().minusDays(6 - i.toLong())
             labels[i] = day.format(fmt)
             conn.prepareStatement(
-                "SELECT COUNT(*) FROM manga_chapters WHERE read = 1 AND date(updated_at/1000,'unixepoch','localtime') = ?" + notIn("manga_id")
+                "SELECT COUNT(*) FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
+                    "WHERE c.read = 1 AND date(c.updated_at/1000,'unixepoch','localtime') = ?" + notIn("c.manga_id")
             ).use { st ->
                 st.setString(1, day.toString())
                 bindExclusions(st, 2)

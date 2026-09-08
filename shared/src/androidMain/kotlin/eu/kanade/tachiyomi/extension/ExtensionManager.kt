@@ -58,6 +58,10 @@ class ExtensionManager(
     private val untrustedExtensionMapFlow = MutableStateFlow(emptyMap<String, Extension.Untrusted>())
     val untrustedExtensionsFlow = untrustedExtensionMapFlow.mapExtensionsWhenInitialized()
 
+    /** Failures from the last catalog refresh, one per unreachable repo; the extensions screen renders these. */
+    private val repoFetchErrorsFlow = MutableStateFlow(emptyList<ExtensionApi.RepoFetchError>())
+    val repoFetchErrors: StateFlow<List<ExtensionApi.RepoFetchError>> = repoFetchErrorsFlow
+
     init {
         scope.launch(Dispatchers.IO) {
             initExtensions()
@@ -124,8 +128,10 @@ class ExtensionManager(
     suspend fun findAvailableExtensions() {
         val extensions: List<Extension.Available> = try {
             api.findExtensions()
+                .also { repoFetchErrorsFlow.value = api.repoFetchErrors.value }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
+            repoFetchErrorsFlow.value = emptyList()
             emptyList()
         }
 

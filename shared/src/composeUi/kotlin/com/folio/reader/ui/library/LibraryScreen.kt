@@ -51,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -496,17 +497,26 @@ fun LibraryScreen(
         // grid or list had to hoist its own state to get the collapse. It now runs
         // full-bleed to the top of the window with the masthead floating over it —
         // the only arrangement in which there is anything behind the glass to see.
+        //
+        // No crossfade between the shelves: a fade disposes the outgoing shelf and
+        // rebuilds the incoming one from scratch every toggle — scroll positions lost,
+        // covers re-resolving — which is exactly what made the switch feel slow. Each
+        // shelf keeps its saveable state (LazyGrid scroll, selection) through the
+        // state holder, so a swap is a single-frame recomposition.
+        val shelfStateHolder = rememberSaveableStateHolder()
         CompositionLocalProvider(LocalFolioTopInset provides topInset) {
-            androidx.compose.animation.Crossfade(
-                targetState = libraryMode,
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .nestedScroll(headerState.nestedScrollConnection),
-            ) { mode ->
-                if (mode == LibraryMode.MANGA) {
-                    mangaContent?.invoke()
+            ) {
+                if (libraryMode == LibraryMode.MANGA) {
+                    shelfStateHolder.SaveableStateProvider("manga") {
+                        mangaContent?.invoke()
+                    }
                 } else {
-                    LibraryContent(
+                    shelfStateHolder.SaveableStateProvider("books") {
+                        LibraryContent(
                         books = books,
                         viewMode = booksViewMode,
                         sortBy = sortBy,
@@ -530,6 +540,7 @@ fun LibraryScreen(
                         onDeleteBook = { bookToDelete = it },
                         onImportClick = onImportClick
                     )
+                    }
                 }
             }
         }

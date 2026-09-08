@@ -2,14 +2,17 @@ package com.folio.reader.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -26,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.TextAlignment
 import com.folio.reader.settings.Theme
+import com.folio.reader.settings.TextWidth
 import com.folio.reader.ui.components.systemFontFamily
 import com.folio.reader.ui.theme.UiFonts
 
@@ -51,53 +55,69 @@ fun SettingsLivePreview(settings: ReaderSettings) {
                 vertical = 18.dp
             )
     ) {
-        Text(
-            text = "Chapter One",
-            style = TextStyle(
-                fontFamily = fontFamily,
-                fontSize = (settings.fontSize * 1.3f).sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = settings.letterSpacing.sp,
-                color = Color(theme.headingText),
-                textAlign = align
-            )
-        )
-        Spacer(Modifier.height(8.dp))
-        val bodyStyle = TextStyle(
-            fontFamily = fontFamily,
-            fontSize = settings.fontSize.sp,
-            lineHeight = (settings.fontSize * settings.lineHeight).sp,
-            fontWeight = FontWeight(settings.fontWeight),
-            letterSpacing = settings.letterSpacing.sp,
-            color = Color(theme.primaryText),
-            textAlign = align
-        )
-        Text(
-            text = withWordSpacing(
-                "The reading room was quiet but for the rain, and the lamplight had " +
-                    "made a small country of its own on the table, where the pages waited " +
-                    "for someone to turn them.",
-                settings.wordSpacing
-            ),
-            style = bodyStyle
-        )
-        // Paragraph spacing is a multiple of the text size, exactly as the reader
-        // applies it — a second paragraph is the only way the control can show.
-        Spacer(Modifier.height((settings.fontSize * settings.paragraphSpacing).dp))
-        Text(
-            text = withWordSpacing(
-                "She turned one, and then another, and the evening went on without her.",
-                settings.wordSpacing
-            ),
-            style = bodyStyle
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "${readerFontLabel(settings, settings.fontFamily)} · " +
-                "${settings.fontSize.toInt()}sp · " +
-                "${"%.1f".format(settings.lineHeight)} line · ${theme.name}",
-            style = TextStyle(fontSize = 11.sp, color = Color(theme.secondaryText))
-        )
+        // The reader centres a measure-capped column — PageEngine.measurePx caps the
+        // body at 560/720/960/1200px by Text width (FULL uncapped). The panel is far
+        // narrower than a reader viewport, so the same ratios are mirrored here: the
+        // Layout panel's Text width dropdown visibly narrows and widens the measure,
+        // the way it does in the book.
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val capRatio = when (settings.textWidth) {
+                TextWidth.NARROW -> 0.55f
+                TextWidth.MEDIUM -> 0.70f
+                TextWidth.WIDE -> 0.85f
+                TextWidth.CUSTOM -> 0.95f
+                TextWidth.FULL -> 1.0f
+            }
+            Column(Modifier.widthIn(max = maxWidth * capRatio)) {
+                Text(
+                    text = "Chapter One",
+                    style = TextStyle(
+                        fontFamily = fontFamily,
+                        fontSize = (settings.fontSize * 1.3f).sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = settings.letterSpacing.sp,
+                        color = Color(theme.headingText),
+                        textAlign = align
+                    )
+                )
+                Spacer(Modifier.height(8.dp))
+                val bodyStyle = TextStyle(
+                    fontFamily = fontFamily,
+                    fontSize = settings.fontSize.sp,
+                    lineHeight = (settings.fontSize * settings.lineHeight).sp,
+                    fontWeight = FontWeight(settings.fontWeight),
+                    letterSpacing = settings.letterSpacing.sp,
+                    color = Color(theme.primaryText),
+                    textAlign = align
+                )
+                Text(
+                    text = withWordSpacing(
+                        "The reading room was quiet but for the rain, and the lamplight had " +
+                            "made a small country of its own on the table, where the pages waited " +
+                            "for someone to turn them.",
+                        settings.wordSpacing
+                    ),
+                    style = bodyStyle
+                )
+                // Paragraph spacing is a multiple of the text size, exactly as the reader
+                // applies it — a second paragraph is the only way the control can show.
+                Spacer(Modifier.height((settings.fontSize * settings.paragraphSpacing).dp))
+                Text(
+                    text = withWordSpacing(
+                        "She turned one, and then another, and the evening went on without her.",
+                        settings.wordSpacing
+                    ),
+                    style = bodyStyle
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "${readerFontLabel(settings, settings.fontFamily)} · " +
+                        "${settings.fontSize.toInt()}sp · " +
+                        "${"%.1f".format(settings.lineHeight)} line · ${theme.name}",
+                    style = TextStyle(fontSize = 11.sp, color = Color(theme.secondaryText))
+                )
+            }
+        }
     }
 }
 

@@ -70,6 +70,7 @@ fun ExtensionsScreen(
     val installStates by viewModel.installStates.collectAsState()
     val repos by viewModel.repos.collectAsState()
     val refreshing by viewModel.refreshingIndex.collectAsState()
+    val repoErrors by viewModel.extensionRepoErrors.collectAsState()
     var tab by remember { mutableStateOf(0) } // 0 installed, 1 available, 2 untrusted
     var showAddRepo by remember { mutableStateOf(false) }
 
@@ -126,6 +127,17 @@ fun ExtensionsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
         ) {
+            // A repo that failed to answer must never read as "no extensions exist":
+            // its failure is rendered where its catalog would have appeared.
+            if (repoErrors.isNotEmpty()) {
+                items(repoErrors.size, key = { "repo-error-$it" }) { i ->
+                    Text(
+                        repoErrors[i],
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             if (shown.isEmpty() && tab == 1 && !refreshing) {
                 item {
                     Text(

@@ -69,7 +69,9 @@ class ExtensionInstaller(
                 val response = httpClient.newCall(request).execute()
 
                 if (!response.isSuccessful) {
-                    throw Exception("Failed to download extension")
+                    val code = response.code
+                    response.close()
+                    throw java.io.IOException("Download failed (HTTP $code)")
                 }
                 response.body.byteStream().use { input ->
                     tmpFile.outputStream().use { output ->

@@ -3,7 +3,9 @@ package eu.kanade.tachiyomi.extension.api
 import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.extension.model.ExtensionRepo
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.awaitSuccess
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -12,6 +14,7 @@ import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import okhttp3.OkHttpClient
 import tachiyomi.core.common.util.system.logcat
+import java.io.IOException
 
 /**
  * Fetches the list of available extensions from the configured extension repositories.
@@ -29,18 +32,35 @@ class ExtensionApi(
     private val _repoSigningKeys = MutableStateFlow<Set<String>>(emptySet())
     val repoSigningKeys: StateFlow<Set<String>> = _repoSigningKeys
 
+    /** One repository's catalog fetch failed; without this a dead repo reads as an empty catalog. */
+    data class RepoFetchError(val repoName: String, val reason: String)
+
+    private val _repoFetchErrors = MutableStateFlow<List<RepoFetchError>>(emptyList())
+    val repoFetchErrors: StateFlow<List<RepoFetchError>> = _repoFetchErrors
+
     suspend fun findExtensions(): List<Extension.Available> {
         val repos = repoProvider()
         val signingKeys = mutableSetOf<String>()
+        val errors = mutableListOf<RepoFetchError>()
         val extensions = repos.flatMap { repo ->
             try {
                 fetchRepo(repo, signingKeys)
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "Failed to fetch extension repo ${repo.name}" }
+                errors += RepoFetchError(
+                    repoName = repo.name,
+                    reason = when {
+                        e is HttpException -> "HTTP ${e.code}"
+                        e is TimeoutCancellationException -> "timed out"
+                        e is IOException && !e.message.isNullOrBlank() -> e.message!!
+                        else -> e.javaClass.simpleName
+                    },
+                )
                 emptyList()
             }
         }
         _repoSigningKeys.value = signingKeys
+        _repoFetchErrors.value = errors
         return extensions
     }
 
