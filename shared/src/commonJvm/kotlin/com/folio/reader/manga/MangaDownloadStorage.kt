@@ -16,6 +16,13 @@ interface MangaDownloadStorage {
     /** Reads the first file whose name starts with [fileNamePrefix], or null. */
     fun readFirst(relativePath: String, fileNamePrefix: String): ByteArray?
     fun listFiles(relativePath: String): List<String>
+    /**
+     * [listFiles] minus anything empty. A process frozen or killed mid-write can
+     * leave a zero-byte page behind, and treating that as downloaded would mark a
+     * resumed chapter complete with a blank page in it. Defaults to [listFiles]
+     * where asking the filesystem for a length is not cheap.
+     */
+    fun listNonEmptyFiles(relativePath: String): List<String> = listFiles(relativePath)
     fun listSubDirs(relativePath: String): List<String>
     fun deleteDir(relativePath: String)
     /** Human-readable location for the settings UI. */
@@ -48,6 +55,11 @@ class FileDownloadStorage(val root: File) : MangaDownloadStorage {
 
     override fun listFiles(relativePath: String): List<String> =
         File(root, relativePath).listFiles().orEmpty().filter { it.isFile }.map { it.name }
+
+    override fun listNonEmptyFiles(relativePath: String): List<String> =
+        File(root, relativePath).listFiles().orEmpty()
+            .filter { it.isFile && it.length() > 0L }
+            .map { it.name }
 
     override fun listSubDirs(relativePath: String): List<String> =
         File(root, relativePath).listFiles().orEmpty().filter { it.isDirectory }.map { it.name }

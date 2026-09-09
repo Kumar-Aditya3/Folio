@@ -380,6 +380,25 @@ class AppGraph(private val app: Application) {
             cachedGlobalSettings =
                 runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
         }
+        // Keep a dataSync foreground service alive exactly while the download queue has
+        // pending work, so in-flight chapters survive the app being closed/frozen. The queue
+        // flow is revision-driven (emits only on change), so this is one cheap collector —
+        // no polling. Start/stop is decided here; the service only reports progress and
+        // retires itself when the queue drains. The `running` flag means we call
+        // start/stop only on a transition, not on every per-page emission.
+        graphScope.launch {
+            var running = false
+            mangaDownloadRepository.observeQueue().collect { queue ->
+                val pending = queue.any {
+                    it.status == com.folio.reader.manga.MangaDownloadStatus.QUEUED ||
+                        it.status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING
+                }
+                if (pending != running) {
+                    running = pending
+                    com.folio.reader.downloads.MangaDownloadService.sync(app, pending)
+                }
+            }
+        }
     }
 
     /**

@@ -6,6 +6,8 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.awaitSuccess
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -64,6 +66,30 @@ class ExtensionApi(
         return extensions
     }
 
+    /**
+     * Repo indexes sit behind CDN fronts that drop connections and rate-limit, and one
+     * failed fetch used to blank the catalog and raise a repo error row for something
+     * the next refresh would have fixed on its own. Transient failures (timeouts, IO,
+     * 5xx, 429) retry with a growing pause; permanent 4xx answers fail at once; a
+     * cancelled caller stays cancelled.
+     */
+    private suspend fun <T> withRetries(block: suspend () -> T): T {
+        val attempts = 3
+        val backoffMs = 1500L
+        var failure: Throwable? = null
+        for (attempt in 1..attempts) {
+            try {
+                return block()
+            } catch (e: Throwable) {
+                kotlin.coroutines.coroutineContext.ensureActive()
+                if (e is HttpException && e.code in 400..499 && e.code != 429) throw e
+                failure = e
+                if (attempt < attempts) delay(backoffMs * attempt)
+            }
+        }
+        throw failure ?: IOException("Fetch failed")
+    }
+
     private suspend fun fetchRepo(
         repo: ExtensionRepo,
         signingKeys: MutableSet<String>,
@@ -74,7 +100,7 @@ class ExtensionApi(
         // repo.json is a metadata wrapper: read the signing key, then fall back to the
         // legacy JSON index next to it (the v2 index it points at is protobuf).
         if (repo.indexUrl.endsWith("repo.json")) {
-            val body = client.newCall(GET(repo.indexUrl)).awaitSuccess().body.string()
+            val body = withRetries { client.newCall(GET(repo.indexUrl)).awaitSuccess().body.string() }
             val meta = runCatching { json.decodeFromString<RepoMetadata>(body) }.getOrNull()
             val key = meta?.meta?.signingKeyFingerprint?.takeIf { it.isNotBlank() }
             if (key != null) signingKeys += key
@@ -90,7 +116,7 @@ class ExtensionApi(
             }
         }
 
-        val body = client.newCall(GET(indexUrl)).awaitSuccess().body.string()
+        val body = withRetries { client.newCall(GET(indexUrl)).awaitSuccess().body.string() }
         val trimmed = body.trimStart()
         return when {
             trimmed.startsWith("[") ->

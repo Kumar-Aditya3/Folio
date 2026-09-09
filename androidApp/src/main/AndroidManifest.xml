@@ -12,11 +12,17 @@
         tools:ignore="QueryAllPackagesPermission" />
     <!-- Manga update summary notification (§11.3); runtime-granted on 33+, notifier no-ops when withheld. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps manga chapter downloads alive after the app is closed via a dataSync
+         foreground service (MangaDownloadService). FOREGROUND_SERVICE is the base
+         permission; FOREGROUND_SERVICE_DATA_SYNC authorizes the dataSync type on 34+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".FolioApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:forceDarkAllowed="false"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
@@ -76,6 +82,16 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.Folio"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- Keeps manga chapter downloads running after the user leaves the app. Single
+             in-process service — no android:process, because queue reactivity comes from an
+             in-process MutableStateFlow revision counter in JdbcMangaDownloadRepository.
+             Started/stopped by a queue collector in AppGraph; retires itself when the queue
+             drains. dataSync type on targetSdk 34. -->
+        <service
+            android:name=".downloads.MangaDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
