@@ -1,10 +1,12 @@
 package com.folio.reader.manga
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -24,6 +26,9 @@ class MangaDownloadManager(
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var loop: Job? = null
 
     @Volatile
     private var storage: MangaDownloadStorage = initialStorage
@@ -90,8 +95,14 @@ class MangaDownloadManager(
         chapters.forEach { from.deleteDir(it) }
     }
 
+    /**
+     * Starts the queue loop. Idempotent — a second loop running alongside the first
+     * would process the same chapters twice.
+     */
     fun start() {
-        scope.launch {
+        if (loop?.isActive == true) return
+        loop = scope.launch {
+            resumeInterrupted()
             while (isActive) {
                 val next = downloadsRepo.observeQueue().first()
                     .firstOrNull { it.status == MangaDownloadStatus.QUEUED }
@@ -100,6 +111,32 @@ class MangaDownloadManager(
                 } else {
                     process(next)
                 }
+            }
+        }
+    }
+
+    /** Ends the loop. The queue is durable, so [start] resumes it where it stopped. */
+    fun stop() {
+        loop?.cancel()
+        loop = null
+    }
+
+    /**
+     * Puts back the chapters a frozen or killed process left behind. The loop only
+     * picks up QUEUED rows, so a row interrupted mid-flight stayed DOWNLOADING
+     * forever, and the socket timeout that fires while Android holds the process
+     * frozen had usually already written the same chapter off as ERROR — the
+     * "Failed · timed out" a reader sees after closing the app mid-download. Both go
+     * back in the queue once per launch; [process] skips the pages already on disk,
+     * so this resumes a chapter instead of restarting it.
+     */
+    private suspend fun resumeInterrupted() {
+        for (item in downloadsRepo.observeQueue().first()) {
+            when (item.status) {
+                MangaDownloadStatus.DOWNLOADING, MangaDownloadStatus.ERROR ->
+                    downloadsRepo.update(item.copy(status = MangaDownloadStatus.QUEUED, error = null))
+
+                else -> Unit
             }
         }
     }
@@ -139,15 +176,21 @@ class MangaDownloadManager(
         downloadsRepo.update(item.copy(status = MangaDownloadStatus.DOWNLOADING, error = null))
 
         try {
-            val pages = backend.fetchPageList(item.mangaId.substringBefore(":").toLong(), ref)
+            val sourceId = item.mangaId.substringBefore(":").toLong()
+            val pages = withRetries { backend.fetchPageList(sourceId, ref) }
             if (!storage.ensureDir(path)) throw IllegalStateException("Cannot create download folder")
-            var done = 0
+            // Pages an interrupted run already wrote are kept, so resuming a chapter
+            // costs only the pages that are genuinely missing.
+            val onDisk = storage.listNonEmptyFiles(path)
+            val stored: (Int) -> Boolean = { index -> onDisk.any { it.startsWith("%03d.".format(index + 1)) } }
+            var done = pages.count { stored(it.index) }
             downloadsRepo.update(
-                item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = 0, error = null)
+                item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = done, error = null)
             )
 
             for (page in pages) {
-                val image = backend.fetchPageImage(item.mangaId.substringBefore(":").toLong(), ref, page)
+                if (stored(page.index)) continue
+                val image = withRetries { backend.fetchPageImage(sourceId, ref, page) }
                 val ext = extensionFor(image.bytes)
                 if (!storage.write(path, "%03d.%s".format(page.index + 1, ext), image.bytes)) {
                     throw IllegalStateException("Cannot write page ${page.index + 1} to storage")
@@ -172,6 +215,25 @@ class MangaDownloadManager(
         return "${mangaId.sanitize()}/${chapterId.sanitize()}"
     }
 
+    /**
+     * Fetching a page fails routinely for reasons that have nothing to do with the
+     * chapter — a radio handover, a source rate limit, or the socket timeout firing
+     * while Android held the process frozen. Retrying keeps a 40-page chapter from
+     * being written off over one bad page; only the last attempt's failure escapes.
+     */
+    private suspend fun <T> withRetries(block: suspend () -> T): T {
+        var failure: Throwable? = null
+        for (attempt in 1..FETCH_ATTEMPTS) {
+            val result = runCatching { block() }
+            if (result.isSuccess) return result.getOrThrow()
+            failure = result.exceptionOrNull()
+            // Cancelling the queue is a decision, not a transient failure.
+            if (failure is CancellationException) throw failure
+            if (attempt < FETCH_ATTEMPTS) delay(FETCH_BACKOFF_MS * attempt)
+        }
+        throw failure ?: IllegalStateException("Download failed")
+    }
+
     /** Removes a chapter's downloaded pages from the active location. */
     suspend fun deleteChapterDownload(mangaId: String, chapterId: String) {
         val path = chapterPath(mangaId, chapterId) ?: return
@@ -193,7 +255,9 @@ class MangaDownloadManager(
     suspend fun downloadedPageCount(mangaId: String, chapterId: String): Int =
         withContext(Dispatchers.IO) {
             val path = chapterPath(mangaId, chapterId) ?: return@withContext 0
-            storage.listFiles(path).size
+            // Empty files are excluded: the reader treats a non-zero count as "this
+            // chapter can be served offline", and a half-written page cannot be.
+            storage.listNonEmptyFiles(path).size
         }
 
     suspend fun isChapterDownloaded(chapterId: String): Boolean =
@@ -214,5 +278,9 @@ class MangaDownloadManager(
     private companion object {
         /** Android's marker for "media scanner, skip this directory tree". */
         const val NOMEDIA = ".nomedia"
+
+        /** Attempts per page fetch, and the pause before each retry. */
+        const val FETCH_ATTEMPTS = 3
+        const val FETCH_BACKOFF_MS = 1500L
     }
 }

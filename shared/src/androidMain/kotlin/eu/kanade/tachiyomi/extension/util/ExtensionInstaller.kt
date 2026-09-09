@@ -13,6 +13,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import logcat.LogPriority
@@ -65,17 +67,24 @@ class ExtensionInstaller(
             val tmpFile = File(context.cacheDir, "extension_${extension.pkgName}.apk")
             try {
                 step.value = InstallStep.Downloading
-                val request = Request.Builder().url(url).build()
-                val response = httpClient.newCall(request).execute()
-
-                if (!response.isSuccessful) {
-                    val code = response.code
-                    response.close()
-                    throw java.io.IOException("Download failed (HTTP $code)")
-                }
-                response.body.byteStream().use { input ->
-                    tmpFile.outputStream().use { output ->
-                        input.copyTo(output)
+                // Transient download failures (dropped socket, timeout, CDN 5xx/429)
+                // retry before the install is written off; a permanent 4xx — the
+                // extension is gone from its repo — fails at once.
+                withRetries {
+                    val request = Request.Builder().url(url).build()
+                    httpClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            val code = response.code
+                            if (code in 400..499 && code != 429) {
+                                throw AbortDownload("Download failed (HTTP $code)")
+                            }
+                            throw java.io.IOException("Download failed (HTTP $code)")
+                        }
+                        response.body.byteStream().use { input ->
+                            tmpFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
                     }
                 }
 
@@ -99,6 +108,26 @@ class ExtensionInstaller(
                 activeSteps.remove(downloadId)
                 job.cancel()
             }
+    }
+
+    /** A failure that trying again cannot fix — the extension is gone from its repo. */
+    private class AbortDownload(message: String) : java.io.IOException(message)
+
+    private suspend fun <T> withRetries(block: suspend () -> T): T {
+        val attempts = 3
+        val backoffMs = 1500L
+        var failure: Throwable? = null
+        for (attempt in 1..attempts) {
+            try {
+                return block()
+            } catch (e: Throwable) {
+                kotlin.coroutines.coroutineContext.ensureActive()
+                if (e is AbortDownload) throw e
+                failure = e
+                if (attempt < attempts) delay(backoffMs * attempt)
+            }
+        }
+        throw failure ?: java.io.IOException("Download failed")
     }
 
     private fun installApkPrivately(downloadId: Long, tempFile: File) {
