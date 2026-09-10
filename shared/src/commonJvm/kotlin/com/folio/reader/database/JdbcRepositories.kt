@@ -6,6 +6,11 @@ import com.folio.reader.model.Bookmark
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.CloudState
 import com.folio.reader.model.Collection
+import com.folio.reader.model.Document
+import com.folio.reader.model.DocumentBookmark
+import com.folio.reader.model.DocumentFormat
+import com.folio.reader.model.DocumentLocator
+import com.folio.reader.model.DocumentPosition
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.NoteType
@@ -18,6 +23,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
@@ -173,6 +179,270 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
             }
             chapters
         }
+    }
+}
+
+// ---------- Documents ----------
+
+class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
+
+    private fun mapDocument(rs: ResultSet) = Document(
+        id = rs.getString("id"),
+        title = rs.getString("title"),
+        originalFilename = rs.getString("original_filename"),
+        format = DocumentFormat.valueOf(rs.getString("format")),
+        mimeType = rs.getString("mime_type"),
+        contentHash = rs.getString("content_hash"),
+        byteSize = rs.getLong("byte_size"),
+        localPath = rs.getString("local_path"),
+        author = rs.getString("author"),
+        description = rs.getString("description"),
+        pageCount = (rs.getObject("page_count") as? Number)?.toInt(),
+        sectionCount = (rs.getObject("section_count") as? Number)?.toInt(),
+        importedAt = Instant.fromEpochMilliseconds(rs.getLong("imported_at")),
+        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
+        lastOpenedAt = (rs.getObject("last_opened_at") as? Number)?.toLong()?.let(Instant::fromEpochMilliseconds),
+        normalizedProgress = rs.getDouble("normalized_progress").coerceIn(0.0, 1.0)
+    )
+
+    private fun decodeLocator(value: String): DocumentLocator =
+        repoJson.decodeFromString(DocumentLocator.serializer(), value)
+
+    private fun locatorKind(locator: DocumentLocator) = when (locator) {
+        is DocumentLocator.FixedPage -> "FIXED_PAGE"
+        is DocumentLocator.Reflowable -> "REFLOWABLE"
+    }
+
+    private fun java.sql.PreparedStatement.bindLocator(start: Int, locator: DocumentLocator) {
+        setString(start, locatorKind(locator))
+        setString(start + 1, repoJson.encodeToString(DocumentLocator.serializer(), locator))
+        when (locator) {
+            is DocumentLocator.FixedPage -> {
+                setInt(start + 2, locator.pageIndex)
+                setNull(start + 3, java.sql.Types.VARCHAR)
+            }
+            is DocumentLocator.Reflowable -> {
+                setNull(start + 2, java.sql.Types.INTEGER)
+                setString(start + 3, locator.sectionId)
+            }
+        }
+    }
+
+    private suspend fun queryDocuments(
+        sql: String,
+        bind: (java.sql.PreparedStatement) -> Unit = {}
+    ): List<Document> = db.withConnection { conn ->
+        conn.prepareStatement(sql).use { stmt ->
+            bind(stmt)
+            stmt.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(mapDocument(rs)) }
+            }
+        }
+    }
+
+    override fun observeDocuments(): Flow<List<Document>> = db.documentDataRevision.map {
+        queryDocuments("SELECT * FROM documents ORDER BY COALESCE(last_opened_at, imported_at) DESC")
+    }
+
+    override suspend fun getDocument(documentId: String): Document? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM documents WHERE id = ?").use { stmt ->
+            stmt.setString(1, documentId)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapDocument(rs) else null }
+        }
+    }
+
+    override suspend fun getDocumentByHash(contentHash: String): Document? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM documents WHERE content_hash = ?").use { stmt ->
+            stmt.setString(1, contentHash)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapDocument(rs) else null }
+        }
+    }
+
+    override fun searchDocuments(query: String): Flow<List<Document>> = db.documentDataRevision.map {
+        val term = query.trim()
+        if (term.isEmpty()) emptyList() else queryDocuments(
+            """
+            SELECT * FROM documents
+            WHERE title LIKE ? COLLATE NOCASE OR original_filename LIKE ? COLLATE NOCASE
+               OR COALESCE(author, '') LIKE ? COLLATE NOCASE OR COALESCE(description, '') LIKE ? COLLATE NOCASE
+            ORDER BY title COLLATE NOCASE
+            """.trimIndent()
+        ) { stmt -> repeat(4) { stmt.setString(it + 1, "%$term%") } }
+    }
+
+    override suspend fun upsertDocument(document: Document) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO documents
+                    (id, title, original_filename, format, mime_type, content_hash, byte_size, local_path,
+                     author, description, page_count, section_count, imported_at, updated_at, last_opened_at,
+                     normalized_progress)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    original_filename = excluded.original_filename,
+                    format = excluded.format,
+                    mime_type = excluded.mime_type,
+                    content_hash = excluded.content_hash,
+                    byte_size = excluded.byte_size,
+                    local_path = excluded.local_path,
+                    author = excluded.author,
+                    description = excluded.description,
+                    page_count = excluded.page_count,
+                    section_count = excluded.section_count,
+                    imported_at = excluded.imported_at,
+                    updated_at = excluded.updated_at,
+                    last_opened_at = excluded.last_opened_at,
+                    normalized_progress = excluded.normalized_progress
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, document.id)
+                stmt.setString(2, document.title)
+                stmt.setString(3, document.originalFilename)
+                stmt.setString(4, document.format.name)
+                stmt.setString(5, document.mimeType)
+                stmt.setString(6, document.contentHash)
+                stmt.setLong(7, document.byteSize)
+                stmt.setString(8, document.localPath)
+                stmt.setString(9, document.author)
+                stmt.setString(10, document.description)
+                if (document.pageCount != null) stmt.setInt(11, document.pageCount) else stmt.setNull(11, java.sql.Types.INTEGER)
+                if (document.sectionCount != null) stmt.setInt(12, document.sectionCount) else stmt.setNull(12, java.sql.Types.INTEGER)
+                stmt.setLong(13, document.importedAt.toEpochMilliseconds())
+                stmt.setLong(14, document.updatedAt.toEpochMilliseconds())
+                if (document.lastOpenedAt != null) stmt.setLong(15, document.lastOpenedAt.toEpochMilliseconds()) else stmt.setNull(15, java.sql.Types.INTEGER)
+                stmt.setDouble(16, document.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun markOpened(documentId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE documents SET last_opened_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                val now = Clock.System.now().toEpochMilliseconds()
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, documentId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun upsertPosition(position: DocumentPosition) {
+        db.withTransaction { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO document_positions
+                    (document_id, locator_kind, locator_json, page_index, section_id, normalized_progress, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, position.documentId)
+                stmt.bindLocator(2, position.locator)
+                stmt.setDouble(6, position.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.setLong(7, position.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement("UPDATE documents SET normalized_progress = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setDouble(1, position.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.setLong(2, position.updatedAt.toEpochMilliseconds())
+                stmt.setString(3, position.documentId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override fun observePosition(documentId: String): Flow<DocumentPosition?> = db.documentDataRevision.map {
+        db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM document_positions WHERE document_id = ?").use { stmt ->
+                stmt.setString(1, documentId)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) null else DocumentPosition(
+                        documentId = rs.getString("document_id"),
+                        locator = decodeLocator(rs.getString("locator_json")),
+                        normalizedProgress = rs.getDouble("normalized_progress"),
+                        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun upsertBookmark(bookmark: DocumentBookmark) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO document_bookmarks
+                    (id, document_id, locator_kind, locator_json, page_index, section_id, label, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookmark.id)
+                stmt.setString(2, bookmark.documentId)
+                stmt.bindLocator(3, bookmark.locator)
+                stmt.setString(7, bookmark.label)
+                stmt.setLong(8, bookmark.createdAt.toEpochMilliseconds())
+                stmt.setLong(9, bookmark.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    private fun mapBookmark(rs: ResultSet) = DocumentBookmark(
+        id = rs.getString("id"),
+        documentId = rs.getString("document_id"),
+        locator = decodeLocator(rs.getString("locator_json")),
+        label = rs.getString("label"),
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+    )
+
+    override suspend fun getBookmark(bookmarkId: String): DocumentBookmark? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM document_bookmarks WHERE id = ?").use { stmt ->
+            stmt.setString(1, bookmarkId)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapBookmark(rs) else null }
+        }
+    }
+
+    override fun observeBookmarks(documentId: String): Flow<List<DocumentBookmark>> = db.documentDataRevision.map {
+        db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM document_bookmarks WHERE document_id = ? ORDER BY created_at").use { stmt ->
+                stmt.setString(1, documentId)
+                stmt.executeQuery().use { rs -> buildList { while (rs.next()) add(mapBookmark(rs)) } }
+            }
+        }
+    }
+
+    override suspend fun deleteBookmark(bookmarkId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM document_bookmarks WHERE id = ?").use { stmt ->
+                stmt.setString(1, bookmarkId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun deleteDocument(documentId: String) {
+        db.withTransaction { conn ->
+            for (sql in listOf(
+                "DELETE FROM document_bookmarks WHERE document_id = ?",
+                "DELETE FROM document_positions WHERE document_id = ?",
+                "DELETE FROM documents WHERE id = ?"
+            )) {
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.setString(1, documentId)
+                    stmt.executeUpdate()
+                }
+            }
+        }
+        db.bumpDocumentData()
     }
 }
 

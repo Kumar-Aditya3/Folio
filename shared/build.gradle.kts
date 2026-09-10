@@ -42,6 +42,7 @@ kotlin {
             dependsOn(getByName("commonMain"))
             dependencies {
                 implementation(libs.sqlite.jdbc)
+                implementation(libs.jsoup)
                 // API only: Android ships org.xmlpull.v1 in the framework; desktop
                 // packages the implementation via desktopMain below.
                 compileOnly(libs.kxml2)
@@ -91,6 +92,7 @@ kotlin {
                 // (bundling kxml2 there collided with framework classes in R8).
                 implementation(libs.kxml2)
                 implementation(libs.jcefmaven)
+                implementation(libs.pdfbox)
                 runtimeOnly(libs.jcef.natives.windows.amd64)
                 implementation(libs.slf4j.api)
                 implementation(libs.slf4j.simple)
@@ -109,6 +111,7 @@ kotlin {
                 implementation(libs.kotlin.test.junit5)
                 implementation(libs.junit.jupiter)
                 implementation(libs.kotlinx.coroutines.test)
+                runtimeOnly(libs.skiko.awt.runtime.windows.x64)
             }
         }
     }

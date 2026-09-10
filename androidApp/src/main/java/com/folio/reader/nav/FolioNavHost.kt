@@ -72,6 +72,9 @@ fun FolioNavHost(
         composable(FolioRoutes.LIBRARY) {
             navModel.libraryContent(
                 onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                onOpenDocument = { documentId ->
+                    navController.navigate(FolioDestination.documentReader(documentId))
+                },
                 onOpenBookDetail = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) },
                 onOpenSearch = { navController.navigate(FolioRoutes.SEARCH) },
                 onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) },
@@ -124,6 +127,21 @@ fun FolioNavHost(
                 onBack = { navController.popBackStack() },
                 onOpenSearch = { navController.navigate(FolioRoutes.SEARCH) },
                 onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) }
+            )
+        }
+
+        composable(
+            route = FolioRoutes.DOCUMENT_READER,
+            arguments = listOf(
+                navArgument(FolioNavArgs.DOCUMENT_ID) { type = NavType.StringType }
+            )
+        ) { entry ->
+            val documentId =
+                entry.arguments?.getString(FolioNavArgs.DOCUMENT_ID)
+                    ?: return@composable
+            navModel.documentReaderContent(
+                documentId = documentId,
+                onBack = { navController.popBackStack() }
             )
         }
 

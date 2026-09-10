@@ -34,6 +34,7 @@ import com.folio.reader.ui.home.HomeUiState
 import com.folio.reader.ui.home.HomeViewModel
 import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.library.LibraryScreen
+import com.folio.reader.ui.library.DocumentLibraryViewModel
 import com.folio.reader.ui.library.LibraryViewModel
 import com.folio.reader.ui.statistics.StatisticsTabContent
 import com.folio.reader.ui.theme.FolioTheme
@@ -199,6 +200,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
 fun LibraryRoute(
     navModel: FolioNavModelImpl,
     onOpenReader: (String) -> Unit,
+    onOpenDocument: (String) -> Unit,
     onOpenBookDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -216,7 +218,7 @@ fun LibraryRoute(
     val callbacks = navModel.callbacks
     val activity = navModel.activity
 
-    // Persist the Books/Manga choice across launches (same raw key as pre-nav).
+    // Persist the selected Library mode across launches (same raw key as pre-nav).
     LaunchedEffect(Unit) {
         runCatching {
             val raw = graph.settingsRepository.getRaw("library.mode")
@@ -242,7 +244,20 @@ fun LibraryRoute(
     LibraryScreen(
         onBookClick = { onOpenReader(it.id) },
         onBookDetailClick = { onOpenBookDetail(it.id) },
-        onImportClick = { callbacks.onImportEpubs() },
+        onImportClick = { callbacks.onImportContent() },
+        documentLibraryViewModel = navModel.documentLibraryVM,
+        onDocumentImportClick = { callbacks.onImportContent() },
+        onDocumentOpen = { onOpenDocument(it.id) },
+        onDocumentDelete = { document ->
+            activity.appScope.launch(Dispatchers.IO) {
+                val result = graph.documentDeletionService.delete(document.id)
+                if (!result.filesDeleted) {
+                    activity.importStatus =
+                        "Document removed; some local files could not be deleted"
+                }
+                activity.refreshTick++
+            }
+        },
         onSearchClick = onOpenSearch,
         onSettingsClick = onOpenSettings,
         showSettingsAction = false,

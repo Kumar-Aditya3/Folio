@@ -29,6 +29,9 @@ import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.folio.reader.importer.IncomingContent
+import com.folio.reader.importer.IncomingContentResult
+import com.folio.reader.nav.FolioDestination
 import com.folio.reader.nav.FolioNavCallbacks
 import com.folio.reader.nav.FolioNavHost
 import com.folio.reader.nav.FolioNavModelImpl
@@ -73,12 +76,26 @@ private val MANGA_ARCHIVE_MIMES = arrayOf(
     "*/*"
 )
 
+private val INCOMING_CONTENT_MIMES = arrayOf(
+    "application/epub+zip",
+    "application/pdf",
+    "text/plain",
+    "text/html",
+    "application/xhtml+xml",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.oasis.opendocument.text"
+)
+
+private const val MAX_INCOMING_SOURCE_BYTES = 512L * 1024L * 1024L
+private const val MAX_OFFICE_SOURCE_BYTES = 100L * 1024L * 1024L
+
 class MainActivity : ComponentActivity() {
 
     internal val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     internal var importStatus by mutableStateOf("")
     internal var refreshTick by mutableIntStateOf(0)
     internal lateinit var navModel: FolioNavModelImpl
+    private var pendingOpenRoute: String? = null
 
     override fun onDestroy() {
         super.onDestroy()
@@ -112,12 +129,16 @@ class MainActivity : ComponentActivity() {
             SideEffect {
                 navModel = model
                 model.navController = navController
+                pendingOpenRoute?.let { route ->
+                    pendingOpenRoute = null
+                    navController.navigate(route)
+                }
             }
 
             // ── Document pickers (bodies live in nav/FolioNavModelImporters.kt) ──
-            val pickEpubs = rememberLauncherForActivityResult(
+            val pickContent = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenMultipleDocuments()
-            ) { uris -> importEpubUris(uris) }
+            ) { uris -> importContentUris(uris) }
             val pickMangaArchives = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenMultipleDocuments()
             ) { uris -> importMangaUris(uris) }
@@ -151,7 +172,7 @@ class MainActivity : ComponentActivity() {
             }
 
             val callbacks = object : FolioNavCallbacks {
-                override fun onImportEpubs() = pickEpubs.launch(arrayOf("application/epub+zip"))
+                override fun onImportContent() = pickContent.launch(INCOMING_CONTENT_MIMES)
                 override fun onImportMangaArchives() = pickMangaArchives.launch(MANGA_ARCHIVE_MIMES)
                 override fun onImportMangaFolder() = pickMangaFolder.launch(null)
                 override fun onImportMangaChoice() {
@@ -205,13 +226,17 @@ class MainActivity : ComponentActivity() {
                 when {
                     model.mangaLibVM.isSelectionMode.value -> model.mangaLibVM.clearSelection()
                     model.libraryVM.isSelectionMode.value -> model.libraryVM.clearSelection()
+                    model.documentLibraryVM.isSelectionMode.value ->
+                        model.documentLibraryVM.clearSelection()
                     model.activeMangaDetailVM?.chapterSelectionMode?.value == true ->
                         model.activeMangaDetailVM?.clearChapterSelection()
                     currentRoute == FolioRoutes.MANGA_BROWSE && model.mangaBrowseVM.searchActive.value ->
                         model.mangaBrowseVM.exitSearch()
                     navController.popBackStack() -> Unit
                     model.mangaSearchActive -> model.mangaSearchActive = false
-                    model.libraryMode == LibraryMode.MANGA -> model.libraryMode = LibraryMode.BOOKS
+                    model.libraryMode == LibraryMode.MANGA ||
+                        model.libraryMode == LibraryMode.DOCUMENTS ->
+                        model.libraryMode = LibraryMode.BOOKS
                     else -> finish()
                 }
             }
@@ -220,7 +245,9 @@ class MainActivity : ComponentActivity() {
             // describes the page and nothing else — feeding themeId in here is what
             // made the two bleed into each other.
             val isReadingScreen =
-                currentRoute == FolioRoutes.READER || currentRoute == FolioRoutes.MANGA_READER
+                currentRoute == FolioRoutes.READER ||
+                    currentRoute == FolioRoutes.DOCUMENT_READER ||
+                    currentRoute == FolioRoutes.MANGA_READER
             val appPalette = AppPalette.byId(model.globalSettings.appThemeId)
             // A custom theme replaces the pack's colours wholesale; its own
             // background lightness, not the pack's, decides the app's polarity.
@@ -301,67 +328,170 @@ class MainActivity : ComponentActivity() {
         }
 
         // Avoid importing the same launch intent again after an activity recreation.
-        if (savedInstanceState == null) handleEpubIntent(intent)
+        if (savedInstanceState == null) handleIncomingIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleEpubIntent(intent)
+        handleIncomingIntent(intent)
     }
 
-    /** Imports EPUB content supplied by either the system document picker or another app. */
-    private fun importEpubUris(uris: List<Uri>) {
+    /** Copies selected/shared content into bounded private temporary files, then imports it. */
+    private fun importContentUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
 
         val graph = (application as FolioApplication).graph
         appScope.launch(Dispatchers.IO) {
-            var imported = 0
-            var restored = 0
-            for ((index, uri) in uris.withIndex()) {
-                withContext(Dispatchers.Main) {
-                    importStatus = "Importing ${index + 1}/${uris.size}..."
-                }
-
-                val tempFile = File(cacheDir, "import_${UUID.randomUUID()}.epub")
-                try {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        tempFile.outputStream().use { output -> input.copyTo(output) }
-                    } ?: throw IllegalArgumentException("Unable to open shared EPUB")
-
-                    graph.bookImporter.importEpub(tempFile.absolutePath)
-                        .onSuccess { book ->
-                            imported++
-                            val adopted = runCatching {
-                                graph.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash) ?: 0
-                            }.getOrDefault(0)
-                            if (adopted > 0) restored++
-                        }
-                        .onFailure { failure ->
-                            withContext(Dispatchers.Main) {
-                                importStatus = "Failed: ${failure.message ?: "unknown error"}"
-                            }
-                        }
-                } catch (e: Exception) {
+            val temporaryFiles = mutableListOf<File>()
+            try {
+                val incoming = uris.mapIndexedNotNull { index, uri ->
                     withContext(Dispatchers.Main) {
-                        importStatus = "Failed: ${e.message ?: "unable to import EPUB"}"
+                        importStatus = "Copying ${index + 1}/${uris.size}..."
                     }
-                } finally {
-                    tempFile.delete()
+                    runCatching {
+                        val displayName = contentDisplayName(uri, index)
+                        val mimeType = contentResolver.getType(uri)
+                        val extension = displayName.substringAfterLast('.', "")
+                            .lowercase()
+                            .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) }
+                        val tempFile = File(
+                            cacheDir,
+                            "incoming_${UUID.randomUUID()}${extension?.let { ".$it" }.orEmpty()}"
+                        )
+                        temporaryFiles += tempFile
+                        copyIncomingUri(uri, tempFile, displayName, mimeType)
+                        IncomingContent(
+                            path = tempFile.absolutePath,
+                            filename = displayName,
+                            mimeType = mimeType
+                        )
+                    }.onFailure { error ->
+                        withContext(Dispatchers.Main) {
+                            importStatus = "Import failed: ${error.message ?: "unable to read content"}"
+                        }
+                    }.getOrNull()
                 }
-            }
 
-            withContext(Dispatchers.Main) {
-                importStatus = when {
-                    imported == 1 -> "Imported 1 book"
-                    imported > 1 -> "Imported $imported of ${uris.size} books"
-                    importStatus.endsWith("...") -> "Import failed"
-                    else -> importStatus
+                if (incoming.isEmpty()) return@launch
+                withContext(Dispatchers.Main) {
+                    importStatus = "Importing ${incoming.size} file(s)..."
                 }
-                if (restored > 0) importStatus += " • progress restored from cloud"
-                refreshTick++
+                val results = graph.incomingContentCoordinator.importMany(incoming)
+                var restored = 0
+                results.forEach { result ->
+                    val book = when (result) {
+                        is IncomingContentResult.ImportedBook -> result.book
+                        is IncomingContentResult.DuplicateBook -> result.book
+                        else -> null
+                    }
+                    if (book != null) {
+                        restored += runCatching {
+                            graph.syncEngine?.adoptCloudProgressForBook(
+                                book.id,
+                                book.epubHash
+                            ) ?: 0
+                        }.getOrDefault(0)
+                    }
+                }
+                val successful = results.count { it.openRoute() != null }
+                val firstRoute = results.firstNotNullOfOrNull { it.openRoute() }
+                val failure = results.firstNotNullOfOrNull { it.failureReason() }
+                withContext(Dispatchers.Main) {
+                    importStatus = when {
+                        successful > 0 ->
+                            "Imported $successful of ${uris.size} file(s)"
+                        failure != null -> "Import failed: $failure"
+                        else -> "No supported files were imported"
+                    }
+                    if (restored > 0) {
+                        importStatus += " • progress restored from cloud"
+                    }
+                    refreshTick++
+                    val controller =
+                        if (::navModel.isInitialized) navModel.navController else null
+                    if (firstRoute != null) {
+                        if (controller != null) {
+                            controller.navigate(firstRoute)
+                        } else {
+                            pendingOpenRoute = firstRoute
+                        }
+                    }
+                }
+            } finally {
+                temporaryFiles.forEach { runCatching { it.delete() } }
             }
         }
+    }
+
+    private fun contentDisplayName(uri: Uri, index: Int): String =
+        runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+            ?: "shared_$index"
+
+    private fun copyIncomingUri(
+        uri: Uri,
+        destination: File,
+        displayName: String,
+        mimeType: String?
+    ) {
+        val extension = displayName.substringAfterLast('.', "").lowercase()
+        val isOfficeDocument =
+            extension == "docx" ||
+                extension == "odt" ||
+                mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                mimeType == "application/vnd.oasis.opendocument.text"
+        val limit = if (isOfficeDocument) {
+            MAX_OFFICE_SOURCE_BYTES
+        } else {
+            MAX_INCOMING_SOURCE_BYTES
+        }
+        contentResolver.openInputStream(uri)?.use { input ->
+            destination.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > limit) {
+                        throw IllegalArgumentException("$displayName exceeds the import size limit")
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+        } ?: throw IllegalArgumentException("Unable to open $displayName")
+    }
+
+    private fun IncomingContentResult.openRoute(): String? = when (this) {
+        is IncomingContentResult.ImportedBook -> FolioDestination.reader(book.id)
+        is IncomingContentResult.DuplicateBook -> FolioDestination.reader(book.id)
+        is IncomingContentResult.ImportedDocument ->
+            FolioDestination.documentReader(document.id)
+        is IncomingContentResult.DuplicateDocument ->
+            FolioDestination.documentReader(document.id)
+        else -> null
+    }
+
+    private fun IncomingContentResult.failureReason(): String? = when (this) {
+        is IncomingContentResult.Unsupported -> reason
+        is IncomingContentResult.Unsafe -> reason
+        is IncomingContentResult.Corrupt -> reason
+        is IncomingContentResult.Encrypted -> reason
+        is IncomingContentResult.TooLarge -> reason
+        is IncomingContentResult.IoError -> reason
+        else -> null
     }
 
     /** Imports CBZ/ZIP manga archives into the local manga source. */
@@ -483,26 +613,47 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun handleEpubIntent(intent: Intent) {
-        val uri = when (intent.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(
+    private fun handleIncomingIntent(intent: Intent) {
+        val uris = LinkedHashSet<Uri>()
+        if (intent.action == Intent.ACTION_VIEW) {
+            intent.data?.let(uris::add)
+        }
+        if (intent.action == Intent.ACTION_SEND ||
+            intent.action == Intent.ACTION_SEND_MULTIPLE
+        ) {
+            IntentCompat.getParcelableArrayListExtra(
                 intent,
                 Intent.EXTRA_STREAM,
                 Uri::class.java
-            ) ?: intent.clipData?.getItemAt(0)?.uri
-            else -> null
+            )?.let(uris::addAll)
+            IntentCompat.getParcelableExtra(
+                intent,
+                Intent.EXTRA_STREAM,
+                Uri::class.java
+            )?.let(uris::add)
+            intent.clipData?.let { clip ->
+                repeat(clip.itemCount) { index ->
+                    clip.getItemAt(index).uri?.let(uris::add)
+                }
+            }
         }
-        uri?.let {
-            // folio:// deep links are consumed by the NavHost, not the importer.
-            if (it.scheme == "folio") return@let
-            val path = it.path.orEmpty()
-            val type = intent.type.orEmpty()
+        uris.removeAll { it.scheme == "folio" }
+        if (uris.isEmpty()) return
+
+        val manga = mutableListOf<Uri>()
+        val content = mutableListOf<Uri>()
+        uris.forEach { uri ->
+            val path = uri.path.orEmpty()
+            val type = contentResolver.getType(uri).orEmpty()
+                .ifBlank { intent.type.orEmpty() }
             val isManga = path.endsWith(".cbz", ignoreCase = true) ||
                 path.endsWith(".zip", ignoreCase = true) ||
-                type.contains("cbz") || type.contains("comicbook")
-            if (isManga) importMangaUris(listOf(it)) else importEpubUris(listOf(it))
+                type.contains("cbz", ignoreCase = true) ||
+                type.contains("comicbook", ignoreCase = true)
+            if (isManga) manga += uri else content += uri
         }
+        if (manga.isNotEmpty()) importMangaUris(manga)
+        if (content.isNotEmpty()) importContentUris(content)
     }
 
     /** Shares the imported EPUB using the app's existing FileProvider grant. */

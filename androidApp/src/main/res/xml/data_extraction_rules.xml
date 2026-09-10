@@ -4,10 +4,12 @@
         <include domain="file" path="library" />
         <include domain="file" path="database" />
         <include domain="sharedpref" path="folio_settings.xml" />
+        <exclude domain="file" path="library/documents" />
     </cloud-backup>
     <device-transfer>
         <include domain="file" path="library" />
         <include domain="file" path="database" />
         <include domain="sharedpref" path="folio_settings.xml" />
+        <exclude domain="file" path="library/documents" />
     </device-transfer>
 </data-extraction-rules>

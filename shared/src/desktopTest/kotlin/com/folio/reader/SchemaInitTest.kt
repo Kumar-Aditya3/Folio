@@ -31,12 +31,33 @@ class SchemaInitTest {
     }
 
     private val expectedTables = setOf(
-        "books", "reading_positions", "reading_sessions", "highlights", "notes",
+        "books", "documents", "document_positions", "document_bookmarks",
+        "reading_positions", "reading_sessions", "highlights", "notes",
         "bookmarks", "series", "collections", "book_collections", "settings",
         "chapters", "sync_queue", "devices", "book_statistics", "daily_statistics",
         "tags", "book_tags", "highlight_tags", "quotes", "revisit_items",
         "reading_cycles", "search_index"
     )
+
+    private val expectedDocumentIndexes = setOf(
+        "idx_documents_title", "idx_documents_last_opened", "idx_documents_imported",
+        "idx_documents_format_imported", "idx_document_positions_page",
+        "idx_document_positions_section", "idx_document_bookmarks_document",
+        "idx_document_bookmarks_page", "idx_document_bookmarks_section"
+    )
+
+    private fun objectsOf(dbPath: String, type: String): Set<String> {
+        DriverManager.getConnection("jdbc:sqlite:$dbPath").use { conn ->
+            conn.prepareStatement("SELECT name FROM sqlite_master WHERE type = ?").use { stmt ->
+                stmt.setString(1, type)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableSetOf<String>()
+                    while (rs.next()) out.add(rs.getString(1))
+                    return out
+                }
+            }
+        }
+    }
 
     private fun tablesOf(dbPath: String): Set<String> {
         DriverManager.getConnection("jdbc:sqlite:$dbPath").use { conn ->
@@ -58,6 +79,10 @@ class SchemaInitTest {
             val tables = tablesOf(platform.fileSystem.getDatabasePath())
             for (expected in expectedTables) {
                 assertTrue(expected in tables, "missing table after init: $expected (have $tables)")
+            }
+            val indexes = objectsOf(platform.fileSystem.getDatabasePath(), "index")
+            for (expected in expectedDocumentIndexes) {
+                assertTrue(expected in indexes, "missing index after init: $expected (have $indexes)")
             }
         } finally {
             runCatching { database.close() }

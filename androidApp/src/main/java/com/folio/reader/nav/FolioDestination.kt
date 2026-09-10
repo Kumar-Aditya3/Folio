@@ -16,6 +16,7 @@ object FolioRoutes {
 
     // Pushed routes (bar hidden, §3.3).
     const val READER = "reader/{bookId}?spine={spine}"
+    const val DOCUMENT_READER = "document/{documentId}"
     const val BOOK_DETAIL = "book/{bookId}"
     const val MANGA_DETAIL = "manga/{mangaId}"
     const val MANGA_READER = "mangaReader/{mangaId}/{chapterId}"
@@ -44,6 +45,9 @@ object FolioDestination {
     fun reader(bookId: String, spine: Int? = null): String =
         "reader/${enc(bookId)}?spine=${spine ?: -1}"
 
+    fun documentReader(documentId: String): String =
+        "document/${enc(documentId)}"
+
     fun bookDetail(bookId: String): String = "book/${enc(bookId)}"
 
     fun mangaDetail(mangaId: String): String = "manga/${enc(mangaId)}"
@@ -60,6 +64,7 @@ object FolioDestination {
 /** Argument names for route parameters — single source of truth. */
 object FolioNavArgs {
     const val BOOK_ID = "bookId"
+    const val DOCUMENT_ID = "documentId"
     const val SPINE = "spine"
     const val MANGA_ID = "mangaId"
     const val CHAPTER_ID = "chapterId"

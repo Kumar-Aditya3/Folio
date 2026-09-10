@@ -60,6 +60,20 @@ compose.desktop {
             packageVersion = "1.0.33"
             windows {
                 fileAssociation("application/epub+zip", "epub", "EPUB eBook")
+                fileAssociation("application/pdf", "pdf", "PDF document")
+                fileAssociation("text/plain", "txt", "Text document")
+                fileAssociation("text/html", "html", "HTML document")
+                fileAssociation("text/html", "htm", "HTML document")
+                fileAssociation(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "docx",
+                    "Word document"
+                )
+                fileAssociation(
+                    "application/vnd.oasis.opendocument.text",
+                    "odt",
+                    "OpenDocument text"
+                )
             }
         }
     }
