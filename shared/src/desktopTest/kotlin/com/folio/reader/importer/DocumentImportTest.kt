@@ -71,7 +71,7 @@ class DocumentImportTest {
         val odt = File(root, "sample.odt")
         zip(odt, mapOf(
             "mimetype" to "application/vnd.oasis.opendocument.text",
-            "content.xml" to """<office:document-content xmlns:office="office" xmlns:text="text" xmlns:table="table"><office:body><text:h text:outline-level="2">ODT heading</text:h><text:list><text:list-item><text:p>ODT item</text:p></text:list-item></text:list><table:table><table:table-row><table:table-cell><text:p>ODT cell</text:p></table:table-cell></table:table-row></table:table></office:body></office:document-content>"""
+            "content.xml" to """<!DOCTYPE office:document-content><office:document-content xmlns:office="office" xmlns:text="text" xmlns:table="table"><office:body><text:h text:outline-level="2">ODT heading</text:h><text:list><text:list-item><text:p>ODT item</text:p></text:list-item></text:list><table:table><table:table-row><table:table-cell><text:p>ODT cell</text:p></table:table-cell></table:table-row></table:table></office:body></office:document-content>"""
         ))
         val odtDocument = importer.importDocument(odt, detector.detect(odt), odt.name)
         val odtHtml = File(platform.fileSystem.getDocumentGeneratedIndexPath(odtDocument.id)).readText()
