@@ -68,6 +68,13 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             sessionRepository = graph.sessionRepository
         )
     }
+    val documentLibraryVM by lazy {
+        com.folio.reader.ui.library.DocumentLibraryViewModel(
+            repository = graph.documentRepository,
+            categoryRepository = graph.documentCategoryRepository,
+            settingsRepository = graph.settingsRepository
+        )
+    }
     val mangaLibVM by lazy {
         com.folio.reader.ui.manga.MangaLibraryViewModel(
             backend = graph.mangaBackend,
@@ -161,6 +168,7 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
     @Composable
     override fun libraryContent(
         onOpenReader: (String) -> Unit,
+        onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,
@@ -174,8 +182,8 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         onOpenMangaDownloads: () -> Unit,
         onOpenMangaSource: (Long, String) -> Unit
     ) = LibraryRoute(
-        this, onOpenReader, onOpenBookDetail, onOpenSearch, onOpenSettings, onOpenTags,
-        onOpenQuotes, onOpenRevisit, onOpenMangaBrowse, onOpenMangaExtensions,
+        this, onOpenReader, onOpenDocument, onOpenBookDetail, onOpenSearch, onOpenSettings,
+        onOpenTags, onOpenQuotes, onOpenRevisit, onOpenMangaBrowse, onOpenMangaExtensions,
         onOpenMangaHistory, onOpenMangaDetail, onOpenMangaDownloads, onOpenMangaSource
     )
 
@@ -204,6 +212,12 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit
     ) = ReaderRoute(this, bookId, targetSpineIndex, onBack, onOpenSearch, onOpenSettings)
+
+    @Composable
+    override fun documentReaderContent(
+        documentId: String,
+        onBack: () -> Unit
+    ) = DocumentReaderRoute(this, documentId, onBack)
 
     @Composable
     override fun bookDetailContent(

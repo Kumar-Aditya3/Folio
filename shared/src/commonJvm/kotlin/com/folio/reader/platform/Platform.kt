@@ -28,8 +28,21 @@ class MessageDigestFileHasher : FileHasher {
     }
 }
 
+data class StagedDocumentCopy(val path: String, val sha256: String, val byteSize: Long)
+
+class StagedCopyTooLargeException : java.io.IOException("Staged document exceeds its size limit")
+
+internal fun requireSafeDocumentId(documentId: String): String = documentId.also {
+    require(it.isNotBlank() && it.all { char -> char.isLetterOrDigit() || char == '-' || char == '_' }) { "Unsafe document ID" }
+}
+
+internal fun requireCanonicalExtension(extension: String): String = extension.lowercase().also {
+    require(it.isNotBlank() && it.all(Char::isLetterOrDigit)) { "Unsafe document extension" }
+}
+
 interface FolioFileSystem {
     val libraryBooksDir: File
+    val libraryDocumentsDir: File
 
     /** Root for the built-in local manga source (CBZ/ZIP/folder series). */
     val mangaLocalDir: File
@@ -52,6 +65,25 @@ interface FolioFileSystem {
     suspend fun copyToLibrary(sourceFile: File, bookId: String): String
     suspend fun copyToLibrary(sourceBytes: ByteArray, bookId: String): String
     suspend fun deleteBookFiles(bookId: String)
+
+    fun getDocumentDir(documentId: String): File
+    fun getDocumentOriginalPath(documentId: String, canonicalExtension: String): String
+    fun getDocumentGeneratedDir(documentId: String): File
+    fun getDocumentGeneratedIndexPath(documentId: String): String
+    fun getDocumentAssetsDir(documentId: String): File
+    fun getDocumentCacheDir(documentId: String): File
+    fun getDocumentPagesDir(documentId: String): File
+    fun getDocumentThumbnailsDir(documentId: String): File
+    suspend fun stageDocumentCopy(
+        sourceFile: File,
+        stagingId: String,
+        canonicalExtension: String,
+        maxBytes: Long = Long.MAX_VALUE
+    ): StagedDocumentCopy
+    suspend fun commitStagedDocument(stagingId: String, documentId: String, canonicalExtension: String): String
+    suspend fun deleteDocumentFiles(documentId: String): Boolean
+    fun getDocumentSize(documentId: String): Long
+
     fun getLibrarySize(): Long
     fun getBookSize(bookId: String): Long
 

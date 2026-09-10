@@ -7,6 +7,8 @@ import com.folio.reader.database.JdbcBookRepository
 import com.folio.reader.database.JdbcBookmarkRepository
 import com.folio.reader.database.JdbcCollectionRepository
 import com.folio.reader.database.JdbcDeviceRepository
+import com.folio.reader.database.JdbcDocumentRepository
+import com.folio.reader.database.ThumbnailDocumentRepository
 import com.folio.reader.database.JdbcHighlightRepository
 import com.folio.reader.database.JdbcNoteRepository
 import com.folio.reader.database.JdbcReadingPositionRepository
@@ -22,8 +24,13 @@ import com.folio.reader.database.JdbcSyncQueueRepository
 import com.folio.reader.epub.EpubParser
 import com.folio.reader.epub.JvmChapterContentProvider
 import com.folio.reader.importer.BookImporter
+import com.folio.reader.importer.DocumentDeletionService
+import com.folio.reader.importer.DocumentFormatDetector
+import com.folio.reader.importer.DocumentImporter
+import com.folio.reader.importer.IncomingContentCoordinator
 import com.folio.reader.importer.SearchIndexer
 import com.folio.reader.platform.AndroidPlatform
+import com.folio.reader.platform.renderAndroidDocumentThumbnail
 import com.folio.reader.sync.NoopStorageSync
 import com.folio.reader.sync.RestFirebaseStorageSync
 import com.folio.reader.sync.RestFirestoreSync
@@ -52,6 +59,12 @@ class AppGraph(private val app: Application) {
     val database = Database(platform.fileSystem.getDatabasePath())
 
     val bookRepository = JdbcBookRepository(database)
+    val documentRepository = ThumbnailDocumentRepository(
+        database,
+        JdbcDocumentRepository(database)
+    )
+    val documentCategoryRepository =
+        com.folio.reader.database.JdbcDocumentCategoryRepository(database)
     val positionRepository = JdbcReadingPositionRepository(database)
     val sessionRepository = JdbcReadingSessionRepository(database)
     val readingCycleRepository = com.folio.reader.database.JdbcReadingCycleRepository(database)
@@ -263,6 +276,19 @@ class AppGraph(private val app: Application) {
         searchIndexer = searchIndexer,
         hashUtil = platform.hasher
     )
+    val documentImporter = DocumentImporter(
+        platform,
+        documentRepository,
+        documentCategoryRepository,
+        ::renderAndroidDocumentThumbnail
+    )
+    val incomingContentCoordinator = IncomingContentCoordinator(
+        DocumentFormatDetector(),
+        bookImporter,
+        documentImporter
+    )
+    val documentDeletionService =
+        DocumentDeletionService(documentRepository, platform)
 
     init {
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

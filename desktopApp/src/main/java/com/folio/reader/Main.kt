@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +28,8 @@ import com.folio.reader.database.JdbcBookRepository
 import com.folio.reader.database.JdbcBookmarkRepository
 import com.folio.reader.database.JdbcCollectionRepository
 import com.folio.reader.database.JdbcDeviceRepository
+import com.folio.reader.database.JdbcDocumentRepository
+import com.folio.reader.database.ThumbnailDocumentRepository
 import com.folio.reader.database.JdbcHighlightRepository
 import com.folio.reader.database.JdbcNoteRepository
 import com.folio.reader.database.JdbcReadingPositionRepository
@@ -42,17 +45,26 @@ import com.folio.reader.database.JdbcSyncQueueRepository
 import com.folio.reader.epub.EpubParser
 import com.folio.reader.epub.JvmChapterContentProvider
 import com.folio.reader.importer.BookImporter
-import com.folio.reader.importer.DuplicateBookException
+import com.folio.reader.importer.DocumentDeletionService
+import com.folio.reader.importer.DocumentFormatDetector
+import com.folio.reader.importer.DocumentImporter
+import com.folio.reader.importer.IncomingContent
+import com.folio.reader.importer.IncomingContentCoordinator
+import com.folio.reader.importer.IncomingContentResult
 import com.folio.reader.importer.SearchIndexer
 import com.folio.reader.model.Book
 import com.folio.reader.model.CloudState
 import com.folio.reader.platform.DesktopPlatform
+import com.folio.reader.platform.renderDesktopDocumentThumbnail
 import com.folio.reader.sync.NoopStorageSync
 import com.folio.reader.sync.RestFirestoreSync
 import com.folio.reader.sync.SyncConfig
 import com.folio.reader.sync.SyncEngine
 import com.folio.reader.ui.library.LibraryScreen
 import com.folio.reader.ui.library.LibraryViewModel
+import com.folio.reader.ui.library.DocumentLibraryViewModel
+import com.folio.reader.ui.document.DocumentReaderScreen
+import com.folio.reader.ui.document.DocumentReaderViewModel
 import com.folio.reader.ui.reader.ReaderScreen
 import com.folio.reader.ui.reader.ReaderViewModel
 import com.folio.reader.ui.search.SearchScreen
@@ -106,6 +118,12 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val database = Database(platform.fileSystem.getDatabasePath())
 
     val bookRepository = JdbcBookRepository(database)
+    val documentRepository = ThumbnailDocumentRepository(
+        database,
+        JdbcDocumentRepository(database)
+    )
+    val documentCategoryRepository =
+        com.folio.reader.database.JdbcDocumentCategoryRepository(database)
     val positionRepository = JdbcReadingPositionRepository(database)
     val sessionRepository = JdbcReadingSessionRepository(database)
     val readingCycleRepository = com.folio.reader.database.JdbcReadingCycleRepository(database)
@@ -166,6 +184,18 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         searchIndexer = searchIndexer,
         hashUtil = platform.hasher
     )
+    val documentImporter = DocumentImporter(
+        platform,
+        documentRepository,
+        documentCategoryRepository,
+        ::renderDesktopDocumentThumbnail
+    )
+    val incomingContentCoordinator = IncomingContentCoordinator(
+        DocumentFormatDetector(),
+        bookImporter,
+        documentImporter
+    )
+    val documentDeletionService = DocumentDeletionService(documentRepository, platform)
 
     init {
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -348,6 +378,7 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 private sealed interface Screen {
     data object Library : Screen
     data class Reader(val book: Book, val targetSpineIndex: Int? = null) : Screen
+    data class DocumentReader(val documentId: String) : Screen
     data object Settings : Screen
     data object Stats : Screen
     data object Search : Screen
@@ -366,8 +397,34 @@ private sealed interface Screen {
     data class MangaReader(val mangaId: String, val chapterId: String) : Screen
 }
 
-private val epubFilter: java.io.FilenameFilter = java.io.FilenameFilter { _, name ->
-    name.endsWith(".epub", ignoreCase = true)
+private val supportedIncomingExtensions = setOf("epub", "pdf", "txt", "html", "htm", "docx", "odt")
+
+private val incomingContentFilter: java.io.FilenameFilter = java.io.FilenameFilter { _, name ->
+    name.substringAfterLast('.', "").lowercase() in supportedIncomingExtensions
+}
+
+private fun IncomingContentResult.openScreen(): Screen? = when (this) {
+    is IncomingContentResult.ImportedBook -> Screen.Reader(book)
+    is IncomingContentResult.DuplicateBook -> Screen.Reader(book)
+    is IncomingContentResult.ImportedDocument -> Screen.DocumentReader(document.id)
+    is IncomingContentResult.DuplicateDocument -> Screen.DocumentReader(document.id)
+    else -> null
+}
+
+private fun IncomingContentResult.importedBook(): Book? = when (this) {
+    is IncomingContentResult.ImportedBook -> book
+    is IncomingContentResult.DuplicateBook -> book
+    else -> null
+}
+
+private fun IncomingContentResult.failureReason(): String? = when (this) {
+    is IncomingContentResult.Unsupported -> reason
+    is IncomingContentResult.Unsafe -> reason
+    is IncomingContentResult.Corrupt -> reason
+    is IncomingContentResult.Encrypted -> reason
+    is IncomingContentResult.TooLarge -> reason
+    is IncomingContentResult.IoError -> reason
+    else -> null
 }
 
 private fun isComposeSceneClosedException(t: Throwable?): Boolean {
@@ -388,9 +445,9 @@ private fun isComposeSceneClosedException(t: Throwable?): Boolean {
 }
 
 fun main(args: Array<String>) {
-    val startupEpubs = args
+    val startupFiles = args
         .map(::File)
-        .filter { it.isFile && it.extension.equals("epub", ignoreCase = true) }
+        .filter { it.isFile && it.extension.lowercase() in supportedIncomingExtensions }
     val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
         if (isComposeSceneClosedException(throwable)) {
@@ -506,6 +563,16 @@ fun main(args: Array<String>) {
                 seriesRepository = deps.seriesRepository
             )
         }
+        val documentLibraryVM = remember {
+            DocumentLibraryViewModel(
+                repository = deps.documentRepository,
+                categoryRepository = deps.documentCategoryRepository,
+                settingsRepository = deps.settingsRepository
+            )
+        }
+        DisposableEffect(documentLibraryVM) {
+            onDispose { documentLibraryVM.close() }
+        }
         val windowState = rememberWindowState()
 
         // Top-level sync state for library screen badge
@@ -541,67 +608,51 @@ fun main(args: Array<String>) {
             }
         }
 
-        fun pickAndImportFiles() {
-            java.awt.EventQueue.invokeLater {
-                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose EPUB files", java.awt.FileDialog.LOAD)
-                dialog.setMultipleMode(true)
-                dialog.filenameFilter = epubFilter
-                dialog.isVisible = true
-                val files = dialog.files
-                if (files != null && files.isNotEmpty()) {
-                    appScope.launch(Dispatchers.IO) {
-                        var ok = 0
-                        for ((index, file) in files.withIndex()) {
-                            appScope.launch(Dispatchers.Main) {
-                                importStatus = "Importing ${file.name} (${index + 1}/${files.size})"
-                            }
-                            deps.bookImporter.importEpub(file.absolutePath)
-                                .onSuccess { book ->
-                                    ok++
-                                    adoptBookProgress(book)
-                                }
-                                .onFailure { failure ->
-                                    val msg = when (failure) {
-                                        is DuplicateBookException -> "Already in library"
-                                        else -> "Failed: ${failure.message ?: file.name}"
-                                    }
-                                    appScope.launch(Dispatchers.Main) {
-                                        importStatus = "${file.name}: $msg"
-                                    }
-                                }
-                        }
-                        appScope.launch(Dispatchers.Main) {
-                            importStatus = "Imported $ok of ${files.size} file(s)"
-                            refreshTick++
-                        }
+        fun importIncomingFiles(files: List<File>, openFirst: Boolean) {
+            if (files.isEmpty()) return
+            documentLibraryVM.setImporting(true)
+            appScope.launch(Dispatchers.IO) {
+                val results = deps.incomingContentCoordinator.importMany(
+                    files.map { file ->
+                        IncomingContent(
+                            path = file.absolutePath,
+                            filename = file.name
+                        )
                     }
+                )
+                results.mapNotNull { it.importedBook() }.forEach(::adoptBookProgress)
+                val firstScreen = results.firstNotNullOfOrNull { it.openScreen() }
+                val imported = results.count { it.openScreen() != null }
+                val failure = results.firstNotNullOfOrNull { it.failureReason() }
+                withContext(Dispatchers.Main) {
+                    documentLibraryVM.setImporting(false)
+                    refreshTick++
+                    importStatus = when {
+                        imported > 0 -> "Imported $imported of ${files.size} file(s)"
+                        failure != null -> "Import failed: $failure"
+                        else -> "No supported files were imported"
+                    }
+                    if (openFirst && firstScreen != null) pushScreen(firstScreen)
                 }
             }
         }
 
-        LaunchedEffect(Unit) {
-            val file = startupEpubs.firstOrNull() ?: return@LaunchedEffect
-            appScope.launch(Dispatchers.IO) {
-                deps.bookImporter.importEpub(file.absolutePath)
-                    .fold(
-                        onSuccess = { book ->
-                            runCatching {
-                                deps.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash)
-                            }
-                            appScope.launch(Dispatchers.Main) {
-                                refreshTick++
-                                pushScreen(Screen.Reader(book))
-                            }
-                        },
-                        onFailure = { error ->
-                            val book = (error as? DuplicateBookException)?.existingBook
-                            appScope.launch(Dispatchers.Main) {
-                                if (book != null) pushScreen(Screen.Reader(book))
-                                else importStatus = "Failed to open ${file.name}: ${error.message}"
-                            }
-                        }
-                    )
+        fun pickAndImportFiles() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(
+                    null as java.awt.Frame?,
+                    "Choose books or documents",
+                    java.awt.FileDialog.LOAD
+                )
+                dialog.setMultipleMode(true)
+                dialog.filenameFilter = incomingContentFilter
+                dialog.isVisible = true
+                importIncomingFiles(dialog.files?.toList().orEmpty(), openFirst = true)
             }
+        }
+
+        LaunchedEffect(Unit) {
+            importIncomingFiles(startupFiles, openFirst = true)
         }
 
         val mangaBackupManager by lazy {
@@ -926,6 +977,22 @@ fun main(args: Array<String>) {
                                             }
                                         },
                                         viewModel = libraryVM,
+                                        documentLibraryViewModel = documentLibraryVM,
+                                        onDocumentImportClick = { pickAndImportFiles() },
+                                        onDocumentOpen = { document ->
+                                            pushScreen(Screen.DocumentReader(document.id))
+                                        },
+                                        onDocumentDelete = { document ->
+                                            appScope.launch(Dispatchers.IO) {
+                                                val result = deps.documentDeletionService.delete(document.id)
+                                                withContext(Dispatchers.Main) {
+                                                    refreshTick++
+                                                    if (!result.filesDeleted) {
+                                                        importStatus = "Document removed; some local files could not be deleted"
+                                                    }
+                                                }
+                                            }
+                                        },
                                         syncState = librarySyncState,
                                         onSyncNow = { deps.syncEngine?.triggerSync(immediate = true) },
                                         libraryMode = libraryMode,
@@ -1013,6 +1080,13 @@ fun main(args: Array<String>) {
                                     onSearchClick = { pushScreen(Screen.Search) },
                                     onSettingsClick = { pushScreen(Screen.Settings) },
                                     onSettingsChanged = { globalSettings = it }
+                                )
+
+                                is Screen.DocumentReader -> DocumentReaderRoute(
+                                    deps = deps,
+                                    documentId = current.documentId,
+                                    settings = globalSettings,
+                                    onBack = { popScreen() }
                                 )
 
                                 is Screen.Settings -> {
@@ -1347,6 +1421,32 @@ fun main(args: Array<String>) {
             }
         }
     }
+}
+
+@Composable
+private fun DocumentReaderRoute(
+    deps: FolioDesktopAppDependencies,
+    documentId: String,
+    settings: com.folio.reader.settings.ReaderSettings,
+    onBack: () -> Unit
+) {
+    val viewModel = remember(documentId) {
+        DocumentReaderViewModel(
+            repository = deps.documentRepository,
+            fileSystem = deps.platform.fileSystem
+        )
+    }
+    LaunchedEffect(documentId) {
+        viewModel.open(documentId)
+    }
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.close() }
+    }
+    DocumentReaderScreen(
+        viewModel = viewModel,
+        settings = settings,
+        onBack = onBack
+    )
 }
 
 @Composable

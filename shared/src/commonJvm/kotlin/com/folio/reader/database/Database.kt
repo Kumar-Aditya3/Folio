@@ -40,6 +40,9 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     val mangaDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpMangaData() { mangaDataRevision.value += 1 }
 
+    val documentDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpDocumentData() { documentDataRevision.value += 1 }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val writeMutex = Mutex() // Serialize ALL database access (SQLite single connection)
     private val driverDelegate = object : DatabaseDriver {
@@ -136,6 +139,83 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_series ON books(series_id)")
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_hash ON books(epub_hash)")
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_books_isbn ON books(isbn)")
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    original_filename TEXT NOT NULL,
+                    format TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    content_hash TEXT NOT NULL UNIQUE,
+                    byte_size INTEGER NOT NULL,
+                    local_path TEXT,
+                    thumbnail_path TEXT,
+                    author TEXT,
+                    description TEXT,
+                    page_count INTEGER,
+                    section_count INTEGER,
+                    imported_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_opened_at INTEGER,
+                    normalized_progress REAL NOT NULL DEFAULT 0.0
+                )
+            """.trimIndent())
+            runCatching {
+                conn.createStatement().executeQuery("SELECT thumbnail_path FROM documents LIMIT 0").close()
+            }.onFailure {
+                conn.createStatementExec("ALTER TABLE documents ADD COLUMN thumbnail_path TEXT")
+            }
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_documents_title ON documents(title COLLATE NOCASE)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_documents_last_opened ON documents(last_opened_at)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_documents_imported ON documents(imported_at)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_documents_format_imported ON documents(format, imported_at)")
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS document_categories (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS document_category_map (
+                    document_id TEXT NOT NULL,
+                    category_id TEXT NOT NULL,
+                    PRIMARY KEY (document_id, category_id)
+                )
+            """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_category_map_category ON document_category_map(category_id, document_id)")
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS document_positions (
+                    document_id TEXT PRIMARY KEY,
+                    locator_kind TEXT NOT NULL,
+                    locator_json TEXT NOT NULL,
+                    page_index INTEGER,
+                    section_id TEXT,
+                    normalized_progress REAL NOT NULL DEFAULT 0.0,
+                    updated_at INTEGER NOT NULL,
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_positions_page ON document_positions(page_index)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_positions_section ON document_positions(section_id)")
+            conn.createStatementExec("""
+                CREATE TABLE IF NOT EXISTS document_bookmarks (
+                    id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL,
+                    locator_kind TEXT NOT NULL,
+                    locator_json TEXT NOT NULL,
+                    page_index INTEGER,
+                    section_id TEXT,
+                    label TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_bookmarks_document ON document_bookmarks(document_id, created_at)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_bookmarks_page ON document_bookmarks(document_id, page_index)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_document_bookmarks_section ON document_bookmarks(document_id, section_id)")
             // Backfill: progress implies Reading (see updateNormalizedProgress).
             conn.createStatementExec("UPDATE books SET status = 1 WHERE status = 0 AND normalized_progress > 0")
             conn.createStatementExec("""

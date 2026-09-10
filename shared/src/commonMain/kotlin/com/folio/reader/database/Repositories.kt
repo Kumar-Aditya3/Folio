@@ -5,6 +5,9 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.CloudState
 import com.folio.reader.model.Collection
+import com.folio.reader.model.Document
+import com.folio.reader.model.DocumentBookmark
+import com.folio.reader.model.DocumentPosition
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.Bookmark
@@ -49,6 +52,22 @@ interface BookRepository {
     suspend fun setBookStatus(bookId: String, status: BookStatus)
     suspend fun setCloudState(bookId: String, cloudState: CloudState)
     suspend fun updateNormalizedProgress(bookId: String, progress: Double)
+}
+
+interface DocumentRepository {
+    fun observeDocuments(): Flow<List<Document>>
+    suspend fun getDocument(documentId: String): Document?
+    suspend fun getDocumentByHash(contentHash: String): Document?
+    fun searchDocuments(query: String): Flow<List<Document>>
+    suspend fun upsertDocument(document: Document)
+    suspend fun markOpened(documentId: String)
+    suspend fun upsertPosition(position: DocumentPosition)
+    fun observePosition(documentId: String): Flow<DocumentPosition?>
+    suspend fun upsertBookmark(bookmark: DocumentBookmark)
+    suspend fun getBookmark(bookmarkId: String): DocumentBookmark?
+    fun observeBookmarks(documentId: String): Flow<List<DocumentBookmark>>
+    suspend fun deleteBookmark(bookmarkId: String)
+    suspend fun deleteDocument(documentId: String)
 }
 
 interface ReadingPositionRepository {

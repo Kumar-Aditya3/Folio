@@ -16,6 +16,8 @@ import com.folio.reader.model.Book
 import com.folio.reader.settings.overriddenFields
 import com.folio.reader.ui.book.BookDetailScreen
 import com.folio.reader.ui.book.BookDetailViewModel
+import com.folio.reader.ui.document.DocumentReaderScreen
+import com.folio.reader.ui.document.DocumentReaderViewModel
 import com.folio.reader.ui.reader.ReaderScreen
 import com.folio.reader.ui.reader.ReaderViewModel
 import com.folio.reader.ui.search.SearchScreen
@@ -187,6 +189,32 @@ private fun ReaderRouteContent(
             onSettingsChanged(updated)
         },
         onResetBook = { viewModel.resetBookToDefaults() }
+    )
+}
+
+@Composable
+fun DocumentReaderRoute(
+    navModel: FolioNavModelImpl,
+    documentId: String,
+    onBack: () -> Unit
+) {
+    val graph = navModel.graph
+    val viewModel = remember(documentId) {
+        DocumentReaderViewModel(
+            repository = graph.documentRepository,
+            fileSystem = graph.platform.fileSystem
+        )
+    }
+    LaunchedEffect(documentId) {
+        viewModel.open(documentId)
+    }
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.close() }
+    }
+    DocumentReaderScreen(
+        viewModel = viewModel,
+        settings = navModel.globalSettings,
+        onBack = onBack
     )
 }
 

@@ -16,6 +16,7 @@ interface FolioNavModel {
     @Composable
     fun libraryContent(
         onOpenReader: (String) -> Unit,
+        onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,
@@ -51,6 +52,12 @@ interface FolioNavModel {
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit
+    )
+
+    @Composable
+    fun documentReaderContent(
+        documentId: String,
+        onBack: () -> Unit
     )
 
     @Composable
@@ -103,7 +110,8 @@ interface FolioNavModel {
  * sharing). Defaults are no-ops so routes stay shippable before wiring is done.
  */
 interface FolioNavCallbacks {
-    fun onImportEpubs() {}
+    fun onImportContent() {}
+    fun onImportEpubs() = onImportContent()
     fun onImportMangaArchives() {}
     fun onImportMangaFolder() {}
     fun onImportMangaChoice() {}
