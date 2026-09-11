@@ -122,5 +122,7 @@ interface FolioNavCallbacks {
     fun onImportBackup() {}
     fun onExportAnnotations(format: String) {}
     fun onPickMangaDownloadsLocation() {}
+    fun onShareBooks(bookIds: Set<String>) {}
+    fun onShareDocuments(documentIds: Set<String>) {}
     fun onShareEpub(bookId: String) {}
 }

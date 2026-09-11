@@ -5,8 +5,12 @@ import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,9 +27,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
@@ -217,6 +225,10 @@ fun LibraryRoute(
     val graph = navModel.graph
     val callbacks = navModel.callbacks
     val activity = navModel.activity
+    val removalScope = rememberCoroutineScope()
+    var mangaRemovalIds by remember { mutableStateOf<Set<String>?>(null) }
+    var deleteMangaDownloads by remember { mutableStateOf(false) }
+    var clearMangaSelectionAfterRemoval by remember { mutableStateOf(false) }
 
     // Persist the selected Library mode across launches (same raw key as pre-nav).
     LaunchedEffect(Unit) {
@@ -264,6 +276,8 @@ fun LibraryRoute(
         onTagManagerClick = onOpenTags,
         onQuoteBrowserClick = onOpenQuotes,
         onRevisitClick = onOpenRevisit,
+        onShareBooks = { callbacks.onShareBooks(it) },
+        onShareDocuments = { callbacks.onShareDocuments(it) },
         onDeleteBooks = { ids ->
             activity.appScope.launch(Dispatchers.IO) {
                 ids.forEach { id ->
@@ -292,10 +306,16 @@ fun LibraryRoute(
         onMangaBackupExport = { callbacks.onExportMangaBackup() },
         booksViewMode = LibraryViewModel.ViewMode.entries[navModel.sharedViewIndex],
         onBooksViewModeChange = { navModel.sharedViewIndex = it.ordinal },
+        preserveFeaturedBookDuringSelection = true,
         mangaViewMode = com.folio.reader.ui.manga.MangaViewMode.entries[navModel.sharedViewIndex],
         onMangaViewModeChange = { navModel.sharedViewIndex = it.ordinal },
         onMangaSearchClick = { navModel.mangaSearchActive = !navModel.mangaSearchActive },
         onMangaImportClick = { callbacks.onImportMangaChoice() },
+        onRemoveSelectedManga = { ids ->
+            mangaRemovalIds = ids
+            deleteMangaDownloads = false
+            clearMangaSelectionAfterRemoval = true
+        },
         mangaContent = {
             com.folio.reader.ui.manga.MangaLibraryScreen(
                 viewModel = navModel.mangaLibVM,
@@ -312,6 +332,11 @@ fun LibraryRoute(
                 onSearchActiveChange = { navModel.mangaSearchActive = it },
                 browseViewModel = navModel.mangaBrowseVM,
                 onImportLocal = { callbacks.onImportMangaChoice() },
+                onRemoveManga = { id ->
+                    mangaRemovalIds = setOf(id)
+                    deleteMangaDownloads = false
+                    clearMangaSelectionAfterRemoval = false
+                },
                 // One rail on the manga shelf too: the Books/Manga switch leads the
                 // category chips instead of sitting on a row of its own above them.
                 railLeading = {
@@ -323,6 +348,64 @@ fun LibraryRoute(
             )
         }
     )
+
+    mangaRemovalIds?.let { ids ->
+        AlertDialog(
+            onDismissRequest = {
+                mangaRemovalIds = null
+                deleteMangaDownloads = false
+                clearMangaSelectionAfterRemoval = false
+            },
+            title = { Text("Remove manga?") },
+            text = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            deleteMangaDownloads = !deleteMangaDownloads
+                        }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = deleteMangaDownloads,
+                        onCheckedChange = { deleteMangaDownloads = it },
+                    )
+                    Text("Also delete downloaded chapters")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val deleteDownloads = deleteMangaDownloads
+                        val clearSelection = clearMangaSelectionAfterRemoval
+                        mangaRemovalIds = null
+                        deleteMangaDownloads = false
+                        clearMangaSelectionAfterRemoval = false
+                        if (clearSelection) {
+                            navModel.mangaLibVM.clearSelection()
+                        }
+                        removalScope.launch(Dispatchers.IO) {
+                            navModel.removeMangaFromLibrary(ids, deleteDownloads)
+                        }
+                    },
+                ) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        mangaRemovalIds = null
+                        deleteMangaDownloads = false
+                        clearMangaSelectionAfterRemoval = false
+                    },
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
 
 @Composable

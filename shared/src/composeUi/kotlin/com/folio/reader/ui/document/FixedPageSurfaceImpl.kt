@@ -119,22 +119,26 @@ internal fun FixedPageSurfaceImpl(
         )
         DocumentReaderMode.CONTINUOUS -> {
             val listState = rememberLazyListState()
-            var enteringMode by remember(mode, opened) { mutableStateOf(true) }
+            var programmaticScrollTarget by remember(mode, opened) { mutableStateOf<Int?>(null) }
             var continuousZoom by remember(mode, resetZoomKey) {
                 mutableFloatStateOf(1f)
             }
 
-            LaunchedEffect(mode, opened) {
-                listState.scrollToItem(
-                    pageIndex.coerceIn(0, opened.pageCount - 1)
-                )
-                enteringMode = false
+            LaunchedEffect(mode, opened, pageIndex) {
+                val target = pageIndex.coerceIn(0, opened.pageCount - 1)
+                if (listState.firstVisibleItemIndex != target) {
+                    programmaticScrollTarget = target
+                    listState.scrollToItem(target)
+                }
             }
             LaunchedEffect(mode, opened, listState) {
                 snapshotFlow { listState.firstVisibleItemIndex }
                     .distinctUntilChanged()
                     .collect { visiblePage ->
-                        if (!enteringMode) {
+                        val target = programmaticScrollTarget
+                        if (target != null) {
+                            if (visiblePage == target) programmaticScrollTarget = null
+                        } else {
                             onCurrentPageChanged(
                                 visiblePage.coerceIn(0, opened.pageCount - 1)
                             )

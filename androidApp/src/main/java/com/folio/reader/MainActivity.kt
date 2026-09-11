@@ -196,6 +196,8 @@ class MainActivity : ComponentActivity() {
                 override fun onExportAnnotations(format: String) =
                     annotationsExportLauncher.launch("annotations.$format")
                 override fun onPickMangaDownloadsLocation() = pickMangaDlDir.launch(null)
+                override fun onShareBooks(bookIds: Set<String>) = shareBooks(bookIds)
+                override fun onShareDocuments(documentIds: Set<String>) = shareDocuments(documentIds)
                 override fun onShareEpub(bookId: String) = shareEpub(bookId)
             }
             model.callbacks = callbacks
@@ -654,6 +656,62 @@ class MainActivity : ComponentActivity() {
         }
         if (manga.isNotEmpty()) importMangaUris(manga)
         if (content.isNotEmpty()) importContentUris(content)
+    }
+
+    private data class ShareableFile(val file: File, val mimeType: String)
+
+    private fun shareBooks(bookIds: Set<String>) {
+        val graph = (application as FolioApplication).graph
+        val files = bookIds.mapNotNull { id ->
+            File(graph.platform.fileSystem.getBookEpubPath(id))
+                .takeIf(File::isFile)
+                ?.let { ShareableFile(it, "application/epub+zip") }
+        }
+        shareFiles(files)
+    }
+
+    private fun shareDocuments(documentIds: Set<String>) {
+        val graph = (application as FolioApplication).graph
+        appScope.launch(Dispatchers.IO) {
+            val files = documentIds.mapNotNull { id ->
+                val document = runCatching { graph.documentRepository.getDocument(id) }.getOrNull()
+                    ?: return@mapNotNull null
+                val file = document.localPath?.let(::File)?.takeIf(File::isFile)
+                    ?: return@mapNotNull null
+                ShareableFile(file, document.mimeType.ifBlank { "*/*" })
+            }
+            withContext(Dispatchers.Main) { shareFiles(files) }
+        }
+    }
+
+    private fun shareFiles(files: List<ShareableFile>) {
+        val shared = files.mapNotNull { item ->
+            runCatching {
+                FileProvider.getUriForFile(this, "$packageName.fileprovider", item.file) to item.mimeType
+            }.getOrNull()
+        }
+        if (shared.isEmpty()) {
+            importStatus = "No selected files are available"
+            return
+        }
+
+        val uris = ArrayList(shared.map { it.first })
+        val mimeTypes = shared.map { it.second }.distinct()
+        val shareIntent = Intent(
+            if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE
+        ).apply {
+            type = mimeTypes.singleOrNull() ?: "*/*"
+            if (uris.size == 1) {
+                putExtra(Intent.EXTRA_STREAM, uris.single())
+            } else {
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            }
+            clipData = ClipData.newRawUri("Shared files", uris.first()).apply {
+                uris.drop(1).forEach { addItem(ClipData.Item(it)) }
+            }
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(shareIntent, "Share files"))
     }
 
     /** Shares the imported EPUB using the app's existing FileProvider grant. */

@@ -3,7 +3,8 @@ package com.folio.reader.ui.reader
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -239,9 +240,11 @@ fun BottomProgressBar(
     chapterTitle: String,
     currentPage: Int = 1,
     totalPages: Int = 1,
+    progress: Float? = null,
     onSeek: ((Float) -> Unit)? = null
 ) {
-    val fraction = if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+    val fraction = progress?.coerceIn(0f, 1f)
+        ?: if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
     // Same glass as the top bar, so the two ends of the reader chrome are the
     // same material; the raw 0.92 surface fill let page text bleed through.
     val accent = com.folio.reader.ui.components.rememberLegibleAccent(FolioTheme.colors.primary)
@@ -260,12 +263,17 @@ fun BottomProgressBar(
                 .fillMaxWidth()
                 .height(18.dp)
                 .then(
-                    if (onSeek != null) Modifier.pointerInput(fraction) {
-                        detectTapGestures(
-                            onPress = { off ->
-                                onSeek((off.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
-                            }
-                        )
+                    if (onSeek != null) Modifier.pointerInput(onSeek) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            onSeek((down.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                            do {
+                                val event = awaitPointerEvent()
+                                event.changes.firstOrNull { it.pressed }?.let { change ->
+                                    onSeek((change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
                     } else Modifier
                 ),
             contentAlignment = Alignment.CenterStart

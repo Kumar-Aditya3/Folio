@@ -80,6 +80,7 @@ fun MangaLibraryScreen(
     onSearchActiveChange: (Boolean) -> Unit = {},
     browseViewModel: BrowseViewModel? = null,
     onOpenSource: (MangaSourceInfo, String) -> Unit = { _, _ -> },
+    onRemoveManga: ((String) -> Unit)? = null,
     /**
      * Leading element on the shelf's own chip rail — the host passes the Books/Manga
      * switch here so manga has one rail rather than a mode row stacked over a
@@ -324,7 +325,10 @@ fun MangaLibraryScreen(
                             if (isSelectionMode) viewModel.toggleSelection(manga.id) else onOpenManga(manga.id)
                         },
                         onLongClick = { viewModel.toggleSelection(manga.id) },
-                        onRemove = { viewModel.removeFromLibrary(manga.id) },
+                        onRemove = {
+                            onRemoveManga?.invoke(manga.id)
+                                ?: viewModel.removeFromLibrary(manga.id)
+                        },
                         onMarkRead = { read -> viewModel.markOneRead(manga.id, read) },
                         onCategories = {
                             singlePickerManga = manga
@@ -366,7 +370,10 @@ fun MangaLibraryScreen(
                             if (isSelectionMode) viewModel.toggleSelection(manga.id) else onOpenManga(manga.id)
                         },
                         onLongClick = { viewModel.toggleSelection(manga.id) },
-                        onRemove = { viewModel.removeFromLibrary(manga.id) },
+                        onRemove = {
+                            onRemoveManga?.invoke(manga.id)
+                                ?: viewModel.removeFromLibrary(manga.id)
+                        },
                         onMarkRead = { read -> viewModel.markOneRead(manga.id, read) },
                         onCategories = {
                             singlePickerManga = manga

@@ -58,6 +58,20 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         }
     }
 
+    suspend fun removeMangaFromLibrary(mangaIds: Set<String>, deleteDownloads: Boolean) {
+        mangaIds.forEach { mangaId ->
+            if (deleteDownloads) {
+                graph.mangaChapterRepository.getChapters(mangaId)
+                    .filter { it.downloadedPages > 0 }
+                    .forEach { chapter ->
+                        graph.mangaDownloadManager.deleteChapterDownload(mangaId, chapter.id)
+                        graph.mangaChapterRepository.setDownloadedPages(chapter.id, 0)
+                    }
+            }
+            graph.mangaRepository.setInLibrary(mangaId, false)
+        }
+    }
+
     // ── View models shared across destinations ───────────────────────────────
     val libraryVM by lazy {
         LibraryViewModel(

@@ -9,6 +9,7 @@ import com.folio.reader.platform.FolioFileSystem
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -142,6 +143,23 @@ class DocumentReaderViewModel(
             normalizedProgress = pageProgress(page, count)
         )
         persistFixedPage()
+    }
+
+    fun seekToProgress(progress: Float) {
+        val clamped = progress.coerceIn(0f, 1f)
+        if (_state.value.document?.format == DocumentFormat.PDF) {
+            val count = _state.value.pageCount
+            if (count > 0) setCurrentPage((clamped * (count - 1)).roundToInt())
+        } else {
+            updateReflowableProgress(clamped)
+        }
+    }
+
+    fun updateReflowablePage(currentPage: Int, pageCount: Int) {
+        _state.value = _state.value.copy(
+            currentPage = currentPage.coerceIn(1, pageCount.coerceAtLeast(1)),
+            pageCount = pageCount.coerceAtLeast(1)
+        )
     }
 
     fun setMode(mode: DocumentReaderMode) {

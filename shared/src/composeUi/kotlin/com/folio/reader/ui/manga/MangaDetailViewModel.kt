@@ -213,6 +213,10 @@ class MangaDetailViewModel(
         }
     }
 
+    fun reflectRemovedFromLibrary() {
+        manga.value = manga.value?.copy(inLibrary = false, updatedAt = Clock.System.now())
+    }
+
     fun toggleRead(chapter: MangaChapter) {
         scope.launch {
             chapterRepo.markRead(listOf(chapter.id), !chapter.read)
@@ -313,7 +317,9 @@ class MangaDetailViewModel(
         val manager = downloadManager ?: return
         val sel = selectedChapters()
         scope.launch {
-            sel.forEach { manager.queueChapter(it.mangaId, it) }
+            sel.sortedWith(STORY_ORDER).forEach {
+                manager.queueChapter(it.mangaId, it)
+            }
             clearChapterSelection()
         }
     }
@@ -334,9 +340,12 @@ class MangaDetailViewModel(
     fun downloadUnread() {
         val manager = downloadManager ?: return
         scope.launch {
-            chapters.value.filter { !it.read }.forEach { chapter ->
-                manager.queueChapter(chapter.mangaId, chapter)
-            }
+            chapters.value
+                .filter { !it.read }
+                .sortedWith(STORY_ORDER)
+                .forEach { chapter ->
+                    manager.queueChapter(chapter.mangaId, chapter)
+                }
         }
     }
 
