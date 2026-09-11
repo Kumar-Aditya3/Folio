@@ -307,14 +307,14 @@ class MangaReaderViewModel(
     private suspend fun fetchSlot(chapter: MangaChapter): ChapterSlot? {
         // Only a completed download is served from disk: a chapter still downloading has
         // a partial file set, and trusting the folder would present a truncated chapter
-        // whose short page list then gets cached. Individual already-written pages still
-        // resolve from disk below (resolvePageBytes), so a live download and reading can
-        // coexist without ever shrinking the chapter.
-        val downloadComplete = downloadManager?.isChapterDownloaded(chapter.id) == true
-        val localPages = if (downloadComplete) {
-            downloadManager?.downloadedPageCount(mangaId, chapter.id) ?: 0
-        } else 0
-        if (localPages > 0) {
+        // whose short page list then gets cached. The chapter's persisted downloaded page
+        // count remains authoritative after its finished queue row has been cleared.
+        val localPages = downloadManager?.downloadedPageCount(mangaId, chapter.id) ?: 0
+        val localComplete = localPages > 0 && (
+            downloadManager?.isChapterDownloaded(chapter.id) == true ||
+                chapter.downloadedPages > 0 && localPages >= chapter.downloadedPages
+            )
+        if (localComplete) {
             val pages = (0 until localPages).map { MangaPageRef(index = it) }
             cachePageList(chapter.id, pages)
             return ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)

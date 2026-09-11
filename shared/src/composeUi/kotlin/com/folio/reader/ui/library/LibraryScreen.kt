@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewAgenda
@@ -117,6 +118,7 @@ fun LibraryScreen(
     onQuoteBrowserClick: () -> Unit = {},
     onRevisitClick: () -> Unit = {},
     onDeleteBooks: (Set<String>) -> Unit = {},
+    onShareBooks: (Set<String>) -> Unit = {},
     onSetBookStatus: (Set<String>, BookStatus) -> Unit = { _, _ -> },
     viewModel: LibraryViewModel,
     syncState: com.folio.reader.sync.SyncState? = null,
@@ -125,10 +127,12 @@ fun LibraryScreen(
     onLibraryModeChange: (LibraryMode) -> Unit = {},
     booksViewMode: LibraryViewModel.ViewMode = LibraryViewModel.ViewMode.GRID,
     onBooksViewModeChange: (LibraryViewModel.ViewMode) -> Unit = {},
+    preserveFeaturedBookDuringSelection: Boolean = false,
     documentLibraryViewModel: DocumentLibraryViewModel? = null,
     onDocumentImportClick: () -> Unit = {},
     onDocumentOpen: (Document) -> Unit = {},
     onDocumentDelete: (Document) -> Unit = {},
+    onShareDocuments: (Set<String>) -> Unit = {},
     mangaContent: (@Composable () -> Unit)? = null,
     mangaExtensionsAvailable: Boolean = false,
     onMangaBrowseClick: () -> Unit = {},
@@ -141,6 +145,7 @@ fun LibraryScreen(
     mangaViewMode: com.folio.reader.ui.manga.MangaViewMode = com.folio.reader.ui.manga.MangaViewMode.GRID,
     onMangaViewModeChange: (com.folio.reader.ui.manga.MangaViewMode) -> Unit = {},
     mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null,
+    onRemoveSelectedManga: ((Set<String>) -> Unit)? = null,
     onOpenStats: (() -> Unit)? = null
 ) {
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
@@ -398,10 +403,17 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            onShareDocuments(selectedDocumentIds)
+                            documentLibraryViewModel?.clearSelection()
+                        }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share files")
+                        }
                         IconButton(onClick = { documentLibraryViewModel?.requestBulkCategories() }) {
                             Icon(Icons.Filled.Label, contentDescription = "Set categories")
                         }
-                    }
+                    },
+                    rail = railContent
                 )
             }
             mangaMode && mangaSelActive -> {
@@ -426,7 +438,10 @@ fun LibraryScreen(
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(false) }) {
                             Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
                         }
-                        IconButton(onClick = { mangaLibraryViewModel?.removeSelected() }) {
+                        IconButton(onClick = {
+                            onRemoveSelectedManga?.invoke(mangaSelIds)
+                                ?: mangaLibraryViewModel?.removeSelected()
+                        }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Remove from library", tint = FolioTheme.colors.error)
                         }
                     },
@@ -444,6 +459,12 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            onShareBooks(selectedBooks)
+                            viewModel.clearSelection()
+                        }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share files")
+                        }
                         IconButton(onClick = {
                             onSetBookStatus(selectedBooks, BookStatus.READING)
                             viewModel.clearSelection()
@@ -463,6 +484,7 @@ fun LibraryScreen(
                             Icon(Icons.Filled.Delete, contentDescription = "Delete books", tint = FolioTheme.colors.error)
                         }
                     },
+                    rail = railContent
                 )
             }
             else -> {
@@ -821,24 +843,28 @@ fun LibraryScreen(
                         LibraryContent(
                             books = books,
                             viewMode = booksViewMode,
-                        sortBy = sortBy,
-                        sortAscending = sortAscending,
-                        filter = filter,
-                        allSeries = allSeries,
-                        allCollections = allCollections,
-                        selectedBooks = selectedBooks,
-                        isSelectionMode = isSelectionMode,
-                        finishEstimates = finishEstimates,
-                        onViewMode = onBooksViewModeChange,
-                        onSortChange = { sortBy = it },
-                        onDirectionChange = { sortAscending = it },
-                        onFilterChange = { filter = it },
-                        onSeriesFilterOpen = { seriesFilterOpen = it },
-                        onCollectionFilterOpen = { collectionFilterOpen = it },
-                        seriesFilterOpen = seriesFilterOpen,
-                        collectionFilterOpen = collectionFilterOpen,
-                        onBookClick = { if (isSelectionMode) viewModel.toggleSelection(it.id) else onBookDetailClick(it) },
-                        onBookLongClick = { viewModel.toggleSelection(it.id) },
+                            sortBy = sortBy,
+                            sortAscending = sortAscending,
+                            filter = filter,
+                            allSeries = allSeries,
+                            allCollections = allCollections,
+                            selectedBooks = selectedBooks,
+                            isSelectionMode = isSelectionMode,
+                            preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
+                            finishEstimates = finishEstimates,
+                            onViewMode = onBooksViewModeChange,
+                            onSortChange = { sortBy = it },
+                            onDirectionChange = { sortAscending = it },
+                            onFilterChange = { filter = it },
+                            onSeriesFilterOpen = { seriesFilterOpen = it },
+                            onCollectionFilterOpen = { collectionFilterOpen = it },
+                            seriesFilterOpen = seriesFilterOpen,
+                            collectionFilterOpen = collectionFilterOpen,
+                            onBookClick = {
+                                if (isSelectionMode) viewModel.toggleSelection(it.id)
+                                else onBookDetailClick(it)
+                            },
+                            onBookLongClick = { viewModel.toggleSelection(it.id) },
                             onDeleteBook = { bookToDelete = it },
                             onImportClick = onImportClick
                         )
@@ -1149,6 +1175,7 @@ private fun LibraryContent(
     allCollections: List<FolioCollection>,
     selectedBooks: Set<String>,
     isSelectionMode: Boolean,
+    preserveFeaturedDuringSelection: Boolean,
     finishEstimates: Map<String, String>,
     onViewMode: (LibraryViewModel.ViewMode) -> Unit,
     onSortChange: (LibraryViewModel.SortBy) -> Unit,
@@ -1189,13 +1216,14 @@ private fun LibraryContent(
         } else {
             when (viewMode) {
                 LibraryViewModel.ViewMode.GRID -> BookGrid(
-                    books,
-                    onBookClick,
-                    onBookLongClick,
-                    onDeleteBook,
-                    selectedBooks,
-                    isSelectionMode,
-                    finishEstimates
+                    books = books,
+                    onBookClick = onBookClick,
+                    onBookLongClick = onBookLongClick,
+                    onDeleteBook = onDeleteBook,
+                    selectedBooks = selectedBooks,
+                    isSelectionMode = isSelectionMode,
+                    finishEstimates = finishEstimates,
+                    preserveFeaturedDuringSelection = preserveFeaturedDuringSelection,
                 )
 
                 LibraryViewModel.ViewMode.LIST -> BookList(

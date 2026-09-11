@@ -887,6 +887,50 @@ fun main(args: Array<String>) {
             }
         }
 
+        fun exportLibraryFiles(bookIds: Set<String> = emptySet(), documentIds: Set<String> = emptySet()) {
+            appScope.launch(Dispatchers.IO) {
+                val sources = mutableListOf<Pair<File, String>>()
+                bookIds.forEach { id ->
+                    File(deps.platform.fileSystem.getBookEpubPath(id))
+                        .takeIf(File::isFile)
+                        ?.let { sources += it to "original.epub" }
+                }
+                documentIds.forEach { id ->
+                    val document = runCatching { deps.documentRepository.getDocument(id) }.getOrNull()
+                        ?: return@forEach
+                    document.localPath?.let(::File)?.takeIf(File::isFile)?.let { source ->
+                        val name = File(document.originalFilename).name.ifBlank { source.name }
+                        sources += source to name
+                    }
+                }
+
+                val downloads = File(System.getProperty("user.home"), "Downloads")
+                var exported = 0
+                var failed = 0
+                if (!downloads.exists() && !downloads.mkdirs()) failed = sources.size
+                if (downloads.isDirectory) {
+                    sources.forEach { (source, requestedName) ->
+                        runCatching {
+                            val name = deps.platform.fileSystem.uniqueFileName(requestedName) {
+                                File(downloads, it).exists()
+                            }
+                            source.inputStream().use { input ->
+                                File(downloads, name).outputStream().use { output -> input.copyTo(output) }
+                            }
+                        }.onSuccess { exported++ }.onFailure { failed++ }
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    importStatus = when {
+                        exported > 0 && failed == 0 -> "Exported $exported file(s) to Downloads"
+                        exported > 0 -> "Exported $exported file(s); $failed failed"
+                        sources.isEmpty() -> "No selected files are available"
+                        else -> "Export failed"
+                    }
+                }
+            }
+        }
+
         Window(
             onCloseRequest = {
                 runCatching { deps.shutdown() }
@@ -949,6 +993,8 @@ fun main(args: Array<String>) {
                                         onTagManagerClick = { pushScreen(Screen.TagManager) },
                                         onQuoteBrowserClick = { pushScreen(Screen.QuoteBrowser) },
                                         onRevisitClick = { pushScreen(Screen.RevisitItems) },
+                                        onShareBooks = { exportLibraryFiles(bookIds = it) },
+                                        onShareDocuments = { exportLibraryFiles(documentIds = it) },
                                         onDeleteBooks = { ids ->
                                             appScope.launch(Dispatchers.IO) {
                                                 ids.forEach { id ->

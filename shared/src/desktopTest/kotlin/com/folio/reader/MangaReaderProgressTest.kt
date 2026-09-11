@@ -13,8 +13,12 @@ import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaChapterRef
 import com.folio.reader.manga.MangaChapterRepository
 import com.folio.reader.manga.MangaDetail
+import com.folio.reader.manga.MangaDownload
+import com.folio.reader.manga.MangaDownloadManager
+import com.folio.reader.manga.MangaDownloadRepository
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaFilter
+import com.folio.reader.manga.FileDownloadStorage
 import com.folio.reader.manga.MangaHistoryEntry
 import com.folio.reader.manga.MangaHistoryItem
 import com.folio.reader.manga.MangaHistoryRepository
@@ -308,9 +312,12 @@ class MangaReaderProgressTest {
             ch.url to List(ch.totalPages) { i -> MangaPageRef(index = i, url = "${ch.url}/p$i") }
         }
 
-    private fun newReaderVm(backend: FakeBackend) = MangaReaderViewModel(
+    private fun newReaderVm(
+        backend: FakeBackend,
+        downloadManager: MangaDownloadManager? = null,
+    ) = MangaReaderViewModel(
         backend = backend,
-        downloadManager = null,
+        downloadManager = downloadManager,
         chapterRepo = chapterRepo,
         mangaRepo = mangaRepo,
         historyRepo = historyRepo,
@@ -320,12 +327,68 @@ class MangaReaderProgressTest {
         sessionRepo = null,
     )
 
+    private fun downloadManager(): MangaDownloadManager = MangaDownloadManager(
+        backend = FakeBackend(emptyMap()),
+        downloadsRepo = object : MangaDownloadRepository {
+            override suspend fun enqueue(download: MangaDownload) {}
+            override suspend fun update(download: MangaDownload) {}
+            override suspend fun remove(id: String) {}
+            override suspend fun clearFinished() {}
+            override fun observeQueue(): Flow<List<MangaDownload>> = flowOf(emptyList())
+            override suspend fun isChapterDownloaded(chapterId: String): Boolean = false
+        },
+        chapterRepo = chapterRepo,
+        initialStorage = FileDownloadStorage(File(tempRoot, "downloads")),
+    )
+
+    private fun seedDownloadedPages(chapter: MangaChapter, count: Int) {
+        val dir = File(tempRoot, "downloads/${chapter.mangaId}/${chapter.id}").apply { mkdirs() }
+        repeat(count) { index -> File(dir, "%03d.png".format(index + 1)).writeBytes(byteArrayOf(1)) }
+    }
+
     private suspend fun awaitCondition(timeoutMs: Long = 8000, message: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition()) {
             if (System.currentTimeMillis() > deadline) fail("Timed out: $message")
             delay(20)
         }
+    }
+
+    // ---------- Offline downloads ----------
+
+    @Test
+    fun fullyDownloadedChapterOpensOfflineAfterQueueMarkerIsCleared() = runBlocking {
+        val chapter = seedChapters(linkedMapOf("/c1" to 3)).single().copy(downloadedPages = 3)
+        chapterRepo.chapters[chapter.id] = chapter
+        seedDownloadedPages(chapter, 3)
+        val backend = FakeBackend(emptyMap())
+        val vm = newReaderVm(backend, downloadManager())
+
+        vm.open(manga, chapter)
+        awaitCondition(message = "downloaded chapter opens without its queue marker") {
+            !vm.loading.value && vm.pages.value.size == 3
+        }
+
+        assertEquals(null, vm.error.value)
+        assertTrue(backend.pageListFetches.isEmpty(), "the offline chapter must not contact the source")
+        vm.close()
+    }
+
+    @Test
+    fun incompleteLocalChapterStillFallsBackToSource() = runBlocking {
+        val chapter = seedChapters(linkedMapOf("/c1" to 3)).single().copy(downloadedPages = 3)
+        chapterRepo.chapters[chapter.id] = chapter
+        seedDownloadedPages(chapter, 2)
+        val backend = FakeBackend(pageListsFor(listOf(chapter)))
+        val vm = newReaderVm(backend, downloadManager())
+
+        vm.open(manga, chapter)
+        awaitCondition(message = "incomplete local chapter uses source page list") {
+            !vm.loading.value && vm.pages.value.size == 3
+        }
+
+        assertEquals(listOf(chapter.url), backend.pageListFetches)
+        vm.close()
     }
 
     // ---------- Position-aware loading ----------

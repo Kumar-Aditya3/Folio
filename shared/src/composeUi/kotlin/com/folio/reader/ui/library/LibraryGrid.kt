@@ -83,16 +83,15 @@ fun BookGrid(
     onDeleteBook: (Book) -> Unit,
     selectedBooks: Set<String>,
     isSelectionMode: Boolean,
-    finishEstimates: Map<String, String> = emptyMap()
+    finishEstimates: Map<String, String> = emptyMap(),
+    preserveFeaturedDuringSelection: Boolean = false,
 ) {
     // The feature slot goes to the first in-progress book in the current (already
-    // sorted and filtered) list, so it always reflects the user's own ordering
-    // rather than a second opinion about relevance. Suppressed during selection,
-    // where every row must be the same target.
+    // sorted and filtered) list, so it always reflects the user's own ordering.
     val featured = remember(books) {
         books.firstOrNull { it.normalizedProgress > 0.0 && it.normalizedProgress < 0.99 }
     }
-    val showFeature = featured != null && !isSelectionMode
+    val showFeature = featured != null && (!isSelectionMode || preserveFeaturedDuringSelection)
     val rest = remember(books, featured, showFeature) {
         if (showFeature) books.filter { it.id != featured!!.id } else books
     }
@@ -112,6 +111,8 @@ fun BookGrid(
                 FeaturedShelfEntry(
                     book = featured!!,
                     finishEstimate = finishEstimates[featured.id],
+                    isSelected = featured.id in selectedBooks,
+                    isSelectionMode = isSelectionMode,
                     onClick = { onBookClick(featured) },
                     onLongClick = { onBookLongClick(featured) },
                     onDeleteBook = onDeleteBook,
@@ -143,6 +144,8 @@ fun BookGrid(
 private fun FeaturedShelfEntry(
     book: Book,
     finishEstimate: String?,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onDeleteBook: (Book) -> Unit,
@@ -168,6 +171,32 @@ private fun FeaturedShelfEntry(
             width = FolioTokens.coverFeature,
             halo = accent,
             elevation = 14.dp,
+            overlay = {
+                if (isSelected) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
+                            .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(FolioTheme.colors.primary),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = FolioTheme.colors.onPrimary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+            },
         )
         Spacer(Modifier.width(FolioTokens.space4))
         Column(modifier = Modifier.weight(1f)) {
@@ -209,11 +238,13 @@ private fun FeaturedShelfEntry(
             Spacer(Modifier.height(FolioTokens.space1))
             FolioProgressBar(progress = book.normalizedProgress.toFloat(), color = accent)
         }
-        BookOptionsDropdown(
-            book = book,
-            onBookClick = { onClick() },
-            onDeleteBook = onDeleteBook,
-        )
+        if (!isSelectionMode) {
+            BookOptionsDropdown(
+                book = book,
+                onBookClick = { onClick() },
+                onDeleteBook = onDeleteBook,
+            )
+        }
     }
 }
 

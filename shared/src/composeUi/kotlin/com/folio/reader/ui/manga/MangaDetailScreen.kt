@@ -82,6 +82,7 @@ fun MangaDetailScreen(
     downloadsAvailable: Boolean,
     onRead: (MangaEntry, MangaChapter) -> Unit,
     onBack: () -> Unit,
+    onRemoveFromLibrary: ((MangaEntry) -> Unit)? = null,
 ) {
     val manga by viewModel.manga.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
@@ -275,8 +276,12 @@ fun MangaDetailScreen(
                         )
                     }
                     IconButton(onClick = {
-                        if (!m.inLibrary) categoryPrompt = true
-                        viewModel.toggleInLibrary()
+                        if (m.inLibrary) {
+                            onRemoveFromLibrary?.invoke(m) ?: viewModel.toggleInLibrary()
+                        } else {
+                            categoryPrompt = true
+                            viewModel.toggleInLibrary()
+                        }
                     }) {
                         Icon(
                             imageVector = if (m.inLibrary) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
@@ -452,7 +457,10 @@ fun MangaDetailScreen(
                 ) {
                     if (m.inLibrary) {
                         OutlinedButton(
-                            onClick = { viewModel.toggleInLibrary() },
+                            onClick = {
+                                onRemoveFromLibrary?.invoke(m)
+                                    ?: viewModel.toggleInLibrary()
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.LibraryAddCheck, contentDescription = null)

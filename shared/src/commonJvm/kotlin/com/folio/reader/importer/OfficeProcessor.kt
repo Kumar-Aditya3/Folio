@@ -6,8 +6,6 @@ import org.xml.sax.helpers.DefaultHandler
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import javax.xml.XMLConstants
@@ -21,9 +19,6 @@ internal object OfficeProcessor {
                 validate(zip)
                 val xmlName = if (format == IncomingFormat.DOCX) "word/document.xml" else "content.xml"
                 val xml = readEntry(zip, xmlName)
-                // #region debug-point B:main-xml-scan
-                reportDebug("B", "OfficeProcessor.kt:24", "[DEBUG] Scanning main Office XML", xmlSignals(xml) + ("entry" to xmlName))
-                // #endregion
                 rejectDangerousXml(xml)
                 val relationships = if (format == IncomingFormat.DOCX) readRelationships(zip) else emptyMap()
                 val assets = linkedMapOf<String, ByteArray>()
@@ -40,9 +35,6 @@ internal object OfficeProcessor {
             throw CorruptContent("Malformed office archive")
         } catch (e: Exception) {
             val message = e.message.orEmpty()
-            // #region debug-point D:exception-classification
-            reportDebug("D", "OfficeProcessor.kt:38", "[DEBUG] Office import exception", mapOf("type" to e.javaClass.name, "message" to message, "causeType" to e.cause?.javaClass?.name.orEmpty(), "causeMessage" to e.cause?.message.orEmpty()))
-            // #endregion
             if (e is UnsafeContent) throw e
             if (e is SAXParseException && (message.contains("doctype", true) || message.contains("entity", true) || message.contains("external", true))) {
                 throw UnsafeContent("DTD and external entities are not allowed")
@@ -158,9 +150,6 @@ internal object OfficeProcessor {
     }
 
     private fun secureFactory() = SAXParserFactory.newInstance().apply {
-        // #region debug-point A:parser-provider
-        reportDebug("A", "OfficeProcessor.kt:159", "[DEBUG] Configuring SAX parser", mapOf("factory" to javaClass.name))
-        // #endregion
         isNamespaceAware = true
         setFeatureIfSupported("http://apache.org/xml/features/disallow-doctype-decl", false)
         setFeatureIfSupported("http://xml.org/sax/features/external-general-entities", false)
@@ -180,9 +169,6 @@ internal object OfficeProcessor {
     private fun readRelationships(zip: ZipFile): Map<String, String> {
         val entry = zip.getEntry("word/_rels/document.xml.rels") ?: return emptyMap()
         val bytes = zip.getInputStream(entry).use { readBounded(it, MAX_ARCHIVE_ENTRY_BYTES) }
-        // #region debug-point C:relationships-xml-scan
-        reportDebug("C", "OfficeProcessor.kt:174", "[DEBUG] Scanning DOCX relationships XML", xmlSignals(bytes))
-        // #endregion
         rejectDangerousXml(bytes)
         val result = mutableMapOf<String, String>()
         secureFactory().newSAXParser().parse(ByteArrayInputStream(bytes), object : DefaultHandler() {
@@ -194,38 +180,6 @@ internal object OfficeProcessor {
             }
         })
         return result
-    }
-
-    private fun reportDebug(hypothesisId: String, location: String, message: String, data: Map<String, Any?>) {
-        runCatching {
-            fun json(value: Any?): String = when (value) {
-                null -> "null"
-                is Number, is Boolean -> value.toString()
-                else -> "\"${value.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\""
-            }
-            val fields = data.entries.joinToString(",") { "${json(it.key)}:${json(it.value)}" }
-            val payload = "{\"sessionId\":\"docx-dtd-import\",\"runId\":\"post-fix\",\"hypothesisId\":${json(hypothesisId)},\"location\":${json(location)},\"msg\":${json(message)},\"data\":{$fields},\"ts\":${System.currentTimeMillis()}}"
-            (URL("http://127.0.0.1:7777/event").openConnection() as HttpURLConnection).run {
-                requestMethod = "POST"
-                connectTimeout = 1000
-                readTimeout = 1000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                outputStream.use { it.write(payload.toByteArray()) }
-                inputStream.close()
-                disconnect()
-            }
-        }
-    }
-
-    private fun xmlSignals(bytes: ByteArray): Map<String, Any> {
-        val xml = bytes.toString(Charsets.ISO_8859_1)
-        return mapOf(
-            "bytes" to bytes.size,
-            "doctype" to Regex("(?is)<!DOCTYPE\\b").containsMatchIn(xml),
-            "entity" to Regex("(?is)<!ENTITY\\b").containsMatchIn(xml),
-            "externalDoctype" to Regex("(?is)<!DOCTYPE\\b[^>]*(?:SYSTEM|PUBLIC)\\s+['\"]").containsMatchIn(xml)
-        )
     }
 
     private fun safeLink(value: String): Boolean = !value.startsWith('/') && !value.startsWith("//") &&

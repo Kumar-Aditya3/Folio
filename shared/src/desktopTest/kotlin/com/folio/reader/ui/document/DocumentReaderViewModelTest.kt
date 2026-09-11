@@ -99,6 +99,10 @@ class DocumentReaderViewModelTest {
         reader.setMode(DocumentReaderMode.SINGLE_PAGE)
         assertEquals(DocumentReaderMode.SINGLE_PAGE, reader.state.value.mode)
         assertEquals(7, reader.state.value.currentPage)
+
+        reader.seekToProgress(0.5f)
+        assertEquals(6, reader.state.value.currentPage)
+        assertEquals(6.0 / 11.0, reader.state.value.normalizedProgress)
     }
 
     @Test
@@ -123,6 +127,13 @@ class DocumentReaderViewModelTest {
         assertIs<DocumentReaderContent.Reflowable>(
             (restored.loadState as DocumentReaderLoadState.Ready).content
         )
+
+        reader.updateReflowablePage(3, 8)
+        assertEquals(3, reader.state.value.currentPage)
+        assertEquals(8, reader.state.value.pageCount)
+
+        reader.seekToProgress(0.25f)
+        assertEquals(0.25, reader.state.value.normalizedProgress)
 
         reader.updateReflowableProgress(1.5f, 42)
         val persisted = withTimeout(2_000) {

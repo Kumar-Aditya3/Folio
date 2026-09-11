@@ -1,9 +1,15 @@
 package com.folio.reader.ui.document
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,18 +28,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Highlight
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.EmptyState
-import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.render.HtmlContentSurface
@@ -50,12 +57,21 @@ fun DocumentReaderScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var resetZoomKey by remember { mutableIntStateOf(0) }
+    var seekNonce by remember { mutableIntStateOf(0) }
+    var seekRequest by remember { mutableStateOf<Pair<Float, Long>?>(null) }
+    val occludes = com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()
+    val isPdf = state.document?.format == com.folio.reader.model.DocumentFormat.PDF
+    val showBottom = state.controlsVisible && state.loadState is DocumentReaderLoadState.Ready
+    val topInset = if (occludes && state.controlsVisible) 56.dp else 0.dp
+    val bottomInset = if (occludes && showBottom) {
+        if (isPdf) 132.dp else 50.dp
+    } else 0.dp
+
+    com.folio.reader.ui.components.ReaderSystemBars(state.controlsVisible)
     DisposableEffect(viewModel) { onDispose { viewModel.flush() } }
-    Column(modifier.fillMaxSize().background(FolioTheme.colors.background)) {
-        if (state.controlsVisible) {
-            DocumentReaderBar(state, onBack, viewModel::toggleBookmark)
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+
+    Box(modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+        Box(Modifier.fillMaxSize().padding(PaddingValues(top = topInset, bottom = bottomInset))) {
             when (val load = state.loadState) {
                 DocumentReaderLoadState.Loading -> LoadingPlaceholder(Modifier.align(Alignment.Center))
                 is DocumentReaderLoadState.Error -> EmptyState(
@@ -81,33 +97,60 @@ fun DocumentReaderScreen(
                         enabled = true,
                         modifier = Modifier.fillMaxSize(),
                         onProgress = viewModel::updateReflowableProgress,
-                        onPageChange = { _, _ -> },
+                        onPageChange = viewModel::updateReflowablePage,
                         onTap = { viewModel.setControlsVisible(!state.controlsVisible) },
                         onLinkClick = null,
-                        onResolveResource = { _, src -> resolveDocumentResource(viewModel, src) }
+                        onResolveResource = { _, src -> resolveDocumentResource(viewModel, src) },
+                        seekRequest = seekRequest
                     )
                 }
             }
         }
-        if (
-            state.controlsVisible &&
-            state.document?.format == com.folio.reader.model.DocumentFormat.PDF
+
+        AnimatedVisibility(
+            visible = state.controlsVisible,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it }
         ) {
-            DocumentReaderControls(
-                state = state,
-                onMode = {
-                    viewModel.setMode(
-                        if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
-                            DocumentReaderMode.CONTINUOUS
-                        } else {
-                            DocumentReaderMode.SINGLE_PAGE
-                        }
+            DocumentReaderBar(state, onBack, viewModel::toggleBookmark)
+        }
+
+        AnimatedVisibility(
+            visible = showBottom,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it }
+        ) {
+            Column {
+                if (isPdf) {
+                    DocumentReaderControls(
+                        state = state,
+                        onMode = {
+                            viewModel.setMode(
+                                if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
+                                    DocumentReaderMode.CONTINUOUS
+                                } else {
+                                    DocumentReaderMode.SINGLE_PAGE
+                                }
+                            )
+                        },
+                        onRotate = viewModel::rotateClockwise,
+                        onResetZoom = { resetZoomKey++ }
                     )
-                },
-                onRotate = viewModel::rotateClockwise,
-                onPage = viewModel::setCurrentPage,
-                onResetZoom = { resetZoomKey++ }
-            )
+                }
+                DocumentProgressBar(
+                    state = state,
+                    isPdf = isPdf,
+                    onSeek = { fraction ->
+                        viewModel.seekToProgress(fraction)
+                        if (!isPdf) {
+                            seekNonce++
+                            seekRequest = fraction to seekNonce.toLong()
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -117,57 +160,44 @@ private fun DocumentReaderControls(
     state: DocumentReaderState,
     onMode: () -> Unit,
     onRotate: () -> Unit,
-    onPage: (Int) -> Unit,
     onResetZoom: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().folioVeil().padding(FolioTokens.space3)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            TextButton(onClick = onMode) {
-                Icon(
-                    if (state.mode == DocumentReaderMode.SINGLE_PAGE) Icons.Default.ViewAgenda else Icons.Default.GridView,
-                    contentDescription = null
-                )
-                Text(if (state.mode == DocumentReaderMode.SINGLE_PAGE) "Continuous" else "Single page")
-            }
-            Text(
-                if (state.pageCount > 0) "Page ${state.currentPage + 1} of ${state.pageCount}" else "Loading pages",
-                color = FolioTheme.colors.onSurface
+    Row(
+        Modifier.fillMaxWidth().folioVeil().padding(horizontal = FolioTokens.space3),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        TextButton(onClick = onMode) {
+            Icon(
+                if (state.mode == DocumentReaderMode.SINGLE_PAGE) Icons.Default.ViewAgenda else Icons.Default.GridView,
+                contentDescription = null
             )
-            IconButton(onClick = onRotate) {
-                Icon(Icons.AutoMirrored.Filled.RotateRight, "Rotate pages")
-            }
+            Text(if (state.mode == DocumentReaderMode.SINGLE_PAGE) "Continuous" else "Single page")
         }
-        if (state.pageCount > 1) {
-            FolioSlider(
-                value = state.currentPage.toFloat(),
-                onValueChange = { onPage(it.toInt()) },
-                valueRange = 0f..(state.pageCount - 1).toFloat(),
-                steps = (state.pageCount - 2).coerceAtLeast(0),
-                modifier = Modifier.fillMaxWidth()
-            )
+        IconButton(onClick = onRotate) {
+            Icon(Icons.AutoMirrored.Filled.RotateRight, "Rotate pages")
         }
         if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "Pinch to zoom. Swipe to change pages at fit.",
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    style = FolioTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onResetZoom) {
-                    Text("Reset zoom")
-                }
-            }
+            TextButton(onClick = onResetZoom) { Text("Reset zoom") }
         }
     }
+}
+
+@Composable
+private fun DocumentProgressBar(
+    state: DocumentReaderState,
+    isPdf: Boolean,
+    onSeek: (Float) -> Unit
+) {
+    val currentPage = if (isPdf) state.currentPage + 1 else state.currentPage.coerceAtLeast(1)
+    val totalPages = state.pageCount.coerceAtLeast(1)
+    com.folio.reader.ui.reader.BottomProgressBar(
+        chapterTitle = state.document?.title.orEmpty(),
+        currentPage = currentPage.coerceAtMost(totalPages),
+        totalPages = totalPages,
+        progress = state.normalizedProgress.toFloat(),
+        onSeek = onSeek
+    )
 }
 
 @Composable

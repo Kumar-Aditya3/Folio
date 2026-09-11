@@ -2,9 +2,18 @@ package com.folio.reader.nav
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -13,6 +22,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MangaBrowseRoute(
@@ -124,13 +137,76 @@ fun MangaDetailRoute(
     val graph = navModel.graph
     val viewModel = navModel.mangaDetailViewModel(mangaId)
         .also { vm -> LaunchedEffect(mangaId) { vm.open(mangaId) } }
+    val removalScope = rememberCoroutineScope()
+    var showRemovalDialog by remember { mutableStateOf(false) }
+    var deleteDownloads by remember { mutableStateOf(false) }
+
     com.folio.reader.ui.manga.MangaDetailScreen(
         viewModel = viewModel,
         backend = graph.mangaBackend,
         downloadsAvailable = graph.mangaBackend.supportsExtensions,
         onRead = { _, chapter -> onRead(chapter.id) },
-        onBack = onBack
+        onBack = onBack,
+        onRemoveFromLibrary = {
+            deleteDownloads = false
+            showRemovalDialog = true
+        },
     )
+
+    if (showRemovalDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showRemovalDialog = false
+                deleteDownloads = false
+            },
+            title = { Text("Remove manga?") },
+            text = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { deleteDownloads = !deleteDownloads }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = deleteDownloads,
+                        onCheckedChange = { deleteDownloads = it },
+                    )
+                    Text("Also delete downloaded chapters")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val shouldDeleteDownloads = deleteDownloads
+                        showRemovalDialog = false
+                        deleteDownloads = false
+                        removalScope.launch(Dispatchers.IO) {
+                            navModel.removeMangaFromLibrary(
+                                setOf(mangaId),
+                                shouldDeleteDownloads,
+                            )
+                            withContext(Dispatchers.Main) {
+                                viewModel.reflectRemovedFromLibrary()
+                            }
+                        }
+                    },
+                ) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showRemovalDialog = false
+                        deleteDownloads = false
+                    },
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
 
 @Composable
