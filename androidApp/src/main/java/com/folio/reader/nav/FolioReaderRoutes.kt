@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.folio.reader.AppGraph
 import com.folio.reader.model.Book
+import com.folio.reader.settings.normalized
 import com.folio.reader.settings.overriddenFields
 import com.folio.reader.ui.book.BookDetailScreen
 import com.folio.reader.ui.book.BookDetailViewModel
@@ -97,6 +98,15 @@ private fun ReaderRouteContent(
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
     val loadError by viewModel.loadError.collectAsState(initial = null)
     val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
+    // Continuous-mode chapter window.
+    val windowSections by viewModel.windowSections.collectAsState(initial = emptyList())
+    val windowLoad by viewModel.windowLoad.collectAsState(initial = emptyList())
+    val windowRange by viewModel.windowRange.collectAsState(initial = null)
+    val windowOp by viewModel.windowOp.collectAsState(initial = null)
+    // A window only renders while continuous layout is actually in effect; a
+    // stale window from a layout switch must not bleed into paged mode.
+    val windowed = windowRange != null &&
+        settings.layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS
     val overridden by remember {
         combine(viewModel.settings, viewModel.bookSettings) { global, book ->
             book?.overriddenFields(global) ?: emptySet()
@@ -166,13 +176,24 @@ private fun ReaderRouteContent(
         onScrollProgress = { fraction -> viewModel.updateScrollProgress(fraction) },
         onChapterEnd = { viewModel.onChapterEnd() },
         onChapterStart = { viewModel.onChapterStart() },
+        sections = if (windowed) windowSections else emptyList(),
+        documentSections = if (windowed) windowLoad else emptyList(),
+        windowed = windowed,
+        windowOp = windowOp,
+        onVisibleSection = { spine -> viewModel.onVisibleSection(spine) },
+        onExtendForward = { viewModel.extendWindow(forward = true) },
+        onExtendBackward = { viewModel.extendWindow(forward = false) },
+        onWindowOpApplied = { nonce -> viewModel.onWindowOpApplied(nonce) },
         chapterChip = chapterChip,
         onDismissChapterChip = { viewModel.dismissChapterChip() },
-        onHighlightParagraph = { paragraphIndex, snippet ->
-            val pos = position
+        onHighlightParagraph = { chapterId, paragraphIndex, snippet ->
+            // The paragraph may sit in a windowed chapter that is not the anchor,
+            // so the locator's spine comes from the selection's own chapter.
+            val spine = chapters.firstOrNull { it.id == chapterId }?.spineIndex
+                ?: position?.spineIndex ?: 0
             viewModel.addHighlight(
-                startLocator = "/${pos?.spineIndex ?: 0}/$paragraphIndex:0",
-                endLocator = "/${pos?.spineIndex ?: 0}/$paragraphIndex:end",
+                startLocator = "/$spine/$paragraphIndex:0",
+                endLocator = "/$spine/$paragraphIndex:end",
                 selectedText = snippet
             )
             viewModel.showControlsFn()
@@ -186,7 +207,9 @@ private fun ReaderRouteContent(
         overriddenFields = overridden,
         onWriteGlobal = { updated ->
             viewModel.updateGlobalSettings(updated)
-            onSettingsChanged(updated)
+            // The navModel's snapshot must stay the *global* row; `updated` is
+            // effective-derived and carries this book's overrides.
+            onSettingsChanged(viewModel.global())
         },
         onResetBook = { viewModel.resetBookToDefaults() }
     )
@@ -271,7 +294,6 @@ fun BookDetailRoute(
                     activity.appScope.launch(Dispatchers.IO) {
                         runCatching { graph.bookRepository.deleteBook(b.id) }
                         runCatching { graph.platform.fileSystem.deleteBookFiles(b.id) }
-                        activity.refreshTick++
                     }
                     onBack()
                 },

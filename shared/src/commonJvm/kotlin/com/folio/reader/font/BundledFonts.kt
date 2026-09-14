@@ -79,26 +79,29 @@ object BundledFonts {
             }
         }
 
-        val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull() ?: return emptyList()
+        val before = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+            ?.customFonts?.mapTo(mutableSetOf()) { it.fileName } ?: emptySet()
         val replaced = ALL.flatMap { it.replaces }.toSet()
-        val kept = settings.customFonts.filterNot { it.fileName in replaced }
-        val additions = ALL
-            .filter { bundled -> kept.none { it.fileName == bundled.fileName } }
-            .mapNotNull { bundled ->
-                if (!File(fontsDir, bundled.fileName).exists()) return@mapNotNull null
-                CustomFont(
-                    id = bundled.fileName,
-                    name = bundled.displayName,
-                    fileName = bundled.fileName,
-                    familyName = bundled.familyName,
-                    weight = bundled.weight
-                )
-            }
-        if (additions.isNotEmpty() || kept != settings.customFonts) {
-            runCatching {
-                settingsRepository.saveGlobalSettings(settings.copy(customFonts = kept + additions))
+        val available = ALL.mapNotNull { bundled ->
+            if (!File(fontsDir, bundled.fileName).exists()) return@mapNotNull null
+            CustomFont(
+                id = bundled.fileName,
+                name = bundled.displayName,
+                fileName = bundled.fileName,
+                familyName = bundled.familyName,
+                weight = bundled.weight
+            )
+        }
+        // Merge, so a settings write landing between the read above and this
+        // save is not clobbered. No change means no write (and no sync event).
+        runCatching {
+            settingsRepository.mergeGlobalSettings { current ->
+                val kept = current.customFonts.filterNot { it.fileName in replaced }
+                val missing = available.filterNot { a -> current.customFonts.any { it.fileName == a.fileName } }
+                if (kept == current.customFonts && missing.isEmpty()) current
+                else current.copy(customFonts = kept + missing)
             }
         }
-        return additions
+        return available.filter { it.fileName !in before }
     }
 }

@@ -415,10 +415,7 @@ private fun GoalEditDialog(
                 onSave(newGoal)
                 if (settingsRepository != null) {
                     scope.launch {
-                        val current = settingsRepository.getGlobalSettings()
-                        settingsRepository.saveGlobalSettings(
-                            current.copy(dailyGoalMinutes = newGoal)
-                        )
+                        settingsRepository.mergeGlobalSettings { it.copy(dailyGoalMinutes = newGoal) }
                     }
                 }
             }) {

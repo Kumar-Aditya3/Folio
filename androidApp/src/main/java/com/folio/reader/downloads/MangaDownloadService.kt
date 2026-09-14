@@ -105,9 +105,9 @@ class MangaDownloadService : Service() {
             return
         }
         graph.mangaDownloadRepository.observeQueue().collect { queue ->
-            val downloading = queue.firstOrNull { it.status == MangaDownloadStatus.DOWNLOADING }
+            val downloading = queue.filter { it.status == MangaDownloadStatus.DOWNLOADING }
             val queued = queue.count { it.status == MangaDownloadStatus.QUEUED }
-            if (downloading == null && queued == 0) {
+            if (downloading.isEmpty() && queued == 0) {
                 // Queue drained (everything DOWNLOADED/ERROR, or empty): retire the service.
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -118,19 +118,23 @@ class MangaDownloadService : Service() {
     }
 
     private suspend fun progressText(
-        downloading: MangaDownload?,
+        downloading: List<MangaDownload>,
         queued: Int,
         chapters: MangaChapterRepository,
     ): String {
-        val active = downloading ?: return pluralChapters(queued)
+        if (downloading.isEmpty()) return pluralChapters(queued)
+        val active = downloading.first()
         val name = chapterName(active.chapterId, chapters)
         val pages = if (active.totalPages > 0) {
             "${active.downloadedPages}/${active.totalPages} pages"
         } else {
             "starting…"
         }
-        val extra = if (queued > 0) " · +$queued queued" else ""
-        return if (name != null) "$name · $pages$extra" else "$pages$extra"
+        // With parallel workers the notification reports the pool: one chapter's
+        // page progress plus how many more are in flight and waiting behind them.
+        val inFlight = if (downloading.size > 1) " · +${downloading.size - 1} downloading" else ""
+        val extra = if (queued > 0) " · $queued queued" else ""
+        return if (name != null) "$name · $pages$inFlight$extra" else "$pages$inFlight$extra"
     }
 
     private suspend fun chapterName(chapterId: String, chapters: MangaChapterRepository): String? {
@@ -143,7 +147,7 @@ class MangaDownloadService : Service() {
     }
 
     private fun pluralChapters(count: Int): String =
-        "$count ${if (count == 1) "chapter" else "chapters"} queued"
+        if (count == 1) "1 chapter queued" else "$count chapters queued"
 
     private fun goForeground(text: String) {
         // ServiceCompat does the version branching for us: on API 29+ it passes the dataSync

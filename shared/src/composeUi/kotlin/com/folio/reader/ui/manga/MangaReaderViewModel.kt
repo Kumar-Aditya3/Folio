@@ -69,6 +69,13 @@ class MangaReaderViewModel(
     val pages = MutableStateFlow<List<MangaPageRef>>(emptyList())
     val currentIndex = MutableStateFlow(0)
     val mode = MutableStateFlow(MangaReaderMode.WEBTOON)
+
+    /**
+     * False until [open] resolves the saved/global reading mode. The screen shows
+     * the loading spinner meanwhile so a WEBTOON frame never flashes for a
+     * paged-mode manga (and vice versa).
+     */
+    val modeResolved = MutableStateFlow(false)
     val loading = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
     val showControls = MutableStateFlow(true)
@@ -165,6 +172,9 @@ class MangaReaderViewModel(
         this.chapter.value = chapter
         currentIndex.value = 0
         error.value = null
+        // Synchronous: the frame between open() and the coroutine's first
+        // assignment must not render "No pages" ahead of the spinner.
+        loading.value = true
         // §11.3: the reader has now shown this manga's chapters — clear the
         // Home "new chapters" badge. Guarded so a repo failure can't break open.
         updateRepo?.let { repo ->
@@ -184,6 +194,7 @@ class MangaReaderViewModel(
                 defaultModeName = settingsRepo.getRaw(KEY_MANGA_READER_DEFAULT_MODE),
             )
             mode.value = resolved
+            modeResolved.value = true
             if (savedName == null) {
                 runCatching { settingsRepo.setRaw(modeKey, resolved.name) }
             }

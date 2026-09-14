@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,6 +33,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import com.folio.reader.ui.components.decodePageImage
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +65,25 @@ private fun pageCachePut(key: String, bitmap: ImageBitmap) = synchronized(pageBi
     }
 }
 
+/**
+ * Aspect ratios (width/height) learned from successful decodes, keyed by page key.
+ * A webtoon item whose bitmap was evicted re-reserves its exact height from this,
+ * so scrolling back to a revisited page never shifts the list geometry mid-scroll.
+ * Bounded by entry count (ratios are 8 bytes each — no memory pressure).
+ */
+private const val ASPECT_CACHE_MAX = 2048
+private val pageAspectCache = LinkedHashMap<String, Float>(64, 0.75f, true)
+
+internal fun pageAspectGet(key: String): Float? = synchronized(pageAspectCache) { pageAspectCache[key] }
+
+internal fun pageAspectPut(key: String, aspect: Float) = synchronized(pageAspectCache) {
+    pageAspectCache[key] = aspect
+    while (pageAspectCache.size > ASPECT_CACHE_MAX && pageAspectCache.isNotEmpty()) {
+        val eldest = pageAspectCache.entries.firstOrNull() ?: break
+        pageAspectCache.remove(eldest.key)
+    }
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun ReaderPage(
@@ -73,15 +95,24 @@ internal fun ReaderPage(
     tapZones: Boolean = false,
     rtl: Boolean = false,
     targetWidthPx: Int = 0,
+    placeholderHeight: Dp? = null,
+    placeholderWidthPx: Int = 0,
     onTap: (Int) -> Unit = {},
     onDoubleTap: () -> Unit = {},
     onLongPress: () -> Unit = {},
 ) {
-    var bitmap by remember(index) { mutableStateOf<ImageBitmap?>(null) }
-    var failed by remember(index) { mutableStateOf(false) }
-    val cacheKey = viewModel.pageKey(index)
+    val density = LocalDensity.current
 
-    LaunchedEffect(index) {
+    // State is keyed by the page's stable cache key, not its combined index: a
+    // backward extension prepends a chapter and shifts every index, and keying by
+    // index reset the whole viewport to spinners at once — the list collapsed,
+    // the anchor recomputed against collapsed sizes, and the content jumped as
+    // images reloaded.
+    val cacheKey = viewModel.pageKey(index)
+    var bitmap by remember(cacheKey) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(cacheKey) { mutableStateOf(false) }
+
+    LaunchedEffect(cacheKey) {
         pageCacheGet(cacheKey)?.let {
             bitmap = it
             return@LaunchedEffect
@@ -95,14 +126,15 @@ internal fun ReaderPage(
                 failed = true
             } else {
                 pageCachePut(cacheKey, decoded)
+                if (decoded.height > 0) pageAspectPut(cacheKey, decoded.width.toFloat() / decoded.height)
                 bitmap = decoded
             }
         }
     }
 
     val zoom by viewModel.zoom.collectAsState()
-    var offsetX by remember(index) { mutableFloatStateOf(0f) }
-    var offsetY by remember(index) { mutableFloatStateOf(0f) }
+    var offsetX by remember(cacheKey) { mutableFloatStateOf(0f) }
+    var offsetY by remember(cacheKey) { mutableFloatStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var pinchActive by remember { mutableStateOf(false) }
 
@@ -115,6 +147,23 @@ internal fun ReaderPage(
         val maxTy = ((zoom - 1f) * viewSize.height) / 2f
         offsetX = if (maxTx <= 0f) 0f else offsetX.coerceIn(-maxTx, maxTx)
         offsetY = if (maxTy <= 0f) 0f else offsetY.coerceIn(-maxTy, maxTy)
+    }
+
+    // While loading (or failed) the item reserves real height instead of collapsing
+    // to a spinner: a LazyColumn's geometry *is* the page heights, and collapsed
+    // unloaded regions made flings teleport, the position tracker report pages the
+    // reader never saw, and revisits of evicted pages shift under the anchor.
+    // The learned aspect ratio keeps a revisit's reservation exact; first loads
+    // default to the viewport height (webtoon strips are tall).
+    fun placeholderModifier(): Modifier {
+        if (placeholderHeight == null) return Modifier
+        val learned = pageAspectGet(cacheKey)
+        val height = if (learned != null && learned > 0f && placeholderWidthPx > 0) {
+            with(density) { (placeholderWidthPx / learned).toDp() }
+        } else {
+            placeholderHeight
+        }
+        return Modifier.height(height)
     }
 
     Box(
@@ -153,7 +202,8 @@ internal fun ReaderPage(
                         offsetY = (offsetY + dragAmount.y).coerceIn(-maxTy, maxTy)
                     }
                 } else Modifier
-            ),
+            )
+            .then(if (bitmap == null) placeholderModifier() else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         when {

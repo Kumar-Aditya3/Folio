@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.onVerticalWheel
+import com.folio.reader.ui.theme.flipThemeMode
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -40,22 +41,43 @@ fun GeneralSettingsPanel(
     mangaDownloadsLocation: String? = null,
     onPickMangaDownloadsLocation: () -> Unit = {}
 ) {
+    // The picker's mode: the app palette's own polarity, or the custom theme's
+    // when one is active (the switch is disabled then, but the cards still
+    // preview the face matching what the user is looking at).
+    val modeDark = settings.customAppTheme?.isDark
+        ?: com.folio.reader.ui.theme.AppPalette.byId(settings.appThemeId).isDark
+    val resolvedAppPaletteId = com.folio.reader.ui.theme.AppPalette.byId(settings.appThemeId).id
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Theme packs: a curated chrome + page pair, applied together.
+        // Theme packs: one theme, two faces. The switch applies the active
+        // pack's other face; tapping a card applies the face being shown.
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Theme packs", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Matched pairs of app colours and page colours. Applying a pack " +
-                        "changes both; either side can still be adjusted on its own.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Theme packs", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Every pack carries a light side and a dark side. The switch " +
+                            "flips the pair; either side can still be adjusted on its own.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                // The picker's mode follows the app palette's own polarity. A
+                // custom app theme owns its polarity, so the switch is disabled
+                // while one is active — the theme maker is where that lives.
+                ThemeModeToggle(
+                    dark = modeDark,
+                    enabled = settings.customAppTheme == null,
+                    onToggle = { onSettingsChange(flipThemeMode(settings)) },
                 )
             }
             // Horizontal scrollable bar of live mini previews, the in-reader
@@ -65,11 +87,15 @@ fun GeneralSettingsPanel(
             val packs = com.folio.reader.ui.theme.ThemePack.ALL
             val packListState = rememberLazyListState()
             val packScrollScope = rememberCoroutineScope()
-            val selectedPackIndex = packs.indexOfFirst { pack ->
-                settings.appThemeId == pack.appPaletteId &&
-                    settings.themeId == pack.readerThemeId &&
-                    settings.customTheme == null
-            }.coerceAtLeast(0)
+            // Resolve through byId: a persisted id may still name a palette that
+            // folded into a surviving family, and the pack must still light up.
+            fun packSelected(pack: com.folio.reader.ui.theme.ThemePack): Boolean =
+                settings.customTheme == null && settings.customAppTheme == null &&
+                    ((resolvedAppPaletteId == pack.lightAppPaletteId &&
+                        settings.themeId == pack.lightReaderThemeId) ||
+                        (resolvedAppPaletteId == pack.darkAppPaletteId &&
+                            settings.themeId == pack.darkReaderThemeId))
+            val selectedPackIndex = packs.indexOfFirst(::packSelected).coerceAtLeast(0)
             LaunchedEffect(Unit) {
                 packListState.scrollToItem(index = selectedPackIndex)
             }
@@ -86,16 +112,15 @@ fun GeneralSettingsPanel(
                 items(packs, key = { it.id }) { pack ->
                     ThemePackCard(
                         pack = pack,
-                        selected = settings.appThemeId == pack.appPaletteId &&
-                            settings.themeId == pack.readerThemeId &&
-                            settings.customTheme == null &&
-                            settings.customAppTheme == null,
+                        dark = modeDark,
+                        selected = packSelected(pack),
                         onClick = {
-                            // Picking a pack is how you leave a custom theme behind.
+                            // Picking a pack is how you leave a custom theme behind;
+                            // the card applies the face the picker is showing.
                             onSettingsChange(
                                 settings.copy(
-                                    appThemeId = pack.appPaletteId,
-                                    themeId = pack.readerThemeId,
+                                    appThemeId = pack.appPaletteId(modeDark),
+                                    themeId = pack.readerThemeId(modeDark),
                                     customTheme = null,
                                     customAppTheme = null,
                                 )
@@ -127,26 +152,6 @@ fun GeneralSettingsPanel(
                     )
                 }
             }
-        }
-
-        // Use embedded fonts toggle
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Use publisher fonts", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Allow EPUBs to load embedded fonts",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = settings.useEmbeddedFonts,
-                onCheckedChange = { onSettingsChange(settings.copy(useEmbeddedFonts = it)) }
-            )
         }
 
         // §13.3: hero tint sampled from the current book's cover. On by default —

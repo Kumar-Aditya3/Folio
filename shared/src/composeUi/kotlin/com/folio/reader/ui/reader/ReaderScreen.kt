@@ -63,7 +63,7 @@ fun ReaderScreen(
     onSetHighlightNote: (highlightId: String, content: String) -> Unit = { _, _ -> },
     onScrollProgress: (Float) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit = {},
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
+    onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)? = null,
     onRetryChapter: (() -> Unit)? = null,
     onLinkClick: ((String) -> Unit)? = null,
     onResolveImage: suspend (chapterHref: String, src: String) -> String? = { _, _ -> null },
@@ -72,6 +72,16 @@ fun ReaderScreen(
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
     onChapterEnd: () -> Unit = {},
     onChapterStart: () -> Unit = {},
+    /** Continuous-mode chapter window: the chapters rendered together, plus its plumbing. */
+    sections: List<com.folio.reader.ui.render.ReaderSection> = emptyList(),
+    /** The window document as loaded — extensions inject into it without rebuilding. */
+    documentSections: List<com.folio.reader.ui.render.ReaderSection> = emptyList(),
+    windowed: Boolean = false,
+    windowOp: com.folio.reader.ui.render.WindowOp? = null,
+    onVisibleSection: (spineIndex: Int) -> Unit = {},
+    onExtendForward: () -> Unit = {},
+    onExtendBackward: () -> Unit = {},
+    onWindowOpApplied: (nonce: Long) -> Unit = {},
     chapterChip: String? = null,
     onDismissChapterChip: () -> Unit = {},
     scopeControlEnabled: Boolean = false,
@@ -96,9 +106,11 @@ fun ReaderScreen(
     // Bottom progress bar taps request a seek to a chapter fraction.
     var seekReq by remember { mutableStateOf<Pair<Float, Long>?>(null) }
     var seekNonce by remember { mutableStateOf(0L) }
-    // The page's live text selection. Highlighting is a chrome action because the
-    // OS selection toolbar covers anything drawn near the text on phones.
-    var pageSelection by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    // The page's live text selection (carries the chapter the paragraph sits in —
+    // a windowed selection may not be the anchor's chapter). Highlighting is a
+    // chrome action because the OS selection toolbar covers anything drawn near
+    // the text on phones.
+    var pageSelection by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     var clearSelTick by remember { mutableStateOf(0L) }
     // Highlight whose note is being written in the glass composer.
     var noteDraftFor by remember { mutableStateOf<String?>(null) }
@@ -291,8 +303,8 @@ fun ReaderScreen(
                 onTap = onToggleControls,
                 onScrollFraction = onScrollProgress,
                 onLongPress = onHighlightParagraph,
-                onSelectionChanged = { idx, text ->
-                    pageSelection = text?.let { idx to it }
+                onSelectionChanged = { chapterId, idx, text ->
+                    pageSelection = text?.let { Triple(chapterId, idx, it) }
                     // Reveal the chrome so Highlight is within reach the moment the
                     // reader selects a passage. A cleared selection leaves the chrome
                     // as the reader left it; a centre tap still hides it.
@@ -318,7 +330,15 @@ fun ReaderScreen(
                     onPageChange(page, total)
                 },
                 onChapterEnd = onChapterEnd,
-                onChapterStart = onChapterStart
+                onChapterStart = onChapterStart,
+                sections = sections,
+                documentSections = documentSections,
+                windowed = windowed,
+                windowOp = windowOp,
+                onVisibleSection = onVisibleSection,
+                onExtendForward = onExtendForward,
+                onExtendBackward = onExtendBackward,
+                onWindowOpApplied = onWindowOpApplied
             )
         } else {
             ReaderNoChapters(onBackPress = onBackPress)

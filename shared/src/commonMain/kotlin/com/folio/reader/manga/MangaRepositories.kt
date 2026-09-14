@@ -1,6 +1,7 @@
 package com.folio.reader.manga
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 interface MangaRepository {
     suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean = true)
@@ -114,4 +115,27 @@ interface MangaDownloadRepository {
     suspend fun clearFinished()
     fun observeQueue(): Flow<List<MangaDownload>>
     suspend fun isChapterDownloaded(chapterId: String): Boolean
+
+    /**
+     * Atomically takes the next QUEUED row: it flips to DOWNLOADING and is returned,
+     * or null when the queue has nothing to hand out. The default is observe-then-
+     * conditional-update so in-memory fakes stay correct under a single-threaded
+     * test runner; the JDBC repo overrides it with one SELECT+UPDATE under the
+     * database's write mutex, which is what makes concurrent workers safe.
+     */
+    suspend fun claimNextQueued(): MangaDownload? {
+        // Snapshot (first()), never a suspending predicate: a fake's flow only
+        // re-emits on writes, so waiting for "a queue that has a QUEUED row" would
+        // park a worker forever on an empty queue.
+        val next = observeQueue().first().firstOrNull { it.status == MangaDownloadStatus.QUEUED }
+            ?: return null
+        // Re-snapshot before flipping: another caller may have taken this row since
+        // the first read. Fakes are single-threaded, so the check is exact there;
+        // real atomicity is the JDBC override's job.
+        val current = observeQueue().first().firstOrNull { it.id == next.id } ?: return null
+        if (current.status != MangaDownloadStatus.QUEUED) return null
+        val claimed = current.copy(status = MangaDownloadStatus.DOWNLOADING, error = null)
+        update(claimed)
+        return claimed
+    }
 }

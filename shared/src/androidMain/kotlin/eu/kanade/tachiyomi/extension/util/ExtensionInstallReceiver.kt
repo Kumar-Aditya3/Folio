@@ -96,7 +96,7 @@ internal class ExtensionInstallReceiver(private val listener: Listener) : Broadc
         val pkgName = getPackageNameFromIntent(intent)
         if (pkgName == null) {
             logcat(LogPriority.WARN) { "Package name not found" }
-            return LoadResult.Error
+            return LoadResult.Error("package name not found in install event")
         }
         return ExtensionLoader.loadExtensionFromPkgName(context, pkgName)
     }

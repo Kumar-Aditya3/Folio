@@ -34,21 +34,18 @@ internal fun FolioNavModelImpl.handleFontImport(uri: Uri) {
                     .onSuccess { font ->
                         if (font != null) {
                             runCatching {
-                                val settings = graph.settingsRepository.getGlobalSettings()
-                                graph.settingsRepository.saveGlobalSettings(
-                                    settings.copy(customFonts = settings.customFonts + font)
-                                )
+                                graph.settingsRepository.mergeGlobalSettings {
+                                    it.copy(customFonts = it.customFonts + font)
+                                }
+                            }.onSuccess { merged ->
+                                activity.appScope.launch(Dispatchers.Main) {
+                                    globalSettings = merged
+                                    activity.importStatus = "Font imported: ${font.name}"
+                                }
                             }.onFailure { e ->
                                 activity.appScope.launch(Dispatchers.Main) {
                                     activity.importStatus = "Font save failed: ${e.message}"
                                 }
-                                return@onSuccess
-                            }
-                            activity.appScope.launch(Dispatchers.Main) {
-                                globalSettings = globalSettings.copy(
-                                    customFonts = globalSettings.customFonts + font
-                                )
-                                activity.importStatus = "Font imported: ${font.name}"
                             }
                         } else {
                             activity.appScope.launch(Dispatchers.Main) {
@@ -81,7 +78,6 @@ internal fun FolioNavModelImpl.handleMangaBackupImport(uri: Uri) {
             val result = mangaBackupManager.importFromMihonBackup(tmp)
             activity.appScope.launch(Dispatchers.Main) {
                 activity.importStatus = "Imported ${result.manga} manga, ${result.chapters} chapters"
-                activity.refreshTick++
             }
         } catch (e: Exception) {
             activity.appScope.launch(Dispatchers.Main) { activity.importStatus = "Backup import failed: ${e.message}" }
@@ -152,7 +148,6 @@ internal fun FolioNavModelImpl.handleBackupRestore(uri: Uri) {
                     activity.appScope.launch(Dispatchers.Main) {
                         activity.importStatus =
                             "Restored: ${summary.booksRestored} books, ${summary.highlightsRestored} highlights, ${summary.errors.size} errors"
-                        activity.refreshTick++
                     }
                 }
                 .onFailure { e ->

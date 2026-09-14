@@ -21,6 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +35,7 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
@@ -89,6 +94,7 @@ fun BookListItem(
 ) {
     val interaction = com.folio.reader.ui.components.rememberFolioInteraction()
     val colors = FolioTheme.colors
+    var menuOpen by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -102,8 +108,9 @@ fun BookListItem(
                     interactionSource = interaction,
                     indication = null,
                     onClick = onClick,
-                    onLongClick = onLongClick
+                    onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
                 )
+                .folioRightClick { if (!isSelectionMode) menuOpen = true }
                 .padding(
                     horizontal = com.folio.reader.ui.theme.FolioTokens.gutter,
                     vertical = com.folio.reader.ui.theme.FolioTokens.space2,
@@ -168,10 +175,12 @@ fun BookListItem(
                 )
             }
 
-            BookOptionsDropdown(
-                book = book,
-                onBookClick = { onClick() },
-                onDeleteBook = onDeleteBook,
+            BookItemMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                onDetails = onClick,
+                onSelect = onLongClick,
+                onDelete = { onDeleteBook(book) },
             )
         }
         com.folio.reader.ui.components.FolioRule(
@@ -225,6 +234,7 @@ fun BookCompactItem(
     finishEstimate: String? = null
 ) {
     val colors = FolioTheme.colors
+    var menuOpen by remember { mutableStateOf(false) }
     Column {
         Row(
             modifier = Modifier
@@ -234,7 +244,11 @@ fun BookCompactItem(
                     if (isSelected) colors.primary.copy(alpha = 0.14f)
                     else androidx.compose.ui.graphics.Color.Transparent
                 )
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
+                )
+                .folioRightClick { if (!isSelectionMode) menuOpen = true }
                 .padding(
                     horizontal = com.folio.reader.ui.theme.FolioTokens.gutter,
                     vertical = com.folio.reader.ui.theme.FolioTokens.space1,
@@ -274,10 +288,12 @@ fun BookCompactItem(
                 )
             }
 
-            BookOptionsDropdown(
-                book = book,
-                onBookClick = { onClick() },
-                onDeleteBook = onDeleteBook,
+            BookItemMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                onDetails = onClick,
+                onSelect = onLongClick,
+                onDelete = { onDeleteBook(book) },
             )
         }
         com.folio.reader.ui.components.FolioRule(

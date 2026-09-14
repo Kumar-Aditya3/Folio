@@ -34,7 +34,7 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
     override suspend fun updateTag(tag: Tag, emitSyncEvent: Boolean): Unit = insertTag(tag, emitSyncEvent)
 
     override suspend fun deleteTag(tagId: String): Unit = withContext(Dispatchers.IO) {
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM book_tags WHERE tag_id = ?").use {
                 it.setString(1, tagId); it.executeUpdate()
             }
@@ -48,6 +48,8 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
                 it.setString(1, tagId); it.executeUpdate()
             }
         }
+        // The tag's book_tags/manga_tags/highlight_tags links vanished with it.
+        db.bumpBookData()
         // Hard-deleted above, so the tag is gone from this device immediately. The
         // DELETE payload stays "{}" on purpose: the id rides on entityId, and
         // SyncEngine.pushTag turns it into an isDeleted tombstone (like book deletes)
@@ -133,6 +135,7 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
                 it.setString(1, bookId); it.setString(2, tagId); it.executeUpdate()
             }
         }
+        db.bumpBookData()
     }
 
     override suspend fun removeTagFromBook(bookId: String, tagId: String): Unit = withContext(Dispatchers.IO) {
@@ -141,6 +144,7 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
                 it.setString(1, bookId); it.setString(2, tagId); it.executeUpdate()
             }
         }
+        db.bumpBookData()
     }
 
     override suspend fun addTagToManga(mangaId: String, tagId: String): Unit = withContext(Dispatchers.IO) {

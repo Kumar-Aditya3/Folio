@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaPageRef
@@ -80,6 +81,10 @@ internal fun WebtoonReader(
         val viewport = maxWidth
         val columnWidth = viewport * maxOf(zoom, 1f)
         val imageWidth = viewport * zoom
+        // Unloaded pages reserve the viewport height (or their learned exact height
+        // inside ReaderPage) so the list's geometry stays truthful while images load.
+        val placeholderHeight = viewport
+        val placeholderWidthPx = with(LocalDensity.current) { imageWidth.roundToPx() }
         Box(Modifier.fillMaxSize().pinchZoom(viewModel, fallback = true).horizontalScroll(hState)) {
             LazyColumn(
                 state = listState,
@@ -93,6 +98,8 @@ internal fun WebtoonReader(
                             modifier = Modifier.width(imageWidth),
                             zoomable = false,
                             targetWidthPx = targetWidthPx,
+                            placeholderHeight = placeholderHeight,
+                            placeholderWidthPx = placeholderWidthPx,
                             onTap = { onTap() },
                             onDoubleTap = { viewModel.resetZoom() },
                             onLongPress = { onLongPressPage(index) },

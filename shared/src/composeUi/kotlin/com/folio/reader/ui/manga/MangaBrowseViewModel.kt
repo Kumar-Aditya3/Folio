@@ -123,6 +123,10 @@ class BrowseViewModel(
     val extensionRepoErrors: StateFlow<List<String>> = backend.observeExtensionRepoErrors()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
 
+    /** Installed-but-unloadable extensions ("Name (pkg): reason") — Android-only, empty elsewhere. */
+    val extensionLoadErrors: StateFlow<List<String>> = backend.observeExtensionLoadErrors()
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
+
     val repos = MutableStateFlow<List<MangaRepoInfo>>(emptyList())
     val refreshingIndex = MutableStateFlow(false)
     val installStates = MutableStateFlow<Map<String, ExtensionInstallStep>>(emptyMap())

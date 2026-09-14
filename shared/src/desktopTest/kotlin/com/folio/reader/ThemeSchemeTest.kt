@@ -1,9 +1,12 @@
 package com.folio.reader
 
+import com.folio.reader.settings.CustomAppTheme
+import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.theme.FolioTypography
 import com.folio.reader.ui.theme.ThemePack
+import com.folio.reader.ui.theme.flipThemeMode
 import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.abs
 import kotlin.math.max
@@ -42,10 +45,12 @@ class ThemeSchemeTest {
     @Test
     fun everyPackResolvesOnBothSides() {
         for (pack in ThemePack.ALL) {
-            assertTrue(Theme.PRESETS.containsKey(pack.readerThemeId),
-                "${pack.id} points at missing reader theme \"${pack.readerThemeId}\"")
-            assertTrue(AppPalette.entries.any { it.id == pack.appPaletteId },
-                "${pack.id} points at missing app palette \"${pack.appPaletteId}\"")
+            for (dark in listOf(false, true)) {
+                assertTrue(Theme.PRESETS.containsKey(pack.readerThemeId(dark)),
+                    "${pack.id} points at missing reader theme \"${pack.readerThemeId(dark)}\"")
+                assertTrue(AppPalette.entries.any { it.id == pack.appPaletteId(dark) },
+                    "${pack.id} points at missing app palette \"${pack.appPaletteId(dark)}\"")
+            }
         }
         assertEquals(ThemePack.ALL.size, ThemePack.ALL.map { it.id }.distinct().size,
             "two packs share an id, so one of them can never be applied")
@@ -55,9 +60,11 @@ class ThemeSchemeTest {
     fun everyAppPaletteIsReachableThroughAPack() {
         // ThemePack.ALL is the only theme picker in SettingsScreen, so an orphan
         // palette is one the user can never select.
-        val packed = ThemePack.ALL.map { it.appPaletteId }.toSet()
-        val orphans = AppPalette.entries.map { it.id }.filterNot { it in packed }
+        val sides = ThemePack.ALL.flatMap { listOf(it.lightAppPaletteId, it.darkAppPaletteId) }
+        val orphans = AppPalette.entries.map { it.id }.filterNot { it in sides }
         assertTrue(orphans.isEmpty(), "app palettes with no theme pack: $orphans")
+        assertEquals(sides.size, sides.distinct().size,
+            "an app palette belongs to two packs, so the light/dark switch cannot know which one to flip")
     }
 
     @Test
@@ -65,10 +72,80 @@ class ThemeSchemeTest {
         // A light page under dark chrome (or the reverse) is the mismatch a pack is
         // supposed to prevent; the whole point of pairing them is that they agree.
         for (pack in ThemePack.ALL) {
-            val appDark = AppPalette.byId(pack.appPaletteId).isDark
-            val readerDark = Theme.PRESETS.getValue(pack.readerThemeId).isDark
-            assertEquals(appDark, readerDark, "${pack.id} pairs ${pack.appPaletteId} with ${pack.readerThemeId}")
+            for (dark in listOf(false, true)) {
+                val appDark = AppPalette.byId(pack.appPaletteId(dark)).isDark
+                val readerDark = Theme.PRESETS.getValue(pack.readerThemeId(dark)).isDark
+                assertEquals(appDark, readerDark,
+                    "${pack.id} pairs ${pack.appPaletteId(dark)} with ${pack.readerThemeId(dark)}")
+            }
         }
+    }
+
+    @Test
+    fun packSidesHaveOppositePolarity() {
+        // A pack is one theme with two faces. Both faces on the same side of
+        // midnight would make the switch a no-op in one direction.
+        for (pack in ThemePack.ALL) {
+            assertEquals(false, AppPalette.byId(pack.lightAppPaletteId).isDark,
+                "${pack.id}: light side palette ${pack.lightAppPaletteId} is dark")
+            assertEquals(true, AppPalette.byId(pack.darkAppPaletteId).isDark,
+                "${pack.id}: dark side palette ${pack.darkAppPaletteId} is light")
+        }
+    }
+
+    @Test
+    fun legacyPaletteIdsResolveToTheirSurvivors() {
+        // Palettes folded into a surviving family when packs gained light/dark
+        // faces. Persisted settings still name them, so byId must land on the
+        // family's survivor rather than silently dropping the user onto LIGHT.
+        val expected = mapOf(
+            "grape" to AppPalette.DUSK,
+            "lava" to AppPalette.EMBER,
+            "acid" to AppPalette.TOXIC_LIME,
+            "ocean" to AppPalette.PEACOCK,
+            "midnightneon" to AppPalette.NEON_TOKYO,
+            "oled" to AppPalette.DARK,
+        )
+        for ((legacy, survivor) in expected) {
+            assertEquals(survivor, AppPalette.byId(legacy),
+                "\"$legacy\" no longer resolves to its family's survivor")
+        }
+    }
+
+    @Test
+    fun flipThemeModeSwapsTheActivePackSides() {
+        // Honey/sepia → Ember/ember and back: both faces of the pack follow.
+        val honey = ReaderSettings(appThemeId = "honey", themeId = "sepia")
+        val ember = flipThemeMode(honey)
+        assertEquals("ember", ember.appThemeId)
+        assertEquals("ember", ember.themeId)
+        val back = flipThemeMode(ember)
+        assertEquals("honey", back.appThemeId)
+        assertEquals("sepia", back.themeId)
+    }
+
+    @Test
+    fun flipThemeModeLeavesIndependentReaderThemesAlone() {
+        // A reader theme chosen outside the pack system is a deliberate
+        // decision; the switch flips the chrome and leaves the page alone.
+        val mixed = ReaderSettings(appThemeId = "honey", themeId = "dracula")
+        val flipped = flipThemeMode(mixed)
+        assertEquals("ember", flipped.appThemeId)
+        assertEquals("dracula", flipped.themeId)
+    }
+
+    @Test
+    fun flipThemeModeHonoursCustomThemesAndLegacyIds() {
+        // A custom app theme owns its polarity — the switch is disabled in the
+        // UI, and a call is a defensive no-op.
+        val custom = ReaderSettings(appThemeId = "honey", customAppTheme = CustomAppTheme())
+        assertEquals(custom, flipThemeMode(custom))
+        // A persisted id from before the curation still flips inside the
+        // surviving family: "ocean" resolves to Peacock, Moss's dark face.
+        val legacy = ReaderSettings(appThemeId = "ocean", themeId = "peacock")
+        val flipped = flipThemeMode(legacy)
+        assertEquals("moss", flipped.appThemeId)
+        assertEquals("moss", flipped.themeId)
     }
 
     // ── §12.3 semantic accent roles ─────────────────────────────────────────
@@ -155,11 +232,12 @@ class ThemeSchemeTest {
     // §15.5: palettes that are achromatic by design satisfy Rule 22 through the
     // luminance clause instead of hue rotation. The list lives here, not in
     // Theme.kt, so adding a palette to it is a visible, reviewable decision.
-    // DARK joins OLED: a #000000 base cannot carry hue at all.
-    // GRAPHITE is the deliberate zero-hue palette (planes separate by ΔL* ≈ 4.4).
+    // DARK joins the zero-hue club: a #000000 base cannot carry hue at all.
+    // GRAPHITE is the deliberate zero-hue dark (planes separate by ΔL* ≈ 4.4);
+    // SILVER is its light mirror (ΔL* ≈ 4.9).
     // BLOSSOM pairs a true-black background with a warm-shifted surface (ΔL* ≈ 5.1):
     // the background carries no hue, so the pair rides the luminance clause too.
-    private val achromaticByDesign = setOf("light", "dark", "oled", "graphite", "blossom")
+    private val achromaticByDesign = setOf("light", "dark", "silver", "graphite", "blossom")
 
     @Test
     fun neutralsVaryInHueNotOnlyLightness() {

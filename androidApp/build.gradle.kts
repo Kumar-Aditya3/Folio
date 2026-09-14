@@ -124,6 +124,7 @@ dependencies {
 
     // ── TEST INFRASTRUCTURE (§8.1 FOLIO_IMPLEMENTATION_SPEC) ────────────────
     // Pin exact versions to match Compose 1.7.6 baseline; no ranges.
+    testImplementation(kotlin("test"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.7.6")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

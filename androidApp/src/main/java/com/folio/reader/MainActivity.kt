@@ -68,23 +68,14 @@ private val FONT_MIMES = arrayOf(
     "application/octet-stream"
 )
 
-private val MANGA_ARCHIVE_MIMES = arrayOf(
-    "application/x-cbz",
-    "application/vnd.comicbook+zip",
-    "application/zip",
-    "application/octet-stream",
-    "*/*"
-)
-
-private val INCOMING_CONTENT_MIMES = arrayOf(
-    "application/epub+zip",
-    "application/pdf",
-    "text/plain",
-    "text/html",
-    "application/xhtml+xml",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.oasis.opendocument.text"
-)
+// Import pickers run as GET_CONTENT with a wildcard type: the ACTION_OPEN_DOCUMENT
+// picker filtered by a specific MIME (epub+zip, x-cbz) made its built-in search
+// both slow (ExternalStorageProvider walks storage recursively) and lossy (EPUBs
+// are frequently indexed as octet-stream, so they never matched the filter). The
+// content chooser's search goes through the indexed MediaStore surfaces instead,
+// and the import pipeline itself detects format from bytes and rejects
+// unsupported files with a status message, so no filter is lost.
+private const val IMPORT_PICKER_MIME = "*/*"
 
 private const val MAX_INCOMING_SOURCE_BYTES = 512L * 1024L * 1024L
 private const val MAX_OFFICE_SOURCE_BYTES = 100L * 1024L * 1024L
@@ -93,7 +84,6 @@ class MainActivity : ComponentActivity() {
 
     internal val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     internal var importStatus by mutableStateOf("")
-    internal var refreshTick by mutableIntStateOf(0)
     internal lateinit var navModel: FolioNavModelImpl
     private var pendingOpenRoute: String? = null
 
@@ -122,6 +112,9 @@ class MainActivity : ComponentActivity() {
         graph.applyStoredMangaDownloadsLocation(appScope)
         graph.backfillAnnotationsOnce(appScope)
         graph.backfillMangaAnnotationsOnce(appScope)
+        // Quiet library scan when the user opted in: new ebooks/documents found
+        // on the granted tree simply appear in the shelves.
+        graph.scanOnStartIfEnabled(appScope)
 
         setContent {
             val navController = rememberNavController()
@@ -137,10 +130,10 @@ class MainActivity : ComponentActivity() {
 
             // ── Document pickers (bodies live in nav/FolioNavModelImporters.kt) ──
             val pickContent = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenMultipleDocuments()
+                ActivityResultContracts.GetMultipleContents()
             ) { uris -> importContentUris(uris) }
             val pickMangaArchives = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenMultipleDocuments()
+                ActivityResultContracts.GetMultipleContents()
             ) { uris -> importMangaUris(uris) }
             val pickMangaFolder = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocumentTree()
@@ -172,15 +165,15 @@ class MainActivity : ComponentActivity() {
             }
 
             val callbacks = object : FolioNavCallbacks {
-                override fun onImportContent() = pickContent.launch(INCOMING_CONTENT_MIMES)
-                override fun onImportMangaArchives() = pickMangaArchives.launch(MANGA_ARCHIVE_MIMES)
+                override fun onImportContent() = pickContent.launch(IMPORT_PICKER_MIME)
+                override fun onImportMangaArchives() = pickMangaArchives.launch(IMPORT_PICKER_MIME)
                 override fun onImportMangaFolder() = pickMangaFolder.launch(null)
                 override fun onImportMangaChoice() {
                     android.app.AlertDialog.Builder(this@MainActivity)
                         .setTitle("Import manga")
                         .setItems(arrayOf("Archive files", "Folder")) { _, which ->
                             when (which) {
-                                0 -> pickMangaArchives.launch(MANGA_ARCHIVE_MIMES)
+                                0 -> pickMangaArchives.launch(IMPORT_PICKER_MIME)
                                 1 -> pickMangaFolder.launch(null)
                             }
                         }
@@ -222,7 +215,7 @@ class MainActivity : ComponentActivity() {
 
             // Back walks back through states instead of exiting: an active bulk
             // selection (manga or books) clears first, then pushed screens pop,
-            // an open manga search closes, Manga returns to Books, and only at
+            // an open shelf search closes, Manga returns to Books, and only at
             // the Books root does back exit the app.
             BackHandler {
                 when {
@@ -236,6 +229,8 @@ class MainActivity : ComponentActivity() {
                         model.mangaBrowseVM.exitSearch()
                     navController.popBackStack() -> Unit
                     model.mangaSearchActive -> model.mangaSearchActive = false
+                    model.bookSearchActive -> model.bookSearchActive = false
+                    model.documentSearchActive -> model.documentSearchActive = false
                     model.libraryMode == LibraryMode.MANGA ||
                         model.libraryMode == LibraryMode.DOCUMENTS ->
                         model.libraryMode = LibraryMode.BOOKS
@@ -303,17 +298,15 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .folioField()
                 ) {
-                    androidx.compose.runtime.key(refreshTick) {
-                        FolioNavShell(
+                    FolioNavShell(
+                        navController = navController,
+                        showBottomBar = showBottomBar
+                    ) {
+                        FolioNavHost(
                             navController = navController,
-                            showBottomBar = showBottomBar
-                        ) {
-                            FolioNavHost(
-                                navController = navController,
-                                navModel = model,
-                                callbacks = callbacks
-                            )
-                        }
+                            navModel = model,
+                            callbacks = callbacks
+                        )
                     }
 
                     Box(
@@ -409,7 +402,6 @@ class MainActivity : ComponentActivity() {
                     if (restored > 0) {
                         importStatus += " • progress restored from cloud"
                     }
-                    refreshTick++
                     val controller =
                         if (::navModel.isInitialized) navModel.navController else null
                     if (firstRoute != null) {
@@ -550,7 +542,6 @@ class MainActivity : ComponentActivity() {
                     importStatus = if (imported == 1) "Imported 1 manga" else "Imported $imported manga"
                     if (restored > 0) importStatus += " • progress restored from cloud"
                 }
-                refreshTick++
             }
         }
     }
@@ -605,7 +596,6 @@ class MainActivity : ComponentActivity() {
                 runCatching { graph.syncEngine?.adoptCloudProgressForManga(entryId) }
                 withContext(Dispatchers.Main) {
                     importStatus = "Imported folder '$seriesName' with ${archives.size} chapters"
-                    refreshTick++
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

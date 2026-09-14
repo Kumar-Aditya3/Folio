@@ -2,7 +2,6 @@ package com.folio.reader.ui.manga
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +26,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -51,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -134,8 +134,9 @@ internal fun MangaGridItem(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
-                onLongClick = onLongClick,
-            ),
+                onLongClick = { if (inSelectionMode) onLongClick() else menuOpen = true },
+            )
+            .folioRightClick { if (!inSelectionMode) menuOpen = true },
     ) {
         Box(
             modifier = Modifier
@@ -226,45 +227,6 @@ internal fun MangaGridItem(
                     )
                 }
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.40f))
-                    .clickable { menuOpen = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = "Options",
-                    tint = Color.White,
-                    modifier = Modifier.size(15.dp),
-                )
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Categories…") },
-                        leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
-                        onClick = { menuOpen = false; onCategories() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Mark all as read") },
-                        leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                        onClick = { menuOpen = false; onMarkRead(true) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Mark all as unread") },
-                        leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
-                        onClick = { menuOpen = false; onMarkRead(false) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Remove from library") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                        onClick = { menuOpen = false; onRemove() },
-                    )
-                }
-            }
         }
         Spacer(Modifier.height(FolioTokens.space2))
         Text(
@@ -293,6 +255,15 @@ internal fun MangaGridItem(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+        MangaItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onOpen = onClick,
+            onSelect = onLongClick,
+            onCategories = onCategories,
+            onMarkRead = onMarkRead,
+            onRemove = onRemove,
+        )
     }
 }
 
@@ -319,12 +290,17 @@ internal fun MangaListItem(
         progress > 0f -> "Reading · $percent%"
         else -> if (unreadCount > 0) "Unread" else ""
     }
+    var menuOpen by remember { mutableStateOf(false) }
     if (compact) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { if (inSelectionMode) onLongClick() else menuOpen = true }
+                )
+                .folioRightClick { if (!inSelectionMode) menuOpen = true },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(modifier = Modifier.padding(start = 16.dp).width(32.dp).height(48.dp)) {
@@ -356,12 +332,14 @@ internal fun MangaListItem(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            MangaRowOptions(
-                fullyRead = fullyRead,
+            MangaItemMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                onOpen = onClick,
+                onSelect = onLongClick,
+                onCategories = onCategories,
                 onMarkRead = onMarkRead,
                 onRemove = onRemove,
-                onCategories = onCategories,
-                modifier = Modifier.padding(end = 8.dp),
             )
         }
     } else {
@@ -377,8 +355,9 @@ internal fun MangaListItem(
                         interactionSource = rowInteraction,
                         indication = null,
                         onClick = onClick,
-                        onLongClick = onLongClick,
+                        onLongClick = { if (inSelectionMode) onLongClick() else menuOpen = true },
                     )
+                    .folioRightClick { if (!inSelectionMode) menuOpen = true }
                     .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -439,11 +418,14 @@ internal fun MangaListItem(
                     )
                     Spacer(Modifier.width(FolioTokens.space1))
                 }
-                MangaRowOptions(
-                    fullyRead = fullyRead,
+                MangaItemMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    onOpen = onClick,
+                    onSelect = onLongClick,
+                    onCategories = onCategories,
                     onMarkRead = onMarkRead,
                     onRemove = onRemove,
-                    onCategories = onCategories,
                 )
             }
             com.folio.reader.ui.components.FolioRule(
@@ -453,40 +435,53 @@ internal fun MangaListItem(
     }
 }
 
+/**
+ * The one context menu a manga carries, opened by long-press (touch) or
+ * right-click (mouse). The old ⋮ badge and the long-press selection jump
+ * revealed two different, partial action sets; this is the union behind a
+ * single gesture — the primary action, the item commands, and the door into
+ * bulk selection.
+ */
 @Composable
-private fun MangaRowOptions(
-    fullyRead: Boolean,
+private fun MangaItemMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    onOpen: () -> Unit,
+    onSelect: () -> Unit,
+    onCategories: () -> Unit,
     onMarkRead: (Boolean) -> Unit,
     onRemove: () -> Unit,
-    onCategories: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = FolioTheme.colors.onSurfaceVariant)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("Categories…") },
-                leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
-                onClick = { open = false; onCategories() },
-            )
-            DropdownMenuItem(
-                text = { Text("Mark all as read") },
-                leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                onClick = { open = false; onMarkRead(true) },
-            )
-            DropdownMenuItem(
-                text = { Text("Mark all as unread") },
-                leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
-                onClick = { open = false; onMarkRead(false) },
-            )
-            DropdownMenuItem(
-                text = { Text("Remove from library") },
-                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                onClick = { open = false; onRemove() },
-            )
-        }
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
+        DropdownMenuItem(
+            text = { Text("Open") },
+            leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+            onClick = { onDismissRequest(); onOpen() },
+        )
+        DropdownMenuItem(
+            text = { Text("Categories…") },
+            leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+            onClick = { onDismissRequest(); onCategories() },
+        )
+        DropdownMenuItem(
+            text = { Text("Mark all as read") },
+            leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
+            onClick = { onDismissRequest(); onMarkRead(true) },
+        )
+        DropdownMenuItem(
+            text = { Text("Mark all as unread") },
+            leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
+            onClick = { onDismissRequest(); onMarkRead(false) },
+        )
+        DropdownMenuItem(
+            text = { Text("Select") },
+            leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
+            onClick = { onDismissRequest(); onSelect() },
+        )
+        DropdownMenuItem(
+            text = { Text("Remove from library") },
+            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+            onClick = { onDismissRequest(); onRemove() },
+        )
     }
 }

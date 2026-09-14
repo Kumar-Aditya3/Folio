@@ -11,7 +11,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * §8.2 ThemeLegibilityTest — `paper`, `midnightneon`, `rainbow` must carry no
+ * §8.2 ThemeLegibilityTest — `paper`, `dusk`, `rainbow` must carry no
  * text with contrast below 4.5:1 (WCAG AA). Reader themes are evaluated on
  * their page-ink roles; app palettes on the chrome text roles, all against the
  * surfaces they are actually painted on.
@@ -72,8 +72,8 @@ class ThemeLegibilityTest {
     }
 
     @Test
-    fun midnightNeonChromeTextIsReadable() {
-        assertChromeReadable(AppPalette.byId("midnightneon"))
+    fun duskChromeTextIsReadable() {
+        assertChromeReadable(AppPalette.byId("dusk"))
     }
 
     @Test

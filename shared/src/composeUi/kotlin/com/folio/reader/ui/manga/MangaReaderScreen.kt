@@ -46,6 +46,7 @@ fun MangaReaderScreen(
     val pages by viewModel.pages.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val modeResolved by viewModel.modeResolved.collectAsState()
     val showControls by viewModel.showControls.collectAsState()
     val mode by viewModel.mode.collectAsState()
     val chapterState by viewModel.chapter.collectAsState()
@@ -75,7 +76,10 @@ fun MangaReaderScreen(
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // Gated on modeResolved too: mode defaults to WEBTOON and is resolved
+            // asynchronously, so an ungated render flashed a webtoon frame for a
+            // paged-mode manga. Errors are NOT gated — a failed open must show.
+            loading || !modeResolved -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color.White)
             }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

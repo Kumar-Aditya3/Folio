@@ -24,11 +24,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +53,7 @@ import com.folio.reader.model.DocumentFormat
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.decodeCoverImage
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
@@ -95,6 +98,7 @@ fun DocumentGrid(
             DocumentGridItem(
                 item = item,
                 selected = item.document.id in selectedIds,
+                isSelectionMode = isSelectionMode,
                 onOpen = {
                     if (isSelectionMode) onToggleSelection(item.document.id) else onOpen(item.document)
                 },
@@ -111,6 +115,7 @@ fun DocumentGrid(
 private fun DocumentListItem(
     item: DocumentLibraryItem,
     selected: Boolean,
+    isSelectionMode: Boolean,
     onOpen: () -> Unit,
     onLongClick: () -> Unit,
     onDelete: () -> Unit,
@@ -118,6 +123,7 @@ private fun DocumentListItem(
 ) {
     val document = item.document
     val interaction = rememberFolioInteraction()
+    var menuOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -128,8 +134,9 @@ private fun DocumentListItem(
                     interactionSource = interaction,
                     indication = null,
                     onClick = onOpen,
-                    onLongClick = onLongClick
+                    onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
                 )
+                .folioRightClick { if (!isSelectionMode) menuOpen = true }
                 .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -153,7 +160,14 @@ private fun DocumentListItem(
                     color = FolioTheme.colors.accentProgress
                 )
             }
-            DocumentOptions(onOpen, onCategories, onDelete)
+            DocumentItemMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                onOpen = onOpen,
+                onSelect = onLongClick,
+                onCategories = onCategories,
+                onDelete = onDelete
+            )
         }
         com.folio.reader.ui.components.FolioRule(Modifier.padding(horizontal = FolioTokens.gutter))
     }
@@ -238,26 +252,48 @@ private fun DocumentThumbnail(
     }
 }
 
+/**
+ * The one context menu a document carries, opened by long-press (touch) or
+ * right-click (mouse) — the union of the old ⋮ menu and the door into bulk
+ * selection behind a single gesture.
+ */
 @Composable
-private fun DocumentOptions(
+private fun DocumentItemMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
     onOpen: () -> Unit,
+    onSelect: () -> Unit,
     onCategories: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    onDelete: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier) {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "Document options", tint = FolioTheme.colors.onSurfaceVariant)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Open") }, onClick = { expanded = false; onOpen() })
-            DropdownMenuItem(text = { Text("Categories") }, onClick = { expanded = false; onCategories() })
-            DropdownMenuItem(
-                text = { Text("Delete document", color = FolioTheme.colors.error) },
-                onClick = { expanded = false; onDelete() }
-            )
-        }
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
+        DropdownMenuItem(
+            text = { Text("Open") },
+            leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            onClick = { onDismissRequest(); onOpen() }
+        )
+        DropdownMenuItem(
+            text = { Text("Categories") },
+            leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            onClick = { onDismissRequest(); onCategories() }
+        )
+        DropdownMenuItem(
+            text = { Text("Select") },
+            leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            onClick = { onDismissRequest(); onSelect() }
+        )
+        DropdownMenuItem(
+            text = { Text("Delete document", color = FolioTheme.colors.error) },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = { onDismissRequest(); onDelete() }
+        )
     }
 }
 
@@ -296,6 +332,7 @@ private fun formatDate(instant: Instant): String =
 private fun DocumentGridItem(
     item: DocumentLibraryItem,
     selected: Boolean,
+    isSelectionMode: Boolean,
     onOpen: () -> Unit,
     onLongClick: () -> Unit,
     onDelete: () -> Unit,
@@ -303,6 +340,7 @@ private fun DocumentGridItem(
 ) {
     val document = item.document
     val interaction = rememberFolioInteraction()
+    var menuOpen by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -313,8 +351,9 @@ private fun DocumentGridItem(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onOpen,
-                onLongClick = onLongClick
+                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
             )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true }
     ) {
         Box(
             modifier = Modifier
@@ -336,7 +375,6 @@ private fun DocumentGridItem(
                 modifier = Modifier.fillMaxSize(),
                 fallbackWithFilename = true
             )
-            DocumentOptions(onOpen, onCategories, onDelete, Modifier.align(Alignment.TopEnd))
             if (document.normalizedProgress > 0.0) {
                 Box(
                     Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp)
@@ -353,6 +391,14 @@ private fun DocumentGridItem(
         Text(document.title, style = FolioTheme.typography.labelMedium, color = FolioTheme.colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(document.primaryCaption(item.isLocalFileMissing), style = FolioTheme.typography.labelSmall, color = if (item.isLocalFileMissing) FolioTheme.colors.error else FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(document.secondaryCaption(), style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        DocumentItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onOpen = onOpen,
+            onSelect = onLongClick,
+            onCategories = onCategories,
+            onDelete = onDelete
+        )
     }
 }
 
@@ -378,6 +424,7 @@ fun DocumentList(
             DocumentListItem(
                 item = item,
                 selected = item.document.id in selectedIds,
+                isSelectionMode = isSelectionMode,
                 onOpen = {
                     if (isSelectionMode) onToggleSelection(item.document.id) else onOpen(item.document)
                 },

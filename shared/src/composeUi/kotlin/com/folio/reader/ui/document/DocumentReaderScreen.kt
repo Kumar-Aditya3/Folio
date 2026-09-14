@@ -89,8 +89,18 @@ fun DocumentReaderScreen(
                         onError = viewModel::reportError
                     )
                     is DocumentReaderContent.Reflowable -> HtmlContentSurface(
-                        html = content.html,
-                        chapterHref = content.chapterHref,
+                        // A reflowed document is one section — same shape a chapter
+                        // window uses, with no chapter identity of its own.
+                        sections = listOf(
+                            com.folio.reader.ui.render.ReaderSection(
+                                spineIndex = -1,
+                                chapterId = DOCUMENT_REFLOWABLE_SECTION,
+                                href = content.chapterHref,
+                                html = content.html
+                            )
+                        ),
+                        windowed = false,
+                        anchorChapterId = null,
                         settings = settings,
                         position = state.reflowableLocator?.toSurfacePosition(state.document!!.id, state.normalizedProgress),
                         highlights = emptyList<Highlight>(),

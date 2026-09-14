@@ -71,6 +71,7 @@ fun ExtensionsScreen(
     val repos by viewModel.repos.collectAsState()
     val refreshing by viewModel.refreshingIndex.collectAsState()
     val repoErrors by viewModel.extensionRepoErrors.collectAsState()
+    val loadErrors by viewModel.extensionLoadErrors.collectAsState()
     var tab by remember { mutableStateOf(0) } // 0 installed, 1 available, 2 untrusted
     var showAddRepo by remember { mutableStateOf(false) }
 
@@ -133,6 +134,17 @@ fun ExtensionsScreen(
                 items(repoErrors.size, key = { "repo-error-$it" }) { i ->
                     Text(
                         repoErrors[i],
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            // Same for an extension that installed but failed to load: without this
+            // line it just vanishes from the Installed list.
+            if (loadErrors.isNotEmpty()) {
+                items(loadErrors.size, key = { "load-error-$it" }) { i ->
+                    Text(
+                        "Extension failed to load — ${loadErrors[i]}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -388,6 +400,17 @@ private fun ExtensionRow(
             entry.isUntrusted -> Button(onClick = onTrust) { Text("Trust") }
             installStep == ExtensionInstallStep.Downloading -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             installStep == ExtensionInstallStep.Installing -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            // A failed install used to silently revert the button to Install; the
+            // label says what happened and the button retries the same install.
+            installStep == ExtensionInstallStep.Error -> {
+                Text(
+                    "Install failed",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.error,
+                )
+                Spacer(Modifier.width(FolioTokens.space2))
+                Button(onClick = onInstall) { Text("Retry") }
+            }
             entry.isInstalled && entry.hasUpdate -> {
                 IconButton(onClick = onUninstall) {
                     Icon(Icons.Filled.Delete, contentDescription = "Uninstall", tint = colors.error)

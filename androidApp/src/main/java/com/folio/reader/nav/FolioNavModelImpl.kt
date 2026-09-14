@@ -12,6 +12,8 @@ import com.folio.reader.AppGraph
 import com.folio.reader.MainActivity
 import com.folio.reader.FolioApplication
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.diffFields
+import com.folio.reader.settings.withFieldsFrom
 import com.folio.reader.sync.SyncState
 import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.library.LibraryViewModel
@@ -20,6 +22,11 @@ import com.folio.reader.ui.statistics.StatisticsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Settings fields whose change means the sync loop must be rebuilt. */
+private val SETTINGS_CREDENTIAL_FIELDS =
+    setOf("firebaseApiKey", "firebaseProjectId", "syncAccountEmail", "syncAccountPassword")
 
 /**
  * Android nav model: owns the state hoisted across destinations and implements
@@ -42,6 +49,8 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
     var libraryModeLoaded by mutableStateOf(false)
     var sharedViewIndex by mutableIntStateOf(0)
     var mangaSearchActive by mutableStateOf(false)
+    var bookSearchActive by mutableStateOf(false)
+    var documentSearchActive by mutableStateOf(false)
     var annotationFormat by mutableStateOf("json")
     var mangaDownloadsLocation by mutableStateOf("")
     var mangaDefaultMode by mutableStateOf(com.folio.reader.ui.manga.MangaReaderMode.WEBTOON)
@@ -119,6 +128,19 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
     }
     val sourceBrowseVmCache = mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
     val searchUiState = SearchUiState()
+    /**
+     * The library rail's books search: query, scope and results hoisted here so
+     * they survive navigation, running the same shared execution as the
+     * full-screen search the reader opens.
+     */
+    val bookSearchController by lazy {
+        com.folio.reader.ui.search.BookSearchController(
+            searchRepository = graph.searchRepository,
+            highlightRepository = graph.highlightRepository,
+            noteRepository = graph.noteRepository,
+            bookmarkRepository = graph.bookmarkRepository
+        )
+    }
     val mangaBackupManager by lazy {
         com.folio.reader.manga.backup.MangaBackupManager(
             mangaRepo = graph.mangaRepository,
@@ -154,15 +176,23 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         }
     }
 
-    /** Saves settings whole, mirroring the pre-nav behaviour; restarts sync on credential change. */
+    /**
+     * Saves only the fields the screen actually changed, so a stale snapshot
+     * cannot clobber values written elsewhere since (e.g. changing the app
+     * theme here must not resurrect an old reading theme). Restarts sync on
+     * credential change.
+     */
     fun updateSettings(updated: ReaderSettings) {
-        val credsChanged = updated.firebaseApiKey != globalSettings.firebaseApiKey ||
-                updated.firebaseProjectId != globalSettings.firebaseProjectId ||
-                updated.syncAccountEmail != globalSettings.syncAccountEmail ||
-                updated.syncAccountPassword != globalSettings.syncAccountPassword
-        globalSettings = updated
+        val changed = updated.diffFields(globalSettings)
+        val credsChanged = SETTINGS_CREDENTIAL_FIELDS.any { it in changed }
+        // Optimistic patch keeps the screen live; the merged row the repository
+        // returns reconciles anything written while the save was in flight.
+        globalSettings = globalSettings.withFieldsFrom(changed, updated)
         activity.appScope.launch(Dispatchers.IO) {
-            runCatching { graph.settingsRepository.saveGlobalSettings(updated) }
+            runCatching {
+                val merged = graph.settingsRepository.mergeGlobalSettings { it.withFieldsFrom(changed, updated) }
+                withContext(Dispatchers.Main) { globalSettings = merged }
+            }
         }
         if (credsChanged) graph.restartSync(activity.appScope)
     }
@@ -182,6 +212,7 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
     @Composable
     override fun libraryContent(
         onOpenReader: (String) -> Unit,
+        onOpenReaderAt: (String, Int?) -> Unit,
         onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,
@@ -196,7 +227,7 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
         onOpenMangaDownloads: () -> Unit,
         onOpenMangaSource: (Long, String) -> Unit
     ) = LibraryRoute(
-        this, onOpenReader, onOpenDocument, onOpenBookDetail, onOpenSearch, onOpenSettings,
+        this, onOpenReader, onOpenReaderAt, onOpenDocument, onOpenBookDetail, onOpenSearch, onOpenSettings,
         onOpenTags, onOpenQuotes, onOpenRevisit, onOpenMangaBrowse, onOpenMangaExtensions,
         onOpenMangaHistory, onOpenMangaDetail, onOpenMangaDownloads, onOpenMangaSource
     )
