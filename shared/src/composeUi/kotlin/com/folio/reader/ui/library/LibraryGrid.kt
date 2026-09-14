@@ -22,11 +22,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,6 +49,7 @@ import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
@@ -152,6 +154,7 @@ private fun FeaturedShelfEntry(
 ) {
     val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
     val interaction = rememberFolioInteraction()
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -160,8 +163,9 @@ private fun FeaturedShelfEntry(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
-                onLongClick = onLongClick,
-            ),
+                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true },
+            )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FolioCoverPlate(
@@ -238,13 +242,13 @@ private fun FeaturedShelfEntry(
             Spacer(Modifier.height(FolioTokens.space1))
             FolioProgressBar(progress = book.normalizedProgress.toFloat(), color = accent)
         }
-        if (!isSelectionMode) {
-            BookOptionsDropdown(
-                book = book,
-                onBookClick = { onClick() },
-                onDeleteBook = onDeleteBook,
-            )
-        }
+        BookItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onDetails = onClick,
+            onSelect = onLongClick,
+            onDelete = { onDeleteBook(book) },
+        )
     }
 }
 
@@ -271,6 +275,7 @@ fun BookCard(
     val interaction = rememberFolioInteraction()
     val inProgress = book.normalizedProgress > 0.0 && book.normalizedProgress < 0.99
     val colors = FolioTheme.colors
+    var menuOpen by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -280,8 +285,9 @@ fun BookCard(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
             )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true }
     ) {
         FolioCoverPlate(
             coverPath = book.coverPath,
@@ -314,14 +320,6 @@ fun BookCard(
                             modifier = Modifier.size(15.dp),
                         )
                     }
-                } else if (!isSelectionMode) {
-                    BookOptionsDropdown(
-                        book = book,
-                        onBookClick = { onClick() },
-                        onDeleteBook = onDeleteBook,
-                        modifier = Modifier.align(Alignment.TopEnd),
-                        iconTint = Color.White
-                    )
                 }
                 // §5.1: progress as a seam on the plate's foot. §2.6 holds — one
                 // progress form per view, and the ring is gone from the shelf.
@@ -384,48 +382,68 @@ fun BookCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
             )
         }
+        BookItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onDetails = onClick,
+            onSelect = onLongClick,
+            onDelete = { onDeleteBook(book) },
+        )
     }
 }
 
+/**
+ * The one context menu a book carries, opened by long-press (touch) or
+ * right-click (mouse). The old per-item ⋮ badge and the long-press selection
+ * jump revealed two different, partial action sets; this is the union behind a
+ * single gesture — the primary action, the door into bulk selection, and delete.
+ */
 @Composable
-internal fun BookOptionsDropdown(
-    book: Book,
-    onBookClick: (Book) -> Unit,
-    onDeleteBook: (Book) -> Unit,
-    modifier: Modifier = Modifier,
-    iconTint: Color = FolioTheme.colors.onSurfaceVariant
+internal fun BookItemMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    onDetails: () -> Unit,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(
-            onClick = { expanded = true },
-            modifier = Modifier.size(32.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = "Book options",
-                tint = iconTint,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Book Details") },
-                onClick = {
-                    expanded = false
-                    onBookClick(book)
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Delete Book", color = FolioTheme.colors.error) },
-                onClick = {
-                    expanded = false
-                    onDeleteBook(book)
-                }
-            )
-        }
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest
+    ) {
+        DropdownMenuItem(
+            text = { Text("Book details") },
+            leadingIcon = {
+                Icon(Icons.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            onClick = {
+                onDismissRequest()
+                onDetails()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Select") },
+            leadingIcon = {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            onClick = {
+                onDismissRequest()
+                onSelect()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Delete book", color = FolioTheme.colors.error) },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismissRequest()
+                onDelete()
+            }
+        )
     }
 }

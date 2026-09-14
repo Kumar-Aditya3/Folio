@@ -62,6 +62,14 @@ class ExtensionManager(
     private val repoFetchErrorsFlow = MutableStateFlow(emptyList<ExtensionApi.RepoFetchError>())
     val repoFetchErrors: StateFlow<List<ExtensionApi.RepoFetchError>> = repoFetchErrorsFlow
 
+    /**
+     * Extensions that are installed but failed to load ("Name (pkg): reason"), from the
+     * last [initExtensions] pass. Without this they simply vanish from the Installed
+     * list; the extensions screen renders these so the failure has a face.
+     */
+    private val loadErrorsFlow = MutableStateFlow(emptyList<String>())
+    val loadErrors: StateFlow<List<String>> = loadErrorsFlow
+
     init {
         scope.launch(Dispatchers.IO) {
             initExtensions()
@@ -113,6 +121,8 @@ class ExtensionManager(
             untrustedExtensionMapFlow.value = extensions
                 .filterIsInstance<LoadResult.Untrusted>()
                 .associate { it.extension.pkgName to it.extension }
+
+            loadErrorsFlow.value = extensions.filterIsInstance<LoadResult.Error>().map { it.reason }
 
             initialized.complete(Unit)
         } catch (e: Throwable) {

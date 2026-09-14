@@ -57,6 +57,13 @@ interface MangaBackend {
      */
     fun observeExtensionRepoErrors(): Flow<List<String>> = flowOf(emptyList())
 
+    /**
+     * Extensions that are installed but failed to load ("Name (pkg): reason").
+     * Empty on platforms without an extension runtime; the Android backend maps
+     * its extension manager's load errors here.
+     */
+    fun observeExtensionLoadErrors(): Flow<List<String>> = flowOf(emptyList())
+
     suspend fun refreshExtensionIndex()
 
     suspend fun getRepos(): List<MangaRepoInfo>

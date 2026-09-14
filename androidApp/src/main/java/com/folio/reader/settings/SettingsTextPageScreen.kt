@@ -14,6 +14,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -22,44 +23,62 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
-import com.folio.reader.model.Book
 import com.folio.reader.nav.FolioNavModelImpl
-import com.folio.reader.ui.settings.FormattingSettingsPanel
+import com.folio.reader.ui.settings.TextAndPageSettingsPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The formatting-panel fields went global in 937069c; books already opened
- * before that still carry snapshotted values for them, which is what the
- * review list counts and clears.
+ * Text & page: the Typography, Layout and Formatting screens merged (§14.2).
+ * One live preview above the controls answers "what does this do?" for all
+ * three sections at once, one override count covers everything per-book, and
+ * the legacy formatting review (books snapshotted before those fields went
+ * global) keeps its place at the bottom of the panel.
  */
-private val LEGACY_FORMATTING_FIELDS = setOf("alignment", "formattingMode", "hyphenation")
-
 @Composable
-fun SettingsFormattingScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
+fun SettingsTextPageScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     val graph = navModel.graph
-    var legacyBooks by remember { mutableStateOf<List<Book>>(emptyList()) }
+    var overrides by remember { mutableIntStateOf(0) }
+    var legacyBooks by remember { mutableStateOf<List<com.folio.reader.model.Book>>(emptyList()) }
     var showReview by remember { mutableStateOf(false) }
+    var reloadTick by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         runCatching { navModel.globalSettings = graph.settingsRepository.getGlobalSettings() }
-        legacyBooks = legacyFormattingBooks(navModel)
+        legacyBooks = legacyFormattingBooks(graph)
+    }
+    // Recounted after every edit, because a book only counts as overriding once
+    // its snapshot differs from the current defaults. Delayed so dragging a
+    // slider does not run one pass per frame.
+    LaunchedEffect(reloadTick, navModel.globalSettings) {
+        delay(300)
+        overrides = withContext(Dispatchers.IO) {
+            booksOverriding(graph, TYPE_FIELDS + MEASURE_FIELDS).size
+        }
     }
 
     SettingsCategoryScaffold(
-        title = "Formatting",
+        title = "Text & page",
         onBack = onBack,
         livePreviewSettings = navModel.globalSettings
     ) {
-        FormattingSettingsPanel(
+        TextAndPageSettingsPanel(
             settings = navModel.globalSettings,
             onSettingsChange = { navModel.updateSettings(it) },
-            overrideCount = legacyBooks.size,
-            onReviewOverrides = { showReview = true }
+            overrideCount = overrides,
+            onApplyToOpenedBooks = {
+                navModel.activity.appScope.launch {
+                    withContext(Dispatchers.IO) { clearBookOverrides(graph, TYPE_FIELDS + MEASURE_FIELDS) }
+                    reloadTick++
+                }
+            },
+            legacyFormattingCount = legacyBooks.size,
+            onReviewLegacyFormatting = { showReview = true }
         )
     }
 
@@ -78,7 +97,7 @@ fun SettingsFormattingScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
                                 )
                             }
                         }
-                        legacyFormattingBooks(navModel)
+                        legacyFormattingBooks(graph)
                     }
                 }
             },
@@ -87,11 +106,18 @@ fun SettingsFormattingScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     }
 }
 
-private suspend fun legacyFormattingBooks(navModel: FolioNavModelImpl): List<Book> {
-    val books = runCatching { navModel.graph.bookRepository.getAllBooks().first() }
+/**
+ * The formatting-panel fields went global in 937069c; books already opened
+ * before that still carry snapshotted values for them, which is what the
+ * review list counts and clears.
+ */
+internal val LEGACY_FORMATTING_FIELDS = setOf("alignment", "formattingMode", "hyphenation")
+
+internal suspend fun legacyFormattingBooks(graph: com.folio.reader.AppGraph): List<com.folio.reader.model.Book> {
+    val books = runCatching { graph.bookRepository.getAllBooks().first() }
         .getOrDefault(emptyList())
     return books.filter { book ->
-        val stored = runCatching { navModel.graph.settingsRepository.getBookSettings(book.id) }.getOrNull()
+        val stored = runCatching { graph.settingsRepository.getBookSettings(book.id) }.getOrNull()
         stored != null &&
             (stored.alignment != null || stored.formattingMode != null || stored.hyphenation != null)
     }
@@ -99,8 +125,8 @@ private suspend fun legacyFormattingBooks(navModel: FolioNavModelImpl): List<Boo
 
 @Composable
 private fun FormattingOverridesDialog(
-    books: List<Book>,
-    onResetBook: (Book) -> Unit,
+    books: List<com.folio.reader.model.Book>,
+    onResetBook: (com.folio.reader.model.Book) -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {

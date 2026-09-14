@@ -208,6 +208,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
 fun LibraryRoute(
     navModel: FolioNavModelImpl,
     onOpenReader: (String) -> Unit,
+    onOpenReaderAt: (String, Int?) -> Unit,
     onOpenDocument: (String) -> Unit,
     onOpenBookDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
@@ -267,10 +268,25 @@ fun LibraryRoute(
                     activity.importStatus =
                         "Document removed; some local files could not be deleted"
                 }
-                activity.refreshTick++
             }
         },
-        onSearchClick = onOpenSearch,
+        // One search contract for every shelf: the icon toggles the mode's rail
+        // search, which keeps the Books/Manga/Documents switch on screen.
+        onSearchClick = {
+            when (navModel.libraryMode) {
+                LibraryMode.BOOKS -> navModel.bookSearchActive = !navModel.bookSearchActive
+                LibraryMode.DOCUMENTS -> navModel.documentSearchActive = !navModel.documentSearchActive
+                LibraryMode.MANGA -> navModel.mangaSearchActive = !navModel.mangaSearchActive
+            }
+        },
+        bookSearchActive = navModel.bookSearchActive,
+        onBookSearchActiveChange = { navModel.bookSearchActive = it },
+        bookSearchController = navModel.bookSearchController,
+        onOpenBookHit = { hit ->
+            onOpenReaderAt(hit.book.id, hit.spineIndex.takeIf { it >= 0 })
+        },
+        documentSearchActive = navModel.documentSearchActive,
+        onDocumentSearchActiveChange = { navModel.documentSearchActive = it },
         onSettingsClick = onOpenSettings,
         showSettingsAction = false,
         onTagManagerClick = onOpenTags,
@@ -284,7 +300,6 @@ fun LibraryRoute(
                     runCatching { graph.bookRepository.deleteBook(id) }
                     runCatching { graph.platform.fileSystem.deleteBookFiles(id) }
                 }
-                activity.refreshTick++
             }
         },
         onSetBookStatus = { ids, status ->
@@ -483,14 +498,13 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
         com.folio.reader.settings.FolioSettingsCategory.DEFAULTS ->
             com.folio.reader.settings.SettingsReaderDefaultsScreen(navModel, onBack)
 
-        com.folio.reader.settings.FolioSettingsCategory.TYPOGRAPHY ->
-            com.folio.reader.settings.SettingsTypographyScreen(navModel, onBack)
-
-        com.folio.reader.settings.FolioSettingsCategory.LAYOUT ->
-            com.folio.reader.settings.SettingsLayoutScreen(navModel, onBack)
-
+        // §14.2: one merged screen; the pre-merge categories (typography,
+        // layout, formatting) keep resolving to it for old deep links.
+        com.folio.reader.settings.FolioSettingsCategory.TEXT_AND_PAGE,
+        com.folio.reader.settings.FolioSettingsCategory.TYPOGRAPHY,
+        com.folio.reader.settings.FolioSettingsCategory.LAYOUT,
         com.folio.reader.settings.FolioSettingsCategory.FORMATTING ->
-            com.folio.reader.settings.SettingsFormattingScreen(navModel, onBack)
+            com.folio.reader.settings.SettingsTextPageScreen(navModel, onBack)
 
         com.folio.reader.settings.FolioSettingsCategory.READING ->
             com.folio.reader.settings.SettingsReadingScreen(navModel, onBack)
@@ -515,6 +529,9 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.MANGA ->
             com.folio.reader.settings.SettingsMangaScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.LIBRARY_SCAN ->
+            com.folio.reader.settings.SettingsLibraryScanScreen(navModel, onBack)
 
         // Unknown/legacy categories (e.g. deep links from older builds) land
         // on the hub instead of a dead end.

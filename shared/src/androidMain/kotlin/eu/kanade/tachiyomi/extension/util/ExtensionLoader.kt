@@ -165,10 +165,11 @@ internal object ExtensionLoader {
         return runBlocking(Dispatchers.IO) {
             val deferred = extPkgs.map { pkg ->
                 async {
+                    val label = pkg.packageInfo.packageName
                     runCatching {
                         withTimeoutOrNull(EXTENSION_LOAD_TIMEOUT_MS) { loadExtension(context, pkg) }
-                            ?: LoadResult.Error
-                    }.getOrElse { LoadResult.Error }
+                            ?: LoadResult.Error("$label: timed out after 15s")
+                    }.getOrElse { LoadResult.Error("$label: ${it.message ?: it.javaClass.simpleName}") }
                 }
             }
             deferred.awaitAll()
@@ -183,7 +184,7 @@ internal object ExtensionLoader {
         val extensionPackage = getExtensionInfoFromPkgName(context, pkgName)
         if (extensionPackage == null) {
             logcat(LogPriority.ERROR) { "Extension package is not found ($pkgName)" }
-            return LoadResult.Error
+            return LoadResult.Error("$pkgName: package not found")
         }
         return loadExtension(context, extensionPackage)
     }
@@ -231,7 +232,8 @@ internal object ExtensionLoader {
      * @param extensionInfo The extension to load.
      */
     private suspend fun loadExtension(context: Context, extensionInfo: ExtensionInfo): LoadResult {
-        val trustExtension: TrustExtension = ExtensionRuntime.trustExtension ?: return LoadResult.Error
+        val trustExtension: TrustExtension = ExtensionRuntime.trustExtension
+            ?: return LoadResult.Error("trust store unavailable")
 
         val pkgManager = context.packageManager
         val pkgInfo = extensionInfo.packageInfo
@@ -245,7 +247,7 @@ internal object ExtensionLoader {
 
         if (versionName.isNullOrEmpty()) {
             logcat(LogPriority.WARN) { "Missing versionName for extension $extName" }
-            return LoadResult.Error
+            return LoadResult.Error("$extName ($pkgName): missing versionName")
         }
 
         // Validate lib version
@@ -258,13 +260,16 @@ internal object ExtensionLoader {
             logcat(LogPriority.WARN) {
                 "Lib version is $libVersion, while only version(s) ${SUPPORTED_LIB_VERSIONS.joinToString()} are supported"
             }
-            return LoadResult.Error
+            return LoadResult.Error(
+                "$extName ($pkgName): unsupported library version $libVersion " +
+                    "(supported: ${SUPPORTED_LIB_VERSIONS.joinToString()})"
+            )
         }
 
         val signatures = getSignatures(pkgInfo)
         if (signatures.isNullOrEmpty()) {
             logcat(LogPriority.WARN) { "Package $pkgName isn't signed" }
-            return LoadResult.Error
+            return LoadResult.Error("$extName ($pkgName): package not signed")
         } else if (!trustExtension.isTrusted(pkgInfo, signatures)) {
             val extension = Extension.Untrusted(
                 extName,
@@ -285,7 +290,7 @@ internal object ExtensionLoader {
             DelegateLastClassLoaderCompat(appInfo.sourceDir, null, context.classLoader)
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e) { "Extension load error: $extName ($pkgName)" }
-            return LoadResult.Error
+            return LoadResult.Error("$extName ($pkgName): class loader failed: ${e.message ?: e.javaClass.simpleName}")
         }
 
         val sources = appInfo.metaData.getString(METADATA_SOURCE_CLASS)!!
@@ -307,7 +312,7 @@ internal object ExtensionLoader {
                     }
                 } catch (e: Throwable) {
                     logcat(LogPriority.ERROR, e) { "Extension load error: $extName ($it)" }
-                    return LoadResult.Error
+                    return LoadResult.Error("$extName ($pkgName): source class failed to load: ${e.message ?: e.javaClass.simpleName}")
                 }
             }
 

@@ -57,7 +57,15 @@ fun SettingsScreen(
     mangaDefaultMode: com.folio.reader.ui.manga.MangaReaderMode = com.folio.reader.ui.manga.MangaReaderMode.WEBTOON,
     onMangaDefaultModeChange: (com.folio.reader.ui.manga.MangaReaderMode) -> Unit = {},
     mangaDownloadsLocation: String? = null,
-    onPickMangaDownloadsLocation: () -> Unit = {}
+    onPickMangaDownloadsLocation: () -> Unit = {},
+    /** Library scanning controls; null hides the section (Android hosts it as its own screen). */
+    scanState: LibraryScanPanelState? = null,
+    onScanScopeChange: (com.folio.reader.importer.LibraryScanScope) -> Unit = {},
+    onPickScanFolder: () -> Unit = {},
+    /** Null (desktop) hides the device-root picker: the device scope scans the user's common folders there. */
+    onPickScanDeviceRoot: (() -> Unit)? = null,
+    onScanOnStartChange: (Boolean) -> Unit = {},
+    onScanNow: () -> Unit = {},
 ) {
     var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
     var showPreview by remember { mutableStateOf(true) }
@@ -123,9 +131,10 @@ fun SettingsScreen(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
 
-                                    SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.TEXT_AND_PAGE -> TextAndPageSettingsPanel(
+                                        settings,
+                                        onSettingsChange
+                                    )
                                     SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
                                         settings,
@@ -134,17 +143,27 @@ fun SettingsScreen(
                                         onSyncNow
                                     )
 
-                                    SettingsCategory.ADVANCED -> AdvancedSettingsPanel(
-                                        settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
-                                        onExportAnnotations
-                                    )
+                                    SettingsCategory.ADVANCED -> Column {
+                                        AdvancedSettingsPanel(
+                                            settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
+                                            onExportAnnotations
+                                        )
+                                        if (scanState != null) {
+                                            LibraryScanSettingsPanel(
+                                                state = scanState,
+                                                onScopeChange = onScanScopeChange,
+                                                onPickFolder = onPickScanFolder,
+                                                onPickDeviceRoot = onPickScanDeviceRoot,
+                                                onScanOnStartChange = onScanOnStartChange,
+                                                onScanNow = onScanNow,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                         if (showPreview && selectedCategory in setOf(
-                                SettingsCategory.TYPOGRAPHY,
-                                SettingsCategory.LAYOUT,
-                                SettingsCategory.FORMATTING
+                                SettingsCategory.TEXT_AND_PAGE
                             )
                         ) {
                             item { SettingsLivePreview(settings) }
@@ -225,9 +244,10 @@ fun SettingsScreen(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
 
-                                    SettingsCategory.TYPOGRAPHY -> TypographySettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.LAYOUT -> LayoutSettingsPanel(settings, onSettingsChange)
-                                    SettingsCategory.FORMATTING -> FormattingSettingsPanel(settings, onSettingsChange)
+                                    SettingsCategory.TEXT_AND_PAGE -> TextAndPageSettingsPanel(
+                                        settings,
+                                        onSettingsChange
+                                    )
                                     SettingsCategory.READING -> ReadingSettingsPanel(settings, onSettingsChange)
                                     SettingsCategory.CLOUD_SYNC -> CloudSyncSettingsPanel(
                                         settings,
@@ -236,17 +256,27 @@ fun SettingsScreen(
                                         onSyncNow
                                     )
 
-                                    SettingsCategory.ADVANCED -> AdvancedSettingsPanel(
-                                        settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
-                                        onExportAnnotations
-                                    )
+                                    SettingsCategory.ADVANCED -> Column {
+                                        AdvancedSettingsPanel(
+                                            settings, onSettingsChange, onImportFont, onExportBackup, onImportBackup,
+                                            onExportAnnotations
+                                        )
+                                        if (scanState != null) {
+                                            LibraryScanSettingsPanel(
+                                                state = scanState,
+                                                onScopeChange = onScanScopeChange,
+                                                onPickFolder = onPickScanFolder,
+                                                onPickDeviceRoot = onPickScanDeviceRoot,
+                                                onScanOnStartChange = onScanOnStartChange,
+                                                onScanNow = onScanNow,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                         if (showPreview && selectedCategory in setOf(
-                                SettingsCategory.TYPOGRAPHY,
-                                SettingsCategory.LAYOUT,
-                                SettingsCategory.FORMATTING
+                                SettingsCategory.TEXT_AND_PAGE
                             )
                         ) {
                             item { SettingsLivePreview(settings) }
@@ -272,15 +302,31 @@ fun SettingsScreen(
 }
 
 // Settings categories enum
-enum class SettingsCategory(val displayName: String) {
-    GENERAL("General"),
-    CUSTOM_THEME("Custom theme"),
-    TRANSPARENCY("Transparency"),
-    DEFAULTS("Reader defaults"),
-    TYPOGRAPHY("Typography"),
-    LAYOUT("Layout"),
-    FORMATTING("Formatting"),
-    READING("Reading"),
-    CLOUD_SYNC("Cloud Sync"),
-    ADVANCED("Advanced")
+enum class SettingsCategory(val displayName: String, val routeName: String) {
+    GENERAL("General", "general"),
+    CUSTOM_THEME("Custom theme", "custom_theme"),
+    TRANSPARENCY("Transparency", "transparency"),
+    DEFAULTS("Reader defaults", "defaults"),
+    TEXT_AND_PAGE("Text & page", "text_and_page"),
+    READING("Reading", "reading"),
+    CLOUD_SYNC("Cloud Sync", "cloud_sync"),
+    ADVANCED("Advanced", "advanced");
+
+    companion object {
+        /**
+         * Pre-merge route names and their successor. Kept so deep links and
+         * bookmarks from older builds land on the merged screen instead of a
+         * dead end — §14.2.
+         */
+        private val LEGACY_ROUTES = mapOf(
+            "typography" to TEXT_AND_PAGE,
+            "layout" to TEXT_AND_PAGE,
+            "formatting" to TEXT_AND_PAGE,
+            "text" to TEXT_AND_PAGE,
+        )
+
+        /** Route-name resolution for `settings/{category}`, shared with the Android hub. */
+        fun fromRoute(route: String): SettingsCategory? =
+            entries.firstOrNull { it.routeName == route } ?: LEGACY_ROUTES[route]
+    }
 }

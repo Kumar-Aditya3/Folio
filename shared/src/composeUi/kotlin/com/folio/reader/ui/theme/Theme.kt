@@ -12,6 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.folio.reader.settings.ReaderSettings
 
 // §12.6: the multi-series/chart hue role. Borrowed from the reader's paper
 // highlighters and reordered so the first six (the genre breakdown's cap) are
@@ -340,6 +341,78 @@ private val MossFolioColors = LightFolioColors.copy(
     accentAnnotation = Color(0xFF6D28D9)
 )
 
+// DAWN — Dusk's light face: violet-washed paper under a pink-tinted ground.
+// The pair shares a family (violet ink, magenta accents); the paper keeps the
+// morning side while Dusk keeps the night.
+private val DawnFolioColors = LightFolioColors.copy(
+    primary = Color(0xFF7C3AED),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFE4D4FF),
+    onPrimaryContainer = Color(0xFF25005F),
+    secondary = Color(0xFFD9579A),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFFD6E8),
+    onSecondaryContainer = Color(0xFF3D0030),
+    tertiary = Color(0xFF00897B),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFB2DFDB),
+    onTertiaryContainer = Color(0xFF004D40),
+    background = Color(0xFFFAF4F9),
+    onBackground = Color(0xFF2B1240),
+    surface = Color(0xFFE4D9F2),
+    onSurface = Color(0xFF2B1240),
+    surfaceVariant = Color(0xFFEBE0F6),
+    onSurfaceVariant = Color(0xFF5E5170),
+    surfaceContainerHighest = Color(0xFFD8CBE8),
+    outline = Color(0xFF9A86B8),
+    outlineVariant = Color(0xFFD8CBE8),
+    inverseSurface = Color(0xFF2B1240),
+    inverseOnSurface = Color(0xFFFAF4F9),
+    inversePrimary = Color(0xFFB39DFF),
+    statusBar = Color(0xFF180A28),
+    accentProgress = Color(0xFF5B21B6),
+    accentStreak = Color(0xFF9A3412),
+    accentDiscovery = Color(0xFF115E59),
+    accentAnnotation = Color(0xFFB31656)
+)
+
+// SILVER — Graphite's light face: zero hue, maximum legibility on paper-grey.
+// Achromatic by design (ThemeSchemeTest allowlist); its planes separate by
+// lightness (background #F1F2F4 vs surface #E2E4E8, ΔL* ≈ 4.9), mirroring
+// Graphite's own ladder from the other end. Accents stay desaturated on
+// purpose — on a neutral field a little colour goes far.
+private val SilverFolioColors = LightFolioColors.copy(
+    primary = Color(0xFF43464B),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD3D6DA),
+    onPrimaryContainer = Color(0xFF26282C),
+    secondary = Color(0xFF5F6469),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE0E3E7),
+    onSecondaryContainer = Color(0xFF1E2024),
+    tertiary = Color(0xFF4A6E88),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFD6E4EE),
+    onTertiaryContainer = Color(0xFF10181E),
+    background = Color(0xFFF1F2F4),
+    onBackground = Color(0xFF1B1D20),
+    surface = Color(0xFFE2E4E8),
+    onSurface = Color(0xFF1B1D20),
+    surfaceVariant = Color(0xFFD8DBE0),
+    onSurfaceVariant = Color(0xFF5C6169),
+    surfaceContainerHighest = Color(0xFFC9CCD2),
+    outline = Color(0xFF9AA0A8),
+    outlineVariant = Color(0xFFC9CCD2),
+    inverseSurface = Color(0xFF1B1D20),
+    inverseOnSurface = Color(0xFFF1F2F4),
+    inversePrimary = Color(0xFFC3C8CE),
+    statusBar = Color(0xFF141518),
+    accentProgress = Color(0xFF35618E),
+    accentStreak = Color(0xFF6E5522),
+    accentDiscovery = Color(0xFF3F6B45),
+    accentAnnotation = Color(0xFF8A4C64)
+)
+
 // ── DARK THEMES ─────────────────────────────────────────────────────────
 
 private val DuskFolioColors = DarkFolioColors.copy(
@@ -438,106 +511,9 @@ private val MidnightFolioColors = DarkFolioColors.copy(
     accentAnnotation = Color(0xFFF06292)
 )
 
-private val OceanFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFF00E5C4),
-    onPrimary = Color(0xFF003028),
-    primaryContainer = Color(0xFF00685A),
-    onPrimaryContainer = Color(0xFFB0FFF0),
-    secondary = Color(0xFF29B6FF),
-    onSecondary = Color(0xFF002438),
-    secondaryContainer = Color(0xFF00507A),
-    onSecondaryContainer = Color(0xFFBEEAFF),
-    tertiary = Color(0xFF00FFAA),
-    onTertiary = Color(0xFF003A26),
-    tertiaryContainer = Color(0xFF006B47),
-    onTertiaryContainer = Color(0xFFB8FFDE),
-    background = Color(0xFF00211C),
-    onBackground = Color(0xFFCFFFF0),
-    surface = Color(0xFF002D2E),
-    onSurface = Color(0xFFCFFFF0),
-    surfaceVariant = Color(0xFF0A353E),
-    onSurfaceVariant = Color(0xFF7FDCCB),
-    surfaceContainerHighest = Color(0xFF14504A),
-    outline = Color(0xFF2E7D72),
-    outlineVariant = Color(0xFF14504A),
-    inverseSurface = Color(0xFFCFFFF0),
-    inverseOnSurface = Color(0xFF002E28),
-    inversePrimary = Color(0xFF00877A),
-    statusBar = Color(0xFF001410),
-    accentProgress = Color(0xFF29B6FF),
-    accentStreak = Color(0xFFFFB300),
-    accentDiscovery = Color(0xFFB2FF59),
-    accentAnnotation = Color(0xFFF48FB1)
-)
-
-private val GrapeFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFFE040FB),
-    onPrimary = Color(0xFF2C0038),
-    primaryContainer = Color(0xFF6A0FA0),
-    onPrimaryContainer = Color(0xFFF8D4FF),
-    secondary = Color(0xFF7C4DFF),
-    onSecondary = Color(0xFF120047),
-    secondaryContainer = Color(0xFF321894),
-    onSecondaryContainer = Color(0xFFDCCEFF),
-    tertiary = Color(0xFFFF2ED1),
-    onTertiary = Color(0xFF3B0030),
-    tertiaryContainer = Color(0xFF700A5C),
-    onTertiaryContainer = Color(0xFFFFC8F2),
-    background = Color(0xFF1B0033),
-    onBackground = Color(0xFFF2DCFF),
-    surface = Color(0xFF38054D),
-    onSurface = Color(0xFFF2DCFF),
-    surfaceVariant = Color(0xFF570F63),
-    onSurfaceVariant = Color(0xFFC79BF0),
-    surfaceContainerHighest = Color(0xFF701A7E),
-    outline = Color(0xFF7438AE),
-    outlineVariant = Color(0xFF701A7E),
-    inverseSurface = Color(0xFFF2DCFF),
-    inverseOnSurface = Color(0xFF28054D),
-    inversePrimary = Color(0xFFA000CC),
-    statusBar = Color(0xFF0F001C),
-    accentProgress = Color(0xFFA78BFA),
-    accentStreak = Color(0xFFFF2ED1),
-    accentDiscovery = Color(0xFF00E5FF),
-    accentAnnotation = Color(0xFFFFD54F)
-)
-
-// §15 Rule 22: OLED is achromatic by design — the true-black theme the spec
-// preserves. Background stays #000000; the card plane lifts just enough
-// (#101010, ΔL* ≈ 4.7) for the luminance clause, like Graphite's specced pair.
-private val OledFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFF90A4AE),
-    onPrimary = Color(0xFF000000),
-    primaryContainer = Color(0xFF1A1A1A),
-    onPrimaryContainer = Color(0xFFCFD8DC),
-    secondary = Color(0xFF78909C),
-    onSecondary = Color(0xFF000000),
-    secondaryContainer = Color(0xFF141414),
-    onSecondaryContainer = Color(0xFFB0BEC5),
-    tertiary = Color(0xFF80CBC4),
-    onTertiary = Color(0xFF000000),
-    tertiaryContainer = Color(0xFF0A1A18),
-    onTertiaryContainer = Color(0xFFB2DFDB),
-    background = Color(0xFF000000),
-    onBackground = Color(0xFFECEFF1),
-    surface = Color(0xFF101010),
-    onSurface = Color(0xFFECEFF1),
-    surfaceVariant = Color(0xFF121212),
-    onSurfaceVariant = Color(0xFF90A4AE),
-    surfaceContainerHighest = Color(0xFF1A1A1A),
-    outline = Color(0xFF494949),
-    outlineVariant = Color(0xFF1A1A1A),
-    shadow = Color.Black,
-    scrim = Color.Black,
-    inverseSurface = Color(0xFFECEFF1),
-    inverseOnSurface = Color(0xFF000000),
-    inversePrimary = Color(0xFF546E7A),
-    statusBar = Color(0xFF000000),
-    accentProgress = Color(0xFFB3C7D6),
-    accentStreak = Color(0xFFECEFF1),
-    accentDiscovery = Color(0xFF8CA3B3),
-    accentAnnotation = Color(0xFF6E8794)
-)
+// ── Removed with the light/dark pairing: OCEAN and GRAPE folded into their
+// nearest surviving families (Peacock, Dusk); their persisted ids are remapped
+// in AppPalette.byId.
 
 // §15.4.1 GRAPHITE — the deliberate opposite of the saturated palettes: zero hue,
 // maximum legibility. In the ThemeSchemeTest allowlist; planes separate by lightness
@@ -711,69 +687,9 @@ private val BubblegumFolioColors = LightFolioColors.copy(
     accentAnnotation = Color(0xFF01579B)
 )
 
-private val AcidFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFFCCFF00),
-    onPrimary = Color(0xFF1E2800),
-    primaryContainer = Color(0xFF3A4A00),
-    onPrimaryContainer = Color(0xFFECFFB0),
-    secondary = Color(0xFFFF2ED1),
-    onSecondary = Color(0xFF3A002E),
-    secondaryContainer = Color(0xFF58084A),
-    onSecondaryContainer = Color(0xFFFFC8F0),
-    tertiary = Color(0xFF00FFAA),
-    onTertiary = Color(0xFF003824),
-    tertiaryContainer = Color(0xFF0A5238),
-    onTertiaryContainer = Color(0xFFC0FFE6),
-    background = Color(0xFF060806),
-    onBackground = Color(0xFFE8FFD6),
-    surface = Color(0xFF0E120C),
-    onSurface = Color(0xFFE8FFD6),
-    surfaceVariant = Color(0xFF182014),
-    onSurfaceVariant = Color(0xFF98B878),
-    surfaceContainerHighest = Color(0xFF24301C),
-    outline = Color(0xFF3A4C2A),
-    outlineVariant = Color(0xFF24301C),
-    inverseSurface = Color(0xFFE8FFD6),
-    inverseOnSurface = Color(0xFF0E120C),
-    inversePrimary = Color(0xFF5E7A00),
-    statusBar = Color(0xFF020302),
-    accentProgress = Color(0xFF00FFAA),
-    accentStreak = Color(0xFFFFB300),
-    accentDiscovery = Color(0xFFFF2ED1),
-    accentAnnotation = Color(0xFF80DEEA)
-)
-
-private val LavaFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFFFF5C1E),
-    onPrimary = Color(0xFF3E0E00),
-    primaryContainer = Color(0xFF6E2200),
-    onPrimaryContainer = Color(0xFFFFD8C4),
-    secondary = Color(0xFFFF2E63),
-    onSecondary = Color(0xFF3E0014),
-    secondaryContainer = Color(0xFF640A28),
-    onSecondaryContainer = Color(0xFFFFC8D6),
-    tertiary = Color(0xFFFFB300),
-    onTertiary = Color(0xFF3A2800),
-    tertiaryContainer = Color(0xFF5C4200),
-    onTertiaryContainer = Color(0xFFFFE6AE),
-    background = Color(0xFF160504),
-    onBackground = Color(0xFFFFE4D4),
-    surface = Color(0xFF220D06),
-    onSurface = Color(0xFFFFE4D4),
-    surfaceVariant = Color(0xFF321808),
-    onSurfaceVariant = Color(0xFFC89878),
-    surfaceContainerHighest = Color(0xFF46240E),
-    outline = Color(0xFF5E3018),
-    outlineVariant = Color(0xFF46240E),
-    inverseSurface = Color(0xFFFFE4D4),
-    inverseOnSurface = Color(0xFF220B06),
-    inversePrimary = Color(0xFFB03A00),
-    statusBar = Color(0xFF0C0202),
-    accentProgress = Color(0xFF29B6F6),
-    accentStreak = Color(0xFFFF2E63),
-    accentDiscovery = Color(0xFFFFD180),
-    accentAnnotation = Color(0xFFB39DDB)
-)
+// ── Removed with the light/dark pairing: ACID and LAVA folded into their
+// nearest surviving families (Toxic Lime, Ember); their persisted ids are
+// remapped in AppPalette.byId.
 
 private val SherbetFolioColors = LightFolioColors.copy(
     primary = Color(0xFFFF7A4D),
@@ -1032,37 +948,8 @@ private val RainbowCandyFolioColors = LightFolioColors.copy(
     accentAnnotation = Color(0xFF6A1B9A)
 )
 
-private val MidnightNeonFolioColors = DarkFolioColors.copy(
-    primary = Color(0xFF7CFF3D),
-    onPrimary = Color(0xFF12300A),
-    primaryContainer = Color(0xFF2A5C12),
-    onPrimaryContainer = Color(0xFFD8FFC2),
-    secondary = Color(0xFFFF3DDB),
-    onSecondary = Color(0xFF3D0034),
-    secondaryContainer = Color(0xFF7A0A68),
-    onSecondaryContainer = Color(0xFFFFC8F2),
-    tertiary = Color(0xFF3DDCFF),
-    onTertiary = Color(0xFF00303D),
-    tertiaryContainer = Color(0xFF0A5C78),
-    onTertiaryContainer = Color(0xFFC4F4FF),
-    background = Color(0xFF04060C),
-    onBackground = Color(0xFFDCF5FF),
-    surface = Color(0xFF0A0B18),
-    onSurface = Color(0xFFDCF5FF),
-    surfaceVariant = Color(0xFF141226),
-    onSurfaceVariant = Color(0xFF88B4CC),
-    surfaceContainerHighest = Color(0xFF1E1C36),
-    outline = Color(0xFF2E3C56),
-    outlineVariant = Color(0xFF1E1C36),
-    inverseSurface = Color(0xFFDCF5FF),
-    inverseOnSurface = Color(0xFF0A0E18),
-    inversePrimary = Color(0xFF3EA814),
-    statusBar = Color(0xFF020306),
-    accentProgress = Color(0xFF3DDCFF),
-    accentStreak = Color(0xFFFF3DDB),
-    accentDiscovery = Color(0xFF7CFF3D),
-    accentAnnotation = Color(0xFFFFB300)
-)
+// ── Removed with the light/dark pairing: MIDNIGHT NEON folded into Neon
+// Tokyo; its persisted id is remapped in AppPalette.byId.
 
 enum class AppPalette(
     val id: String,
@@ -1072,80 +959,114 @@ enum class AppPalette(
 ) {
     LIGHT("light", "Light", false, LightFolioColors),
     WARM("warm", "Warm", false, WarmFolioColors),
+    SILVER("silver", "Silver", false, SilverFolioColors),
     MATCHA("matcha", "Matcha", false, MatchaFolioColors),
     ARCTIC("arctic", "Arctic", false, ArcticFolioColors),
     SAKURA("sakura", "Sakura", false, SakuraFolioColors),
     HONEY("honey", "Honey", false, HoneyFolioColors),
     MOSS("moss", "Moss", false, MossFolioColors),
-    BUBBLEGUM("bubblegum", "Bubblegum", false, BubblegumFolioColors),
     SHERBET("sherbet", "Sherbet", false, SherbetFolioColors),
+    BUBBLEGUM("bubblegum", "Bubblegum", false, BubblegumFolioColors),
+    DAWN("dawn", "Dawn", false, DawnFolioColors),
     HYPERPOP("hyperpop", "Hyperpop", false, HyperpopFolioColors),
     RAINBOW("rainbow", "Rainbow Candy", false, RainbowCandyFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
     DUSK("dusk", "Dusk", true, DuskFolioColors),
     ESPRESSO("espresso", "Espresso", true, EspressoFolioColors),
-    OCEAN("ocean", "Ocean", true, OceanFolioColors),
-    GRAPE("grape", "Grape", true, GrapeFolioColors),
     EMBER("ember", "Ember", true, EmberFolioColors),
     SYNTHWAVE("synthwave", "Synthwave", true, SynthwaveFolioColors),
-    ACID("acid", "Acid Rave", true, AcidFolioColors),
-    LAVA("lava", "Lava", true, LavaFolioColors),
     VAPORWAVE("vaporwave", "Vaporwave", true, VaporwaveFolioColors),
     NEON_TOKYO("neontokyo", "Neon Tokyo", true, NeonTokyoFolioColors),
     TOXIC_LIME("toxiclime", "Toxic Lime", true, ToxicLimeFolioColors),
     RETRO_SUNSET("retrosunset", "Retro Sunset", true, RetroSunsetFolioColors),
     PEACOCK("peacock", "Peacock", true, PeacockFolioColors),
-    MIDNIGHT_NEON("midnightneon", "Midnight Neon", true, MidnightNeonFolioColors),
-    OLED("oled", "Black", true, OledFolioColors),
     GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
     BLOSSOM("blossom", "Blossom", true, BlossomFolioColors);
 
     companion object {
-        fun byId(id: String): AppPalette = entries.firstOrNull { it.id == id } ?: LIGHT
+        /**
+         * Palettes removed when packs gained light/dark faces — near-duplicates
+         * of a surviving family. Old persisted settings still name them, so
+         * their ids land on the nearest survivor instead of dropping the user
+         * onto LIGHT.
+         */
+        private val legacyIds: Map<String, AppPalette> = mapOf(
+            "grape" to DUSK,
+            "lava" to EMBER,
+            "acid" to TOXIC_LIME,
+            "ocean" to PEACOCK,
+            "midnightneon" to NEON_TOKYO,
+            "oled" to DARK,
+        )
+
+        fun byId(id: String): AppPalette =
+            entries.firstOrNull { it.id == id } ?: legacyIds[id] ?: LIGHT
     }
 }
 
+/**
+ * One theme, two faces: every pack carries a light side and a dark side, and
+ * the Settings toggle applies the other face of the same pack. The two names
+ * are the pair's identity — "Honey" is the same theme as "Ember", at morning
+ * and at night — and the picker crossfades between them as the mode flips.
+ */
 data class ThemePack(
     val id: String,
-    val name: String,
-    val appPaletteId: String,
-    val readerThemeId: String,
+    val lightName: String,
+    val darkName: String,
+    val lightAppPaletteId: String,
+    val darkAppPaletteId: String,
+    val lightReaderThemeId: String,
+    val darkReaderThemeId: String,
 ) {
+    fun name(dark: Boolean): String = if (dark) darkName else lightName
+    fun appPaletteId(dark: Boolean): String = if (dark) darkAppPaletteId else lightAppPaletteId
+    fun readerThemeId(dark: Boolean): String = if (dark) darkReaderThemeId else lightReaderThemeId
+
     companion object {
         val ALL = listOf(
-            ThemePack("gallery", "Gallery", "light", "white"),
-            ThemePack("manuscript", "Manuscript", "warm", "sepia"),
-            ThemePack("matcha", "Matcha", "matcha", "matcha"),
-            ThemePack("arctic", "Arctic", "arctic", "arctic"),
-            ThemePack("sakura", "Sakura", "sakura", "paper"),
-            ThemePack("honey", "Honey", "honey", "sepia"),
-            ThemePack("moss", "Moss", "moss", "moss"),
-            ThemePack("dark", "Dark", "dark", "dark"),
-            ThemePack("nocturne", "Nocturne", "midnight", "dark"),
-            ThemePack("dusk", "Dusk", "dusk", "dusk"),
-            ThemePack("espresso", "Espresso", "espresso", "espresso"),
-            ThemePack("ocean", "Ocean", "ocean", "dark"),
-            ThemePack("grape", "Grape", "grape", "dusk"),
-            ThemePack("ember", "Ember", "ember", "ember"),
-            ThemePack("obsidian", "Obsidian", "oled", "oled_black"),
-            ThemePack("synthwave", "Synthwave", "synthwave", "synthwave"),
-            ThemePack("bubblegum", "Bubblegum", "bubblegum", "bubblegum"),
-            ThemePack("acid", "Acid Rave", "acid", "acid"),
-            ThemePack("lava", "Lava", "lava", "lava"),
-            ThemePack("sherbet", "Sherbet", "sherbet", "sherbet"),
-            ThemePack("vaporwave", "Vaporwave", "vaporwave", "vaporwave"),
-            ThemePack("neontokyo", "Neon Tokyo", "neontokyo", "neontokyo"),
-            ThemePack("toxiclime", "Toxic Lime", "toxiclime", "toxiclime"),
-            ThemePack("retrosunset", "Retro Sunset", "retrosunset", "retrosunset"),
-            ThemePack("peacock", "Peacock", "peacock", "peacock"),
-            ThemePack("midnightneon", "Midnight Neon", "midnightneon", "midnightneon"),
-            ThemePack("hyperpop", "Hyperpop", "hyperpop", "candypop"),
-            ThemePack("rainbow", "Rainbow Candy", "rainbow", "rainbow"),
-            ThemePack("graphite", "Graphite", "graphite", "graphite"),
-            ThemePack("blossom", "Blossom", "blossom", "blossom"),
+            ThemePack("gallery", "Gallery", "Dark", "light", "dark", "white", "dark"),
+            ThemePack("manuscript", "Manuscript", "Espresso", "warm", "espresso", "sepia", "espresso"),
+            ThemePack("silver", "Silver", "Graphite", "silver", "graphite", "gray", "graphite"),
+            ThemePack("matcha", "Matcha", "Toxic Lime", "matcha", "toxiclime", "matcha", "toxiclime"),
+            ThemePack("arctic", "Arctic", "Midnight", "arctic", "midnight", "arctic", "dark"),
+            ThemePack("sakura", "Sakura", "Blossom", "sakura", "blossom", "paper", "blossom"),
+            ThemePack("honey", "Honey", "Ember", "honey", "ember", "sepia", "ember"),
+            ThemePack("moss", "Moss", "Peacock", "moss", "peacock", "moss", "peacock"),
+            ThemePack("sherbet", "Sherbet", "Retro Sunset", "sherbet", "retrosunset", "sherbet", "retrosunset"),
+            ThemePack("bubblegum", "Bubblegum", "Vaporwave", "bubblegum", "vaporwave", "bubblegum", "vaporwave"),
+            ThemePack("dawn", "Dawn", "Dusk", "dawn", "dusk", "dawn", "dusk"),
+            ThemePack("hyperpop", "Hyperpop", "Synthwave", "hyperpop", "synthwave", "candypop", "synthwave"),
+            ThemePack("rainbow", "Rainbow Candy", "Neon Tokyo", "rainbow", "neontokyo", "rainbow", "neontokyo"),
         )
     }
+}
+
+/**
+ * The light/dark switch: applies the active pack's other face. The app palette
+ * always flips; the page follows only when it is this pack's own page — a
+ * reader theme chosen independently (Dracula, Nord…) is a deliberate decision
+ * the switch must not stomp. A custom app theme defines its own polarity, so
+ * the switch is a no-op while one is active; the UI disables it then.
+ *
+ * The active pack is found through [AppPalette.byId] on purpose: a persisted
+ * `appThemeId` may still name a removed palette, and the remap must land on
+ * the surviving family's pack, not on "no pack".
+ */
+fun flipThemeMode(settings: ReaderSettings): ReaderSettings {
+    if (settings.customAppTheme != null) return settings
+    val resolved = AppPalette.byId(settings.appThemeId)
+    val pack = ThemePack.ALL.firstOrNull {
+        it.lightAppPaletteId == resolved.id || it.darkAppPaletteId == resolved.id
+    } ?: return settings
+    val dark = resolved.isDark
+    val readerFollows = settings.customTheme == null &&
+        (settings.themeId == pack.readerThemeId(dark) || settings.themeId == pack.readerThemeId(!dark))
+    return settings.copy(
+        appThemeId = pack.appPaletteId(!dark),
+        themeId = if (readerFollows) pack.readerThemeId(!dark) else settings.themeId
+    )
 }
 
 data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {

@@ -31,7 +31,11 @@ import java.util.UUID
 private val mangaJson = Json { ignoreUnknownKeys = true }
 private val stringListSerializer = ListSerializer(String.serializer())
 
-class JdbcMangaRepository(private val db: Database) : com.folio.reader.manga.MangaRepository {
+class JdbcMangaRepository(
+    private val db: Database,
+    /** Deletes the manga's downloaded pages from disk; wired by the app graph to the download manager. */
+    private val onMangaDeleted: suspend (String) -> Unit = {},
+) : com.folio.reader.manga.MangaRepository {
 
     override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {
         db.withConnection { conn ->
@@ -77,17 +81,36 @@ class JdbcMangaRepository(private val db: Database) : com.folio.reader.manga.Man
 
     override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) {
         val existing = get(mangaId)
-        db.withConnection { conn ->
+        // One transaction: chapters, notes, downloads, tag links, history and
+        // categories are all children of the library row and must not outlive
+        // it. None of them are synced entities, so no tombstones — the manga
+        // row itself carries the DELETE event below.
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM manga_category_map WHERE manga_id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
             conn.prepareStatement("DELETE FROM manga_history WHERE manga_id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
+            conn.prepareStatement("DELETE FROM manga_tags WHERE manga_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM manga_chapters WHERE manga_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM manga_notes WHERE manga_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM manga_downloads WHERE manga_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
             conn.prepareStatement("DELETE FROM manga_library WHERE id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
         }
+        // On-disk pages go after the commit, so a failed database delete never
+        // removes files. Best effort: a storage hiccup must not fail the delete.
+        runCatching { onMangaDeleted(mangaId) }
         if (emitSyncEvent && existing != null) {
             db.onEntityChanged?.invoke(
                 "manga",
@@ -234,7 +257,9 @@ class JdbcMangaRepository(private val db: Database) : com.folio.reader.manga.Man
 class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.manga.MangaChapterRepository {
 
     override suspend fun replaceChapters(mangaId: String, chapters: List<MangaChapter>) {
-        db.withConnection { conn ->
+        // One transaction: the SELECT→DELETE→INSERT sequence must be atomic so
+        // a crash never loses the previous chapter list without the new one.
+        db.withTransaction { conn ->
             val previousRead = mutableMapOf<String, Pair<Boolean, Int>>()
             val previousUpdated = mutableMapOf<String, Long>()
             val previousTotal = mutableMapOf<String, Int>()
@@ -1032,18 +1057,7 @@ class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.m
         conn.createStatement().use { stmt ->
             stmt.executeQuery("SELECT * FROM manga_downloads ORDER BY queued_at").use { rs ->
                 val list = mutableListOf<MangaDownload>()
-                while (rs.next()) {
-                    list += MangaDownload(
-                        id = rs.getString("id"),
-                        mangaId = rs.getString("manga_id"),
-                        chapterId = rs.getString("chapter_id"),
-                        status = MangaDownloadStatus.fromValue(rs.getInt("status")),
-                        totalPages = rs.getInt("total_pages"),
-                        downloadedPages = rs.getInt("downloaded_pages"),
-                        queuedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("queued_at")),
-                        error = rs.getString("error"),
-                    )
-                }
+                while (rs.next()) list += mapDownload(rs)
                 list
             }
         }
@@ -1072,7 +1086,65 @@ class JdbcMangaDownloadRepository(private val db: Database) : com.folio.reader.m
         bumpQueue()
     }
 
-    override suspend fun update(download: MangaDownload) = enqueue(download)
+    override suspend fun update(download: MangaDownload) {
+        // A true UPDATE, deliberately not the INSERT OR REPLACE of [enqueue]: a
+        // cancelled row is deleted, and the worker's next progress write must not
+        // resurrect it as a zombie DOWNLOADING row. Enqueue stays the insert path.
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                UPDATE manga_downloads SET
+                    manga_id = ?, chapter_id = ?, status = ?, total_pages = ?,
+                    downloaded_pages = ?, queued_at = ?, error = ?
+                WHERE id = ?
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, download.mangaId)
+                stmt.setString(2, download.chapterId)
+                stmt.setInt(3, download.status.value)
+                stmt.setInt(4, download.totalPages)
+                stmt.setInt(5, download.downloadedPages)
+                stmt.setLong(6, download.queuedAt.toEpochMilliseconds())
+                stmt.setString(7, download.error)
+                stmt.setString(8, download.id)
+                stmt.executeUpdate()
+            }
+        }
+        bumpQueue()
+    }
+
+    override suspend fun claimNextQueued(): MangaDownload? = db.withConnection { conn ->
+        // SELECT + conditional UPDATE inside one connection scope: every method is
+        // serialized through the Database write mutex, so two workers can never
+        // claim the same row — the second UPDATE finds status already DOWNLOADING
+        // and its rowcount is 0.
+        val next = conn.prepareStatement(
+            "SELECT * FROM manga_downloads WHERE status = ? ORDER BY queued_at LIMIT 1"
+        ).use { stmt ->
+            stmt.setInt(1, MangaDownloadStatus.QUEUED.value)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapDownload(rs) else null }
+        } ?: return@withConnection null
+        val claimed = conn.prepareStatement(
+            "UPDATE manga_downloads SET status = ?, error = NULL WHERE id = ? AND status = ?"
+        ).use { stmt ->
+            stmt.setInt(1, MangaDownloadStatus.DOWNLOADING.value)
+            stmt.setString(2, next.id)
+            stmt.setInt(3, MangaDownloadStatus.QUEUED.value)
+            stmt.executeUpdate()
+        }
+        if (claimed == 1) next.copy(status = MangaDownloadStatus.DOWNLOADING, error = null) else null
+    }
+
+    private fun mapDownload(rs: ResultSet) = MangaDownload(
+        id = rs.getString("id"),
+        mangaId = rs.getString("manga_id"),
+        chapterId = rs.getString("chapter_id"),
+        status = MangaDownloadStatus.fromValue(rs.getInt("status")),
+        totalPages = rs.getInt("total_pages"),
+        downloadedPages = rs.getInt("downloaded_pages"),
+        queuedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("queued_at")),
+        error = rs.getString("error"),
+    )
 
     override suspend fun remove(id: String) {
         db.withConnection { conn ->

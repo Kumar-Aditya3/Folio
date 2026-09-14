@@ -38,14 +38,17 @@ private val repoJson = Json { ignoreUnknownKeys = true }
 class JdbcBookRepository(private val db: Database) : BookRepository {
     override suspend fun insertBook(book: Book, emitSyncEvent: Boolean) {
         db.insertBook(book)
+        db.bumpBookData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
     }
     override suspend fun updateBook(book: Book, emitSyncEvent: Boolean) {
         db.updateBook(book)
+        db.bumpBookData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
     }
     override suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean) {
         db.deleteBook(bookId)
+        db.bumpBookData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("book", bookId, "DELETE", "{}")
     }
     override suspend fun getBook(bookId: String): Book? = db.getBook(bookId)
@@ -53,6 +56,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
     override suspend fun getBookByIsbn(isbn: String): Book? = db.getBookByIsbn(isbn)
     override suspend fun markOpened(bookId: String) {
         db.markOpened(bookId)
+        db.bumpBookData()
         db.getBook(bookId)?.let { book ->
             db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
         }
@@ -60,6 +64,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
 
     override suspend fun setBookStatus(bookId: String, status: com.folio.reader.model.BookStatus) {
         db.setBookStatus(bookId, status)
+        db.bumpBookData()
         db.getBook(bookId)?.let { book ->
             db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
         }
@@ -67,6 +72,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
 
     override suspend fun setCloudState(bookId: String, cloudState: CloudState) {
         db.setCloudState(bookId, cloudState)
+        db.bumpBookData()
         db.getBook(bookId)?.let { book ->
             db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
         }
@@ -74,17 +80,22 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
 
     override suspend fun updateNormalizedProgress(bookId: String, progress: Double) {
         db.updateNormalizedProgress(bookId, progress)
+        db.bumpBookData()
     }
 
-    override fun getAllBooks(): Flow<List<Book>> = flow { emit(db.getAllBooks()) }
+    // The observe flows re-query on bookDataRevision, mirroring the manga and
+    // document repositories: every write to the book tables emits a fresh list
+    // so screens update in place instead of waiting for a remount.
+
+    override fun getAllBooks(): Flow<List<Book>> = db.bookDataRevision.map { db.getAllBooks() }
 
     override fun getBooksByStatus(status: BookStatus): Flow<List<Book>> =
-        flow { emit(db.getAllBooks().filter { it.status == status }) }
+        db.bookDataRevision.map { db.getAllBooks().filter { it.status == status } }
 
     override fun getBooksBySeries(seriesId: String): Flow<List<Book>> =
-        flow { emit(db.getAllBooks().filter { it.seriesId == seriesId }) }
+        db.bookDataRevision.map { db.getAllBooks().filter { it.seriesId == seriesId } }
 
-    override fun getBooksByCollection(collectionId: String): Flow<List<Book>> = flow {
+    override fun getBooksByCollection(collectionId: String): Flow<List<Book>> = db.bookDataRevision.map {
         val ids = db.withConnection { conn ->
             conn.prepareStatement("SELECT book_id FROM book_collections WHERE collection_id = ?").use { stmt ->
                 stmt.setString(1, collectionId)
@@ -95,28 +106,26 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
                 }
             }
         }.toSet()
-        emit(db.getAllBooks().filter { it.id in ids })
+        db.getAllBooks().filter { it.id in ids }
     }
 
     override fun getCurrentlyReading(): Flow<List<Book>> =
-        flow { emit(db.getAllBooks().filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED }) }
+        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED } }
 
     override fun getFinishedBooks(): Flow<List<Book>> =
-        flow { emit(db.getAllBooks().filter { it.status == BookStatus.FINISHED }) }
+        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.FINISHED } }
 
     override fun getUnreadBooks(): Flow<List<Book>> =
-        flow { emit(db.getAllBooks().filter { it.status == BookStatus.UNREAD }) }
+        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.UNREAD } }
 
-    override fun searchBooks(query: String): Flow<List<Book>> = flow {
+    override fun searchBooks(query: String): Flow<List<Book>> = db.bookDataRevision.map {
         val q = query.trim()
-        emit(
-            if (q.isEmpty()) emptyList()
-            else db.getAllBooks().filter {
-                it.title.contains(q, ignoreCase = true) ||
-                    it.displayAuthor.contains(q, ignoreCase = true) ||
-                    (it.subtitle?.contains(q, ignoreCase = true) ?: false)
-            }
-        )
+        if (q.isEmpty()) emptyList()
+        else db.getAllBooks().filter {
+            it.title.contains(q, ignoreCase = true) ||
+                it.displayAuthor.contains(q, ignoreCase = true) ||
+                (it.subtitle?.contains(q, ignoreCase = true) ?: false)
+        }
     }
 
     override suspend fun insertChapters(bookId: String, chapters: List<Chapter>) {
@@ -750,9 +759,12 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
     }
 
     override suspend fun restoreNote(noteId: String) {
+        // updated_at advances too: without it, sync's last-write-wins can
+        // re-delete the restored note against its own older tombstone.
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE notes SET is_deleted = 0, deleted_at = NULL WHERE id = ?").use { stmt ->
-                stmt.setString(1, noteId)
+            conn.prepareStatement("UPDATE notes SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
+                stmt.setString(2, noteId)
                 stmt.executeUpdate()
             }
         }
@@ -861,9 +873,12 @@ class JdbcBookmarkRepository(private val db: Database) : BookmarkRepository {
     }
 
     override suspend fun restoreBookmark(bookmarkId: String) {
+        // updated_at advances too: without it, sync's last-write-wins can
+        // re-delete the restored bookmark against its own older tombstone.
         db.withConnection { conn ->
-            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 0, deleted_at = NULL WHERE id = ?").use { stmt ->
-                stmt.setString(1, bookmarkId)
+            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
+                stmt.setString(2, bookmarkId)
                 stmt.executeUpdate()
             }
         }
@@ -938,13 +953,14 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                 stmt.executeUpdate()
             }
         }
+        db.bumpBookData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("collection", collection.id, "UPSERT", repoJson.encodeToString(Collection.serializer(), collection))
     }
 
     override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) = insertCollection(collection, emitSyncEvent)
 
     override suspend fun deleteCollection(collectionId: String) {
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM collections WHERE id = ?").use { stmt ->
                 stmt.setString(1, collectionId); stmt.executeUpdate()
             }
@@ -952,11 +968,12 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                 stmt.setString(1, collectionId); stmt.executeUpdate()
             }
         }
+        db.bumpBookData()
         db.onEntityChanged?.invoke("collection", collectionId, "DELETE", "{}")
     }
 
-    override fun getAllCollections(): Flow<List<Collection>> = flow {
-        emit(db.withConnection { conn ->
+    override fun getAllCollections(): Flow<List<Collection>> = db.bookDataRevision.map {
+        db.withConnection { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT * FROM collections ORDER BY sort_order, name").use { rs ->
                     val out = mutableListOf<Collection>()
@@ -964,7 +981,7 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                     out
                 }
             }
-        })
+        }
     }
 
     override suspend fun getCollectionByName(name: String): Collection? {
@@ -1002,6 +1019,7 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                 stmt.executeUpdate()
             }
         }
+        db.bumpBookData()
     }
 
     override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {
@@ -1012,6 +1030,7 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                 stmt.executeUpdate()
             }
         }
+        db.bumpBookData()
     }
 }
 
@@ -1035,22 +1054,29 @@ class JdbcSeriesRepository(private val db: Database) : SeriesRepository {
                 stmt.executeUpdate()
             }
         }
+        db.bumpBookData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("series", series.id, "UPSERT", repoJson.encodeToString(Series.serializer(), series))
     }
 
     override suspend fun updateSeries(series: Series, emitSyncEvent: Boolean) = insertSeries(series, emitSyncEvent)
 
     override suspend fun deleteSeries(seriesId: String) {
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM series WHERE id = ?").use { stmt ->
                 stmt.setString(1, seriesId); stmt.executeUpdate()
             }
+            // Books pointed at the deleted series would dangle (D6); they go
+            // back to being unseriesed rather than referencing a missing row.
+            conn.prepareStatement("UPDATE books SET series_id = NULL WHERE series_id = ?").use { stmt ->
+                stmt.setString(1, seriesId); stmt.executeUpdate()
+            }
         }
+        db.bumpBookData()
         db.onEntityChanged?.invoke("series", seriesId, "DELETE", "{}")
     }
 
-    override fun getAllSeries(): Flow<List<Series>> = flow {
-        emit(db.withConnection { conn ->
+    override fun getAllSeries(): Flow<List<Series>> = db.bookDataRevision.map {
+        db.withConnection { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT * FROM series ORDER BY sort_order, name").use { rs ->
                     val out = mutableListOf<Series>()
@@ -1058,7 +1084,7 @@ class JdbcSeriesRepository(private val db: Database) : SeriesRepository {
                     out
                 }
             }
-        })
+        }
     }
 
     override suspend fun getSeries(seriesId: String): Series? {
@@ -1079,8 +1105,8 @@ class JdbcSeriesRepository(private val db: Database) : SeriesRepository {
         }
     }
 
-    override suspend fun getBooksInSeries(seriesId: String): Flow<List<Book>> = flow {
-        emit(db.getAllBooks().filter { it.seriesId == seriesId }.sortedBy { it.seriesNumber ?: Double.MAX_VALUE })
+    override suspend fun getBooksInSeries(seriesId: String): Flow<List<Book>> = db.bookDataRevision.map {
+        db.getAllBooks().filter { it.seriesId == seriesId }.sortedBy { it.seriesNumber ?: Double.MAX_VALUE }
     }
 }
 
@@ -1357,46 +1383,5 @@ class JdbcSearchRepository(private val db: Database) : SearchRepository {
 
 // ---------- Settings ----------
 
-class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
-    companion object {
-        private const val KEY_GLOBAL = "global_reader_settings"
-        private fun keyForBook(bookId: String) = Database.bookSettingsKey(bookId)
-    }
+// The settings repository lives in JdbcSettingsRepository.kt (§6 split).
 
-    override suspend fun getGlobalSettings(): ReaderSettings =
-        db.getSettings(KEY_GLOBAL)?.let {
-            runCatching { repoJson.decodeFromString(ReaderSettings.serializer(), it) }.getOrNull()
-        } ?: ReaderSettings()
-
-    override suspend fun saveGlobalSettings(settings: ReaderSettings, emitSyncEvent: Boolean) {
-        db.setSettings(KEY_GLOBAL, repoJson.encodeToString(ReaderSettings.serializer(), settings))
-        if (emitSyncEvent) {
-            db.onEntityChanged?.invoke("settings", "global", "UPSERT", repoJson.encodeToString(ReaderSettings.serializer(), settings))
-        }
-    }
-
-    override suspend fun getBookSettings(bookId: String): BookReaderSettings? =
-        db.getSettings(keyForBook(bookId))?.let {
-            runCatching { repoJson.decodeFromString(BookReaderSettings.serializer(), it) }.getOrNull()
-        }
-
-    override suspend fun saveBookSettings(bookId: String, settings: BookReaderSettings) {
-        db.setSettings(keyForBook(bookId), repoJson.encodeToString(BookReaderSettings.serializer(), settings))
-    }
-
-    override suspend fun deleteBookSettings(bookId: String) {
-        db.withConnection { conn ->
-            conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->
-                stmt.setString(1, keyForBook(bookId))
-                stmt.executeUpdate()
-            }
-        }
-    }
-
-    override suspend fun setRaw(key: String, value: String) {
-        db.setSettings(key, value)
-    }
-
-    override suspend fun getRaw(key: String): String? =
-        db.getSettings(key)?.takeIf { it.isNotEmpty() }
-}

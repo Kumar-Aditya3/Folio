@@ -28,14 +28,24 @@ object FolioSettingsCategory {
     const val TRANSPARENCY = "transparency"
     const val CUSTOM_THEME = "custom_theme"
     const val DEFAULTS = "defaults"
+
+    /** §14.2: the merged Typography/Layout/Formatting destination. */
+    const val TEXT_AND_PAGE = "text_and_page"
+
+    // Pre-merge route values, kept resolving so deep links and bookmarks from
+    // older builds land on the merged screen instead of a dead end.
     const val TYPOGRAPHY = "typography"
     const val LAYOUT = "layout"
     const val FORMATTING = "formatting"
+
     const val READING = "reading"
     const val CLOUD_SYNC = "cloud_sync"
     const val ADVANCED = "advanced"
     const val STATS = "stats"
     const val MANGA = "manga"
+
+    /** Library scanning (folder / device-wide import): its own destination under "Library tools". */
+    const val LIBRARY_SCAN = "library_scan"
 }
 
 /**

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
@@ -28,9 +27,9 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -110,24 +109,10 @@ fun SettingsHubScreen(
                     )
                     HubRow(
                         icon = Icons.Filled.TextFields,
-                        title = "Typography",
-                        subtitle = "Typeface, size and spacing for prose",
+                        title = "Text & page",
+                        subtitle = "Typeface, measure, alignment, hyphenation",
                         accent = colors.accentProgress,
-                        onClick = { onOpenSettings(FolioSettingsCategory.TYPOGRAPHY) }
-                    )
-                    HubRow(
-                        icon = Icons.Filled.ViewColumn,
-                        title = "Layout",
-                        subtitle = "Text width and margins",
-                        accent = colors.accentProgress,
-                        onClick = { onOpenSettings(FolioSettingsCategory.LAYOUT) }
-                    )
-                    HubRow(
-                        icon = Icons.AutoMirrored.Filled.FormatAlignLeft,
-                        title = "Formatting",
-                        subtitle = "Alignment, hyphenation, formatting mode",
-                        accent = colors.accentProgress,
-                        onClick = { onOpenSettings(FolioSettingsCategory.FORMATTING) }
+                        onClick = { onOpenSettings(FolioSettingsCategory.TEXT_AND_PAGE) }
                     )
                     HubRow(
                         icon = Icons.AutoMirrored.Filled.MenuBook,
@@ -212,8 +197,15 @@ fun SettingsHubScreen(
                         title = "Statistics exclusions",
                         subtitle = "Keep titles out of Stats and Home",
                         accent = colors.accentAnnotation,
-                        last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.STATS) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Search,
+                        title = "Library scanning",
+                        subtitle = "Import new ebooks and documents automatically",
+                        accent = colors.accentAnnotation,
+                        last = true,
+                        onClick = { onOpenSettings(FolioSettingsCategory.LIBRARY_SCAN) }
                     )
                 }
             }

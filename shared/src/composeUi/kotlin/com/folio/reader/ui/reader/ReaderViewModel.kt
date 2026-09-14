@@ -18,7 +18,9 @@ import com.folio.reader.settings.BookReaderSettings
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.changedFields
 import com.folio.reader.settings.clearing
+import com.folio.reader.settings.normalized
 import com.folio.reader.settings.overriddenFields
+import com.folio.reader.settings.withFieldsFrom
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -112,7 +114,10 @@ class ReaderViewModel(
         loadErrorState = _loadError,
         currentBookId = { currentBookId },
         chapters = { _chapters.value },
-        currentChapterIndex = { _currentChapterIndex.value }
+        currentChapterIndex = { _currentChapterIndex.value },
+        // Continuous layout is the windowed layout: chapters load as one
+        // scrolling document so they flow instead of swapping per chapter.
+        windowMode = { effective().layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS }
     )
 
     val book: Flow<Book?> = _book
@@ -138,6 +143,17 @@ class ReaderViewModel(
     val chapterChip: Flow<String?> = _chapterChip
     val isLoadingContent: Flow<Boolean> = _isLoadingContent
     val linkClickResult: Flow<LinkClickResult?> = links.linkClickResult
+
+    // Continuous-mode chapter window: the chapters on screen together, the range
+    // they span, and the pending DOM mutation the surface still has to apply.
+    val windowSections: kotlinx.coroutines.flow.StateFlow<List<com.folio.reader.ui.render.ReaderSection>> =
+        contentLoader.windowSections
+    val windowRange: kotlinx.coroutines.flow.StateFlow<IntRange?> = contentLoader.windowRange
+    val windowOp: kotlinx.coroutines.flow.StateFlow<com.folio.reader.ui.render.WindowOp?> = contentLoader.windowOp
+
+    /** The window as last rebuilt — the document the surface renders (extensions mutate it in place). */
+    val windowLoad: kotlinx.coroutines.flow.StateFlow<List<com.folio.reader.ui.render.ReaderSection>> =
+        contentLoader.windowLoad
 
     fun openBook(bookId: String, deviceId: String, initialSettings: ReaderSettings = ReaderSettings(), startChapterOverride: Int? = null) {
         this.deviceId = deviceId
@@ -231,6 +247,10 @@ class ReaderViewModel(
             scrollOffset = resumeFraction
         )
         sessionTracker.markChapterEntry(_position.value?.normalizedProgress ?: 0.0)
+        // A windowed jump to a chapter already on screen reloads nothing: the
+        // document holds it and the jump's seek scrolls to the target.
+        val range = contentLoader.windowRange.value
+        if (range != null && range.contains(_currentChapterIndex.value)) return
         viewModelScope.launch { loadChapterHtml() }
     }
 
@@ -248,23 +268,86 @@ class ReaderViewModel(
     /**
      * Backwards counterpart of [onChapterEnd]: the reader kept pushing up at the top
      * of a chapter, so continue into the previous one. At most once per chapter.
+     * In a window the prepend path supplies the chapters above, so the edge only
+     * matters at the very start of the book.
      */
     fun onChapterStart() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
         if (_currentChapterIndex.value <= 0) return
+        val range = contentLoader.windowRange.value
+        if (range != null && range.first > 1) return
         if (!sessionTracker.chapterStartGuard.accept(chapter.id)) return
         previousChapter(openAtEnd = true)
     }
 
-    /** Advances at most once for a chapter, despite repeated browser scroll events. */
+    /**
+     * Advances at most once for a chapter, despite repeated browser scroll events.
+     * In a window the scroll itself moves chapters — a bottom edge can only mean
+     * the extension could not add more, i.e. the book ended; mid-book edges are
+     * stray bottom-outs while an append is in flight and are ignored.
+     */
     fun onChapterEnd() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
+        val range = contentLoader.windowRange.value
+        if (range != null) {
+            if (range.last < _chapters.value.lastIndex) return
+            if (!sessionTracker.chapterEndGuard.accept(chapter.id)) return
+            val share = sessionTracker.chapterShare(_position.value?.normalizedProgress ?: 0.0)
+            _chapterChip.value = buildChapterChip(_currentChapterIndex.value, share.first, share.second)
+            return
+        }
         if (!sessionTracker.chapterEndGuard.accept(chapter.id)) return
         val finishedIndex = _currentChapterIndex.value
         val share = sessionTracker.chapterShare(_position.value?.normalizedProgress ?: 0.0)
         _chapterChip.value = buildChapterChip(finishedIndex, share.first, share.second)
         if (finishedIndex < _chapters.value.lastIndex) nextChapter()
     }
+
+    /**
+     * The visible section moved with the scroll — the continuous-mode chapter
+     * change. Repoints the position (and banks the finished chapter's §5.3 chip
+     * when reading forward) without reloading anything: the chapter is already
+     * on screen.
+     */
+    fun onVisibleSection(spineIndex: Int) {
+        val chaptersList = _chapters.value
+        if (chaptersList.isEmpty()) return
+        val index = chaptersList.indexOfFirst { it.spineIndex == spineIndex }
+        if (index < 0 || index == _currentChapterIndex.value) return
+        val range = contentLoader.windowRange.value ?: return
+        if (!range.contains(index)) return
+        sessionTracker.markReadingActivity()
+        positionStore.flushProgress()
+        if (index > _currentChapterIndex.value) {
+            val finishedIndex = _currentChapterIndex.value
+            val finished = chaptersList.getOrNull(finishedIndex)
+            if (finished != null && sessionTracker.chapterEndGuard.accept(finished.id)) {
+                val share = sessionTracker.chapterShare(_position.value?.normalizedProgress ?: 0.0)
+                _chapterChip.value = buildChapterChip(finishedIndex, share.first, share.second)
+            }
+        }
+        _currentChapterIndex.value = index
+        val chapter = chaptersList[index]
+        _position.value = _position.value?.copy(
+            chapterId = chapter.id,
+            spineIndex = chapter.spineIndex,
+            chapterProgress = 0.0,
+            scrollOffset = 0.0
+        )
+        sessionTracker.markChapterEntry(0.0)
+    }
+
+    /** The engine hit a window edge: grow the window that way. */
+    fun extendWindow(forward: Boolean) {
+        // One extension at a time: an op that has not been applied on screen yet
+        // must not be overwritten — StateFlow conflates, and a lost append leaves
+        // a permanent gap between sections.
+        if (contentLoader.hasPendingWindowOp()) return
+        viewModelScope.launch { contentLoader.extendWindow(forward) }
+    }
+
+    /** Surfaces acknowledge each window mutation they applied. */
+    fun onWindowOpApplied(nonce: Long) = contentLoader.onWindowOpApplied(nonce)
 
     fun dismissChapterChip() {
         _chapterChip.value = null
@@ -402,11 +485,19 @@ class ReaderViewModel(
     /**
      * "All books" write: stores the new global defaults and drops this book's
      * override for the fields being changed, so it follows the new defaults.
+     *
+     * The panel paints effective (book-merged) values, so "the fields being
+     * changed" is measured against those — diffing against the globals instead
+     * would promote this book's untouched overrides into the defaults every
+     * other book follows (the "All books" leak). The write itself is
+     * field-scoped, so no other global field can be clobbered either.
      */
     fun updateGlobalSettings(newSettings: ReaderSettings) {
-        val changed = _settings.value.changedFields(newSettings)
-        _settings.value = newSettings
-        viewModelScope.launch { runCatching { settingsRepository.saveGlobalSettings(newSettings) } }
+        val changed = effective().changedFields(newSettings)
+        _settings.value = _settings.value.withFieldsFrom(changed, newSettings)
+        viewModelScope.launch {
+            runCatching { settingsRepository.mergeGlobalSettings { it.withFieldsFrom(changed, newSettings) } }
+        }
         val snapshot = _bookSettings.value ?: return
         if (changed.isEmpty()) return
         val cleared = snapshot.clearing(changed)

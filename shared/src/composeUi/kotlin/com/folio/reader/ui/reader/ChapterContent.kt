@@ -51,8 +51,8 @@ fun ChapterContent(
     onTap: () -> Unit,
     onScrollFraction: (Float) -> Unit,
     onLinkClick: ((String) -> Unit)? = null,
-    onLongPress: ((paragraphIndex: Int, selectedText: String) -> Unit)? = null,
-    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)? = null,
+    onLongPress: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)? = null,
+    onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)? = null,
     clearSelectionRequest: Long? = null,
     onRetry: (() -> Unit)? = null,
     onNextChapter: (() -> Unit)? = null,
@@ -68,7 +68,17 @@ fun ChapterContent(
     seekTargetRequest: Pair<String, Long>? = null,
     onPageChange: (currentPage: Int, totalPages: Int) -> Unit = { _, _ -> },
     onChapterEnd: () -> Unit = {},
-    onChapterStart: () -> Unit = {}
+    onChapterStart: () -> Unit = {},
+    /** Continuous-mode chapter window: the chapters rendered together, plus its plumbing. */
+    sections: List<com.folio.reader.ui.render.ReaderSection> = emptyList(),
+    /** The window document as loaded — extensions inject into it without rebuilding. */
+    documentSections: List<com.folio.reader.ui.render.ReaderSection> = emptyList(),
+    windowed: Boolean = false,
+    windowOp: com.folio.reader.ui.render.WindowOp? = null,
+    onVisibleSection: (spineIndex: Int) -> Unit = {},
+    onExtendForward: () -> Unit = {},
+    onExtendBackward: () -> Unit = {},
+    onWindowOpApplied: (nonce: Long) -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
     val readerTheme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
@@ -281,7 +291,9 @@ fun ChapterContent(
                 }
                 Spacer(Modifier.height(24.dp))
             }
-            html.isBlank() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // A blank chapter inside a window flows past as an empty section;
+            // only a blank single-chapter load is a dead end with a button.
+            html.isBlank() && !windowed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -298,25 +310,40 @@ fun ChapterContent(
             }
             else -> {
                 // Browser owns all rendering — no Compose fallback (it broke scroll/pagination flow).
-                val chapterHighlights = remember(highlights, chapter.id) {
-                    highlights.filter { it.chapterId == chapter.id && !it.isDeleted }
+                val sectionIds = remember(sections) { sections.map { it.chapterId }.toSet() }
+                val visibleHighlights = remember(highlights, chapter.id, sections) {
+                    if (windowed) highlights.filter { it.chapterId in sectionIds && !it.isDeleted }
+                    else highlights.filter { it.chapterId == chapter.id && !it.isDeleted }
                 }
                 com.folio.reader.ui.render.HtmlContentSurface(
-                    html = html,
-                    chapterHref = chapter.href,
+                    sections = if (windowed) documentSections else listOf(
+                        com.folio.reader.ui.render.ReaderSection(
+                            spineIndex = -1,
+                            chapterId = chapter.id,
+                            href = chapter.href,
+                            html = html
+                        )
+                    ),
+                    windowed = windowed,
+                    anchorChapterId = chapter.id,
                     settings = settings,
                     position = position,
-                    highlights = chapterHighlights,
+                    highlights = visibleHighlights,
                     enabled = enabled,
                     modifier = Modifier.fillMaxSize(),
                     onProgress = onScrollFraction,
                     onPageChange = onPageChange,
+                    onVisibleSection = onVisibleSection,
+                    onExtendForward = onExtendForward,
+                    onExtendBackward = onExtendBackward,
+                    windowOp = windowOp,
+                    onWindowOpApplied = onWindowOpApplied,
                     onChapterEnd = onChapterEnd,
                     onChapterStart = onChapterStart,
                     onTap = onTap,
                     onLinkClick = onLinkClick,
                     onResolveResource = onResolveResource,
-                    onHighlightParagraph = onLongPress?.let { cb -> { idx, text -> cb(idx, text) } },
+                    onHighlightParagraph = onLongPress?.let { cb -> { chapterId, idx, text -> cb(chapterId, idx, text) } },
                     onSelectionChanged = onSelectionChanged,
                     clearSelectionRequest = clearSelectionRequest,
                     seekRequest = seekRequest,

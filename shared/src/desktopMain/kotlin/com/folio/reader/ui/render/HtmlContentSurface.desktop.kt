@@ -52,8 +52,9 @@ actual fun htmlSurfaceOccludesOverlays(): Boolean = true
  */
 @Composable
 actual fun HtmlContentSurface(
-    html: String,
-    chapterHref: String,
+    sections: List<ReaderSection>,
+    windowed: Boolean,
+    anchorChapterId: String?,
     settings: ReaderSettings,
     position: ReadingPosition?,
     highlights: List<Highlight>,
@@ -61,13 +62,18 @@ actual fun HtmlContentSurface(
     modifier: Modifier,
     onProgress: (Float) -> Unit,
     onPageChange: (Int, Int) -> Unit,
+    onVisibleSection: (spineIndex: Int) -> Unit,
+    onExtendForward: () -> Unit,
+    onExtendBackward: () -> Unit,
+    windowOp: WindowOp?,
+    onWindowOpApplied: (nonce: Long) -> Unit,
     onChapterEnd: () -> Unit,
     onChapterStart: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
-    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)?,
+    onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)?,
+    onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)?,
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
     seekTargetRequest: Pair<String, Long>?
@@ -81,6 +87,9 @@ actual fun HtmlContentSurface(
     val callbacks = remember { SurfaceCallbacks() }
     callbacks.onProgress = onProgress
     callbacks.onPageChange = onPageChange
+    callbacks.onVisibleSection = onVisibleSection
+    callbacks.onExtendForward = onExtendForward
+    callbacks.onExtendBackward = onExtendBackward
     callbacks.onChapterEnd = onChapterEnd
     callbacks.onChapterStart = onChapterStart
     callbacks.onTap = onTap
@@ -91,6 +100,14 @@ actual fun HtmlContentSurface(
     val resolver by rememberUpdatedState(onResolveResource)
     val positionState by rememberUpdatedState(position)
     val settingsState by rememberUpdatedState(settings)
+    val sectionsState by rememberUpdatedState(sections)
+    // A chapter window loads as one document; the single-section path (documents,
+    // and non-windowed chapters) keys everything on the chapter href as before.
+    val loadKey = if (windowed) {
+        "window:" + sections.joinToString("-") { it.spineIndex.toString() }
+    } else {
+        sections.firstOrNull()?.href ?: ""
+    }
 
     val overlayHtml = LocalOverlayHtml.current
     callbacks.onOverlayAction = LocalOverlayAction.current
@@ -98,12 +115,17 @@ actual fun HtmlContentSurface(
     var session by remember { mutableStateOf<JcefSession?>(null) }
     var fatalError by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(true) }
-    var resolvedHtml by remember(html, chapterHref) { mutableStateOf<String?>(null) }
+    // The title handler resolves sel2 spines against the current window.
+    session?.let {
+        it.sectionsForCallbacks = sections
+        it.anchorChapterIdForCallbacks = anchorChapterId
+    }
+    var resolvedHtml by remember(loadKey) { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
     var appliedSettings by remember { mutableStateOf<ReaderSettings?>(null) }
     var hasLoadedOnce by remember { mutableStateOf(false) }
     // Chapter whose document has been handed to the browser; null again on change.
-    var loadedChapter by remember(chapterHref) { mutableStateOf<String?>(null) }
+    var loadedChapter by remember(loadKey) { mutableStateOf<String?>(null) }
 
     // Only geometry changes (page columns, measure cap, gutter) need a document
     // reload; theme/typography changes swap the stylesheet in place, so switching
@@ -127,17 +149,79 @@ actual fun HtmlContentSurface(
         onDispose { session?.dispose() }
     }
 
-    // 2) Resolve EPUB resources (images, stylesheets, fonts) to cache files.
-    LaunchedEffect(html, chapterHref, session) {
+    // 2) Resolve EPUB resources (images, stylesheets, fonts) to cache files — per
+    //    section, then assemble the window document when one is on screen.
+    LaunchedEffect(loadKey, sections, session) {
         val current = session ?: return@LaunchedEffect
         resolvedHtml = null
         if (!hasLoadedOnce) preparing = true
         val result = withContext(Dispatchers.IO) {
-            runCatching { resolveResources(html, chapterHref) { href, src -> resolver(href, src) } }
+            runCatching {
+                val resolved = sections.map { section ->
+                    section.copy(html = resolveResources(section.html, section.href) { href, src -> resolver(href, src) })
+                }
+                if (windowed) ReaderWindowAssembler.assemble(resolved) else resolved.firstOrNull()?.html.orEmpty()
+            }
         }
         result
             .onSuccess { resolvedHtml = it }
             .onFailure { fatalError = it.message ?: "Unable to prepare chapter" }
+    }
+
+    // 2b) Grow/trim the window on screen. Each op is consumed once; an append or
+    //     prepend re-runs the highlight painter afterwards so the freshly
+    //     injected section wears its own marks.
+    LaunchedEffect(windowOp, session) {
+        val op = windowOp ?: return@LaunchedEffect
+        val current = session ?: return@LaunchedEffect
+        when (op) {
+            is WindowOp.Append -> {
+                val fragment = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val resolved = resolveResources(op.section.html, op.section.href) { href, src -> resolver(href, src) }
+                        ReaderWindowAssembler.sectionFragment(op.section.copy(html = resolved))
+                    }.getOrDefault("")
+                }
+                if (fragment.isNotBlank()) {
+                    current.execute(
+                        "window.__folioAppend&&window.__folioAppend(${op.section.spineIndex}," +
+                            "${ReaderWindowAssembler.jsStringLiteral(op.section.chapterId)}," +
+                            "${ReaderWindowAssembler.jsStringLiteral(fragment)});"
+                    )
+                }
+            }
+
+            is WindowOp.Prepend -> {
+                val fragment = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val resolved = resolveResources(op.section.html, op.section.href) { href, src -> resolver(href, src) }
+                        ReaderWindowAssembler.sectionFragment(op.section.copy(html = resolved))
+                    }.getOrDefault("")
+                }
+                if (fragment.isNotBlank()) {
+                    current.execute(
+                        "window.__folioPrepend&&window.__folioPrepend(${op.section.spineIndex}," +
+                            "${ReaderWindowAssembler.jsStringLiteral(op.section.chapterId)}," +
+                            "${ReaderWindowAssembler.jsStringLiteral(fragment)});"
+                    )
+                }
+            }
+
+            is WindowOp.Trim -> current.execute(
+                "window.__folioTrim&&window.__folioTrim(${op.fromSpine},${op.toSpine});"
+            )
+        }
+        // Keep the session's live section list (used to resolve selection spines)
+        // in step with the DOM mutations just applied.
+        when (op) {
+            is WindowOp.Append -> current.sectionsForCallbacks = current.sectionsForCallbacks + op.section
+            is WindowOp.Prepend -> current.sectionsForCallbacks = listOf(op.section) + current.sectionsForCallbacks
+            is WindowOp.Trim -> current.sectionsForCallbacks = current.sectionsForCallbacks.filter {
+                it.spineIndex in op.fromSpine..op.toSpine
+            }
+        }
+        current.applyHighlights(HighlightPaint.applyJs(highlights, theme))
+        onWindowOpApplied(op.nonce)
     }
 
     // 3) Write and load the styled document — on content changes and on geometry
@@ -156,9 +240,19 @@ actual fun HtmlContentSurface(
             }
         }
         result.onSuccess { url ->
-            val js = if (pagedCols > 0) PageEngine.js(fraction, pagedCols, s.margins.left, PageEngine.measurePx(s.textWidth)) else readerBridgeJs(fraction)
+            val js = when {
+                pagedCols > 0 -> PageEngine.js(fraction, pagedCols, s.margins.left, PageEngine.measurePx(s.textWidth))
+                windowed -> ContinuousEngine.js(
+                    seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
+                        ?: sections.firstOrNull()?.spineIndex ?: -1,
+                    seedFraction = fraction,
+                    desktopEvents = true
+                )
+
+                else -> readerBridgeJs(fraction)
+            }
             current.load(url, js)
-            loadedChapter = chapterHref
+            loadedChapter = loadKey
             appliedSettings = s
             hasLoadedOnce = true
             preparing = false
@@ -204,21 +298,23 @@ actual fun HtmlContentSurface(
     //    to find the mark the painter creates.
     LaunchedEffect(highlights, settings.themeId, settings.customTheme, session, loadedChapter) {
         val current = session ?: return@LaunchedEffect
-        if (loadedChapter != chapterHref) return@LaunchedEffect
+        if (loadedChapter != loadKey) return@LaunchedEffect
         current.applyHighlights(HighlightPaint.js(highlights, theme))
     }
 
     // 8) Annotation jumps: scroll to a highlight mark or paragraph. Waits for this
     //    chapter's document to be handed over, so it never moves an older document
-    //    that happens to still be on screen.
+    //    that happens to still be on screen. A windowed seek is scoped to the
+    //    anchor's section so paragraph indices resolve inside the right chapter.
     var appliedSeek by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(seekTargetRequest, session, loadedChapter) {
         val current = session ?: return@LaunchedEffect
         val req = seekTargetRequest ?: return@LaunchedEffect
-        if (loadedChapter != chapterHref) return@LaunchedEffect
+        if (loadedChapter != loadKey) return@LaunchedEffect
         if (appliedSeek == req.second) return@LaunchedEffect
         appliedSeek = req.second
-        current.seekTo(req.first)
+        val scoped = if (windowed && anchorChapterId != null) "c:$anchorChapterId|${req.first}" else req.first
+        current.seekTo(scoped)
     }
 
     // 9) The chrome committed a selection; drop it so the control dims again.
@@ -274,13 +370,16 @@ actual fun HtmlContentSurface(
 private class SurfaceCallbacks {
     @Volatile var onProgress: (Float) -> Unit = {}
     @Volatile var onPageChange: (Int, Int) -> Unit = { _, _ -> }
+    @Volatile var onVisibleSection: (Int) -> Unit = {}
+    @Volatile var onExtendForward: () -> Unit = {}
+    @Volatile var onExtendBackward: () -> Unit = {}
     @Volatile var onChapterEnd: () -> Unit = {}
     @Volatile var onChapterStart: () -> Unit = {}
     @Volatile var onTap: () -> Unit = {}
     @Volatile var onLinkClick: ((String) -> Unit)? = null
     @Volatile var onOverlayAction: ((String) -> Unit)? = null
-    @Volatile var onHighlightParagraph: ((Int, String) -> Unit)? = null
-    @Volatile var onSelectionChanged: ((Int, String?) -> Unit)? = null
+    @Volatile var onHighlightParagraph: ((String, Int, String) -> Unit)? = null
+    @Volatile var onSelectionChanged: ((String, Int, String?) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
 }
 
@@ -309,6 +408,10 @@ private class JcefSession private constructor(
     @Volatile private var pendingSeekFraction: Float? = null
     @Volatile private var lastHighlightJs: String? = null
     @Volatile private var lastDocument: File? = null
+    // Window context for title-event resolution: sections (spine → chapter) and
+    // the anchor chapter. Updated by the composable on every new window.
+    @Volatile var sectionsForCallbacks: List<ReaderSection> = emptyList()
+    @Volatile var anchorChapterIdForCallbacks: String? = null
     private var readyTimer: Timer? = null
 
     companion object {
@@ -338,14 +441,20 @@ private class JcefSession private constructor(
                 when {
                     t.startsWith("folio-progress:") -> {
                         val parts = t.split(':')
-                        if (parts.size != 5) return
+                        if (parts.size < 5) return
                         val fraction = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return
+                        val spine = parts.getOrNull(5)?.toIntOrNull()
                         callbacks.onProgress(fraction)
                         callbacks.onPageChange(
                             parts[2].toIntOrNull()?.coerceAtLeast(1) ?: 1,
                             parts[3].toIntOrNull()?.coerceAtLeast(1) ?: 1
                         )
+                        if (spine != null) callbacks.onVisibleSection(spine)
                     }
+
+                    t.startsWith("folio-extend:fwd:") -> callbacks.onExtendForward()
+
+                    t.startsWith("folio-extend:bwd:") -> callbacks.onExtendBackward()
 
                     t.startsWith("folio-link:") -> {
                         val encoded = t.removePrefix("folio-link:").substringAfter(':', "")
@@ -359,15 +468,32 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-edge:start:") -> callbacks.onChapterStart()
 
-                    t.startsWith("folio-selclear:") -> callbacks.onSelectionChanged?.invoke(0, null)
+                    t.startsWith("folio-selclear:") -> callbacks.onSelectionChanged?.invoke("", 0, null)
+
+                    t.startsWith("folio-sel2:") -> {
+                        val rest = t.removePrefix("folio-sel2:")
+                        val spine = rest.substringBefore(':').toIntOrNull() ?: -1
+                        val afterSpine = rest.substringAfter(':')
+                        val idx = afterSpine.substringBefore(':').toIntOrNull() ?: 0
+                        val encoded = afterSpine.substringAfter(':').substringBeforeLast(':')
+                        val text = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
+                        // The spine names a section of the window; resolve it to the
+                        // chapter the host knows.
+                        val chapterId = sectionsForCallbacks.firstOrNull { it.spineIndex == spine }?.chapterId
+                            ?: sectionsForCallbacks.firstOrNull()?.chapterId.orEmpty()
+                        if (text.isNullOrBlank()) callbacks.onSelectionChanged?.invoke(chapterId, idx, null)
+                        else callbacks.onSelectionChanged?.invoke(chapterId, idx, text)
+                    }
 
                     t.startsWith("folio-sel:") -> {
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')
                         val text = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
-                        if (text.isNullOrBlank()) callbacks.onSelectionChanged?.invoke(idx, null)
-                        else callbacks.onSelectionChanged?.invoke(idx, text)
+                        val chapterId = anchorChapterIdForCallbacks
+                            ?: sectionsForCallbacks.firstOrNull()?.chapterId.orEmpty()
+                        if (text.isNullOrBlank()) callbacks.onSelectionChanged?.invoke(chapterId, idx, null)
+                        else callbacks.onSelectionChanged?.invoke(chapterId, idx, text)
                     }
 
                     t.startsWith("folio-ovl:") -> {
@@ -496,6 +622,11 @@ private class JcefSession private constructor(
             if (!ready) pendingLoad = action
         }
         if (runNow) EventQueue.invokeLater(action)
+    }
+
+    /** Runs JS on the current document immediately (window grow/trim mutations). */
+    fun execute(js: String) {
+        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
     }
 
     /** Swaps the reader stylesheet in place (theme/typography) without navigating. */

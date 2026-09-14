@@ -20,7 +20,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
-import kotlinx.serialization.builtins.serializer
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -28,8 +27,9 @@ actual fun htmlSurfaceOccludesOverlays(): Boolean = false
 
 @Composable
 actual fun HtmlContentSurface(
-    html: String,
-    chapterHref: String,
+    sections: List<ReaderSection>,
+    windowed: Boolean,
+    anchorChapterId: String?,
     settings: ReaderSettings,
     position: ReadingPosition?,
     highlights: List<Highlight>,
@@ -37,13 +37,18 @@ actual fun HtmlContentSurface(
     modifier: Modifier,
     onProgress: (Float) -> Unit,
     onPageChange: (Int, Int) -> Unit,
+    onVisibleSection: (spineIndex: Int) -> Unit,
+    onExtendForward: () -> Unit,
+    onExtendBackward: () -> Unit,
+    windowOp: WindowOp?,
+    onWindowOpApplied: (nonce: Long) -> Unit,
     onChapterEnd: () -> Unit,
     onChapterStart: () -> Unit,
     onTap: () -> Unit,
     onLinkClick: ((String) -> Unit)?,
     onResolveResource: suspend (chapterHref: String, src: String) -> String?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
-    onSelectionChanged: ((paragraphIndex: Int, selectedText: String?) -> Unit)?,
+    onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)?,
+    onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)?,
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
     seekTargetRequest: Pair<String, Long>?
@@ -52,6 +57,19 @@ actual fun HtmlContentSurface(
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
     val latestSelection by rememberUpdatedState(onSelectionChanged)
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // Sections on screen, including DOM extensions: the `sections` param is the
+    // document as loaded (extensions never rebuild it), so the live list grows
+    // and trims here as window ops apply. One state object for the whole
+    // lifetime of the surface, so the remembered clients always read current.
+    val liveSectionsState = remember { mutableStateOf(sections) }
+    LaunchedEffect(sections) { liveSectionsState.value = sections }
+    // A chapter window loads as one document; the single-section path (documents,
+    // and non-windowed chapters) keys everything on the chapter href as before.
+    val loadKey = if (windowed) {
+        "window:" + sections.joinToString("-") { it.spineIndex.toString() }
+    } else {
+        sections.firstOrNull()?.href ?: ""
+    }
     // Paragraph seeks have to wait for the chapter they were requested for: running
     // one against the page still on screen would move the previous chapter.
     val pageState = remember { PageLoadState() }
@@ -60,16 +78,20 @@ actual fun HtmlContentSurface(
     // front. Declared before the seek effects so it runs first in composition order;
     // without it a jump's seek moved the previous chapter and the new one then
     // opened at its saved fraction, i.e. the top of the chapter.
-    LaunchedEffect(chapterHref) { pageState.loading(chapterHref) }
+    LaunchedEffect(loadKey) { pageState.loading(loadKey) }
+    // A windowed seek is scoped to the anchor's section so paragraph indices and
+    // highlight marks resolve inside the right chapter.
+    fun scopedTarget(target: String): String =
+        if (windowed && anchorChapterId != null) "c:$anchorChapterId|$target" else target
     LaunchedEffect(seekRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
-        pageState.seekFraction(req.first.coerceIn(0f, 1f), wv, chapterHref)
+        pageState.seekFraction(req.first.coerceIn(0f, 1f), wv, loadKey)
     }
     LaunchedEffect(seekTargetRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekTargetRequest ?: return@LaunchedEffect
-        pageState.seekTo(req.first, wv, chapterHref)
+        pageState.seekTo(scopedTarget(req.first), wv, loadKey)
     }
     LaunchedEffect(clearSelectionRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
@@ -86,19 +108,24 @@ actual fun HtmlContentSurface(
             HighlightPaint.applyJs(highlights, theme), null
         )
     }
-    val content = remember(html, settings, chapterHref, position, highlights) {
-        injectReaderCss(html, settings)
+    // The document: a window is assembled from its sections with every resource
+    // reference rewritten to the canonical file URL the interceptor serves; a
+    // single section loads exactly as it always did.
+    val content = remember(sections, windowed, settings) {
+        if (windowed) {
+            val rewritten = sections.map { section ->
+                section.copy(html = rewriteToCanonicalUrls(section.html, section.href))
+            }
+            injectReaderCss(ReaderWindowAssembler.assemble(rewritten), settings)
+        } else {
+            injectReaderCss(sections.firstOrNull()?.html.orEmpty(), settings)
+        }
     }
     val resourceCache = remember { ConcurrentHashMap<String, File>() }
-    var resourcesReady by remember(chapterHref, html) { mutableStateOf(false) }
-    LaunchedEffect(chapterHref, html, onResolveResource) {
-        resourcesReady = false
-        val sources = Regex("""(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-            .findAll(html).map { it.groupValues[1] }
-            .filter { !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") }
-            .distinct().toList()
+    var resourcesReady by remember(loadKey) { mutableStateOf(false) }
+    suspend fun resolveSectionSources(section: ReaderSection) {
         val pending = ArrayDeque<Pair<String, String>>()
-        sources.forEach { pending.addLast(chapterHref to it) }
+        sourcesOf(section.html).forEach { pending.addLast(section.href to it) }
         val visited = mutableSetOf<String>()
         while (pending.isNotEmpty()) {
             val (baseHref, src) = pending.removeFirst()
@@ -121,7 +148,60 @@ actual fun HtmlContentSurface(
                 }
             }
         }
+    }
+    LaunchedEffect(loadKey, sections, onResolveResource) {
+        resourcesReady = false
+        for (section in sections) resolveSectionSources(section)
         resourcesReady = true
+    }
+    // Grow/trim the window on screen. Each op is consumed once; an append or
+    // prepend re-runs the highlight painter afterwards so the freshly injected
+    // section wears its own marks.
+    LaunchedEffect(windowOp, webViewRef) {
+        val op = windowOp ?: return@LaunchedEffect
+        val wv = webViewRef ?: return@LaunchedEffect
+        when (op) {
+            is WindowOp.Append -> {
+                resolveSectionSources(op.section)
+                val fragment = ReaderWindowAssembler.sectionFragment(
+                    op.section.copy(html = rewriteToCanonicalUrls(op.section.html, op.section.href))
+                )
+                wv.evaluateJavascript(
+                    "window.__folioAppend&&window.__folioAppend(${op.section.spineIndex}," +
+                        "${jsLiteral(op.section.chapterId)}," +
+                        "${jsLiteral(fragment)});",
+                    null
+                )
+                liveSectionsState.value = liveSectionsState.value + op.section
+            }
+
+            is WindowOp.Prepend -> {
+                resolveSectionSources(op.section)
+                val fragment = ReaderWindowAssembler.sectionFragment(
+                    op.section.copy(html = rewriteToCanonicalUrls(op.section.html, op.section.href))
+                )
+                wv.evaluateJavascript(
+                    "window.__folioPrepend&&window.__folioPrepend(${op.section.spineIndex}," +
+                        "${jsLiteral(op.section.chapterId)}," +
+                        "${jsLiteral(fragment)});",
+                    null
+                )
+                liveSectionsState.value = listOf(op.section) + liveSectionsState.value
+            }
+
+            is WindowOp.Trim -> {
+                wv.evaluateJavascript(
+                    "window.__folioTrim&&window.__folioTrim(${op.fromSpine},${op.toSpine});",
+                    null
+                )
+                liveSectionsState.value = liveSectionsState.value.filter {
+                    it.spineIndex in op.fromSpine..op.toSpine
+                }
+            }
+        }
+        val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        wv.evaluateJavascript(HighlightPaint.applyJs(highlights, theme), null)
+        onWindowOpApplied(op.nonce)
     }
     // Hold pending JS so onPageFinished can inject after layout. This fixes the 1/1
     // measurement that happened immediately after loadDataWithBaseURL before layout.
@@ -137,10 +217,18 @@ actual fun HtmlContentSurface(
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val latestProgress by rememberUpdatedState(onProgress)
     val latestPage by rememberUpdatedState(onPageChange)
+    val latestVisible by rememberUpdatedState(onVisibleSection)
+    val latestExtendFwd by rememberUpdatedState(onExtendForward)
+    val latestExtendBwd by rememberUpdatedState(onExtendBackward)
     val latestEnd by rememberUpdatedState(onChapterEnd)
     val latestStart by rememberUpdatedState(onChapterStart)
     val latestLink by rememberUpdatedState(onLinkClick)
-    val client = remember(chapterHref, onResolveResource, resourceCache) {
+    val latestAnchorChapterId by rememberUpdatedState(anchorChapterId)
+    // Selection events name a spine; resolve the chapter through the live window.
+    fun chapterIdForSpine(spine: Int): String =
+        liveSectionsState.value.firstOrNull { it.spineIndex == spine }?.chapterId
+            ?: liveSectionsState.value.firstOrNull()?.chapterId.orEmpty()
+    val client = remember(loadKey, onResolveResource, resourceCache) {
         object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 resourceResponse(request.url.toString(), resourceCache)
@@ -188,8 +276,9 @@ actual fun HtmlContentSurface(
             }
         }
     }
-    // The paged engine talks through document.title (same protocol as the
-    // desktop surface): progress/pages, link clicks, center taps.
+    // Both layout modes talk through document.title: the paged engine always did,
+    // and the continuous bridge joined it when chapter windows arrived, so one
+    // parser covers progress, links, taps, edges, selections and extend requests.
     val chromeClient = remember {
         object : WebChromeClient() {
             override fun onReceivedTitle(view: WebView?, title: String?) {
@@ -199,17 +288,23 @@ actual fun HtmlContentSurface(
                 when {
                     t.startsWith("folio-progress:") -> {
                         val parts = t.split(':')
-                        if (parts.size != 5) return
+                        if (parts.size < 5) return
                         val f = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return
+                        val spine = parts.getOrNull(5)?.toIntOrNull()
                         mainHandler.post {
                             latestProgress(f)
                             latestPage(
                                 parts[2].toIntOrNull()?.coerceAtLeast(1) ?: 1,
                                 parts[3].toIntOrNull()?.coerceAtLeast(1) ?: 1
                             )
+                            if (spine != null) latestVisible(spine)
                             if (parts[4] == "true") latestEnd()
                         }
                     }
+
+                    t.startsWith("folio-extend:fwd:") -> mainHandler.post { latestExtendFwd() }
+
+                    t.startsWith("folio-extend:bwd:") -> mainHandler.post { latestExtendBwd() }
 
                     t.startsWith("folio-link:") -> {
                         val encoded = t.removePrefix("folio-link:").substringAfter(':', "")
@@ -223,14 +318,34 @@ actual fun HtmlContentSurface(
 
                     t.startsWith("folio-edge:start:") -> mainHandler.post { latestStart() }
 
-                    t.startsWith("folio-selclear:") -> mainHandler.post { latestSelection?.invoke(0, null) }
+                    t.startsWith("folio-selclear:") -> mainHandler.post {
+                        latestSelection?.invoke(latestAnchorChapterId ?: liveSectionsState.value.firstOrNull()?.chapterId.orEmpty(), 0, null)
+                    }
+
+                    t.startsWith("folio-sel2:") -> {
+                        val rest = t.removePrefix("folio-sel2:")
+                        val spine = rest.substringBefore(':').toIntOrNull() ?: -1
+                        val afterSpine = rest.substringAfter(':')
+                        val idx = afterSpine.substringBefore(':').toIntOrNull() ?: 0
+                        val encoded = afterSpine.substringAfter(':').substringBeforeLast(':')
+                        val text = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
+                        mainHandler.post {
+                            latestSelection?.invoke(chapterIdForSpine(spine), idx, text?.takeIf { it.isNotBlank() })
+                        }
+                    }
 
                     t.startsWith("folio-sel:") -> {
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')
                         val text = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull()
-                        mainHandler.post { latestSelection?.invoke(idx, text?.takeIf { it.isNotBlank() }) }
+                        mainHandler.post {
+                            latestSelection?.invoke(
+                                latestAnchorChapterId ?: liveSectionsState.value.firstOrNull()?.chapterId.orEmpty(),
+                                idx,
+                                text?.takeIf { it.isNotBlank() }
+                            )
+                        }
                     }
 
                     t.startsWith("folio-engdiag:") ->
@@ -291,7 +406,7 @@ actual fun HtmlContentSurface(
         },
         update = { webView ->
             webView.isEnabled = enabled
-            val contentKey = "$chapterHref:${content.hashCode()}"
+            val contentKey = "$loadKey:${content.hashCode()}"
             if (resourcesReady && webView.tag != contentKey) {
                 webView.tag = contentKey
                 val importedFonts = settings.customFonts.joinToString("") { font ->
@@ -305,67 +420,30 @@ actual fun HtmlContentSurface(
                     com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
                 val pagedCols = PageEngine.colsFor(androidLayoutMode)
                 // Paged modes run the shared book engine (discrete pages + leaf
-                // flip, progress via the title protocol); continuous keeps the
-                // layout-aware scrolling measurement below.
+                // flip); continuous runs the section-aware bridge — one
+                // implementation for windows and plain single-section documents.
                 val baseJs = if (pagedCols > 0) {
                     PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
-                } else """(function(){
-                            var paginated=false,scheduled=false,last=0,nonce=0,maxTotal=1;
-                            function atBottom(){var s=document.scrollingElement||document.documentElement;return s.scrollTop+s.clientHeight>=s.scrollHeight-2;}
-                            window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));schedule();};
-                            window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
-                            window.__folioSeekTo=function(t){var parts=String(t).split(':'),isH=parts[0]==='h';var id=isH?(parts[1]||''):'',para=isH?parts[2]:parts[1],frac=isH?parts[3]:parts[2];function byMark(){if(!id)return null;try{return document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){return null;}}function land(el){el.scrollIntoView({block:'start'});schedule();}function byPara(){if(para===undefined||para==='')return false;var n=parseInt(para,10);if(isNaN(n))return false;var ps=document.querySelectorAll('p');if(!ps.length)return false;land(ps[Math.min(Math.max(0,n),ps.length-1)]);return true;}function byFrac(){if(frac===undefined||frac==='')return false;var f=parseFloat(frac);if(isNaN(f))return false;if(window.__folioSeek)window.__folioSeek(f);return true;}var m=byMark();if(m){land(m);return;}if(!byPara())byFrac();};
-                            ${PageEngine.selectionWatchJs}
-                            ${PageEngine.emptyHideJs}
-                            function report(){
-                                scheduled=false;
-                                var now=Date.now();
-                                if(now-last<100){schedule();return;}
-                                last=now;
-                                var scroller = document.scrollingElement || document.documentElement;
-                                var d=document.documentElement,b=document.body||d;
-                                var vw=Math.max(1, (scroller.clientWidth || d.clientWidth || window.innerWidth || 1)),vh=Math.max(1, (scroller.clientHeight || d.clientHeight || window.innerHeight || 1));
-                                var docWidth=Math.max(scroller.scrollWidth, d.scrollWidth, b.scrollWidth);
-                                var docHeight=Math.max(scroller.scrollHeight, d.scrollHeight, b.scrollHeight || 0);
-                                var range=paginated?Math.max(0,docWidth-vw):Math.max(0,docHeight-vh);
-                                var offset=paginated? (scroller.scrollLeft || window.scrollX) : (scroller.scrollTop || window.scrollY);
-                                var total=paginated?Math.max(1,Math.ceil(docWidth/vw)):Math.max(1,Math.ceil(docHeight/vh));
-                                if(total>maxTotal)maxTotal=total;else total=maxTotal;
-                                var current=paginated?Math.min(total,Math.floor(offset/vw)+1):Math.min(total,Math.floor(offset/vh)+1);
-                                FolioReader.report(range>0?Math.min(1,offset/range):0,current,total);
-                            }
-                            function schedule(){if(!scheduled){scheduled=true;requestAnimationFrame(report);}}
-                            var lastEdgeHop=0;
-                            function edge(which){
-                              var now=Date.now();
-                              if(now-lastEdgeHop<600)return;
-                              lastEdgeHop=now;
-                              document.title='folio-edge:'+which+':'+(++nonce);
-                            }
-                            function atTop(){return ((document.scrollingElement||document.documentElement).scrollTop||0)<=1;}
-                            var lastY=0;
-                            window.addEventListener('touchstart',function(e){var t=e.touches&&e.touches[0];lastY=t?t.clientY:0;},{passive:true});
-                            window.addEventListener('touchmove',function(e){var t=e.touches&&e.touches[0];if(!t)return;var dy=t.clientY-lastY;lastY=t.clientY;if(dy>16&&atTop())edge('start');if(dy<-16&&atBottom())edge('end');},{passive:true});
-                            window.addEventListener('wheel',function(e){var d=e.deltaY||0;if(d<0&&atTop())edge('start');if(d>0&&atBottom())edge('end');},{passive:true});
-                            window.addEventListener('scroll',function(){schedule();clearTimeout(window.__folioSettleT);window.__folioSettleT=setTimeout(schedule,180);},{passive:true});
-                            window.addEventListener('resize',schedule);
-                            window.addEventListener('load',schedule);
-                            if(window.ResizeObserver){new ResizeObserver(schedule).observe(document.documentElement); if(document.body) new ResizeObserver(schedule).observe(document.body);}
-                            // Restore saved scroll position; use scroller
-                            var scroller2 = document.scrollingElement || document.documentElement;
-                            if(paginated){ scroller2.scrollLeft = scroller2.scrollWidth*$fraction; } else { scroller2.scrollTop = scroller2.scrollHeight*$fraction; }
-                            if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){ schedule(); setTimeout(schedule,150); });
-                            document.querySelectorAll('img').forEach(function(img){img.addEventListener('load',schedule);img.addEventListener('error',schedule);});
-                            schedule();setTimeout(schedule,250);setTimeout(schedule,600);setTimeout(schedule,1000);setTimeout(schedule,1800);
-                        })();"""
+                } else {
+                    val seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
+                        ?: sections.firstOrNull()?.spineIndex
+                        ?: -1
+                    ContinuousEngine.js(seedSpine, fraction.toFloat(), desktopEvents = false)
+                }
                 val theme = settings.customTheme
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
                 val js = baseJs + HighlightPaint.js(highlights, theme)
                 val token = loadNonce + 1
                 loadNonce = token
                 pendingJs = token to js
-                pageState.loading(chapterHref)
-                webView.loadDataWithBaseURL("file:///folio/$chapterHref?folio-load=$token", "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
+                pageState.loading(loadKey)
+                val baseUrl = if (windowed) {
+                    "file:///folio/?folio-load=$token"
+                } else {
+                    val href = sections.firstOrNull()?.href ?: ""
+                    "file:///folio/$href?folio-load=$token"
+                }
+                webView.loadDataWithBaseURL(baseUrl, "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
                 android.util.Log.i("FolioLoad", "issued token=$token key=$contentKey")
                 // Only for a WebView whose onPageFinished never fires: re-running the
                 // bridge is not idempotent, it restores scrollTop from the saved
@@ -397,6 +475,34 @@ actual fun HtmlContentSurface(
     )
 }
 
+/** Embeds a string as a JSON literal for evaluateJavascript. */
+private fun jsLiteral(s: String): String = ReaderWindowAssembler.jsStringLiteral(s)
+
+/** Relative src/href attribute values of a chapter document, deduplicated. */
+private fun sourcesOf(html: String): List<String> =
+    Regex("""(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        .findAll(html).map { it.groupValues[1] }
+        .filter { !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") }
+        .distinct().toList()
+
+/**
+ * Rewrites a section's resource references to the canonical file:// URLs the
+ * request interceptor serves. Chapter-to-chapter links stay relative — the
+ * click bridge resolves those to spine targets, and an absolute file URL would
+ * make them dead.
+ */
+private fun rewriteToCanonicalUrls(html: String, href: String): String =
+    Regex("""((?:src|href)\s*=\s*)(["'])([^"']+)\2""", RegexOption.IGNORE_CASE).replace(html) { m ->
+        val attr = m.groupValues[1].trim().lowercase()
+        val quote = m.groupValues[2]
+        val src = m.groupValues[3]
+        val keep = src.startsWith("#") || src.startsWith("http") || src.startsWith("data:") ||
+            src.startsWith("file:") ||
+            (attr.startsWith("href") && Regex("""\.x?html?(#.*)?$""", RegexOption.IGNORE_CASE).containsMatchIn(src))
+        if (keep) m.value
+        else m.groupValues[1] + quote + "file:///folio/" + canonicalEpubPath(href, src) + quote
+    }
+
 /**
  * WebView that never opens the floating text-selection toolbar. Folio shows its own
  * Highlight button for a selection; Android's Copy/Share bar landing on top of it
@@ -422,7 +528,7 @@ private class PageLoadState {
     private var pending: String? = null
     private var pendingHref: String? = null
 
-    /** [href] is the chapter about to be handed to the WebView. */
+    /** [href] is the load key (chapter href, or the window's key) about to be handed to the WebView. */
     fun loading(href: String) {
         pageReady = false
         loadingHref = href
@@ -459,9 +565,7 @@ private class PageLoadState {
     }
 
     fun seekTo(target: String, view: WebView, href: String) {
-        val literal = kotlinx.serialization.json.Json.encodeToString(
-            String.serializer(), target
-        )
+        val literal = ReaderWindowAssembler.jsStringLiteral(target)
         run("window.__folioSeekTo&&window.__folioSeekTo($literal);", view, href)
     }
 

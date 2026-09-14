@@ -48,11 +48,20 @@ private suspend fun loadMangaCover(
     val key = "$sourceId:$thumbnailUrl"
     mangaCoverCache[key]?.let { return it }
     if (thumbnailUrl.isNullOrBlank()) return null
-    val bytes = try {
-        backend.fetchCover(sourceId, thumbnailUrl)
-    } catch (_: Throwable) {
-        null
-    } ?: return null
+    // Disk before network: a cover seen in any previous session is a plain file
+    // read, which is what keeps library thumbnails loaded across cold starts.
+    // Only a genuine miss goes to the source, and its bytes are written through
+    // so the next start starts warm.
+    var bytes = MangaCoverDiskCache.read(key)
+    if (bytes == null) {
+        bytes = try {
+            backend.fetchCover(sourceId, thumbnailUrl)
+        } catch (_: Throwable) {
+            null
+        }
+        if (bytes != null) MangaCoverDiskCache.write(key, bytes)
+    }
+    bytes ?: return null
     val bitmap = withContext(Dispatchers.IO) { decodeCoverImage(bytes) } ?: return null
     if (mangaCoverCache.size >= MANGA_COVER_CACHE_MAX) {
         mangaCoverOrder.pollFirst()?.let { mangaCoverCache.remove(it) }

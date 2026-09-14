@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -82,7 +81,12 @@ import com.folio.reader.model.DocumentCategory
 import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
+import com.folio.reader.ui.search.BookHit
+import com.folio.reader.ui.search.BookSearchController
+import com.folio.reader.ui.search.BookSearchResultsList
+import com.folio.reader.ui.search.SearchScope
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioTopInset
 import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.launch
@@ -111,6 +115,7 @@ fun LibraryScreen(
     onBookClick: (Book) -> Unit,
     onBookDetailClick: (Book) -> Unit,
     onImportClick: () -> Unit,
+    /** Toggles the current shelf's rail search (books and documents; manga uses [onMangaSearchClick]). */
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     showSettingsAction: Boolean = true,
@@ -146,7 +151,15 @@ fun LibraryScreen(
     onMangaViewModeChange: (com.folio.reader.ui.manga.MangaViewMode) -> Unit = {},
     mangaLibraryViewModel: com.folio.reader.ui.manga.MangaLibraryViewModel? = null,
     onRemoveSelectedManga: ((Set<String>) -> Unit)? = null,
-    onOpenStats: (() -> Unit)? = null
+    onOpenStats: (() -> Unit)? = null,
+    /** Books rail search: the field lives on the rail and never removes the mode switch. */
+    bookSearchActive: Boolean = false,
+    onBookSearchActiveChange: (Boolean) -> Unit = {},
+    bookSearchController: BookSearchController? = null,
+    onOpenBookHit: (BookHit) -> Unit = {},
+    /** Documents rail search: same pattern as books, backed by the document query flow. */
+    documentSearchActive: Boolean = false,
+    onDocumentSearchActiveChange: (Boolean) -> Unit = {},
 ) {
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
@@ -255,6 +268,10 @@ fun LibraryScreen(
 
     val allSeries by viewModel.allSeries().collectAsState(initial = emptyList())
     val allCollections by viewModel.allCollections().collectAsState(initial = emptyList())
+    // The whole library, unfiltered: the rail's books search fans out over every
+    // book, not just the ones the status/series chips are currently showing.
+    val allBooks by viewModel.allBooks().collectAsState(initial = emptyList())
+    val railScope = rememberCoroutineScope()
     // §5.1: pace captions keyed by book id. Empty unless the host supplied a
     // session repository, so callers that don't want the extra read pay nothing.
     val finishEstimates by remember(viewModel) { viewModel.finishEstimates() }
@@ -305,79 +322,97 @@ fun LibraryScreen(
     val railContent: (@Composable () -> Unit)? = when (libraryMode) {
         LibraryMode.MANGA -> null
         LibraryMode.DOCUMENTS -> ({
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onSizeChanged { railPx = it.height }
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-            ) {
-                if (maxWidth < 600.dp) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        LibraryModeSwitch(libraryMode, onLibraryModeChange, Modifier.fillMaxWidth())
-                        DocumentCategoryRail(
-                            categories = documentCategories,
-                            selectedCategoryId = selectedDocumentCategory,
-                            onSelect = { documentLibraryViewModel?.selectCategory(it) },
-                            onManage = { manageDocumentCategories = true }
-                        )
-                        androidx.compose.material3.OutlinedTextField(
-                            value = documentState.query,
-                            onValueChange = { documentLibraryViewModel?.setQuery(it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = documentLibraryViewModel != null,
-                            singleLine = true,
-                            placeholder = { Text("Search documents") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
-                        )
-                    }
+            // One rail, exactly like Books and Manga: the switch leads the
+            // category chips, so no mode stacks its categories below the
+            // selector. While searching, the chips give way to the field but
+            // the switch stays at the head of the row.
+            Box(Modifier.onSizeChanged { railPx = it.height }) {
+                if (documentSearchActive && documentLibraryViewModel != null) {
+                    LibrarySearchRail(
+                        switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                        query = documentState.query,
+                        onQueryChange = { documentLibraryViewModel?.setQuery(it) },
+                        placeholder = "Search documents",
+                        onClose = {
+                            // The document grid's query flow filters as long as the
+                            // text is non-blank, so closing the field clears it —
+                            // otherwise the shelf would stay filtered with no field
+                            // on screen to explain why.
+                            documentLibraryViewModel?.setQuery("")
+                            onDocumentSearchActiveChange(false)
+                        },
+                    )
                 } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        LibraryModeSwitch(libraryMode, onLibraryModeChange)
-                        Spacer(Modifier.width(12.dp))
-                        DocumentCategoryRail(
-                            categories = documentCategories,
-                            selectedCategoryId = selectedDocumentCategory,
-                            onSelect = { documentLibraryViewModel?.selectCategory(it) },
-                            onManage = { manageDocumentCategories = true },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        androidx.compose.material3.OutlinedTextField(
-                            value = documentState.query,
-                            onValueChange = { documentLibraryViewModel?.setQuery(it) },
-                            modifier = Modifier.weight(1f),
-                            enabled = documentLibraryViewModel != null,
-                            singleLine = true,
-                            placeholder = { Text("Search documents") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
-                        )
+                        item { LibraryModeSwitch(libraryMode, onLibraryModeChange) }
+                        items(documentCategories, key = { it.id }) { category ->
+                            com.folio.reader.ui.components.FolioChip(
+                                selected = selectedDocumentCategory == category.id,
+                                onClick = { documentLibraryViewModel?.selectCategory(category.id) },
+                                label = category.name
+                            )
+                        }
+                        item {
+                            com.folio.reader.ui.components.FolioChip(
+                                selected = false,
+                                onClick = { manageDocumentCategories = true },
+                                label = "Edit"
+                            )
+                        }
                     }
                 }
             }
         })
         LibraryMode.BOOKS -> ({
             Box(Modifier.onSizeChanged { railPx = it.height }) {
-                LibraryFilterChips(
-                    filter = filter,
-                    allSeries = allSeries,
-                    allCollections = allCollections,
-                    seriesFilterOpen = seriesFilterOpen,
-                    collectionFilterOpen = collectionFilterOpen,
-                    onFilterChange = { filter = it },
-                    onSeriesFilterOpen = { seriesFilterOpen = it },
-                    onCollectionFilterOpen = { collectionFilterOpen = it },
-                    leading = if (mangaContent != null || documentLibraryViewModel != null) {
-                        ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
-                    } else {
-                        null
-                    },
-                )
+                val controller = bookSearchController
+                if (bookSearchActive && controller != null) {
+                    LibrarySearchRail(
+                        switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                        query = controller.query,
+                        onQueryChange = { q ->
+                            controller.runSearch(q, controller.scope, allBooks, railScope)
+                        },
+                        placeholder = "Search books",
+                        onClose = { onBookSearchActiveChange(false) },
+                        scopeChips = {
+                            // A plain Row: on phones these chips ride the same
+                            // scrollable row as the mode switch.
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SearchScope.entries.forEach { s ->
+                                    com.folio.reader.ui.components.FolioChip(
+                                        selected = controller.scope == s,
+                                        onClick = {
+                                            controller.runSearch(controller.query, s, allBooks, railScope)
+                                        },
+                                        label = s.label
+                                    )
+                                }
+                            }
+                        },
+                    )
+                } else {
+                    LibraryFilterChips(
+                        filter = filter,
+                        allSeries = allSeries,
+                        allCollections = allCollections,
+                        seriesFilterOpen = seriesFilterOpen,
+                        collectionFilterOpen = collectionFilterOpen,
+                        onFilterChange = { filter = it },
+                        onSeriesFilterOpen = { seriesFilterOpen = it },
+                        onCollectionFilterOpen = { collectionFilterOpen = it },
+                        leading = if (mangaContent != null || documentLibraryViewModel != null) {
+                            ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         })
     }
@@ -502,13 +537,17 @@ fun LibraryScreen(
                             onClick = onSyncNow
                         )
                     }
+                    // One search contract for every shelf: the icon toggles the
+                    // mode's rail search (manga routes through its own callback).
+                    // Documents used to disable this icon because their field was
+                    // permanently on the rail; the unified search gives them the
+                    // same toggle the other two modes have.
                     IconButton(onClick = {
                         when (libraryMode) {
-                            LibraryMode.BOOKS -> onSearchClick()
-                            LibraryMode.DOCUMENTS -> Unit
                             LibraryMode.MANGA -> onMangaSearchClick()
+                            else -> onSearchClick()
                         }
-                    }, enabled = !documentMode) {
+                    }) {
                         Icon(Icons.Filled.Search, contentDescription = "Search")
                     }
                     IconButton(onClick = {
@@ -840,68 +879,73 @@ fun LibraryScreen(
                         )
                     }
                     LibraryMode.BOOKS -> shelfStateHolder.SaveableStateProvider("books") {
-                        LibraryContent(
-                            books = books,
-                            viewMode = booksViewMode,
-                            sortBy = sortBy,
-                            sortAscending = sortAscending,
-                            filter = filter,
-                            allSeries = allSeries,
-                            allCollections = allCollections,
-                            selectedBooks = selectedBooks,
-                            isSelectionMode = isSelectionMode,
-                            preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
-                            finishEstimates = finishEstimates,
-                            onViewMode = onBooksViewModeChange,
-                            onSortChange = { sortBy = it },
-                            onDirectionChange = { sortAscending = it },
-                            onFilterChange = { filter = it },
-                            onSeriesFilterOpen = { seriesFilterOpen = it },
-                            onCollectionFilterOpen = { collectionFilterOpen = it },
-                            seriesFilterOpen = seriesFilterOpen,
-                            collectionFilterOpen = collectionFilterOpen,
-                            onBookClick = {
-                                if (isSelectionMode) viewModel.toggleSelection(it.id)
-                                else onBookDetailClick(it)
-                            },
-                            onBookLongClick = { viewModel.toggleSelection(it.id) },
-                            onDeleteBook = { bookToDelete = it },
-                            onImportClick = onImportClick
-                        )
+                        // Searching the shelf: the Titles scope filters the grid in
+                        // place; every other scope replaces the shelf with the same
+                        // hit list the full-screen search renders, so one interaction
+                        // covers both surfaces.
+                        val controller = bookSearchController
+                        if (bookSearchActive && controller != null && controller.scope != SearchScope.TITLES) {
+                            BookSearchResultsList(
+                                query = controller.query,
+                                scope = controller.scope,
+                                titleMatches = controller.titleMatches,
+                                results = controller.results,
+                                annotationResults = controller.annotationResults,
+                                onOpenTitle = onBookDetailClick,
+                                onOpenHit = onOpenBookHit,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            val queryText = if (bookSearchActive) controller?.query?.trim().orEmpty() else ""
+                            val displayed = if (queryText.isNotEmpty()) {
+                                books?.filter {
+                                    it.title.contains(queryText, ignoreCase = true) ||
+                                        it.displayAuthor.contains(queryText, ignoreCase = true)
+                                }
+                            } else {
+                                books
+                            }
+                            if (displayed != null && displayed.isEmpty() && queryText.isNotEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    com.folio.reader.ui.components.EmptyState(
+                                        icon = Icons.Filled.Search,
+                                        headline = "No matches for \"$queryText\"",
+                                    )
+                                }
+                            } else {
+                                LibraryContent(
+                                    books = displayed,
+                                    viewMode = booksViewMode,
+                                    sortBy = sortBy,
+                                    sortAscending = sortAscending,
+                                    filter = filter,
+                                    allSeries = allSeries,
+                                    allCollections = allCollections,
+                                    selectedBooks = selectedBooks,
+                                    isSelectionMode = isSelectionMode,
+                                    preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
+                                    finishEstimates = finishEstimates,
+                                    onViewMode = onBooksViewModeChange,
+                                    onSortChange = { sortBy = it },
+                                    onDirectionChange = { sortAscending = it },
+                                    onFilterChange = { filter = it },
+                                    onSeriesFilterOpen = { seriesFilterOpen = it },
+                                    onCollectionFilterOpen = { collectionFilterOpen = it },
+                                    seriesFilterOpen = seriesFilterOpen,
+                                    collectionFilterOpen = collectionFilterOpen,
+                                    onBookClick = {
+                                        if (isSelectionMode) viewModel.toggleSelection(it.id)
+                                        else onBookDetailClick(it)
+                                    },
+                                    onBookLongClick = { viewModel.toggleSelection(it.id) },
+                                    onDeleteBook = { bookToDelete = it },
+                                    onImportClick = onImportClick
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun DocumentCategoryRail(
-    categories: List<DocumentCategory>,
-    selectedCategoryId: String?,
-    onSelect: (String) -> Unit,
-    onManage: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    LazyRow(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        items(categories, key = { it.id }) { category ->
-            com.folio.reader.ui.components.FolioChip(
-                selected = selectedCategoryId == category.id,
-                onClick = { onSelect(category.id) },
-                label = category.name
-            )
-        }
-        item {
-            com.folio.reader.ui.components.FolioChip(
-                selected = false,
-                onClick = onManage,
-                label = "Edit"
-            )
         }
     }
 }

@@ -7,6 +7,13 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Whole-device library scanning: All Files Access on Android 11+, where
+         scoped storage hides other apps' non-media files (EPUBs, PDFs) from
+         both MediaStore and SAF tree grants unless the root is granted — which
+         OEMs frequently block. Sideloaded app; Play's policy on this permission
+         does not apply. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <!-- Needed to discover installed Mihon extension packages on Android 11+. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -24,6 +31,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:forceDarkAllowed="false"
         android:fullBackupContent="@xml/backup_rules"
+        android:requestLegacyExternalStorage="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_launcher_round"

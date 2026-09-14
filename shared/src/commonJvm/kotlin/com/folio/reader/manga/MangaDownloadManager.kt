@@ -12,17 +12,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Sequential chapter download worker (Mihon-style download queue). Pages are stored on
+ * Chapter download pool (Mihon-style download queue). Pages are stored on
  * disk under "<mangaId>/<chapterId>/" inside the active [MangaDownloadStorage] and served
  * back to the reader by [readDownloadedPage] before falling through to the network backend.
  * The storage location can be changed at runtime via [switchStorage], which migrates
  * existing chapters to the new home.
+ *
+ * [parallelChapters] workers drain the queue concurrently. File writes are isolated
+ * per chapter ("<mangaId>/<chapterId>/"), every database write goes through the
+ * single write mutex, and chapter pickup is an atomic claim (claimNextQueued), so
+ * workers never touch the same files or the same queue row.
  */
 class MangaDownloadManager(
     private val backend: MangaBackend,
     private val downloadsRepo: MangaDownloadRepository,
     private val chapterRepo: MangaChapterRepository,
     initialStorage: MangaDownloadStorage,
+    private val parallelChapters: Int = 3,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -96,26 +102,29 @@ class MangaDownloadManager(
     }
 
     /**
-     * Starts the queue loop. Idempotent — a second loop running alongside the first
-     * would process the same chapters twice.
+     * Starts the worker pool. Idempotent — a second pool running alongside the first
+     * would claim the same chapters twice.
      */
     fun start() {
         if (loop?.isActive == true) return
         loop = scope.launch {
             resumeInterrupted()
-            while (isActive) {
-                val next = downloadsRepo.observeQueue().first()
-                    .firstOrNull { it.status == MangaDownloadStatus.QUEUED }
-                if (next == null) {
-                    delay(1500)
-                } else {
-                    process(next)
+            repeat(parallelChapters) {
+                launch {
+                    while (isActive) {
+                        val next = downloadsRepo.claimNextQueued()
+                        if (next == null) {
+                            delay(1500)
+                        } else {
+                            process(next)
+                        }
+                    }
                 }
             }
         }
     }
 
-    /** Ends the loop. The queue is durable, so [start] resumes it where it stopped. */
+    /** Ends the pool (cancelling every worker). The queue is durable, so [start] resumes it where it stopped. */
     fun stop() {
         loop?.cancel()
         loop = null
@@ -241,6 +250,18 @@ class MangaDownloadManager(
             storage.deleteDir(path)
         }
         downloadsRepo.remove(chapterId)
+    }
+
+    /**
+     * Removes every downloaded chapter of a manga — the whole
+     * "<mangaId>/" directory — from the active location. Called by the
+     * repository's cascade delete through the app graph.
+     */
+    suspend fun deleteMangaDownloads(mangaId: String) {
+        if (mangaId.isBlank()) return
+        withContext(Dispatchers.IO) {
+            storage.deleteDir(mangaId.sanitize())
+        }
     }
 
     /** Reads a downloaded page from disk, or null when the chapter is not downloaded. */

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -26,6 +27,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioAtmosphere
@@ -294,6 +298,27 @@ fun Modifier.folioPressable(
 @Composable
 fun rememberFolioInteraction(): MutableInteractionSource =
     remember { MutableInteractionSource() }
+
+/**
+ * Secondary-button (right-click) trigger for items whose actions live behind the
+ * long-press context menu. A mouse cannot hold comfortably, so the platform's own
+ * context gesture is the menu's other door; touch never reports the secondary
+ * button, so this stays silent on phones and tablets.
+ */
+@Composable
+fun Modifier.folioRightClick(onRightClick: () -> Unit): Modifier {
+    val current by rememberUpdatedState(onRightClick)
+    return pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.type == PointerEventType.Release && event.buttons.isSecondaryPressed) {
+                    current()
+                }
+            }
+        }
+    }
+}
 
 /**
  * A hairline structural rule. Editorial layouts get their order from rules and

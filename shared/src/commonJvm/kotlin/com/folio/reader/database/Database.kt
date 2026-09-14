@@ -40,6 +40,17 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     val mangaDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpMangaData() { mangaDataRevision.value += 1 }
 
+    /**
+     * Bumped after every write to the books, book_tags, book_collections,
+     * series and collections tables. The book observe* flows re-query on this
+     * so the library, home shelf and status chips update live instead of
+     * relying on the screens being remounted. Not bumped by
+     * reading_positions/reading_sessions writes: those fire on the reading
+     * debounce, and the lists display the books-row progress fields anyway.
+     */
+    val bookDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpBookData() { bookDataRevision.value += 1 }
+
     val documentDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpDocumentData() { documentDataRevision.value += 1 }
 
@@ -794,45 +805,48 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         }
     }
 
-    suspend fun deleteBook(bookId: String): Unit = withContext(dispatcher) {
-        writeMutex.withLock {
-            val conn = driverDelegate.getConnection()
-        listOf(
-            "DELETE FROM reading_positions WHERE book_id = ?",
-            "DELETE FROM highlights WHERE book_id = ?",
-            "DELETE FROM notes WHERE book_id = ?",
-            "DELETE FROM bookmarks WHERE book_id = ?",
-            "DELETE FROM reading_sessions WHERE book_id = ?",
-            "DELETE FROM chapters WHERE book_id = ?",
-            "DELETE FROM search_index WHERE book_id = ?",
-            "DELETE FROM book_tags WHERE book_id = ?",
-            "DELETE FROM book_collections WHERE book_id = ?",
-            "DELETE FROM quotes WHERE book_id = ?",
-            "DELETE FROM revisit_items WHERE book_id = ?",
-            "DELETE FROM book_statistics WHERE book_id = ?",
-            "DELETE FROM reading_cycles WHERE book_id = ?",
-            "DELETE FROM books WHERE id = ?"
-        ).forEach { sql ->
-            // FTS virtual table uses different delete syntax; ignore errors
-            runCatching {
+    suspend fun deleteBook(bookId: String) {
+        // One transaction: a crash or a failed statement mid-sequence rolls the
+        // whole delete back, so no half-orphaned rows survive. The one exception
+        // is the FTS search_index delete, which may legitimately fail (virtual
+        // table syntax differences) and must not abort the rest of the commit.
+        withTransaction { conn ->
+            listOf(
+                "DELETE FROM reading_positions WHERE book_id = ?",
+                "DELETE FROM highlights WHERE book_id = ?",
+                "DELETE FROM notes WHERE book_id = ?",
+                "DELETE FROM bookmarks WHERE book_id = ?",
+                "DELETE FROM reading_sessions WHERE book_id = ?",
+                "DELETE FROM chapters WHERE book_id = ?",
+                "DELETE FROM book_tags WHERE book_id = ?",
+                "DELETE FROM book_collections WHERE book_id = ?",
+                "DELETE FROM quotes WHERE book_id = ?",
+                "DELETE FROM revisit_items WHERE book_id = ?",
+                "DELETE FROM book_statistics WHERE book_id = ?",
+                "DELETE FROM reading_cycles WHERE book_id = ?",
+                "DELETE FROM books WHERE id = ?"
+            ).forEach { sql ->
                 conn.prepareStatement(sql).use { stmt ->
                     stmt.setString(1, bookId)
                     stmt.executeUpdate()
                 }
             }
-        }
-        // highlight_tags orphan cleanup
-        runCatching {
+            // FTS virtual table uses different delete syntax; a failure here is
+            // expected on some configurations and must not roll the rest back.
+            runCatching {
+                conn.prepareStatement("DELETE FROM search_index WHERE book_id = ?").use { stmt ->
+                    stmt.setString(1, bookId)
+                    stmt.executeUpdate()
+                }
+            }
+            // highlight_tags orphan cleanup
             conn.prepareStatement("DELETE FROM highlight_tags WHERE highlight_id NOT IN (SELECT id FROM highlights)").use { it.executeUpdate() }
-        }
-        // Per-book reader overrides live in the settings KV table keyed by book id,
-        // so the books DELETE above would leave the row behind permanently.
-        runCatching {
+            // Per-book reader overrides live in the settings KV table keyed by book id,
+            // so the books DELETE above would leave the row behind permanently.
             conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->
                 stmt.setString(1, bookSettingsKey(bookId))
                 stmt.executeUpdate()
             }
-        }
         }
     }
 

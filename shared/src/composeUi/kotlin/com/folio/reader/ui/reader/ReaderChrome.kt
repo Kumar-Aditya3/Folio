@@ -57,8 +57,8 @@ internal fun ReaderTopBar(
     bookTitle: String,
     showClock: Boolean,
     occludes: Boolean,
-    pageSelection: Pair<Int, String>?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
+    pageSelection: Triple<String, Int, String>?,
+    onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)?,
     onSelectionConsumed: () -> Unit,
     isBookmarked: Boolean,
     bookmarkColor: Color,
@@ -125,7 +125,7 @@ internal fun ReaderTopBar(
                         enabled = selected != null,
                         onClick = {
                             if (selected != null) {
-                                onHighlightParagraph?.invoke(selected.first, selected.second)
+                                onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
                                 onSelectionConsumed()
                             }
                         }
@@ -176,8 +176,8 @@ internal fun ReaderTopBar(
  */
 @Composable
 internal fun ReaderFloatingRail(
-    pageSelection: Pair<Int, String>?,
-    onHighlightParagraph: ((paragraphIndex: Int, selectedText: String) -> Unit)?,
+    pageSelection: Triple<String, Int, String>?,
+    onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)?,
     onSelectionConsumed: () -> Unit,
     isBookmarked: Boolean,
     bookmarkColor: Color,
@@ -205,7 +205,7 @@ internal fun ReaderFloatingRail(
                 enabled = selected != null,
                 onClick = {
                     if (selected != null) {
-                        onHighlightParagraph?.invoke(selected.first, selected.second)
+                        onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
                         onSelectionConsumed()
                     }
                 }

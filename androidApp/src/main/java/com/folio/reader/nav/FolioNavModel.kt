@@ -16,6 +16,7 @@ interface FolioNavModel {
     @Composable
     fun libraryContent(
         onOpenReader: (String) -> Unit,
+        onOpenReaderAt: (String, Int?) -> Unit,
         onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,

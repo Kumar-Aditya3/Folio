@@ -72,6 +72,9 @@ fun FolioNavHost(
         composable(FolioRoutes.LIBRARY) {
             navModel.libraryContent(
                 onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                onOpenReaderAt = { bookId, spine ->
+                    navController.navigate(FolioDestination.reader(bookId, spine))
+                },
                 onOpenDocument = { documentId ->
                     navController.navigate(FolioDestination.documentReader(documentId))
                 },

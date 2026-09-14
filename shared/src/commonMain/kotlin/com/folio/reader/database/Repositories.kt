@@ -226,6 +226,27 @@ data class SearchResult(
 interface SettingsRepository {
     suspend fun getGlobalSettings(): ReaderSettings
     suspend fun saveGlobalSettings(settings: ReaderSettings, emitSyncEvent: Boolean = true)
+
+    /**
+     * Atomic read-modify-write of the global settings row: [transform] receives
+     * the row as it currently exists and returns the next one, so fields the
+     * caller did not touch keep their stored values even when the caller's
+     * snapshot is stale. Callers changing a few fields should patch via
+     * [ReaderSettings.diffFields] + [ReaderSettings.withFieldsFrom]; whole-row
+     * replacement (sync apply, backup restore) keeps [saveGlobalSettings].
+     * Returns the row that was stored; when the transform is a no-op nothing
+     * is written and no sync event is emitted.
+     */
+    suspend fun mergeGlobalSettings(
+        emitSyncEvent: Boolean = true,
+        transform: (ReaderSettings) -> ReaderSettings,
+    ): ReaderSettings {
+        val current = getGlobalSettings()
+        val merged = transform(current)
+        if (merged != current) saveGlobalSettings(merged, emitSyncEvent)
+        return merged
+    }
+
     suspend fun getBookSettings(bookId: String): BookReaderSettings?
     suspend fun saveBookSettings(bookId: String, settings: BookReaderSettings)
     suspend fun deleteBookSettings(bookId: String)

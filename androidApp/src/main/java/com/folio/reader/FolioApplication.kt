@@ -84,7 +84,10 @@ class AppGraph(private val app: Application) {
     val searchIndexer = SearchIndexer(searchRepository)
 
     // ---------- Manga category (Mihon-powered backend) ----------
-    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database)
+    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database) { mangaId ->
+        // Cascade delete also removes the manga's downloaded pages from disk.
+        mangaDownloadManager.deleteMangaDownloads(mangaId)
+    }
     val mangaChapterRepository = com.folio.reader.database.JdbcMangaChapterRepository(database)
     val mangaCategoryRepository = com.folio.reader.database.JdbcMangaCategoryRepository(database)
     val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
@@ -130,6 +133,60 @@ class AppGraph(private val app: Application) {
                 val ok = mangaDownloadManager.switchStorage(com.folio.reader.manga.SafDownloadStorage(app, uri))
                 if (!ok) runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
             }
+        }
+    }
+
+    /**
+     * One library scan pass over the configured scope. The folder scope walks its
+     * granted SAF tree; the device scope walks the storage roots directly, which
+     * requires All Files Access on Android 11+ (or the legacy storage permission
+     * below it) — without it the scan is a no-op rather than a partial miss.
+     * Returns null when scanning is off or its access is missing.
+     */
+    suspend fun runLibraryScan(): com.folio.reader.importer.LibraryScanSummary? {
+        val keys = com.folio.reader.importer.LibraryScanKeys
+        val scope = com.folio.reader.importer.LibraryScanScope.fromRaw(
+            runCatching { settingsRepository.getRaw(keys.SCOPE) }.getOrNull()
+        )
+        if (scope == com.folio.reader.importer.LibraryScanScope.OFF) return null
+        val summary = when (scope) {
+            com.folio.reader.importer.LibraryScanScope.DEVICE -> {
+                if (!com.folio.reader.scan.AndroidLibraryScanner.hasDeviceAccess(app)) return null
+                com.folio.reader.scan.AndroidLibraryScanner.scanStorage(app, libraryScanCoordinator)
+            }
+
+            com.folio.reader.importer.LibraryScanScope.FOLDER -> {
+                val raw = runCatching { settingsRepository.getRaw(keys.FOLDER) }.getOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: return null
+                val uri = runCatching { android.net.Uri.parse(raw) }.getOrNull() ?: return null
+                val granted = app.contentResolver.persistedUriPermissions.any {
+                    it.uri == uri && it.isReadPermission
+                }
+                // A revoked folder grant is dropped so the settings screen asks again.
+                if (!granted) {
+                    runCatching { settingsRepository.setRaw(keys.FOLDER, "") }
+                    return null
+                }
+                com.folio.reader.scan.AndroidLibraryScanner.scan(app, uri, libraryScanCoordinator)
+            }
+
+            com.folio.reader.importer.LibraryScanScope.OFF -> return null
+        }
+        runCatching { settingsRepository.setRaw(keys.LAST, summary.describe()) }
+        return summary
+    }
+
+    /**
+     * The "scan on app start" setting: one quiet pass off the main thread. New
+     * files simply appear in the library; failures are swallowed so a bad scan
+     * can never affect startup.
+     */
+    fun scanOnStartIfEnabled(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val enabled = runCatching {
+                settingsRepository.getRaw(com.folio.reader.importer.LibraryScanKeys.ON_START)
+            }.getOrNull() == "1"
+            if (enabled) runCatching { runLibraryScan() }
         }
     }
 
@@ -287,6 +344,7 @@ class AppGraph(private val app: Application) {
         bookImporter,
         documentImporter
     )
+    val libraryScanCoordinator = com.folio.reader.importer.LibraryScanCoordinator(incomingContentCoordinator)
     val documentDeletionService =
         DocumentDeletionService(documentRepository, platform)
 
@@ -573,6 +631,10 @@ class FolioApplication : Application() {
         // Same directory holds the interface faces (Fraunces/Manrope); installed here
         // so the first frame is never drawn in the system font.
         com.folio.reader.ui.theme.UiFonts.install(graph.platform.fileSystem.getFontsDir())
+        // Network-fetched manga covers persist to disk from here on, so library
+        // thumbnails survive cold starts instead of refetching every launch.
+        com.folio.reader.ui.manga.MangaCoverDiskCache.directory =
+            graph.platform.fileSystem.mangaCoversDir
     }
 
     override fun onTerminate() {
