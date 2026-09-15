@@ -17,10 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +36,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.BookCover
 import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.theme.FolioTheme
@@ -54,7 +57,19 @@ fun BookList(
     isSelectionMode: Boolean,
     finishEstimates: Map<String, String> = emptyMap()
 ) {
+    // Re-tap on the Library nav item scrolls the shelf back to its top.
+    val listScroll = rememberLazyListState()
+    LaunchedEffect(listScroll) {
+        FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library" &&
+                (listScroll.firstVisibleItemIndex > 0 || listScroll.firstVisibleItemScrollOffset > 0)
+            ) {
+                listScroll.animateScrollToItem(0)
+            }
+        }
+    }
     LazyColumn(
+        state = listScroll,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = com.folio.reader.ui.theme.FolioTokens.space2 +
@@ -199,7 +214,19 @@ fun BookCompactList(
     isSelectionMode: Boolean,
     finishEstimates: Map<String, String> = emptyMap()
 ) {
+    // Re-tap on the Library nav item scrolls the shelf back to its top.
+    val listScroll = rememberLazyListState()
+    LaunchedEffect(listScroll) {
+        FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library" &&
+                (listScroll.firstVisibleItemIndex > 0 || listScroll.firstVisibleItemScrollOffset > 0)
+            ) {
+                listScroll.animateScrollToItem(0)
+            }
+        }
+    }
     LazyColumn(
+        state = listScroll,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = com.folio.reader.ui.theme.FolioTokens.space2 +

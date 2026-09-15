@@ -1639,10 +1639,25 @@ private fun DocumentReaderRoute(
     settings: com.folio.reader.settings.ReaderSettings,
     onBack: () -> Unit
 ) {
+    // Same contract as Android: the persisted documentReaderMode seeds the
+    // reader and a mode change writes back through the host's settings path.
+    // The desktop host passes a settings snapshot (no live row), so the
+    // persistence callback merges into the stored row directly.
+    val initialMode = remember(documentId) {
+        runCatching {
+            com.folio.reader.ui.document.DocumentReaderMode.valueOf(settings.documentReaderMode)
+        }.getOrDefault(com.folio.reader.ui.document.DocumentReaderMode.SINGLE_PAGE)
+    }
     val viewModel = remember(documentId) {
         DocumentReaderViewModel(
             repository = deps.documentRepository,
-            fileSystem = deps.platform.fileSystem
+            fileSystem = deps.platform.fileSystem,
+            initialMode = initialMode,
+            onModeChanged = { mode ->
+                deps.settingsRepository.mergeGlobalSettings {
+                    it.copy(documentReaderMode = mode.name)
+                }
+            }
         )
     }
     LaunchedEffect(documentId) {

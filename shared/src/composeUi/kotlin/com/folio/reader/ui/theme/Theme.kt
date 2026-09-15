@@ -5,6 +5,7 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -982,7 +983,19 @@ enum class AppPalette(
     RETRO_SUNSET("retrosunset", "Retro Sunset", true, RetroSunsetFolioColors),
     PEACOCK("peacock", "Peacock", true, PeacockFolioColors),
     GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
-    BLOSSOM("blossom", "Blossom", true, BlossomFolioColors);
+    BLOSSOM("blossom", "Blossom", true, BlossomFolioColors),
+
+    /**
+     * §16 Material You. The wallpaper-derived palette: on a supported device the
+     * host intercepts these ids and swaps in colors derived from
+     * `dynamicLightColorScheme`/`dynamicDarkColorScheme` (see
+     * [deriveSystemPalette]); the entries below are the fallbacks a device below
+     * API 31 renders instead — the default pack's faces, per the degradation
+     * ladder. Two entries so the pack mechanism (and flipThemeMode) treat the
+     * System palette's faces exactly like every other pack's.
+     */
+    SYSTEM("system", "System", false, LightFolioColors),
+    SYSTEM_DARK("systemdark", "System", true, DarkFolioColors);
 
     companion object {
         /**
@@ -1026,6 +1039,9 @@ data class ThemePack(
 
     companion object {
         val ALL = listOf(
+            // §16: first, and only shown where the platform can derive it —
+            // GeneralSettingsPanel hides the card when no dynamic scheme exists.
+            ThemePack("system", "System", "System", "system", "systemdark", "paper", "dark"),
             ThemePack("gallery", "Gallery", "Dark", "light", "dark", "white", "dark"),
             ThemePack("manuscript", "Manuscript", "Espresso", "warm", "espresso", "sepia", "espresso"),
             ThemePack("silver", "Silver", "Graphite", "silver", "graphite", "gray", "graphite"),
@@ -1221,6 +1237,14 @@ object FolioTokens {
      */
     val motionShimmer = 1200L
 
+    /**
+     * §17: the specular band that crosses the nav capsule when the selected tab
+     * changes. Between the shimmer and the sheet morph on purpose — long enough
+     * to read as the glass catching light, short enough that the eye lands on the
+     * destination before the light does.
+     */
+    val motionLiquidSweep = 420L
+
     // Progress ring diameter when decorating covers
     val ringSmall = 28.dp
     // Progress ring diameter on the Home daily-goal card
@@ -1251,6 +1275,7 @@ object FolioTokens {
     val ringStrokeHero = 8f         // hero ring stroke (compact strip uses 4f)
     val sparkHeight = 32.dp         // inline sparkline height
     val gradientMinAlpha = 0.55f    // floor for chart gradients (Rule 15)
+    val weekChartHeight = 150.dp    // the smooth-curve week chart in Stats
 
     // ── Redesign: material elevation ladder ────────────────────────────────
     // Four steps, not a continuum. Anything between two of these reads as an
@@ -1301,6 +1326,25 @@ object FolioTokens {
      * and large windows, which is exactly what it is not.
      */
     val navFloatMaxWidth = 420.dp
+
+    // ── §16 liquid glass ───────────────────────────────────────────────────
+    // Rule 2: the blur material's numbers live here, never as literals at the
+    // effect sites. The radius cap is the whole restraint — past ~28dp a blur
+    // stops reading as thick glass and starts reading as a rendering fault.
+    val blurRadius = 20.dp
+    val blurRadiusMax = 28.dp
+
+    /** Haze's noise factor for blurred glass. */
+    const val glassNoise = 0.12f
+
+    /** Alpha of the deterministic grain on glass that cannot blur. */
+    const val glassGrainAlpha = 0.035f
+
+    /** The resting leading sweep of the reader's end-edge glass sheets. */
+    val radiusSheetSweep = 26.dp
+
+    /** The capsule radius those sheets enter reading as, before settling. */
+    val radiusSheetCapsule = 96.dp
 }
 
 object FolioTheme {
@@ -1322,20 +1366,32 @@ object FolioTheme {
         // previews show one theme inside another). Defaulting to `Default` made
         // every such nesting silently throw the user's opacity away.
         opacity: FolioSurfaceOpacity = LocalFolioSurfaceOpacity.current,
+        // Inherited like `opacity`, for the same reason: the reader and the
+        // Appearance previews re-enter the theme mid-tree, and a nested theme
+        // must not reset the room's clock. The live value is read once at the
+        // true root (AppTheme) and flows down from there.
+        daylight: FolioDaylight = LocalFolioDaylight.current,
         content: @Composable () -> Unit
     ) {
+        // §17 contrast pass: the ink roles deepened toward the palette's own
+        // extreme, once, at the seam every themed tree flows through — the app
+        // root, the reader's re-themed chrome and the Appearance previews all
+        // inherit the same derivation. The raw palettes stay exactly as
+        // authored and as tested; only what the eye sees moves.
+        val ink = remember(colors) { deepenInkRoles(colors) }
         CompositionLocalProvider(
-            LocalFolioColors provides colors,
+            LocalFolioColors provides ink,
             LocalFolioTypography provides typography,
             LocalFolioSurfaceOpacity provides opacity,
+            LocalFolioDaylight provides daylight,
             // Material3 defaults LocalContentColor to pure black, and Folio's
             // panels are not wrapped in `Surface`, so every unstyled Text/Icon
             // rendered black — unreadable on any dark palette. Anchor the default
             // to the palette's own foreground instead.
-            androidx.compose.material3.LocalContentColor provides colors.onSurface
+            androidx.compose.material3.LocalContentColor provides ink.onSurface
         ) {
             androidx.compose.material3.MaterialTheme(
-                colorScheme = colors.toColorScheme(),
+                colorScheme = ink.toColorScheme(),
                 typography = typography.toTypography(),
                 shapes = Shapes(),
                 content = content
@@ -1356,6 +1412,10 @@ object FolioTheme {
         colors: FolioColors = palette.colors,
         isDark: Boolean = palette.isDark,
         opacity: FolioSurfaceOpacity = LocalFolioSurfaceOpacity.current,
+        // AppTheme is the app's true root, so this is where the room reads the
+        // reader's clock; MaterialTheme below inherits it. Null means "the live
+        // hour" (the normal case); a caller may pin one to preview 7am against 9pm.
+        daylight: FolioDaylight? = null,
         content: @Composable () -> Unit
     ) {
         val typo = FolioTypography(fontTheme)
@@ -1364,6 +1424,7 @@ object FolioTheme {
             colors = colors,
             typography = typo,
             opacity = opacity,
+            daylight = daylight ?: rememberDaylight(),
             content = content
         )
     }

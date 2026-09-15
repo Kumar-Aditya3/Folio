@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioSlider
+import com.folio.reader.ui.components.folioGlassEffect
 import com.folio.reader.ui.settings.readableLabel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -142,6 +143,8 @@ internal fun ReaderControls(
     // the page — and the mirror finish is a thin white specular band along the crown,
     // since the light source is above and both bars catch it at their top edge. The
     // art stays perceivable through the ~0.70 glass while the bar still dominates.
+    // §16: the pages are a Compose backdrop, so the bars blur the art underneath
+    // when the device can carry it; the gradients above still govern the fill.
     val glassTop = Brush.verticalGradient(
         0f to Color.Black.copy(alpha = 0.86f),
         1f to Color.Black.copy(alpha = 0.70f),
@@ -155,12 +158,23 @@ internal fun ReaderControls(
         0.55f to Color.Transparent,
     )
     val hairline = Color.White.copy(alpha = 0.10f)
+    val glassCaps = com.folio.reader.ui.components.LocalGlassCapabilities.current
+    val glassBackdrop = com.folio.reader.ui.components.LocalGlassBackdrop.current
+    val blurLayer = if (glassCaps.blur && glassBackdrop != null) {
+        Modifier.folioGlassEffect(
+            backdrop = glassBackdrop,
+            backgroundColor = Color.Black,
+        )
+    } else {
+        Modifier
+    }
 
     Column(Modifier.fillMaxSize()) {
         com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(blurLayer)
                 .background(glassTop)
                 .background(sheen)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -216,6 +230,7 @@ internal fun ReaderControls(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(blurLayer)
                 .background(glassBottom)
                 .background(sheen)
                 .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),

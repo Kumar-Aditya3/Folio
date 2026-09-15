@@ -21,6 +21,14 @@ import kotlin.math.max
  * So the atmosphere keeps stating what the design intends, and each knob is
  * applied at the paint site — the one place that knows *which* surface it is.
  *
+ * The §16 glass tier follows the same split. The alphas above were calibrated
+ * for the no-blur world (near-opaque, because translucency alone let text bleed
+ * through); real blur fixes bleed-through, so when a paint site is actually
+ * blurring it steps its knob down via [glassTierAlpha] instead of burying the
+ * blurred backdrop under the un-compensated fill. The atmosphere and the §15
+ * tests are untouched — the tier is a paint-site decision, keyed on the
+ * platform's glass capabilities, and `1f` remains a solid lid everywhere.
+ *
  * Every knob is a **fill alpha, not a factor**: `1f` means the surface is solid
  * and nothing bleeds through it. The shipped glass look therefore sits partway
  * along each slider ([BAR_GLASS], [NAV_GLASS], [PANEL_GLASS]) rather than at its
@@ -56,8 +64,62 @@ data class FolioSurfaceOpacity(
 
         /** Where the designed panel fill (`veilFill`) lands. */
         const val PANEL_GLASS = 0.97f
+
+        /**
+         * The §16 glass tiers — each surface's designed point once *real* blur
+         * runs under it (see [glassTierAlpha]). Reader chrome deliberately has
+         * none: it sits over the page being read, where bleed-through is a legibility
+         * problem blur does not fully buy back, and over the WebView it cannot blur
+         * at all.
+         */
+        const val BAR_GLASS_BLURRED = 0.25f
+        const val NAV_GLASS_BLURRED = 0.60f
+        const val PANEL_GLASS_BLURRED = 0.82f
     }
 }
+
+/**
+ * The §16 glass tier of a fill alpha: what [knob] becomes at a paint site that
+ * is actually blurring its backdrop.
+ *
+ * The shipped alphas were calibrated for the no-blur world — near-opaque on
+ * purpose, because translucency alone let page text bleed through a bar at full
+ * contrast. Blur is exactly the thing that fixes bleed-through, so when it runs
+ * the fill steps down to [glassPoint]: the blurred backdrop shows through the
+ * material instead of being buried under it, which is the whole difference
+ * between liquid glass and the same pill with better anti-aliasing.
+ *
+ * The knob's contract survives unchanged: `1f` is still a lid (a reader who
+ * asked for solid gets solid — blur never punches a hole in it), and at or
+ * below [designPoint] the knob keeps its proportional meaning, so the floor and
+ * the sliders behave identically; only the designed point moves.
+ */
+fun glassTierAlpha(knob: Float, designPoint: Float, glassPoint: Float): Float {
+    val k = knob.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+    if (k >= 1f) return 1f
+    val point = designPoint.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+    return if (k <= point) {
+        (k * (glassPoint / point)).coerceIn(FolioSurfaceOpacity.MIN, glassPoint.coerceAtMost(1f))
+    } else {
+        lerp(glassPoint, 1f, (k - point) / (1f - point))
+    }
+}
+
+/** The nav capsule's fill alpha at its paint site, tiered when that site can blur. */
+fun FolioSurfaceOpacity.navCapsuleFill(canBlur: Boolean): Float =
+    if (canBlur) {
+        glassTierAlpha(navBar, FolioSurfaceOpacity.NAV_GLASS, FolioSurfaceOpacity.NAV_GLASS_BLURRED)
+    } else {
+        navBar
+    }
+
+/** A panel/sheet fill alpha at its paint site, tiered when that site can blur. */
+fun FolioSurfaceOpacity.panelFill(canBlur: Boolean): Float =
+    if (canBlur) {
+        glassTierAlpha(panel, FolioSurfaceOpacity.PANEL_GLASS, FolioSurfaceOpacity.PANEL_GLASS_BLURRED)
+    } else {
+        panel
+    }
 
 /**
  * The masthead's fill, as the alphas of the stops its gradient is built from.
@@ -88,9 +150,20 @@ data class FolioBarFill(
  * behaviour: no fill at rest, glass fading in as content passes underneath.
  * Above it the bar progressively stops waiting for the scroll and stops decaying,
  * because a "100%" that still vanishes at rest is not an opacity setting.
+ *
+ * [blurred] steps the knob down to its glass tier
+ * ([glassTierAlpha] at [FolioSurfaceOpacity.BAR_GLASS_BLURRED]) first — the
+ * masthead is the one surface whose blur and fill are computed together, so
+ * its tier lives here rather than at a separate paint site.
  */
-fun FolioSurfaceOpacity.topBarFill(collapse: Float): FolioBarFill {
-    val knob = topBar.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+fun FolioSurfaceOpacity.topBarFill(collapse: Float, blurred: Boolean = false): FolioBarFill {
+    val knob = (
+        if (blurred) {
+            glassTierAlpha(topBar, FolioSurfaceOpacity.BAR_GLASS, FolioSurfaceOpacity.BAR_GLASS_BLURRED)
+        } else {
+            topBar
+        }
+        ).coerceIn(FolioSurfaceOpacity.MIN, 1f)
     val f = collapse.coerceIn(0f, 1f)
     // How far past the designed glass point the user has pushed: 0 = glass, 1 = lid.
     val solid = ((knob - FolioSurfaceOpacity.BAR_GLASS) /

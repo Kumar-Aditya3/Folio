@@ -21,6 +21,7 @@ import com.folio.reader.manga.MangaImageData
 import com.folio.reader.manga.MangaPageRef
 import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.manga.downloadPathSafe
 import com.folio.reader.platform.DesktopPlatform
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
@@ -114,7 +115,7 @@ class MangaParallelDownloadTest {
 
         ids.forEach { id ->
             assertEquals(1, backend.pageListAttempts["https://test/$id"], "chapter $id's page list is fetched exactly once")
-            assertEquals(2, storage.names("$MANGA_ID/$id").size, "chapter $id's pages are written once")
+            assertEquals(2, storage.names("${MANGA_ID.downloadPathSafe()}/$id").size, "chapter $id's pages are written once")
         }
     }
 

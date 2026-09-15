@@ -81,6 +81,7 @@ import com.folio.reader.model.DocumentCategory
 import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.search.BookHit
 import com.folio.reader.ui.search.BookSearchController
 import com.folio.reader.ui.search.BookSearchResultsList
@@ -168,6 +169,9 @@ fun LibraryScreen(
     // clear it instead of falling through and exiting the app.
     val selectedBooks by viewModel.selectedBookIds.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    // Bulk collections: non-null while the picker is open (the manga/document
+    // picker's `bulkPickerInitial` contract — the value is the shared check set).
+    val bulkCollectionPickerInitial by viewModel.bulkCollectionPickerInitial.collectAsState()
     var overflowOpen by remember { mutableStateOf(false) }
     var mangaOverflowOpen by remember { mutableStateOf(false) }
     // View mode, sort and (manga) shelf filters live in their own "Display" menu.
@@ -268,6 +272,17 @@ fun LibraryScreen(
 
     val allSeries by viewModel.allSeries().collectAsState(initial = emptyList())
     val allCollections by viewModel.allCollections().collectAsState(initial = emptyList())
+    bulkCollectionPickerInitial?.let { initial ->
+        // The books counterpart of the dialog above: check set = each selected
+        // book's complete collection membership after apply (§5.3's shelf rule).
+        BookCollectionPickerDialog(
+            collections = allCollections,
+            initialSelected = initial,
+            onCreate = { name -> viewModel.createCollection(name) },
+            onApply = { viewModel.applyBulkCollections(it) },
+            onDismiss = { viewModel.closeBulkPicker() }
+        )
+    }
     // The whole library, unfiltered: the rail's books search fans out over every
     // book, not just the ones the status/series chips are currently showing.
     val allBooks by viewModel.allBooks().collectAsState(initial = emptyList())
@@ -380,20 +395,19 @@ fun LibraryScreen(
                         },
                         placeholder = "Search books",
                         onClose = { onBookSearchActiveChange(false) },
-                        scopeChips = {
-                            // A plain Row: on phones these chips ride the same
-                            // scrollable row as the mode switch.
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                SearchScope.entries.forEach { s ->
-                                    com.folio.reader.ui.components.FolioChip(
-                                        selected = controller.scope == s,
-                                        onClick = {
-                                            controller.runSearch(controller.query, s, allBooks, railScope)
-                                        },
-                                        label = s.label
-                                    )
-                                }
-                            }
+                        // The scope selector lives on the field's own search icon:
+                        // a chip row below the field folded out of sight on phones,
+                        // which is how Titles/Content/Highlights/Notes ended up
+                        // undiscoverable. The dropdown cannot scroll away.
+                        scopeOptions = SearchScope.entries.map { it.label },
+                        scopeSelected = SearchScope.entries.indexOf(controller.scope).coerceAtLeast(0),
+                        onScopeSelect = { index ->
+                            controller.runSearch(
+                                controller.query,
+                                SearchScope.entries[index],
+                                allBooks,
+                                railScope,
+                            )
                         },
                     )
                 } else {
@@ -494,6 +508,12 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
+                        // Add to collections first: it is the reason selection
+                        // exists on a shelf — the same Label action the manga and
+                        // document selection bars lead with.
+                        IconButton(onClick = { viewModel.requestBulkCollections() }) {
+                            Icon(Icons.Filled.Label, contentDescription = "Add to collections")
+                        }
                         IconButton(onClick = {
                             onShareBooks(selectedBooks)
                             viewModel.clearSelection()
@@ -851,7 +871,12 @@ fun LibraryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(headerState.nestedScrollConnection),
+                    .nestedScroll(headerState.nestedScrollConnection)
+                    // §16: the shelf (books grid, documents, manga, or the stats
+                    // hub when embedded here) is the backdrop the masthead and
+                    // capsule blur. One box, one source — never the grids
+                    // themselves, so a shelf swap never stacks two.
+                    .folioBackdropSource(),
             ) {
                 when (libraryMode) {
                     LibraryMode.MANGA -> shelfStateHolder.SaveableStateProvider("manga") {
@@ -1147,6 +1172,106 @@ private fun DocumentCategoryPickerDialog(
                         enabled = newName.trim().isNotEmpty()
                     ) {
                         Icon(Icons.Filled.Add, contentDescription = "Create category")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
+}
+
+/**
+ * Bulk collections for the selected books — the books counterpart of
+ * [DocumentCategoryPickerDialog] and the manga picker, with the same contract:
+ * taps apply immediately (no confirm step), the check set *is* each selected
+ * book's membership after apply, and a collection can be created inline and
+ * checked in one move so a brand-new shelf can be filled without leaving the
+ * dialog.
+ */
+@Composable
+private fun BookCollectionPickerDialog(
+    collections: List<FolioCollection>,
+    initialSelected: Set<String>,
+    onCreate: suspend (String) -> String?,
+    onApply: (Set<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
+    var newName by remember { mutableStateOf("") }
+
+    fun apply(next: Set<String>) {
+        selected = next
+        onApply(next)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Collections") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (collections.isEmpty()) {
+                    Text(
+                        "No collections yet — create one below.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FolioTheme.colors.onSurfaceVariant
+                    )
+                }
+                collections.forEach { collection ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                apply(
+                                    if (collection.id in selected) selected - collection.id
+                                    else selected + collection.id
+                                )
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = collection.id in selected,
+                            onCheckedChange = { checked ->
+                                apply(
+                                    if (checked) selected + collection.id
+                                    else selected - collection.id
+                                )
+                            }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            collection.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = FolioTheme.colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("New collection") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            val name = newName.trim()
+                            if (name.isNotEmpty()) {
+                                scope.launch {
+                                    onCreate(name)?.let { apply(selected + it) }
+                                }
+                                newName = ""
+                            }
+                        },
+                        enabled = newName.trim().isNotEmpty()
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create collection")
                     }
                 }
             }

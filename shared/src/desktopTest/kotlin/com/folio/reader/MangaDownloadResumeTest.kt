@@ -20,6 +20,7 @@ import com.folio.reader.manga.MangaImageData
 import com.folio.reader.manga.MangaPageRef
 import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.manga.downloadPathSafe
 import com.folio.reader.platform.DesktopPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -113,8 +114,8 @@ class MangaDownloadResumeTest {
     @Test
     fun `a chapter interrupted mid-download resumes from the pages already on disk`() = runBlocking {
         seedChapter()
-        storage.seed("$MANGA_ID/$CHAPTER", "001.png", PAGE)
-        storage.seed("$MANGA_ID/$CHAPTER", "002.png", PAGE)
+        storage.seed(chapterDir(), "001.png", PAGE)
+        storage.seed(chapterDir(), "002.png", PAGE)
         seedRow(MangaDownloadStatus.DOWNLOADING, pages = 4)
 
         manager.start()
@@ -122,7 +123,7 @@ class MangaDownloadResumeTest {
 
         assertEquals(listOf(2, 3), backend.fetched.sorted(), "only the missing pages are fetched again")
         assertEquals(4, done.downloadedPages)
-        assertEquals(4, storage.names("$MANGA_ID/$CHAPTER").size)
+        assertEquals(4, storage.names(chapterDir()).size)
         assertEquals(4, manager.downloadedPageCount(MANGA_ID, CHAPTER), "the reader may now serve it offline")
     }
 
@@ -151,7 +152,7 @@ class MangaDownloadResumeTest {
         assertEquals(2, backend.attempts[2], "the page that failed is tried again")
         assertEquals(1, backend.attempts[0], "pages that arrive first time are not refetched")
         assertNull(done.error)
-        assertEquals(4, storage.names("$MANGA_ID/$CHAPTER").size)
+        assertEquals(4, storage.names(chapterDir()).size)
     }
 
     @Test
@@ -180,11 +181,20 @@ class MangaDownloadResumeTest {
         assertEquals(4, done.downloadedPages)
     }
 
-    /** Pages are written under "<mangaId>/<chapterId>/NNN.ext"; mangaId carries the source. */
+    /**
+     * Pages are written under "<mangaId>/<chapterId>/NNN.ext"; mangaId carries the
+     * source. The fake storage keys by the exact relative path the manager
+     * computes, so seeding and asserting go through the same path-safe fold the
+     * production code applies (ids like "7:m1" are not legal directory names
+     * as-is).
+     */
     private companion object {
         const val MANGA_ID = "7:m1"
         const val CHAPTER = "c1"
         val PAGE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 1, 2, 3, 4, 5)
+
+        fun chapterDir(mangaId: String = MANGA_ID, chapterId: String = CHAPTER): String =
+            "${mangaId.downloadPathSafe()}/${chapterId.downloadPathSafe()}"
     }
 
     /** In-memory stand-in for the download folder, so a test can pre-seed a partial chapter. */

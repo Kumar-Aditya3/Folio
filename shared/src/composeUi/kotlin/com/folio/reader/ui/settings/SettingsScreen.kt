@@ -35,6 +35,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.folioBarTopInset
 
@@ -106,7 +107,8 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .nestedScroll(headerState.nestedScrollConnection),
+                            .nestedScroll(headerState.nestedScrollConnection)
+                            .folioBackdropSource(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -214,7 +216,8 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .nestedScroll(headerState.nestedScrollConnection),
+                            .nestedScroll(headerState.nestedScrollConnection)
+                            .folioBackdropSource(),
                         contentPadding = PaddingValues(
                             start = 24.dp,
                             top = topInset + 24.dp,

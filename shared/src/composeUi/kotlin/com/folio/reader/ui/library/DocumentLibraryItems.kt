@@ -82,7 +82,19 @@ fun DocumentGrid(
     onToggleSelection: (String) -> Unit
 ) {
     val entry = rememberEntryProgress(items.map { it.document.id })
+    // Re-tap on the Library nav item scrolls the shelf back to its top.
+    val gridScroll = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    LaunchedEffect(gridScroll) {
+        com.folio.reader.ui.components.FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library" &&
+                (gridScroll.firstVisibleItemIndex > 0 || gridScroll.firstVisibleItemScrollOffset > 0)
+            ) {
+                gridScroll.animateScrollToItem(0)
+            }
+        }
+    }
     LazyVerticalGrid(
+        state = gridScroll,
         columns = GridCells.Adaptive(minSize = 140.dp),
         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = entry },
         contentPadding = PaddingValues(

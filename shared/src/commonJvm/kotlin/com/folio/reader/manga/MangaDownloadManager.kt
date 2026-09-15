@@ -12,6 +12,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * Path-segment-safe form of a manga or chapter id: `[A-Za-z0-9._-]` only, every
+ * other character folded to `_`. The `:` every manga id carries ("sourceId:url")
+ * is deliberately folded too — a colon is not a legal character in a Windows
+ * path segment, and the first cut of this function kept it, which meant the
+ * desktop app could never create a download folder at all (the test harness
+ * seeding raw ids hit the same wall).
+ */
+internal fun String.downloadPathSafe(): String = replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+/**
  * Chapter download pool (Mihon-style download queue). Pages are stored on
  * disk under "<mangaId>/<chapterId>/" inside the active [MangaDownloadStorage] and served
  * back to the reader by [readDownloadedPage] before falling through to the network backend.
@@ -221,7 +231,7 @@ class MangaDownloadManager(
 
     private fun chapterPath(mangaId: String, chapterId: String): String? {
         if (mangaId.isBlank() || chapterId.isBlank()) return null
-        return "${mangaId.sanitize()}/${chapterId.sanitize()}"
+        return "${mangaId.downloadPathSafe()}/${chapterId.downloadPathSafe()}"
     }
 
     /**
@@ -260,7 +270,7 @@ class MangaDownloadManager(
     suspend fun deleteMangaDownloads(mangaId: String) {
         if (mangaId.isBlank()) return
         withContext(Dispatchers.IO) {
-            storage.deleteDir(mangaId.sanitize())
+            storage.deleteDir(mangaId.downloadPathSafe())
         }
     }
 
@@ -293,8 +303,6 @@ class MangaDownloadManager(
         bytes.size > 2 && bytes[0] == 0x42.toByte() && bytes[1] == 0x4D.toByte() -> "bmp"
         else -> "img"
     }
-
-    private fun String.sanitize(): String = replace(Regex("[^A-Za-z0-9._:-]"), "_")
 
     private companion object {
         /** Android's marker for "media scanner, skip this directory tree". */

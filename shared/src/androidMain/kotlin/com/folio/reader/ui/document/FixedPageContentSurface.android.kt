@@ -54,6 +54,20 @@ private class AndroidFixedPageDocument(
     private var closed = false
     override val pageCount: Int = renderer.pageCount
 
+    /** Dimensions come from openPage, which must close promptly and is cached — a 500-page document asks for every page. */
+    private val aspectRatios = HashMap<Int, Float>()
+
+    override suspend fun pageAspectRatio(pageIndex: Int): Float? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (closed || pageIndex !in 0 until pageCount) return@withLock null
+            aspectRatios.getOrPut(pageIndex) {
+                renderer.openPage(pageIndex).use { page ->
+                    page.width.coerceAtLeast(1).toFloat() / page.height.coerceAtLeast(1)
+                }
+            }
+        }
+    }
+
     override suspend fun render(request: FixedPageRenderRequest): ImageBitmap = withContext(Dispatchers.IO) {
         mutex.withLock {
             coroutineContext.ensureActive()

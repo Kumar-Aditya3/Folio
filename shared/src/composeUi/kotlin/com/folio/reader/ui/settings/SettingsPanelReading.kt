@@ -44,16 +44,17 @@ fun ReadingSettingsPanel(
             )
         }
 
-        // Show progress toggle
+        // Show progress toggle — now the page block: position drawn as the block of
+        // pages at the foot of the reader, and the band that takes the drag to jump.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Show progress", style = MaterialTheme.typography.bodyLarge)
+                Text("Show page block", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Display reading progress bar",
+                    "Draw position as a block of pages at the foot of the screen; drag it to jump",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

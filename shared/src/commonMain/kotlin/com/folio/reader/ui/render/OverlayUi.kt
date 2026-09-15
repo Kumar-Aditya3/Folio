@@ -89,6 +89,14 @@ object OverlayUi {
         val canNote: Boolean = false
     )
 
+    /** One reader-theme swatch: id, display name, paper, ink. */
+    data class ThemeSwatch(
+        val id: String,
+        val name: String,
+        val background: String,
+        val ink: String,
+    )
+
     fun annotations(bookmarks: List<AnnotationRow>, highlights: List<AnnotationRow>, notes: List<AnnotationRow>, c: OverlayColors): String {
         val hover = if (c.isDark) "rgba(255,255,255,0.12)" else "rgba(0,0,0,0.08)"
         val rest = if (c.isDark) "rgba(255,255,255,0.05)" else "rgba(0,0,0,0.04)"
@@ -139,7 +147,7 @@ object OverlayUi {
 
     fun settings(
         fontSize: Float, lineHeight: Float, margin: Float, fontFamily: String,
-        fontOptions: List<String>, themeId: String, themes: List<Triple<String, String, String>>, // id, name, bg
+        fontOptions: List<String>, themeId: String, themes: List<ThemeSwatch>, // id, name, bg, ink
         layoutMode: String,
         highlightColors: List<String>, highlightIndex: Int,
         c: OverlayColors
@@ -158,9 +166,14 @@ object OverlayUi {
         val themeRow = "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Theme</span></div>" +
                 "<div style='display:flex;gap:6px;flex-wrap:wrap;'>" +
                 themes.joinToString("") { t ->
-                    val sel = t.first == themeId
-                    "<button data-act='set:theme:${t.first}' title='${esc(t.second)}' style='all:unset;cursor:pointer;width:38px;height:38px;border-radius:10px;background:${t.third};border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
-                            (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'></button>"
+                    val sel = t.id == themeId
+                    // The swatch carries its own "Aa" in the theme's ink over its
+                    // paper — a colour chip alone reads as a tint until the type
+                    // proves it's a page.
+                    "<button data-act='set:theme:${t.id}' title='${esc(t.name)}' style='all:unset;cursor:pointer;width:38px;height:38px;border-radius:10px;background:${t.background};border:2px solid ${if (sel) c.accent else (if (c.isDark) "#444" else "#ccc")};" +
+                            (if (sel) "box-shadow:0 0 0 2px ${c.accent}55;" else "") + "'>" +
+                            "<span style='display:flex;width:100%;height:100%;align-items:center;justify-content:center;" +
+                            "font:600 13px/1 'Segoe UI',system-ui,sans-serif;color:${t.ink};'>Aa</span></button>"
                 } + "</div>"
         val highlightRow = if (highlightColors.isEmpty()) "" else
             "<div style='display:flex;justify-content:space-between;font-size:12px;opacity:0.75;margin-top:4px;'><span>Highlight</span></div>" +

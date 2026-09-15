@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
@@ -263,7 +264,8 @@ fun DownloadsScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(headerState.nestedScrollConnection),
+                    .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource(),
                 contentPadding = PaddingValues(
                     start = FolioTokens.space3,
                     top = topInset + FolioTokens.space3,

@@ -128,6 +128,25 @@ class HomeStatsScopeTest {
         override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {}
     }
 
+    /** Counts group lookups — the N+1 the §11.2 fast path exists to avoid. */
+    private class CountingTagRepo(private val tags: List<Tag> = emptyList()) : EmptyTagRepo() {
+        var calls = 0
+            private set
+        override suspend fun getTagsForBook(bookId: String): List<Tag> {
+            calls++
+            return tags
+        }
+    }
+
+    private class CountingCollectionRepo : EmptyCollectionRepo() {
+        var calls = 0
+            private set
+        override suspend fun getCollectionsForBook(bookId: String): List<Collection> {
+            calls++
+            return emptyList()
+        }
+    }
+
     /** Mirrors the real query's one-way MANGA scope; source/category resolution lives in JDBC tests. */
     private class FakeMangaUpdateRepo(badges: List<MangaNewChapterBadge>) : MangaUpdateRepository {
         val badges = MutableStateFlow(badges)
@@ -327,5 +346,45 @@ class HomeStatsScopeTest {
 
         val noRepo = homeViewModel(books = listOf(book("a")), sessions = emptyList()).state.first()
         assertTrue(noRepo.newChapters.isEmpty())
+    }
+
+    // ── §17 startup pass: the N+1 group-resolution guard ─────────────────────
+
+    @Test
+    fun `no tag or collection rules skips every per-book group query`() = runBlocking {
+        // Direct/series/status rules never consult tags or collections, so the
+        // two roundtrips per book must not happen — on a large library this is
+        // the single slowest step of Home's first emission.
+        val tagRepo = CountingTagRepo()
+        val collectionRepo = CountingCollectionRepo()
+        val exclusions = FakeExclusionRepo().apply { add(Scope.BOOK, "a") }
+        val state = HomeViewModel(
+            bookRepository = FakeBookRepo(listOf(book("a"), book("b"), book("c"))),
+            sessionRepository = FakeSessionRepo(emptyList()),
+            statsExclusionRepository = exclusions,
+            tagRepository = tagRepo,
+            collectionRepository = collectionRepo
+        ).state.first()
+
+        assertEquals(0, tagRepo.calls, "tag queries ran with no BOOK_TAG rules to match")
+        assertEquals(0, collectionRepo.calls, "collection queries ran with no BOOK_COLLECTION rules to match")
+        // And the direct rule still excludes.
+        assertTrue(state.hero?.id != "a")
+    }
+
+    @Test
+    fun `a tag rule resolves groups per book as before`() = runBlocking {
+        val tagRepo = CountingTagRepo(listOf(Tag("t-dnf", "Did not finish")))
+        val exclusions = FakeExclusionRepo().apply { add(Scope.BOOK_TAG, "t-dnf") }
+        val state = HomeViewModel(
+            bookRepository = FakeBookRepo(listOf(book("a"), book("b"), book("c"))),
+            sessionRepository = FakeSessionRepo(emptyList()),
+            statsExclusionRepository = exclusions,
+            tagRepository = tagRepo,
+            collectionRepository = CountingCollectionRepo()
+        ).state.first()
+
+        assertEquals(3, tagRepo.calls, "every book's tags must resolve under a BOOK_TAG rule")
+        assertNull(state.hero, "every book carries the excluded tag, so none may be the hero")
     }
 }

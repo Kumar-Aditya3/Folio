@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -213,11 +213,18 @@ class MainActivity : ComponentActivity() {
             // The bar is visible on exactly the 4 top-level routes (§3.3).
             val showBottomBar = currentRoute in FolioRoutes.BAR_ROUTES
 
+            // §16 predictive back: the gesture's progress drives the chrome —
+            // the capsule and status banner recede as the swipe grows, and snap
+            // back if it is abandoned. The committed action is the same back
+            // walk the plain handler performed; below API 33 the opt-in is inert
+            // and this behaves as an ordinary back handler.
+            var backProgress by remember { mutableStateOf(0f) }
+
             // Back walks back through states instead of exiting: an active bulk
             // selection (manga or books) clears first, then pushed screens pop,
             // an open shelf search closes, Manga returns to Books, and only at
             // the Books root does back exit the app.
-            BackHandler {
+            fun onBackWalked() {
                 when {
                     model.mangaLibVM.isSelectionMode.value -> model.mangaLibVM.clearSelection()
                     model.libraryVM.isSelectionMode.value -> model.libraryVM.clearSelection()
@@ -237,6 +244,17 @@ class MainActivity : ComponentActivity() {
                     else -> finish()
                 }
             }
+            androidx.activity.compose.PredictiveBackHandler { progress ->
+                try {
+                    progress.collect { event -> backProgress = event.progress }
+                    // The flow completing is the commit.
+                    onBackWalked()
+                    backProgress = 0f
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // The gesture was abandoned — snap the chrome back.
+                    backProgress = 0f
+                }
+            }
 
             // The app chrome follows the app's own light/dark choice. A reading theme
             // describes the page and nothing else — feeding themeId in here is what
@@ -246,13 +264,38 @@ class MainActivity : ComponentActivity() {
                     currentRoute == FolioRoutes.DOCUMENT_READER ||
                     currentRoute == FolioRoutes.MANGA_READER
             val appPalette = AppPalette.byId(model.globalSettings.appThemeId)
+            // §16 Material You: the wallpaper-derived schemes; the System pack's
+            // faces resolve through the contrast-enforcing derivation, and fall
+            // back to the pack's gallery placeholders below API 31.
+            val dynamicSchemes = com.folio.reader.ui.theme.rememberDynamicSchemes()
             // A custom theme replaces the pack's colours wholesale; its own
             // background lightness, not the pack's, decides the app's polarity.
             val customAppTheme = model.globalSettings.customAppTheme
-            val appColors = remember(customAppTheme, appPalette) {
-                customAppTheme?.toFolioColors() ?: appPalette.colors
+            val appColors = remember(customAppTheme, appPalette, dynamicSchemes) {
+                when {
+                    customAppTheme != null -> customAppTheme.toFolioColors()
+                    dynamicSchemes != null && appPalette == AppPalette.SYSTEM ->
+                        com.folio.reader.ui.theme.deriveSystemPalette(dynamicSchemes.first)
+                    dynamicSchemes != null && appPalette == AppPalette.SYSTEM_DARK ->
+                        com.folio.reader.ui.theme.deriveSystemPalette(dynamicSchemes.second)
+                    else -> appPalette.colors
+                }
             }
             val appDark = customAppTheme?.isDark ?: appPalette.isDark
+            // §16 liquid glass: the capability verdict for this device, provided
+            // once at the root so every surface reads it instead of probing the
+            // platform. Blur floor is API 32 (Haze disables 31 for RenderNode
+            // invalidation issues); low-RAM devices opt out; the preference is
+            // the user's. Desktop never enters this file, so its tree keeps
+            // GlassCapabilities.None — today's look, byte-for-byte.
+            val glassCapabilities = remember(model.globalSettings.liquidGlassEffects) {
+                com.folio.reader.ui.components.glassCapabilitiesFor(
+                    platformBlurSupported = android.os.Build.VERSION.SDK_INT >= 32,
+                    lowRamDevice = getSystemService(android.app.ActivityManager::class.java)
+                        ?.isLowRamDevice == true,
+                    liquidGlassEffects = model.globalSettings.liquidGlassEffects,
+                )
+            }
             // A source behind an interactive bot check needs a window with a finger in
             // it, which an OkHttp interceptor does not have. Registering the opener
             // here (and dropping it on dispose) is what lets shared browse code offer
@@ -281,42 +324,67 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            FolioTheme.AppTheme(
-                palette = appPalette,
-                fontTheme = FontTheme.byId(model.globalSettings.fontThemeId),
-                colors = appColors,
-                isDark = appDark,
-                opacity = model.globalSettings.surfaceOpacity()
-            ) {
-                // The app's ground plane. `folioField` replaces the flat
-                // background fill with the theme's atmosphere — a vertical wash
-                // plus three enormous, very low-alpha accent pools — so every
-                // screen sits in an environment instead of on a colour. One
-                // drawing pass, no recomposition; see FolioAtmosphere.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .folioField()
+            // §16: one backdrop registry for the whole shell — every screen
+            // attaches its scrolling child as the source, and the capsule, the
+            // mastheads and the status banner blur against it.
+            com.folio.reader.ui.components.FolioGlassRoot(capabilities = glassCapabilities) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.folio.reader.ui.theme.LocalDynamicSchemes provides dynamicSchemes,
                 ) {
-                    FolioNavShell(
-                        navController = navController,
-                        showBottomBar = showBottomBar
+                    FolioTheme.AppTheme(
+                        palette = appPalette,
+                        fontTheme = FontTheme.byId(model.globalSettings.fontThemeId),
+                        colors = appColors,
+                        isDark = appDark,
+                        opacity = model.globalSettings.surfaceOpacity()
                     ) {
-                        FolioNavHost(
-                            navController = navController,
-                            navModel = model,
-                            callbacks = callbacks
-                        )
-                    }
-
+                    // §17 living glass: the room's slow animated light, provided
+                    // once at the Android root. Every material's sheen and the
+                    // field's pools read it in the draw phase, so a resting page
+                    // still has something travelling for the liquid glass to
+                    // catch. Desktop and previews never provide it and keep the
+                    // still room — today's look, byte-for-byte. Reduce-motion
+                    // freezes it at neutral (rememberAmbientLight).
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.folio.reader.ui.theme.LocalFolioAmbient provides
+                            com.folio.reader.ui.theme.rememberAmbientLight(),
+                    ) {
+                    // The app's ground plane. `folioField` replaces the flat
+                    // background fill with the theme's atmosphere — a vertical wash
+                    // plus three enormous, very low-alpha accent pools — so every
+                    // screen sits in an environment instead of on a colour. One
+                    // drawing pass, no recomposition; see FolioAtmosphere.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(com.folio.reader.ui.theme.FolioTokens.space3)
-                            .navigationBarsPadding(),
-                        contentAlignment = Alignment.BottomCenter
+                            .folioField()
                     ) {
-                        com.folio.reader.ui.components.FolioStatusBanner(importStatus)
+                        FolioNavShell(
+                            navController = navController,
+                            showBottomBar = showBottomBar,
+                            backProgress = backProgress,
+                        ) {
+                            FolioNavHost(
+                                navController = navController,
+                                navModel = model,
+                                callbacks = callbacks
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = 1f - (backProgress * 0.6f).coerceIn(0f, 1f)
+                                }
+                                .padding(com.folio.reader.ui.theme.FolioTokens.space3)
+                                .navigationBarsPadding(),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            com.folio.reader.ui.components.FolioStatusBanner(importStatus)
+                        }
+                    }
+                    }
                     }
                 }
             }

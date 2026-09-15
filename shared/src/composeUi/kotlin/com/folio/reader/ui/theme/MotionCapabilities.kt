@@ -18,3 +18,12 @@ expect fun rememberBlurSupported(): Boolean
 /** `RuntimeShader`/AGSL available; below API 33 gradients are static Brushes. */
 @Composable
 expect fun rememberShaderSupported(): Boolean
+
+/**
+ * §16's settle tick: a low-amplitude haptic for glass press-settle — the nav
+ * capsule and sheet handles only, nowhere else (app-wide press haptics would be
+ * noise). API 31+ composes `VibrationEffect.PRIMITIVE_TICK`; below that it falls
+ * back to the platform's softest standard feedback; desktop is a no-op.
+ */
+@Composable
+expect fun rememberGlassTick(): () -> Unit

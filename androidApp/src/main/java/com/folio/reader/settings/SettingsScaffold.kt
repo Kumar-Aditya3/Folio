@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.settings.SettingsLivePreview
 import com.folio.reader.ui.theme.FolioTheme
@@ -77,7 +78,10 @@ fun SettingsCategoryScaffold(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(headerState.nestedScrollConnection),
+                .nestedScroll(headerState.nestedScrollConnection)
+                // §16: the scrolling panel is the backdrop the floating masthead
+                // (and the capsule, on bar routes) blurs.
+                .folioBackdropSource(),
             contentPadding = PaddingValues(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,

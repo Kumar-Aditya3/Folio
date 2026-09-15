@@ -56,6 +56,7 @@ import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -135,6 +136,25 @@ fun MangaLibraryScreen(
             viewModel.listScrollOffset = listState.firstVisibleItemScrollOffset
             viewModel.gridScrollIndex = gridState.firstVisibleItemIndex
             viewModel.gridScrollOffset = gridState.firstVisibleItemScrollOffset
+        }
+    }
+
+    // Re-tap on the Library nav item scrolls whichever shelf view is showing
+    // back to its top. The other two shelves (books/documents) collect the same
+    // event through their own hosts.
+    LaunchedEffect(viewModel) {
+        FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library") {
+                if (viewMode == MangaViewMode.LIST || viewMode == MangaViewMode.COMPACT) {
+                    if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+                        listState.animateScrollToItem(0)
+                    }
+                } else {
+                    if (gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0) {
+                        gridState.animateScrollToItem(0)
+                    }
+                }
+            }
         }
     }
 
@@ -486,34 +506,19 @@ private fun MangaSearchHeader(
 ) {
     // Same adaptive contract as the Books/Documents rail (LibrarySearchRail):
     // wide window puts switch and field on one line; on phones the field takes
-    // the full row and the switch leads the scope chips below — still on
-    // screen, never destroyed, and the field stays wide enough to read what
-    // you typed.
+    // the full row with the switch folded to the row beneath. The scope
+    // selector is a dropdown on the field's leading search icon — the old chip
+    // row was the same second row that hid the books scopes on phones.
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier = Modifier.fillMaxWidth()
     ) {
-        val scopeChips: @Composable () -> Unit = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FolioChip(
-                    selected = scope == MangaSearchScope.LIBRARY,
-                    onClick = { onScopeChange(MangaSearchScope.LIBRARY) },
-                    label = "In library",
-                )
-                if (sourcesAvailable) {
-                    FolioChip(
-                        selected = scope == MangaSearchScope.SOURCES,
-                        onClick = { onScopeChange(MangaSearchScope.SOURCES) },
-                        label = "All sources",
-                    )
-                }
-            }
-        }
+        val scopeOptions = if (sourcesAvailable) listOf("In library", "All sources") else listOf("In library")
+        val scopeIndex = if (scope == MangaSearchScope.SOURCES && sourcesAvailable) 1 else 0
         if (maxWidth >= 600.dp) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space1),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (leading != null) {
@@ -527,19 +532,22 @@ private fun MangaSearchHeader(
                         onQueryChange = onQueryChange,
                         placeholder = if (scope == MangaSearchScope.LIBRARY) "Search your library" else "Search all sources",
                         modifier = Modifier.weight(1f),
+                        scopeOptions = scopeOptions,
+                        scopeSelected = scopeIndex,
+                        onScopeSelect = { index ->
+                            onScopeChange(if (index == 1) MangaSearchScope.SOURCES else MangaSearchScope.LIBRARY)
+                        },
                     )
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
                     }
                 }
-                scopeChips()
             }
         } else {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = FolioTokens.space1),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
             ) {
                 Row(
                     modifier = Modifier
@@ -552,20 +560,23 @@ private fun MangaSearchHeader(
                         onQueryChange = onQueryChange,
                         placeholder = if (scope == MangaSearchScope.LIBRARY) "Search your library" else "Search all sources",
                         modifier = Modifier.weight(1f),
+                        scopeOptions = scopeOptions,
+                        scopeSelected = scopeIndex,
+                        onScopeSelect = { index ->
+                            onScopeChange(if (index == 1) MangaSearchScope.SOURCES else MangaSearchScope.LIBRARY)
+                        },
                     )
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
                     }
                 }
-                androidx.compose.foundation.lazy.LazyRow(
-                    contentPadding = PaddingValues(horizontal = FolioTokens.space3),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (leading != null) {
+                if (leading != null) {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        contentPadding = PaddingValues(horizontal = FolioTokens.space3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         item(key = "switch") { leading() }
                     }
-                    item(key = "scopes") { scopeChips() }
                 }
             }
         }

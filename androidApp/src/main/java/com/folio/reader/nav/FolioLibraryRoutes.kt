@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.home.HomeScreen
 import com.folio.reader.ui.home.HomeUiState
 import com.folio.reader.ui.home.HomeViewModel
@@ -125,7 +126,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 )
             }
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().folioBackdropSource()) {
             val viewModel = remember {
                 HomeViewModel(
                     graph.bookRepository,
@@ -445,6 +446,7 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
                 modifier = Modifier
                     .fillMaxSize()
                     .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource()
             ) {
                 StatisticsTabContent(
                     viewModel = navModel.statisticsVM,

@@ -124,6 +124,8 @@ data class MangaStatistics(
     val totalReadMinutes: Long = 0L,
     /** Distinct local days on which at least one chapter was marked read. */
     val readActiveDays: Int = 0,
+    /** Most chapters marked read in a single local day — the true "binge". */
+    val biggestDayChapters: Int = 0,
     val weekReadChapters: List<Int> = List(7) { 0 },
     val weekLabels: List<String> = List(7) { "" },
     val topManga: List<MangaTopEntry> = emptyList(),

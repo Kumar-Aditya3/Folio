@@ -489,6 +489,10 @@ fun isTransientStatus(message: String): Boolean =
  * is derived from the message itself so every entry point gets the same treatment:
  * a spinner while working, a warning glyph on the error container for failures, and
  * a check on the inverse surface for successes.
+ *
+ * §16: it floats over the capsule and the page, so it gets the veil treatment —
+ * blur under its fill when a backdrop source is live, grain and a hairline
+ * otherwise, and always its own message-kind container colour.
  */
 @Composable
 fun FolioStatusBanner(message: String, modifier: Modifier = Modifier) {
@@ -498,6 +502,9 @@ fun FolioStatusBanner(message: String, modifier: Modifier = Modifier) {
     val container = if (isError) colors.errorContainer else colors.inverseSurface
     val content = if (isError) colors.onErrorContainer else colors.inverseOnSurface
     val shape = RoundedCornerShape(com.folio.reader.ui.theme.FolioTokens.radiusControl)
+    val caps = LocalGlassCapabilities.current
+    val backdrop = LocalGlassBackdrop.current
+    val canBlur = caps.blur && backdrop != null
 
     androidx.compose.animation.AnimatedVisibility(
         visible = message.isNotBlank(),
@@ -511,7 +518,25 @@ fun FolioStatusBanner(message: String, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .widthIn(max = 420.dp)
                 .shadow(10.dp, shape)
+                .then(
+                    if (canBlur) {
+                        Modifier
+                            .clip(shape)
+                            .folioGlassEffect(
+                                backdrop = backdrop,
+                                backgroundColor = colors.background,
+                            )
+                    } else {
+                        Modifier
+                    }
+                )
                 .background(container, shape)
+                .then(if (caps.noise && !canBlur) Modifier.folioGlassGrain() else Modifier)
+                .border(
+                    1.dp,
+                    com.folio.reader.ui.theme.FolioTheme.atmosphere.hairline,
+                    shape,
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)

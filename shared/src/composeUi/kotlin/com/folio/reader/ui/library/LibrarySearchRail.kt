@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,11 +19,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +51,13 @@ import com.folio.reader.ui.theme.atmosphere
  * enforced minimum height towered over the switch at the rail's default size
  * and collapsed to a stub when constrained; BasicTextField has no minimums to
  * fight.
+ *
+ * The scope selector rides *inside* the field as a dropdown on the leading
+ * search icon: books search hides its Titles/Content/Highlights/Notes scopes
+ * and manga its Library/All-sources toggle in a chip row below the field that
+ * phones fold out of sight, so the one control that decides what the query
+ * touches now sits where the thumb already is. The chevron beside the icon is
+ * the only extra ink it costs.
  */
 @Composable
 internal fun FolioSearchField(
@@ -52,9 +66,14 @@ internal fun FolioSearchField(
     placeholder: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    scopeOptions: List<String> = emptyList(),
+    scopeSelected: Int = 0,
+    onScopeSelect: ((Int) -> Unit)? = null,
 ) {
     val colors = FolioTheme.colors
     val atmos = FolioTheme.atmosphere
+    var scopeMenuOpen by remember { mutableStateOf(false) }
+    val hasScopes = scopeOptions.isNotEmpty() && onScopeSelect != null
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -73,12 +92,69 @@ internal fun FolioSearchField(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = colors.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
+                if (hasScopes) {
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { scopeMenuOpen = true }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = "Search scope",
+                                tint = colors.primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Icon(
+                                Icons.Filled.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = scopeMenuOpen,
+                            onDismissRequest = { scopeMenuOpen = false },
+                        ) {
+                            scopeOptions.forEachIndexed { index, label ->
+                                val selected = index == scopeSelected
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            label,
+                                            color = if (selected) colors.primary else colors.onSurface,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (selected) {
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = colors.primary,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Spacer(Modifier.size(18.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        scopeMenuOpen = false
+                                        onScopeSelect?.invoke(index)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) {
                         Text(
@@ -116,12 +192,13 @@ internal fun FolioSearchField(
  * - Narrow window (phones): the field gets the full row. A three-segment
  *   switch eats ~230dp of a ~380dp rail, and the field that survives beside it
  *   is a stub too small to read what you typed into it. The switch drops to the
- *   second row and leads the scope chips there — the same head-of-row position
- *   it holds when the chips are filter chips, so the rail still reads as one
- *   control line, just folded while you search.
+ *   second row — the same head-of-row position it holds when the chips are
+ *   filter chips, so the rail still reads as one control line, just folded
+ *   while you search.
  *
- * [scopeChips] must be a plain [Row]: in the narrow layout it rides the same
- * scrollable row as the switch.
+ * Search scopes are not chips on either measure: they live in the dropdown on
+ * the field's own leading icon (see [FolioSearchField]), where a second row
+ * cannot hide them.
  */
 @Composable
 internal fun LibrarySearchRail(
@@ -132,34 +209,31 @@ internal fun LibrarySearchRail(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    scopeChips: (@Composable () -> Unit)? = null,
+    scopeOptions: List<String> = emptyList(),
+    scopeSelected: Int = 0,
+    onScopeSelect: ((Int) -> Unit)? = null,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         if (maxWidth >= 600.dp) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = FolioTokens.gutter, vertical = 6.dp)
+                    .padding(horizontal = FolioTokens.gutter, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    switch()
-                    Spacer(Modifier.width(10.dp))
-                    FolioSearchField(
-                        query = query,
-                        onQueryChange = onQueryChange,
-                        placeholder = placeholder,
-                        enabled = enabled,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SearchCloseIcon(onClose)
-                }
-                if (scopeChips != null) {
-                    Spacer(Modifier.height(6.dp))
-                    scopeChips()
-                }
+                switch()
+                Spacer(Modifier.width(10.dp))
+                FolioSearchField(
+                    query = query,
+                    onQueryChange = onQueryChange,
+                    placeholder = placeholder,
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                    scopeOptions = scopeOptions,
+                    scopeSelected = scopeSelected,
+                    onScopeSelect = onScopeSelect,
+                )
+                SearchCloseIcon(onClose)
             }
         } else {
             Column(
@@ -179,19 +253,18 @@ internal fun LibrarySearchRail(
                         placeholder = placeholder,
                         enabled = enabled,
                         modifier = Modifier.weight(1f),
+                        scopeOptions = scopeOptions,
+                        scopeSelected = scopeSelected,
+                        onScopeSelect = onScopeSelect,
                     )
                     SearchCloseIcon(onClose)
                 }
-                Spacer(Modifier.height(6.dp))
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     item(key = "switch") { switch() }
-                    if (scopeChips != null) {
-                        item(key = "scopes") { scopeChips() }
-                    }
                 }
             }
         }

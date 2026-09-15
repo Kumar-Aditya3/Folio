@@ -12,6 +12,7 @@ import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
 import com.folio.reader.ui.components.currentStreak
+import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -133,6 +134,16 @@ data class StatisticsUiState(
     val topBooks: List<TopBook> = emptyList(),
     /** §12.5 genre breakdown: window minutes per tag, largest first. */
     val genres: List<TagSlice> = emptyList(),
+    /** Longest single sitting in the window, minutes. */
+    val longestSessionMinutes: Long = 0,
+    /** Distinct local days with any session this year-window. */
+    val daysActiveThisYear: Int = 0,
+    /** Books with window reading minutes (N of the "N of M books opened" caption). */
+    val booksOpened: Int = 0,
+    /** Library size, exclusion-filtered (M of the caption). */
+    val librarySize: Int = 0,
+    /** Reading minutes bucketed by start hour, 24 slots (the peak-hour band). */
+    val hourTotals: List<Long> = List(24) { 0L },
     /** Today's reading minutes, derived from sessions whose local date matches today. */
     val todayMinutes: Long = 0
 )
@@ -218,7 +229,12 @@ class StatisticsViewModel(
                     .filterNot { it.bookId in excluded || it.bookId in directBooks },
                 inProgress.filterNot { it.id in excluded },
                 finished.filterNot { it.id in excluded },
-                allBooks
+                // The drill core renders every book it is given — unread ones
+                // included, and those carry no sessions for the filter above to
+                // catch — so exclusions must land in the book list itself
+                // (§11.2/Rule 18). The leaderboard is unaffected: it only ever
+                // resolved ids whose sessions already survived.
+                allBooks.filterNot { it.id in excluded }
             )
         }
     }
@@ -238,17 +254,39 @@ class StatisticsViewModel(
      * are resolved exactly once per pass and reused for the session filter and
      * both book lists; series membership needs no lookup because every book
      * carries its own seriesId, so excluding a series removes all of its books.
+     *
+     * The group resolution is two repository roundtrips per book, so it only
+     * runs when a BOOK_TAG or BOOK_COLLECTION rule exists to match against —
+     * the same guard [HomeViewModel] applies (see `StatsScope.hasRules`).
      */
     private suspend fun excludedBookIds(books: List<Book>, scope: StatsScope): Set<String> {
         val excluded = HashSet<String>()
+        val resolveTags = scope.hasRules(Scope.BOOK_TAG)
+        val resolveCollections = scope.hasRules(Scope.BOOK_COLLECTION)
+        if (!resolveTags && !resolveCollections) {
+            for (book in books) {
+                if (!scope.includesBook(book.id, emptySet(), emptySet(), book.seriesId, book.status)) {
+                    excluded.add(book.id)
+                }
+            }
+            return excluded
+        }
         val tagCache = HashMap<String, Set<String>>()
         val collectionCache = HashMap<String, Set<String>>()
         for (book in books) {
-            val tagIds = tagCache.getOrPut(book.id) {
-                tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            val tagIds = if (resolveTags) {
+                tagCache.getOrPut(book.id) {
+                    tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+                }
+            } else {
+                emptySet()
             }
-            val collectionIds = collectionCache.getOrPut(book.id) {
-                collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            val collectionIds = if (resolveCollections) {
+                collectionCache.getOrPut(book.id) {
+                    collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+                }
+            } else {
+                emptySet()
             }
             if (!scope.includesBook(book.id, tagIds, collectionIds, book.seriesId, book.status)) {
                 excluded.add(book.id)
@@ -376,8 +414,12 @@ class StatisticsViewModel(
         val thisWeek = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= weekStart }
         val thisYear = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= yearStart }
         val timed = sessions.filter { it.durationMs > 0 }
+        // Minutes per start-hour (minutes, not ms — the band and the chronotype
+        // comparisons both want human-scale buckets).
         val hourTotals = LongArray(24)
-        sessions.forEach { hourTotals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs }
+        sessions.forEach {
+            hourTotals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs / 60_000
+        }
 
         // §12.5 leaderboard + genre breakdown. Minutes per bookId over the
         // window; manga sessions carry a manga id that is absent from the book
@@ -416,6 +458,10 @@ class StatisticsViewModel(
                 .take(GENRE_CAP)
                 .map { (label, minutes) -> TagSlice(label, minutes) }
         }
+
+        // The drill core reuses the leaderboard's own per-book window minutes —
+        // one aggregation, two instruments. `books` arrives exclusion-filtered
+        // in both combine branches, so the core obeys §11.2 for free.
 
         return StatisticsUiState(
             hasData = sessions.isNotEmpty(),
@@ -458,6 +504,11 @@ class StatisticsViewModel(
             },
             topBooks = topBooks,
             genres = genres,
+            longestSessionMinutes = timed.maxOfOrNull { it.durationMs / 60_000 } ?: 0L,
+            daysActiveThisYear = readDays.size,
+            booksOpened = minutesByBook.count { it.value > 0L },
+            librarySize = books.size,
+            hourTotals = hourTotals.toList(),
             todayMinutes = minutesByDay[today] ?: 0L
         )
     }

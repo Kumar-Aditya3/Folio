@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -110,7 +111,22 @@ fun StatisticsTabContent(
     // Sync when the host pushes a new value (e.g. after external settings change).
     LaunchedEffect(initialGoalMinutes) { goalMinutes = initialGoalMinutes }
 
+    // Re-tap on the Stats nav item scrolls the tab back to its top. The tab
+    // renders inside the library host's tab area, so the bus is the only way
+    // the re-tap reaches this scrollable.
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState) {
+        com.folio.reader.ui.components.FolioTabReselect.events.collect { (route, _) ->
+            if (route == "stats" &&
+                (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0)
+            ) {
+                listState.animateScrollToItem(0)
+            }
+        }
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             top = com.folio.reader.ui.theme.LocalFolioTopInset.current,
@@ -180,7 +196,13 @@ fun StatisticsTabContent(
 
         if (stats.topBooks.isNotEmpty()) {
             item {
-                TopBooksCard(books = stats.topBooks, onBookClick = onBookClick)
+                WhereYourTimeWentCard(
+                    books = stats.topBooks.take(6),
+                    everythingElseMinutes = everythingElseMinutes(stats.topBooks, stats.timeThisYearMs / 60_000),
+                    booksOpened = stats.booksOpened,
+                    librarySize = stats.librarySize,
+                    onBookClick = onBookClick,
+                )
                 Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
         }
@@ -224,13 +246,13 @@ fun StatisticsTabContent(
  * Stats' opening statement, and the screen's only raised composition.
  *
  * The old screen opened with a 140dp ring inside a card, so the first thing it
- * said was "here is a widget". This says something about the reader instead: the
- * year's reading time as a hero figure, the chronotype as a sentence, and the
- * daily-goal ring demoted to a compact companion on the trailing edge — still
- * informative, no longer the headline.
+ * said was "here is a widget". This says something about the reader instead:
+ * this week's reading time as the hero figure, the chronotype as a sentence,
+ * and the daily-goal ring demoted to a compact companion on the trailing edge —
+ * still informative, no longer the headline.
  *
  * Both progress forms coexist legitimately here because they measure different
- * spans (year vs today) and only one is a ring; §2.6 forbids duplicated *forms*
+ * spans (week vs today) and only one is a ring; §2.6 forbids duplicated *forms*
  * for the same quantity.
  */
 @Composable
@@ -242,7 +264,6 @@ private fun StatsOverture(
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     val colors = FolioTheme.colors
-    val hours = stats.timeThisYearMs / 3_600_000
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -258,9 +279,8 @@ private fun StatsOverture(
         Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 FolioFigure(
-                    value = if (hours > 0) hours.toString() else stats.todayMinutes.toString(),
-                    unit = if (hours > 0) "hours this year" else "minutes today",
-                    label = "Your reading life",
+                    value = formatWeekHours(stats.timeThisWeekMs),
+                    label = "Reading this week",
                     accent = colors.accentProgress,
                     emphasis = FigureScale.Hero,
                 )
@@ -305,6 +325,16 @@ private fun StatsOverture(
             },
             settingsRepository = settingsRepository,
         )
+    }
+}
+
+/** The hero figure's compact form: "6h 20m" / "45m" for the week's reading. */
+private fun formatWeekHours(ms: Long): String {
+    val minutes = ms / 60_000
+    val hours = minutes / 60
+    return when {
+        hours > 0 -> "${hours}h ${minutes % 60}m"
+        else -> "${minutes}m"
     }
 }
 

@@ -3,6 +3,8 @@ package com.folio.reader.nav
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
@@ -15,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -22,6 +25,35 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.folio.reader.ui.theme.FolioTokens
+
+/**
+ * The four bottom-bar destinations — the set the §17 tab morph applies to.
+ * A switch *between* these is a change of page in place, not travel down a
+ * stack, so it morphs (the new page rising out of the old one's field) instead
+ * of sliding like a push does.
+ */
+private val topLevelRoutes = setOf(
+    FolioRoutes.HOME,
+    FolioRoutes.LIBRARY,
+    FolioRoutes.STATS,
+    FolioRoutes.MORE,
+)
+
+/**
+ * True when both the page being left and the page being entered are top-level
+ * tabs. A push (library → book detail) keeps the slide; a return (detail →
+ * library) keeps the reverse slide; only tab↔tab morphs.
+ */
+private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.isTabMorph(): Boolean =
+    initialState.destination.route in topLevelRoutes &&
+        targetState.destination.route in topLevelRoutes
+
+/**
+ * The origin the tab morph scales about: a little below centre, so the incoming
+ * page's scale-up reads as rising *toward* the reader out of the page's own
+ * field rather than inflating in place.
+ */
+private val tabMorphOrigin = TransformOrigin(0.5f, 0.62f)
 
 /**
  * Wires routes to screen composables (§3.2 FOLIO_IMPLEMENTATION_SPEC).
@@ -43,25 +75,67 @@ fun FolioNavHost(
         navController = navController,
         startDestination = FolioRoutes.LIBRARY,
         modifier = modifier,
-        // Pushes travel: a fade plus a short horizontal slide, so opening a book
-        // reads as moving *into* it and back reads as returning. The library
-        // default (~700ms with delays) reads as lag; these are 220/180 with the
-        // slide capped at 4% of the width, which is felt rather than watched.
+        // §17 morphing tabs: a switch between the bar's destinations is the
+        // same page changing its mind, so the incoming tab rises out of the
+        // field (scale from 0.94 + fade, origin below centre) while the old
+        // one settles back into it — one surface re-forming, not two cards
+        // trading places. Everything that is *not* tab↔tab keeps the push
+        // travel below: a fade plus a short horizontal slide, so opening a
+        // book reads as moving *into* it and back reads as returning. The
+        // library default (~700ms with delays) reads as lag; these are
+        // 220/180 with the slide capped at 4% of the width, which is felt
+        // rather than watched.
         enterTransition = {
-            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+            if (isTabMorph()) {
+                fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                    scaleIn(
+                        animationSpec = tween(FolioTokens.motionStandard.toInt()),
+                        initialScale = 0.94f,
+                        transformOrigin = tabMorphOrigin,
+                    )
+            } else {
+                fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                    slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+            }
         },
         exitTransition = {
-            fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+            if (isTabMorph()) {
+                fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                    scaleOut(
+                        animationSpec = tween(FolioTokens.motionStandard.toInt()),
+                        targetScale = 0.97f,
+                        transformOrigin = tabMorphOrigin,
+                    )
+            } else {
+                fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                    slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+            }
         },
         popEnterTransition = {
-            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+            if (isTabMorph()) {
+                fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                    scaleIn(
+                        animationSpec = tween(FolioTokens.motionStandard.toInt()),
+                        initialScale = 1.03f,
+                        transformOrigin = tabMorphOrigin,
+                    )
+            } else {
+                fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                    slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+            }
         },
         popExitTransition = {
-            fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+            if (isTabMorph()) {
+                fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                    scaleOut(
+                        animationSpec = tween(FolioTokens.motionStandard.toInt()),
+                        targetScale = 0.94f,
+                        transformOrigin = tabMorphOrigin,
+                    )
+            } else {
+                fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                    slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+            }
         }
     ) {
         // ── Bottom-bar destinations ─────────────────────────────────────────

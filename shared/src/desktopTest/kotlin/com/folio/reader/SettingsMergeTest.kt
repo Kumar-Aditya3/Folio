@@ -99,7 +99,9 @@ class SettingsMergeTest {
         topBarOpacity = 0.5f,
         navBarOpacity = 0.8f,
         panelOpacity = 0.9f,
-        readerChromeOpacity = 0.85f
+        readerChromeOpacity = 0.85f,
+        liquidGlassEffects = false,
+        documentReaderMode = "CONTINUOUS"
     )
 
     @Test

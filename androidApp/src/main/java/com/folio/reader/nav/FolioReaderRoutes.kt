@@ -222,10 +222,28 @@ fun DocumentReaderRoute(
     onBack: () -> Unit
 ) {
     val graph = navModel.graph
+    // The reader defaults now contain the doc defaults: the persisted
+    // documentReaderMode seeds the reader (unknown values fall back to today's
+    // single-page), and a mode change in the reader writes back through the
+    // canonical settings path, so it survives the visit and syncs like every
+    // other default.
+    val initialMode = remember(documentId) {
+        runCatching {
+            com.folio.reader.ui.document.DocumentReaderMode.valueOf(
+                navModel.globalSettings.documentReaderMode
+            )
+        }.getOrDefault(com.folio.reader.ui.document.DocumentReaderMode.SINGLE_PAGE)
+    }
     val viewModel = remember(documentId) {
         DocumentReaderViewModel(
             repository = graph.documentRepository,
-            fileSystem = graph.platform.fileSystem
+            fileSystem = graph.platform.fileSystem,
+            initialMode = initialMode,
+            onModeChanged = { mode ->
+                navModel.updateSettings(
+                    navModel.globalSettings.copy(documentReaderMode = mode.name)
+                )
+            }
         )
     }
     LaunchedEffect(documentId) {

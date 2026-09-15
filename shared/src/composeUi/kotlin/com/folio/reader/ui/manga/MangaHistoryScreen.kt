@@ -44,6 +44,7 @@ import com.folio.reader.manga.MangaHistoryEntry
 import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
@@ -81,7 +82,8 @@ fun MangaHistoryScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(headerState.nestedScrollConnection),
+                    .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource(),
                 contentPadding = PaddingValues(
                     start = FolioTokens.space3,
                     top = topInset + FolioTokens.space3,

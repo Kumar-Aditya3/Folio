@@ -46,6 +46,25 @@ class StatsScopeTest {
     }
 
     @Test
+    fun `hasRules reports which group resolutions can be skipped`() {
+        // The callers' contract: with no BOOK_TAG/BOOK_COLLECTION rules, the two
+        // per-book group queries never need to run — on a large library that is
+        // the difference between Home loading in one pass and an N+1 crawl.
+        val empty = scopeOf()
+        assertFalse(empty.hasRules(Scope.BOOK_TAG))
+        assertFalse(empty.hasRules(Scope.BOOK_COLLECTION))
+        assertFalse(empty.hasRules(Scope.BOOK))
+
+        val direct = scopeOf(Scope.BOOK to "b1", Scope.BOOK_STATUS to BookStatus.ABANDONED.name)
+        assertFalse(direct.hasRules(Scope.BOOK_TAG))
+        assertFalse(direct.hasRules(Scope.BOOK_COLLECTION))
+
+        assertTrue(scopeOf(Scope.BOOK_TAG to "t").hasRules(Scope.BOOK_TAG))
+        assertFalse(scopeOf(Scope.BOOK_TAG to "t").hasRules(Scope.BOOK_COLLECTION))
+        assertTrue(scopeOf(Scope.BOOK_COLLECTION to "c").hasRules(Scope.BOOK_COLLECTION))
+    }
+
+    @Test
     fun `book listed directly is excluded, others stay`() {
         val scope = scopeOf(Scope.BOOK to "b1")
         assertFalse(includes(scope, bookId = "b1"))
