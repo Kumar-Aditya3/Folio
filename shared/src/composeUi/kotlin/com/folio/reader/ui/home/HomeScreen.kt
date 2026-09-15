@@ -68,13 +68,21 @@ import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
+import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.ProgressRing
+import com.folio.reader.ui.components.ReadingClimate
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.heroMesh
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.lightFraction
+import com.folio.reader.ui.components.phrase
+import com.folio.reader.ui.components.readingClimate
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.components.tint
+import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -132,6 +140,18 @@ fun HomeScreen(
             }
         else -> {
             val listState = rememberLazyListState()
+            // Re-tap on the Home nav item scrolls back to the anchor. Animated
+            // when there is distance to cover; an instant hop when the list is
+            // still composing (firstVisibleItemIndex unknown).
+            LaunchedEffect(listState) {
+                FolioTabReselect.events.collect { (route, _) ->
+                    if (route == "home") {
+                        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+                            listState.animateScrollToItem(0)
+                        }
+                    }
+                }
+            }
             // §13.9 hero collapse: tracked 1:1 off the scroll offset — no spring,
             // no settle — over the first 160dp; reduce-motion keeps the hero full
             // size and simply scrolling away.
@@ -156,6 +176,14 @@ fun HomeScreen(
                 state.readingNow
             }
             val anchorItem = readingNow.firstOrNull()
+            // The reading weather, computed once for the whole page: it lights
+            // the anchor, marks the ledger and phrases the week well's forecast.
+            val climate = readingClimate(
+                todayMinutes = state.todayMinutes,
+                goalMinutes = state.goalMinutes,
+                streakDays = state.streakDays,
+                daysSinceLastRead = state.daysSinceLastRead,
+            )
             // The hero tint is computed here so the host top bar can bleed the
             // same colour upward (§13.9); the hero itself re-derives it cheaply
             // from the accent cache. A manga with only a network thumbnail has no
@@ -195,11 +223,11 @@ fun HomeScreen(
                 contentPadding = PaddingValues(top = topInset),
             ) {
                 item {
-                    ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, openItem, onOpenLibrary)
+                    ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, climate, openItem, onOpenLibrary)
                     Spacer(Modifier.height(FolioTokens.spaceBeat))
                 }
                 item {
-                    LedgerStrip(state, onOpenStats, onOpenExclusions)
+                    LedgerStrip(state, climate, onOpenStats, onOpenExclusions)
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
                 }
                 // The shelf is the rest of the same ranked list — books and manga
@@ -232,7 +260,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(FolioTokens.spaceMovement))
                     }
                 }
-                item { ThisWeekWell(state, onOpenStats, LocalFolioBarInset.current) }
+                item { ThisWeekWell(state, climate, onOpenStats, LocalFolioBarInset.current) }
             }
         }
     }
@@ -262,6 +290,7 @@ private fun ReadingNowAnchor(
     backend: MangaBackend?,
     collapse: State<Float>,
     heroTint: Color?,
+    climate: ReadingClimate?,
     onOpen: (ReadingNowItem) -> Unit,
     onOpenLibrary: () -> Unit
 ) {
@@ -292,6 +321,11 @@ private fun ReadingNowAnchor(
     }
     val tint = heroTint ?: colors.accentProgress
     val fraction = collapse.value
+    // The reading weather burns through the plane's lighting: the cover still
+    // owns the hue (§13.3), but the climate scales how brightly it is lit — a
+    // warm spell lifts the gradient, a dry spell lets the room go dim. The
+    // collapse fade below keeps its own calibrated floor.
+    val climateLight = climate?.lightFraction() ?: 0.30f
     val interaction = rememberFolioInteraction()
     Box(
         modifier = Modifier
@@ -318,9 +352,22 @@ private fun ReadingNowAnchor(
                 accent = tint,
                 elevation = FolioTokens.elevationRaised,
             )
+            // §13.4's drifting mesh, finally on the surface it was designed
+            // for: three large low-alpha accent gradients breathing behind
+            // "Reading now" on slow independent cycles, so the anchor — the
+            // one surface the page is about — is the one surface that is
+            // alive. The same layer list FolioHeroCard specifies: the cover's
+            // own hue plus the two discovery accents. Reduce-motion parks the
+            // centres; the hero still reads as lit, merely still.
+            .heroMesh(
+                layers = listOf(tint, colors.accentDiscovery, colors.accentProgress),
+                animate = rememberMotionEnabled(),
+            )
             .background(
                 Brush.linearGradient(
-                    0f to tint.copy(alpha = androidx.compose.ui.util.lerp(0.30f, 0.10f, fraction)),
+                    0f to tint.copy(
+                        alpha = androidx.compose.ui.util.lerp(climateLight, 0.10f, fraction)
+                    ),
                     0.65f to Color.Transparent,
                 ),
                 FolioShapes.heroBleed,
@@ -462,10 +509,20 @@ private fun ReadingNowAnchor(
  * ring appearing beside it, not by a coloured box: celebration should feel like
  * emphasis, not like a notification.
  *
+ * The reading weather rides the rule's trailing edge — one small phrase in the
+ * climate's own tint (the streak accent in a warm spell, dimmed toward ink in a
+ * dry one), so the page states its climate in a word or two rather than another
+ * figure. Absent when there is no history to have weather from.
+ *
  * Tapping opens Stats. Rule 8's exclusion notice keeps its own row beneath.
  */
 @Composable
-private fun LedgerStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclusions: () -> Unit) {
+private fun LedgerStrip(
+    state: HomeUiState,
+    climate: ReadingClimate?,
+    onOpenStats: () -> Unit,
+    onOpenExclusions: () -> Unit
+) {
     val colors = FolioTheme.colors
     val met = state.goalMinutes > 0 && state.todayMinutes >= state.goalMinutes
     val goalFraction = if (state.goalMinutes > 0) {
@@ -499,7 +556,7 @@ private fun LedgerStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclu
                     progress = 1f,
                     modifier = Modifier.size(26.dp),
                     strokeWidth = 3f,
-                    color = colors.accentStreak,
+                    color = climate?.tint() ?: colors.accentStreak,
                     trackColor = colors.accentStreak.copy(alpha = 0.18f),
                 )
             } else if (goalFraction > 0f) {
@@ -507,13 +564,21 @@ private fun LedgerStrip(state: HomeUiState, onOpenStats: () -> Unit, onOpenExclu
                     progress = goalFraction,
                     modifier = Modifier.size(26.dp),
                     strokeWidth = 3f,
-                    color = colors.accentProgress,
+                    color = climate?.tint() ?: colors.accentProgress,
                     trackColor = colors.accentProgress.copy(alpha = 0.14f),
                 )
             }
         }
         Spacer(Modifier.height(FolioTokens.space2))
         FolioRule()
+        if (climate != null) {
+            Text(
+                climate.phrase(state.streakDays, state.daysSinceLastRead ?: 0),
+                style = FolioTheme.typography.labelSmall,
+                color = climate.tint(),
+                modifier = Modifier.padding(top = FolioTokens.spaceHair),
+            )
+        }
         if (state.exclusionsActive) {
             Row(
                 modifier = Modifier
@@ -757,109 +822,6 @@ private fun BecauseYouFinishedShelf(
         }
     }
 }
-
-/**
- * **The week.** The only chart on Home, and the only *sunken* surface — cut into
- * the page while the anchor floats above it, so the screen reads as having a
- * genuine top and bottom rather than one plane of cards.
- *
- * Edge-to-edge on purpose: the well spans the full width with only the type inset,
- * which gives the sparkline room and keeps the bottom of the screen from becoming
- * a fourth card. Rule 16 still holds — this is Home's own sparkline, not the Stats
- * bar chart.
- */
-@Composable
-private fun ThisWeekWell(state: HomeUiState, onOpenStats: () -> Unit, bottomInset: Dp = 0.dp) {
-    val colors = FolioTheme.colors
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .folioSunken(FolioShapes.edgeStart)
-            .clickable(onClick = onOpenStats)
-            .padding(
-                start = FolioTokens.gutter,
-                end = FolioTokens.gutter,
-                top = FolioTokens.space3,
-                bottom = FolioTokens.space3,
-            )
-    ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            FolioFigure(
-                value = formatMinutes(state.week.sumOf { it.minutes }),
-                label = "This week",
-                emphasis = FigureScale.Quiet,
-                accent = colors.accentProgress,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
-                style = FolioTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.height(FolioTokens.space3))
-        WeekSparkline(
-            week = state.week,
-            modifier = Modifier.fillMaxWidth().height(FolioTokens.sparkHeight * 1.4f)
-        )
-        // The floating capsule's clearance, held *inside* the well. The page therefore
-        // ends on a surface rather than on dead scroll, and the leaf sits in the band
-        // to the leading side of the capsule as a closing mark.
-        if (bottomInset > 0.dp) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(bottomInset),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                FolioLogoMark(
-                    modifier = Modifier
-                        .size(22.dp)
-                        .graphicsLayer { alpha = 0.28f }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
-    val color = FolioTheme.colors.accentProgress
-    // §13.5: the line trims in once per window (keyed on dates, not minutes),
-    // drawn in the canvas phase so nothing recomposes per frame.
-    val entry = rememberEntryState(week.map { it.date })
-    Canvas(modifier = modifier) {
-        if (week.size < 2) return@Canvas
-        val progress = entry.value
-        val max = week.maxOf { it.minutes }.coerceAtLeast(1L)
-        val stepX = size.width / (week.size - 1)
-        val points = week.mapIndexed { index, day ->
-            Offset(index * stepX, size.height * (1f - day.minutes.toFloat() / max))
-        }
-        val areaPath = Path().apply {
-            moveTo(0f, size.height)
-            points.forEach { lineTo(it.x, it.y) }
-            lineTo(size.width, size.height)
-            close()
-        }
-        val linePath = Path().apply {
-            points.forEachIndexed { index, point ->
-                if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
-            }
-        }
-        clipRect(right = size.width * progress) {
-            drawPath(
-                areaPath,
-                brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
-            )
-            drawPath(linePath, color = color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-        }
-        // The dot marks today — the last day of the trailing week.
-        if (progress >= 1f) points.last().let { drawCircle(color, radius = 3.dp.toPx(), center = it) }
-    }
-}
-
-private fun formatMinutes(total: Long): String =
-    if (total >= 60) "${total / 60}h ${total % 60}m" else "${total}m"
 
 /**
  * "When did I last pick this up?" in the fewest words that are still true.

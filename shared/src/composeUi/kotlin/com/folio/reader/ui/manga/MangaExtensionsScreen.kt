@@ -54,6 +54,7 @@ import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
@@ -119,7 +120,8 @@ fun ExtensionsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(headerState.nestedScrollConnection),
+                .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource(),
             contentPadding = PaddingValues(
                 start = FolioTokens.space3,
                 top = topInset + FolioTokens.space3,

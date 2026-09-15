@@ -73,7 +73,23 @@ data class ReaderSettings(
     val navBarOpacity: Float = 0.9f,
     val panelOpacity: Float = 0.97f,
     /** Reader bars, rails, drawers and the reader settings sheet; solid by default. */
-    val readerChromeOpacity: Float = 1f
+    val readerChromeOpacity: Float = 1f,
+    /**
+     * §16 liquid glass: blur, directional specular and grain on the overlay
+     * layer, on devices that can carry them. Off restores the pre-glass look on
+     * every device — the fill-alpha knobs above keep governing the fills either
+     * way, which is why this is a flag and not a fifth slider.
+     */
+    val liquidGlassEffects: Boolean = true,
+    /**
+     * Document reader (PDF and the generated reflowable formats) default page
+     * mode — the compose layer's `DocumentReaderMode` name, kept as a string
+     * because this module cannot see that enum; unknown values fall back to
+     * single-page at the read site. Without this field the reader defaults
+     * contained no doc defaults: the document reader's mode was per-visit
+     * memory, reset on every open and invisible to Settings, sync and backup.
+     */
+    val documentReaderMode: String = "SINGLE_PAGE"
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(

@@ -1,6 +1,7 @@
 package com.folio.reader.ui.search
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.LocalFolioTopInset
 
 /**
  * Renders FTS5 snippets: `<<term>>` becomes bold + accent instead of raw markers.
@@ -57,6 +60,11 @@ internal fun SnippetText(text: String, maxLines: Int) {
  * [onOpenTitle] receives title/author matches (they open the book's detail);
  * [onOpenHit] receives content and annotation hits (they open the reader at the
  * hit's spine).
+ *
+ * The library rail search floats this list under its masthead, so the first
+ * rows pad by [LocalFolioTopInset] to clear the glass — without it the section
+ * headers and opening hits sat behind the bar. The pushed search screen has no
+ * floating bar, and the locals default to zero there.
  */
 @Composable
 fun BookSearchResultsList(
@@ -70,7 +78,14 @@ fun BookSearchResultsList(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    LazyColumn(state = listState, modifier = modifier) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        contentPadding = PaddingValues(
+            top = LocalFolioTopInset.current,
+            bottom = LocalFolioBarInset.current,
+        ),
+    ) {
         if (titleMatches.isNotEmpty()) {
             item(key = "head:titles") {
                 Text(

@@ -1,6 +1,10 @@
 package com.folio.reader.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -48,11 +54,15 @@ import androidx.compose.ui.util.lerp
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioAmbient
+import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.topBarFill
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Screen chrome: the collapsing masthead and the controls that live in it.
@@ -161,10 +171,17 @@ fun FolioTopBar(
     val atmos = FolioTheme.atmosphere
     val f = collapse.coerceIn(0f, 1f)
     val statusPx = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+    // §16 liquid glass: the masthead's blur and fill are computed together, so
+    // the tier is applied inside topBarFill — when the bar can actually blur,
+    // the knob steps down to its glass tier, because blur fixes the
+    // bleed-through the near-opaque default was calibrated against.
+    val glassCaps = LocalGlassCapabilities.current
+    val glassBackdrop = LocalGlassBackdrop.current
+    val blurred = glassCaps.blur && glassBackdrop != null
     // The user's top-bar preference *is* the crown's alpha, not a factor on the
     // designed one: scaling a 0.36 `barGlass` could only ever go down, so the
     // slider ran from invisible to nearly invisible and its ends looked the same.
-    val fill = FolioTheme.surfaceOpacity.topBarFill(f)
+    val fill = FolioTheme.surfaceOpacity.topBarFill(f, blurred = blurred)
     val statusColor = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * fill.scrim)
     val veil = atmos.barGlass
     // Specular catch for the masthead's mirror finish — the atmosphere's own rim
@@ -172,9 +189,31 @@ fun FolioTopBar(
     // Purely additive over the veil; it never touches barGlass's alpha, so the §15
     // glass window (DesignSystemTest.appBarsAreGlassNotLids) still holds.
     val sheen = atmos.rimLight
+    // Blur only while something is passing underneath — the same condition as the
+    // fill — fading in with the bar's presence. A bar at rest over the page's own
+    // field has nothing to refract.
+    val canBlur = blurred && fill.presence > 0.01f
+    val daylight = LocalFolioDaylight.current
+    // §17 living light, draw-phase read: the crown's specular catch drifts with
+    // the room's slow light, so even a bar over an entirely still page has one
+    // thing on it that is genuinely in transit.
+    val ambient = LocalFolioAmbient.current
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (canBlur) {
+                    Modifier.folioGlassEffect(
+                        backdrop = glassBackdrop,
+                        backgroundColor = colors.background,
+                        alpha = fill.presence,
+                        progressive = true,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .then(if (glassCaps.noise && !canBlur) Modifier.folioGlassGrain() else Modifier)
             .drawBehind {
                 // The OS icons need their own ground on every theme; the page does
                 // not need a band. The scrim decays fast — full strength only in the
@@ -211,13 +250,29 @@ fun FolioTopBar(
                     // polished glass reflecting the light above rather than a flat tint.
                     // Tied to the bar's presence exactly like the veil — it appears only
                     // once the bar is a surface at all, which is the only time it needs
-                    // to read as one.
-                    drawRect(
-                        Brush.verticalGradient(
-                            0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
-                            0.38f to Color.Transparent,
+                    // to read as one. §16: the band runs along the daylight axis like
+                    // every other material's sheen; at neutral daylight (and on
+                    // platforms without the glass upgrade) it is the fixed top-light
+                    // band this bar has always had.
+                    if (glassCaps.specular) {
+                        val (sheenStart, sheenEnd) = daylightGradient(size, daylight, ambient.value)
+                        drawRect(
+                            Brush.linearGradient(
+                                0f to Color.Transparent,
+                                0.62f to Color.Transparent,
+                                1f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
+                                start = sheenStart,
+                                end = sheenEnd,
+                            )
                         )
-                    )
+                    } else {
+                        drawRect(
+                            Brush.verticalGradient(
+                                0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
+                                0.38f to Color.Transparent,
+                            )
+                        )
+                    }
                     // The bar's lower boundary — glass fade thickening down into a
                     // hairline at the bar's very edge — painted inside the masthead's
                     // own footprint. As Column children they grew the bar 11dp past
@@ -366,7 +421,7 @@ private fun FolioMark(modifier: Modifier = Modifier) {
 }
 
 /**
- * A segmented switch: one track, one lit segment.
+ * A segmented switch: one track, one lit segment — and the segment *travels*.
  *
  * This replaces a pair of loose [FolioChip]s wherever the choice is *exclusive*.
  * Two chips side by side say "two independent filters"; one track with a lit
@@ -374,9 +429,39 @@ private fun FolioMark(modifier: Modifier = Modifier) {
  * costs a third of the width, so it fits on the same rail as the filters instead
  * of demanding a row of its own.
  *
- * Selection is carried by a tinted segment and accent ink, never by weight: a
- * heavier label would re-measure the track and nudge everything beside it.
+ * §17 liquid selection: the lit segment is a single indicator that glides from
+ * the old slot to the new one, stretching and squeezing through the gap, instead
+ * of two fills cross-fading in place. The eye follows the motion, so selection
+ * is legible by *where the light went* — the same argument that made the nav
+ * capsule's pill breathe. Selection is never carried by weight: a heavier label
+ * would re-measure the track and nudge everything beside it.
+ *
+ * The indicator is drawn behind the labels in one `drawWithCache`, and the
+ * travel is animated by `animateDpAsState` read in the draw phase — the
+ * geometry recomputes per frame but nothing recomposes and no layout pass runs
+ * for the glide. Under reduce-motion the indicator snaps between slots.
  */
+private val SEGMENT_H_PAD = 14.dp
+private val SEGMENT_V_PAD = 7.dp
+private val SEGMENT_GAP = 2.dp
+
+/**
+ * The lit segment's slot geometry, in the caller's units: (left, width) of
+ * segment [index] given every segment's [widths] and the [gap] between them.
+ * Pure so the travel is pinned by test rather than by eye — the indicator must
+ * land exactly on the slot the labels laid out, or the two disagree by a pixel
+ * and the control reads broken.
+ */
+internal fun segmentedSlotBounds(
+    widths: List<Float>,
+    index: Int,
+    gap: Float,
+): Pair<Float, Float> {
+    val i = index.coerceIn(0, widths.lastIndex)
+    val left = widths.take(i).sum() + gap * i
+    return left to widths[i]
+}
+
 @Composable
 fun FolioSegmented(
     options: List<String>,
@@ -384,44 +469,106 @@ fun FolioSegmented(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (options.isEmpty()) return
     val colors = FolioTheme.colors
     val atmos = FolioTheme.atmosphere
-    Row(
+    val motion = rememberMotionEnabled()
+    val style = FolioTheme.typography.labelMedium
+    // Measured with the same measurer and style that render the labels, so the
+    // slot widths are the pills' actual widths — a hand-rolled width estimate
+    // is what would make the indicator land half a millimetre off its label.
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val slotWidths: List<Dp> = remember(options, style, density) {
+        with(density) {
+            options.map { label ->
+                measurer.measure(text = label, style = style, maxLines = 1).size.width.toDp() +
+                    SEGMENT_H_PAD * 2
+            }
+        }
+    }
+    val clamped = selectedIndex.coerceIn(0, options.lastIndex)
+    val targetLeft = remember(slotWidths, clamped) {
+        val (left, _) = segmentedSlotBounds(slotWidths.map { it.value }, clamped, SEGMENT_GAP.value)
+        left.dp
+    }
+    val targetWidth = slotWidths[clamped]
+    // Liquid, not sloppy: a touch of overshoot on the glide (damping ≈ 0.78),
+    // matching the press springs' own calibration.
+    val glideSpec: AnimationSpec<Dp> =
+        if (motion) spring(dampingRatio = 0.78f, stiffness = 480f) else snap()
+    val indicatorLeft by animateDpAsState(targetLeft, glideSpec, label = "segmentLeft")
+    val indicatorWidth by animateDpAsState(targetWidth, glideSpec, label = "segmentWidth")
+    Box(
         modifier = modifier
             .clip(FolioShapes.pill)
             .background(atmos.sunkenFill.copy(alpha = 0.5f), FolioShapes.pill)
             .border(1.dp, atmos.hairline, FolioShapes.pill)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(3.dp)
+            .drawWithCache {
+                // Behind the labels (drawBehind runs before the content), inside
+                // the track's own padding, so the coordinate space *is* the row's.
+                val radius = CornerRadius(size.height / 2f)
+                onDrawBehind {
+                    drawRoundRect(
+                        color = colors.primary.copy(alpha = 0.20f),
+                        topLeft = Offset(indicatorLeft.toPx(), 0f),
+                        size = Size(indicatorWidth.toPx(), size.height),
+                        cornerRadius = radius,
+                    )
+                }
+            },
     ) {
-        options.forEachIndexed { index, label ->
-            val selected = index == selectedIndex
-            val fill by animateColorAsState(
-                targetValue = if (selected) colors.primary.copy(alpha = 0.20f) else Color.Transparent,
-                label = "segmentFill",
-            )
-            val ink by animateColorAsState(
-                targetValue = if (selected) colors.primary else colors.onSurfaceVariant,
-                label = "segmentInk",
-            )
-            Box(
-                modifier = Modifier
-                    .clip(FolioShapes.pill)
-                    .background(fill, FolioShapes.pill)
-                    .clickable(enabled = !selected) { onSelect(index) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-            ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(SEGMENT_GAP),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            options.forEachIndexed { index, label ->
+                val selected = index == clamped
+                // Ink still cross-fades per segment: the label tells you where
+                // the light landed, the indicator shows it travelling.
+                val ink by animateColorAsState(
+                    targetValue = if (selected) colors.primary else colors.onSurfaceVariant,
+                    label = "segmentInk",
+                )
                 Text(
                     text = label,
-                    style = FolioTheme.typography.labelMedium,
+                    style = style,
                     color = ink,
                     maxLines = 1,
+                    modifier = Modifier
+                        .clip(FolioShapes.pill)
+                        .clickable(enabled = !selected) { onSelect(index) }
+                        .padding(horizontal = SEGMENT_H_PAD, vertical = SEGMENT_V_PAD),
                 )
             }
         }
     }
 }
+
+/**
+ * §17 liquid selection, geometry half: where the capsule's specular sweep band
+ * sits for [progress] 0..1 across a capsule [width] px wide with a [band] px
+ * band, travelling toward [direction] (+1 left→right, -1 the reverse). At 0 the
+ * band spans entirely off the leading edge and at 1 entirely past the trailing
+ * edge — the same off-edge contract as [shimmerSweep], tightened by one band so
+ * no travel is spent invisible. Pure so it is pinned by test. Public because
+ * the capsule itself lives in the app module, which cannot see this module's
+ * internal members.
+ */
+fun navSweepBand(progress: Float, width: Float, band: Float, direction: Float): Float {
+    val x = -band + progress.coerceIn(0f, 1f) * (width + band)
+    // Mirror the forward position about the capsule: -band ↔ width.
+    return if (direction >= 0f) x else width - band - x
+}
+
+/**
+ * The sweep's alpha envelope: 0 at rest at both ends, one soft peak mid-travel.
+ * Sine rather than a triangle so the band eases in and out instead of switching
+ * on. Pure so it is pinned by test; public for [navSweepBand]'s reason.
+ */
+fun navSweepAlpha(progress: Float): Float =
+    sin(PI * progress.coerceIn(0f, 1f).toDouble()).toFloat().coerceIn(0f, 1f)
 
 /**
  * Section label inside a menu, so one menu can carry two or three groups and still

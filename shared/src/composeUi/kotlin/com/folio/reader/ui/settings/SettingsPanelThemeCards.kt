@@ -59,9 +59,14 @@ internal fun ThemePackCard(
     dark: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
+    // §16: the System pack's live preview — the wallpaper-derived colours of the
+    // face being shown. Null for every other pack (and for System where the
+    // platform cannot derive one, in which case the card is not shown at all).
+    previewColors: com.folio.reader.ui.theme.FolioColors? = null,
 ) {
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    val spec = com.folio.reader.ui.theme.AppPalette.byId(pack.appPaletteId(dark)).colors
+    val spec = previewColors
+        ?: com.folio.reader.ui.theme.AppPalette.byId(pack.appPaletteId(dark)).colors
     val page = com.folio.reader.settings.Theme.getPreset(pack.readerThemeId(dark))
     val shape = FolioShapes.inset
     val interaction = rememberFolioInteraction()

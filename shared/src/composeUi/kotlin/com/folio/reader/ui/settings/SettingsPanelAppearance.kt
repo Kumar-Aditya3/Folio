@@ -447,6 +447,35 @@ fun TransparencySettingsPanel(
             readerTheme = settings.customTheme ?: Theme.getPreset(settings.themeId),
             focus = focus,
         )
+        // §16: the liquid glass switch. It is a flag, not a fifth slider: the
+        // fill alphas below govern the fills either way, and the effect stack
+        // (blur, specular, grain) is one yes/no the device either can carry or
+        // cannot. Off restores the pre-glass look on every device.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Liquid glass effects",
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = "Blur, daylight sheen and grain on bars, the capsule " +
+                        "and sheets, on devices that can carry them. The sliders " +
+                        "below keep governing how solid each surface is.",
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.liquidGlassEffects,
+                onCheckedChange = { on ->
+                    onSettingsChange(settings.copy(liquidGlassEffects = on))
+                },
+            )
+        }
         Text(
             text = "Drag a slider to highlight the surface it controls in the preview. " +
                 "Each value is the surface's own opacity: 100% is solid and nothing " +

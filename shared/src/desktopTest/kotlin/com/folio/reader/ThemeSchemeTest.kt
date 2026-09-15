@@ -237,7 +237,11 @@ class ThemeSchemeTest {
     // SILVER is its light mirror (ΔL* ≈ 4.9).
     // BLOSSOM pairs a true-black background with a warm-shifted surface (ΔL* ≈ 5.1):
     // the background carries no hue, so the pair rides the luminance clause too.
-    private val achromaticByDesign = setOf("light", "dark", "silver", "graphite", "blossom")
+    // §16 SYSTEM/SYSTEM_DARK alias the gallery faces as their below-31
+    // placeholders, so they join their luminance-clause club; on a 31+ device
+    // the wallpaper-derived derivation replaces the whole colour set.
+    private val achromaticByDesign =
+        setOf("light", "dark", "silver", "graphite", "blossom", "system", "systemdark")
 
     @Test
     fun neutralsVaryInHueNotOnlyLightness() {
@@ -324,6 +328,86 @@ class ThemeSchemeTest {
         val span = setOf(t.displaySmall.fontWeight, t.titleLarge.fontWeight,
             t.bodyMedium.fontWeight, t.labelLarge.fontWeight)
         assertTrue(span.size >= 3, "type scale spans ${span.size} weights — Rule 24 wants at least three")
+    }
+
+    // ── §16 Material You: the System palette ────────────────────────────────
+
+    @Test
+    fun systemPackFlipsLikeEveryOtherPack() {
+        // The System palette persists as ordinary appThemeId faces, so the
+        // light/dark switch (and everything else that walks packs) just works.
+        val light = ReaderSettings(appThemeId = "system", themeId = "paper")
+        val dark = flipThemeMode(light)
+        assertEquals("systemdark", dark.appThemeId)
+        assertEquals("dark", dark.themeId)
+        val back = flipThemeMode(dark)
+        assertEquals("system", back.appThemeId)
+        assertEquals("paper", back.themeId)
+    }
+
+    @Test
+    fun systemPalettesFallBackToTheGalleryFaces() {
+        // Below API 31 — or anywhere no dynamic scheme exists — the entries are
+        // the default pack's faces: the ladder's "falls back to the default pack".
+        assertEquals(AppPalette.LIGHT.colors, AppPalette.SYSTEM.colors)
+        assertEquals(AppPalette.DARK.colors, AppPalette.SYSTEM_DARK.colors)
+    }
+
+    @Test
+    fun derivedSystemPaletteHoldsTheSchemeInvariants() {
+        // A wallpaper is art, not a palette: the derivation must enforce the
+        // same invariants the built-in palettes are held to. Three synthetic
+        // schemes cover the shape of the input space: a normal three-hue
+        // scheme, a monochrome one whose accent hues coincide, and a dark one.
+        assertDerivedInvariants(
+            androidx.compose.material3.lightColorScheme(
+                background = androidx.compose.ui.graphics.Color(0xFFFDFBFF),
+                surface = androidx.compose.ui.graphics.Color(0xFFF7F2FA),
+                primary = androidx.compose.ui.graphics.Color(0xFF6750A4),
+                tertiary = androidx.compose.ui.graphics.Color(0xFF7D5260),
+                error = androidx.compose.ui.graphics.Color(0xFFB3261E),
+            )
+        )
+        assertDerivedInvariants(
+            androidx.compose.material3.lightColorScheme(
+                background = androidx.compose.ui.graphics.Color(0xFFFCF8F8),
+                surface = androidx.compose.ui.graphics.Color(0xFFF2ECEC),
+                primary = androidx.compose.ui.graphics.Color(0xFF6750A4),
+                tertiary = androidx.compose.ui.graphics.Color(0xFF6B54A8),
+                error = androidx.compose.ui.graphics.Color(0xFF6E57A9),
+            )
+        )
+        assertDerivedInvariants(
+            androidx.compose.material3.darkColorScheme(
+                background = androidx.compose.ui.graphics.Color(0xFF1C1B1F),
+                surface = androidx.compose.ui.graphics.Color(0xFF26232A),
+                primary = androidx.compose.ui.graphics.Color(0xFFD0BCFF),
+                tertiary = androidx.compose.ui.graphics.Color(0xFFEFB8C8),
+                error = androidx.compose.ui.graphics.Color(0xFFF2B8B5),
+            )
+        )
+    }
+
+    private fun assertDerivedInvariants(scheme: androidx.compose.material3.ColorScheme) {
+        val c = com.folio.reader.ui.theme.deriveSystemPalette(scheme)
+        val accents = listOf(
+            "progress" to c.accentProgress,
+            "discovery" to c.accentDiscovery,
+            "streak" to c.accentStreak,
+            "annotation" to c.accentAnnotation,
+        )
+        for (i in accents.indices) for (j in i + 1 until accents.size) {
+            val dE = deltaE(accents[i].second, accents[j].second)
+            assertTrue(dE >= 10.0,
+                "derived ${accents[i].first} vs ${accents[j].first} ΔE=$dE — too similar to tell apart")
+        }
+        for ((role, a) in accents) {
+            val ratio = wcagRatio(a.toArgb(), c.surface.toArgb())
+            assertTrue(ratio >= 4.5, "derived accent$role on surface is $ratio:1 — below WCAG AA")
+        }
+        val inkRatio = wcagRatio(c.onSurface.toArgb(), c.surface.toArgb())
+        assertTrue(inkRatio >= 7.0, "derived ink on surface is $inkRatio:1 — below the §15 reading floor")
+        assertEquals(8, c.chartSeries.size, "chartSeries must fall back intact")
     }
 
     // ── colour math ─────────────────────────────────────────────────────────

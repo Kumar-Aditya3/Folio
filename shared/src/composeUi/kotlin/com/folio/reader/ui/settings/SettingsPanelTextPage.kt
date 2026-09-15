@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.folio.reader.model.FormattingMode
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.TextAlignment
@@ -80,12 +82,30 @@ fun TextAndPageSettingsPanel(
             options = fonts,
             onChange = { onSettingsChange(settings.copy(fontFamily = it)) },
             optionContent = { option ->
-                Text(
-                    text = readerFontLabel(settings, option),
-                    fontFamily = readerFontFamily(settings, option),
-                    fontWeight = if (option == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (option == settings.fontFamily) accent else colors.onSurface
-                )
+                // Uniform label + per-font "Ag" specimen: the row's optics stay
+                // constant while the specimen still shows the face (the raw
+                // per-option fontFamily made Comfortaa tower over Calluna).
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = readerFontLabel(settings, option),
+                        style = FolioTheme.typography.bodyMedium,
+                        fontWeight = if (option == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (option == settings.fontFamily) accent else colors.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Ag",
+                        fontFamily = readerFontFamily(settings, option),
+                        fontSize = 18.sp,
+                        lineHeight = 22.sp,
+                        color = colors.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.width(34.dp)
+                    )
+                }
             },
             selectedContent = {
                 Text(

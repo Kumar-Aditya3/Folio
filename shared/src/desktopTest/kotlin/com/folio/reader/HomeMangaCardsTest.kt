@@ -391,7 +391,10 @@ class HomeMangaCardsTest {
             mangaRepo = repo,
             history = FakeHistoryRepo(listOf(historyRow("anchor"))),
             backend = backend
-        ).state.first()
+        )
+            // §17 startup pass: Discover rides in after the first emission, so
+            // wait for the surface to settle rather than the first frame.
+            .state.first { it.discover.isNotEmpty() }
 
         assertEquals(6, state.discover.size)
         assertEquals(listOf("B", "C", "D", "E", "G", "H"), state.discover.map { it.title })
@@ -450,12 +453,15 @@ class HomeMangaCardsTest {
             backend = backend
         )
 
-        assertEquals(listOf("X"), viewModel.state.first().discover.map { it.title })
-        assertEquals(listOf("X"), viewModel.state.first().discover.map { it.title })
+        // The fetch lands after the first emission (§17 startup pass), so wait
+        // for the settled surface; the second collection reads the fresh cache
+        // and must not refetch within the window.
+        assertEquals(listOf("X"), viewModel.state.first { it.discover.isNotEmpty() }.discover.map { it.title })
+        assertEquals(listOf("X"), viewModel.state.first { it.discover.isNotEmpty() }.discover.map { it.title })
         assertEquals(1, backend.browseCount, "the cached window must suppress the second fetch")
 
         HomeViewModel.resetDiscoverCache()
-        viewModel.state.first()
+        viewModel.state.first { it.discover.isNotEmpty() }
         assertEquals(2, backend.browseCount)
         Unit
     }

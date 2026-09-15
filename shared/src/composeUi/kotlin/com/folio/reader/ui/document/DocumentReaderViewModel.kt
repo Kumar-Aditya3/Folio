@@ -28,11 +28,20 @@ import kotlinx.datetime.Clock
 class DocumentReaderViewModel(
     private val repository: DocumentRepository,
     private val fileSystem: FolioFileSystem,
+    /**
+     * The persisted document-reader default (ReaderSettings.documentReaderMode).
+     * Honored on every open — the mode used to be per-visit memory, silently
+     * reset to single-page each time, which is what "the reader defaults don't
+     * contain the doc defaults" was.
+     */
+    initialMode: DocumentReaderMode = DocumentReaderMode.SINGLE_PAGE,
+    /** Persisted on every mode change, so the choice outlives the visit. */
+    private val onModeChanged: suspend (DocumentReaderMode) -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
-    private val _state = MutableStateFlow(DocumentReaderState())
+    private val _state = MutableStateFlow(DocumentReaderState(mode = initialMode))
     val state: StateFlow<DocumentReaderState> = _state.asStateFlow()
 
     private var documentId: String? = null
@@ -43,7 +52,9 @@ class DocumentReaderViewModel(
         this.documentId = documentId
         bookmarkJob?.cancel()
         persistJob?.cancel()
-        _state.value = DocumentReaderState()
+        // A fresh state that keeps the mode: the document changes, the reader's
+        // own defaults do not.
+        _state.value = DocumentReaderState(mode = _state.value.mode)
         scope.launch {
             val document = try {
                 repository.getDocument(documentId)
@@ -163,7 +174,9 @@ class DocumentReaderViewModel(
     }
 
     fun setMode(mode: DocumentReaderMode) {
+        if (mode == _state.value.mode) return
         _state.value = _state.value.copy(mode = mode)
+        scope.launch { onModeChanged(mode) }
     }
 
     fun rotateClockwise() {

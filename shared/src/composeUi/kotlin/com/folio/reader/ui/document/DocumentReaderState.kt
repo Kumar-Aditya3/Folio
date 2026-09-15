@@ -72,6 +72,14 @@ data class FixedPageRenderRequest(
 interface FixedPageDocument : AutoCloseable {
     val pageCount: Int
     suspend fun render(request: FixedPageRenderRequest): ImageBitmap
+
+    /**
+     * The page's natural width/height (after its /Rotate), or null when the
+     * document layer cannot cheaply answer. Callers fall back to a generic
+     * book-shaped ratio. Implementations must be safe to call for any page
+     * index and should cache — the continuous strip asks for every page.
+     */
+    suspend fun pageAspectRatio(pageIndex: Int): Float? = null
 }
 
 class FixedPageException(

@@ -57,8 +57,13 @@
 
 ## Caveats
 - `ThumbnailDocumentRepository` is a containment workaround for the source visibility discrepancy. Its thumbnail update is a second, non-atomic SQL statement and list/search hydration currently performs one thumbnail query per document. Direct support should move into a reliable JDBC implementation when that discrepancy is resolved.
-- Continuous zoom currently scales the whole lazy list visually; lazy-list scroll extents do not scale with it and should be behaviorally reviewed on a target device.
 - Existing PDF raw-byte validation remains sensitive to PDFs whose page-tree tokens exist only in compressed object streams; the focused generated fixture avoids that unrelated limitation.
+
+## Continuous-mode strip rework (follow-up)
+- The whole-list `graphicsLayer` zoom (the flaw recorded above: "lazy-list scroll extents do not scale with it") is gone. Continuous mode is now a true strip: the column width scales with zoom inside a horizontal scroller, so every item height scales linearly and the scroll extents stay truthful.
+- Each item's layout box uses `FixedPageDocument.pageAspectRatio(pageIndex)` — cropBox + `/Rotate` on desktop, `openPage` dimensions (lazily, promptly closed, cached) on Android — replacing the hardcoded 0.74 book-cover ratio. Unknown pages still fall back to 0.74.
+- Pinch zoom (strip-level and per-page handlers) routes through a compensated step: `setZoom` then `dispatchRawDelta(zoomScrollDelta(applied, offset + centroid))` in the same pointer event, the same pattern as the webtoon reader (`MangaPager.zoomScrollDelta`), so the content under the pinch centroid stays pinned.
+- The raster cache key still deliberately excludes *live* zoom, but the raster is oversampled by the strip zoom (stepped, bounded 1–4x, then pixel-capped), so zoomed pages re-render crisp rather than upsampling the 1x bitmap. `FilterQuality.High` replaces the `Image` default on strip pages.
 
 ## Verification
 - Focused raster-key, stable-input, mode/current-page, PDF thumbnail render/store/persist/delete, non-PDF fallback, repository round-trip, and schema migration tests: passed.

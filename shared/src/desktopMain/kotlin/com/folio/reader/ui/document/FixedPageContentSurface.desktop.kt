@@ -43,6 +43,24 @@ private class DesktopFixedPageDocument(private val document: PDDocument) : Fixed
     private var closed = false
     override val pageCount: Int = document.numberOfPages
 
+    /** cropBox + /Rotate, remembered per page — the strip asks for every page. */
+    private val aspectRatios = HashMap<Int, Float>()
+
+    override suspend fun pageAspectRatio(pageIndex: Int): Float? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (closed || pageIndex !in 0 until pageCount) return@withLock null
+            aspectRatios.getOrPut(pageIndex) {
+                val page = document.getPage(pageIndex)
+                val crop = page.cropBox
+                val pageRotation = ((page.rotation % 360) + 360) % 360
+                val rotated = pageRotation == 90 || pageRotation == 270
+                val width = (if (rotated) crop.height else crop.width).coerceAtLeast(1f)
+                val height = (if (rotated) crop.width else crop.height).coerceAtLeast(1f)
+                width / height
+            }
+        }
+    }
+
     override suspend fun render(request: FixedPageRenderRequest): ImageBitmap = withContext(Dispatchers.IO) {
         mutex.withLock {
             coroutineContext.ensureActive()

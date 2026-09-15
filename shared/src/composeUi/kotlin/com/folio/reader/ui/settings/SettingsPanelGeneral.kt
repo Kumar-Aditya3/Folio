@@ -84,7 +84,16 @@ fun GeneralSettingsPanel(
             // theme slider turned sideways: opens on the active pack, tap applies.
             // A bare LazyRow is not wheel-scrollable on desktop (the old FlowRow
             // complaint), so vertical wheel deltas are mapped to horizontal scrolls.
-            val packs = com.folio.reader.ui.theme.ThemePack.ALL
+            // §16 Material You: the System pack leads, shown only where the
+            // platform can derive a wallpaper scheme (API 31+); its card previews
+            // the live derivation of the face being shown. Below 31 the pack is
+            // absent, and a persisted "system" id falls back to the gallery faces.
+            val dynamicSchemes = com.folio.reader.ui.theme.LocalDynamicSchemes.current
+            val packs = if (dynamicSchemes != null) {
+                com.folio.reader.ui.theme.ThemePack.ALL
+            } else {
+                com.folio.reader.ui.theme.ThemePack.ALL.drop(1)
+            }
             val packListState = rememberLazyListState()
             val packScrollScope = rememberCoroutineScope()
             // Resolve through byId: a persisted id may still name a palette that
@@ -110,6 +119,15 @@ fun GeneralSettingsPanel(
                 contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
             ) {
                 items(packs, key = { it.id }) { pack ->
+                    val preview = if (pack.id == "system" && dynamicSchemes != null) {
+                        androidx.compose.runtime.remember(dynamicSchemes, modeDark) {
+                            com.folio.reader.ui.theme.deriveSystemPalette(
+                                if (modeDark) dynamicSchemes.second else dynamicSchemes.first,
+                            )
+                        }
+                    } else {
+                        null
+                    }
                     ThemePackCard(
                         pack = pack,
                         dark = modeDark,
@@ -126,6 +144,7 @@ fun GeneralSettingsPanel(
                                 )
                             )
                         },
+                        previewColors = preview,
                     )
                 }
             }

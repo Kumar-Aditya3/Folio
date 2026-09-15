@@ -27,16 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSectionHead
-import com.folio.reader.ui.components.chartStagger
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
-import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -53,7 +49,7 @@ import kotlinx.datetime.LocalDate
  * gradient from `accentProgress` down to it at [FolioTokens.gradientMinAlpha] —
  * scaled against [peak], stubbed track when the day is empty. The bar at the
  * window's max carries the Rule 15 peak marker: a brighter `accentStreak` cap.
- * Used by the weekly charts and the book-detail sparkline.
+ * Used by the book-detail and manga-detail sparklines.
  *
  * §13.5: [growth] scales the bar from the empty track up to full height, and
  * [capReveal] fades the peak cap in only after its bar has finished growing —
@@ -111,7 +107,8 @@ internal fun ChartBar(
 
 /**
  * Manga chapters per day over the last 7 days. Same well treatment as the books
- * [WeekChart] — data sits *in* the page — with counts instead of minutes.
+ * [WeekChart] — data sits *in* the page — and the same smooth curve, with the
+ * chapter count riding above its day's column.
  */
 @Composable
 internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
@@ -120,116 +117,20 @@ internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
             FolioEyebrow("Manga — last 7 days")
         }
         Spacer(Modifier.height(FolioTokens.space2))
-        val peak = (chaptersPerDay.maxOrNull() ?: 0).coerceAtLeast(1)
-        // §13.5: same entry sweep as the books week chart, keyed on the labels.
-        val entry = rememberEntryProgress(labels)
-        Row(
+        SmoothWeekCurve(
+            values = chaptersPerDay.map { it.toFloat() },
+            dayLabels = List(chaptersPerDay.size) { index ->
+                labels.getOrNull(index)?.take(1) ?: ""
+            },
+            plotHeight = FolioTokens.chartHeight,
+            valueCaptions = chaptersPerDay.map { chapters ->
+                if (chapters > 0) chapters.toString() else ""
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .folioSunken(FolioShapes.edgeStart)
-                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
-                .height(FolioTokens.chartHeight),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            chaptersPerDay.forEachIndexed { index, chapters ->
-                val label = labels.getOrNull(index)?.take(1) ?: ""
-                val (growth, cap) = chartStagger(entry, index, chaptersPerDay.size)
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom,
-                ) {
-                    Text(
-                        text = if (chapters > 0) chapters.toString() else "",
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    ChartBar(
-                        value = chapters.toFloat(),
-                        peak = peak.toFloat(),
-                        growth = growth,
-                        capReveal = cap,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = label,
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Last 7 days, as a well cut into the page. Sinking the chart is what stops the
- * one data visual on the screen from reading as another card in the stack; the
- * bars grow out of the well's floor, which is where a bar chart belongs.
- */
-@Composable
-internal fun WeekChart(week: List<StatDay>) {
-    Column {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-            FolioSectionHead(title = "Last 7 days")
-        }
-        Spacer(Modifier.height(FolioTokens.space3))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .folioSunken(FolioShapes.edgeStart)
-                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
-        ) {
-            WeekBars(week)
-        }
-    }
-}
-
-/** The bare 7-day bar row shared by the stats week chart and the Home "This week" card. */
-@Composable
-internal fun WeekBars(week: List<StatDay>) {
-    val peak = (week.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
-    // §13.5: one entry sweep for the window, keyed on the days' DATES — minutes
-    // updating live must not replay it — staggered 40ms left-to-right.
-    val entry = rememberEntryProgress(week.map { it.date })
-    Row(
-        modifier = Modifier.fillMaxWidth().height(FolioTokens.chartHeight),
-        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-        verticalAlignment = Alignment.Bottom
-    ) {
-        week.forEachIndexed { index, day ->
-            val (growth, cap) = chartStagger(entry, index, week.size)
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Bottom
-            ) {
-                Text(
-                    text = if (day.minutes > 0) shortMinutes(day.minutes) else "",
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    maxLines = 1,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                ChartBar(
-                    value = day.minutes.toFloat(),
-                    peak = peak.toFloat(),
-                    growth = growth,
-                    capReveal = cap,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = day.date.dayOfWeek.name.take(1),
-                    style = FolioTheme.typography.labelSmall,
-                    color = FolioTheme.colors.onSurfaceVariant
-                )
-            }
-        }
+                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
+        )
     }
 }
 

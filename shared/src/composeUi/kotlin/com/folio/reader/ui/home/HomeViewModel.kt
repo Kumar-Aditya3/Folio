@@ -30,10 +30,12 @@ import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.statistics.StatisticsViewModel
 import com.folio.reader.ui.statistics.localSessions
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
@@ -84,7 +86,13 @@ data class HomeUiState(
     /** Rule 8: some exclusions are active — Home shows the "review" line. */
     val exclusionsActive: Boolean = false,
     /** §13.3: hero gradient is tinted from the current book's cover (Themes toggle). */
-    val coverTint: Boolean = true
+    val coverTint: Boolean = true,
+    /**
+     * Days since the last reading sitting (0 = today), or null when there is
+     * no session history at all — the reading weather's drought signal. Derived
+     * from the same gated sessions as every other number on the page.
+     */
+    val daysSinceLastRead: Int? = null
 )
 
 /** One row of the manga Continue-reading card (§11.4). */
@@ -188,19 +196,22 @@ class HomeViewModel(
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
 
     /** Cold so a goal edited on the Stats tab is picked up on the next Home visit. */
-    private val goalFlow: Flow<Int> = flow {
-        val goal = settingsRepository
-            ?.let { repo -> runCatching { repo.getGlobalSettings().dailyGoalMinutes }.getOrNull() }
-            ?: 60
-        emit(goal)
-    }
+    private data class HomeSettings(val goalMinutes: Int, val coverTint: Boolean)
 
-    /** §13.3 cover-tint toggle, read cold like the goal. */
-    private val coverTintFlow: Flow<Boolean> = flow {
-        val tint = settingsRepository
-            ?.let { repo -> runCatching { repo.getGlobalSettings().homeCoverTint }.getOrNull() }
-            ?: true
-        emit(tint)
+    /**
+     * One settings read per emission, not two: the goal and the §13.3 cover-tint
+     * toggle used to be two separate flows, each fetching and deserializing the
+     * whole global-settings row before Home's first emission could assemble.
+     */
+    private val settingsFlow: Flow<HomeSettings> = flow {
+        val settings = settingsRepository
+            ?.let { repo -> runCatching { repo.getGlobalSettings() }.getOrNull() }
+        emit(
+            HomeSettings(
+                goalMinutes = settings?.dailyGoalMinutes ?: 60,
+                coverTint = settings?.homeCoverTint ?: true,
+            )
+        )
     }
 
     /** One combine emission before exclusion gating, so both pipelines share it. */
@@ -209,7 +220,7 @@ class HomeViewModel(
         val sessions: List<ReadingSession>,
         val inProgress: List<Book>,
         val finished: List<Book>,
-        val goalMinutes: Int
+        val settings: HomeSettings
     )
 
     private val inputs: Flow<Inputs> = combine(
@@ -219,26 +230,69 @@ class HomeViewModel(
         ),
         bookRepository.getCurrentlyReading(),
         bookRepository.getFinishedBooks(),
-        goalFlow
-    ) { books, sessions, inProgress, finished, goal ->
-        Inputs(books, sessions, inProgress, finished, goal)
+        settingsFlow
+    ) { books, sessions, inProgress, finished, settings ->
+        Inputs(books, sessions, inProgress, finished, settings)
     }
 
+    /**
+     * §11.4 Discover, off Home's critical path: the first emission is whatever
+     * the cache holds (stale rows beat a blank shelf) or empty, and arrives
+     * instantly; the live browse fetch — bounded at
+     * [DISCOVER_FETCH_TIMEOUT_MS] but still seconds on a cold cache — runs
+     * afterward and updates the surface in place. `loaded=true` is never held
+     * hostage by the network again. The flow never completes while collected,
+     * because `combine` tears the whole state down when any source finishes.
+     */
+    private val discoverFlow: Flow<List<MangaDiscoverItem>> = flow {
+        // Fresh cache: one emission, no network — the "one browse request per
+        // cache window" contract. Stale cache: show the stale rows immediately
+        // (stale beats blank), then refresh in place. No cache: empty, then
+        // fetch. The fetch only ever runs when the window has actually lapsed.
+        val now = Clock.System.now()
+        val cached = discoverCache
+        if (cached != null) {
+            val ttl = if (cached.second.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
+            if (now - cached.first < ttl) {
+                emit(cached.second)
+                awaitCancellation()
+            }
+            emit(cached.second)
+        } else {
+            emit(emptyList())
+        }
+        val exclusions = statsExclusionRepository?.observeExclusions()?.first() ?: emptySet()
+        emit(fetchDiscover(exclusions))
+        awaitCancellation()
+    }
+
+    /**
+     * Home's state. The base pipeline (books, sessions, settings, exclusions,
+     * the manga shelves) emits as soon as the local database answers; Discover
+     * rides in on top through [discoverFlow] whenever the network gets there.
+     */
     val state: Flow<HomeUiState> = run {
         val exclusionRepo = statsExclusionRepository
-        if (exclusionRepo == null) {
-            combine(inputs, coverTintFlow) { value, tint -> value.build(null, coverTint = tint) }
+        val base = if (exclusionRepo == null) {
+            inputs.map { value -> value.build(null, discover = cachedDiscover()) }
         } else {
-            combine(inputs, coverTintFlow, exclusionRepo.observeExclusions()) { value, tint, exclusions ->
-                value.build(exclusions, coverTint = tint)
+            combine(inputs, exclusionRepo.observeExclusions()) { value, exclusions ->
+                value.build(exclusions, discover = cachedDiscover())
             }
+        }
+        combine(base, discoverFlow) { value, discover ->
+            if (discover.isEmpty()) value else value.copy(discover = discover)
         }
     }
 
+    /** Discover's cached rows, however stale — the instant first paint. */
+    private fun cachedDiscover(): List<MangaDiscoverItem> = discoverCache?.second.orEmpty()
+
     private suspend fun Inputs.build(
         exclusions: Set<Pair<Scope, String>>?,
-        coverTint: Boolean = true
+        discover: List<MangaDiscoverItem>
     ): HomeUiState {
+        val coverTint = settings.coverTint
         val today = today()
         val weekStart = today.minus(DatePeriod(days = 6))
         val weekStartInstant = weekStart.atStartOfDayIn(timeZone)
@@ -264,6 +318,10 @@ class HomeViewModel(
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
         val readDays = gatedSessions.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }
+        // Reading weather: how long since the last sitting, over the same
+        // gated sessions every other number here uses. Null = no history yet.
+        val lastReadDate = readDays.maxOrNull()
+        val daysSinceLastRead = lastReadDate?.let { today.toEpochDays() - it.toEpochDays() }
 
         // §12.4 hero: the most recently opened in-progress book that passes. When
         // nothing is in progress (fresh library), the most recently added
@@ -306,7 +364,6 @@ class HomeViewModel(
             ?.getNewChapterBadges(exclusions ?: emptySet())
             .orEmpty()
         val mangaContinue = buildMangaContinue(exclusions)
-        val discover = buildDiscover(exclusions)
         val hasManga = mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
         // One ranked list for the anchor and the shelf behind it.
         val readingNow = buildReadingNow(heroBook, gatedInProgress, gatedSessions, mangaContinue)
@@ -315,7 +372,7 @@ class HomeViewModel(
             loaded = true,
             hasBooks = books.isNotEmpty(),
             hasManga = hasManga,
-            goalMinutes = goalMinutes,
+            goalMinutes = settings.goalMinutes,
             todayMinutes = minutesByDay[today] ?: 0L,
             streakDays = currentStreak(readDays, today),
             week = (0..6).map { offset ->
@@ -333,7 +390,8 @@ class HomeViewModel(
             readingNow = readingNow,
             discover = discover,
             exclusionsActive = exclusions?.isNotEmpty() == true,
-            coverTint = coverTint
+            coverTint = coverTint,
+            daysSinceLastRead = daysSinceLastRead
         )
     }
 
@@ -448,20 +506,20 @@ class HomeViewModel(
     }
 
     /**
-     * §11.4 Discover: LATEST from the source of the most recently read library
-     * manga, minus titles already in the library, cap 6. One browse request per
-     * cache window, silently absent on failure, without a backend, without
-     * history, or when the source cannot serve LATEST.
+     * §11.4 Discover fetch: LATEST from the source of the most recently read
+     * library manga, minus titles already in the library, cap 6. One browse
+     * request per cache window, silently absent on failure, without a backend,
+     * without history, or when the source cannot serve LATEST.
+     *
+     * The live network half only — the cache is read by [discoverFlow] and
+     * [cachedDiscover], so this runs *off* Home's first-emission path and its
+     * result lands as an in-place update.
      */
-    private suspend fun buildDiscover(exclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
+    private suspend fun fetchDiscover(exclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
         val backend = mangaBackend ?: return emptyList()
         val history = mangaHistoryRepository ?: return emptyList()
         val mangaRepo = mangaRepository ?: return emptyList()
         val now = Clock.System.now()
-        discoverCache?.let { (cachedAt, rows) ->
-            val ttl = if (rows.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
-            if (now - cachedAt < ttl) return rows
-        }
         val fetched: List<MangaDiscoverItem> = runCatching {
             val recent = history.observeRecent(1).first().firstOrNull() ?: return emptyList()
             val entry = mangaRepo.get(recent.mangaId) ?: return emptyList()
@@ -512,17 +570,40 @@ class HomeViewModel(
     /**
      * §11.2 one-way resolution — the same pass [StatisticsViewModel] runs, so
      * Home and Stats can never disagree about what counts.
+     *
+     * The group resolution (tags, collections) is two repository roundtrips per
+     * book, which on a large library was the single slowest step of Home's first
+     * emission — so it only runs when a BOOK_TAG or BOOK_COLLECTION rule exists
+     * to match against. Direct, series and status rules never need it.
      */
     private suspend fun excludedBookIds(books: List<Book>, scope: StatsScope): Set<String> {
         val excluded = HashSet<String>()
+        val resolveTags = scope.hasRules(Scope.BOOK_TAG)
+        val resolveCollections = scope.hasRules(Scope.BOOK_COLLECTION)
+        if (!resolveTags && !resolveCollections) {
+            for (book in books) {
+                if (!scope.includesBook(book.id, emptySet(), emptySet(), book.seriesId, book.status)) {
+                    excluded.add(book.id)
+                }
+            }
+            return excluded
+        }
         val tagCache = HashMap<String, Set<String>>()
         val collectionCache = HashMap<String, Set<String>>()
         for (book in books) {
-            val tagIds = tagCache.getOrPut(book.id) {
-                tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            val tagIds = if (resolveTags) {
+                tagCache.getOrPut(book.id) {
+                    tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+                }
+            } else {
+                emptySet()
             }
-            val collectionIds = collectionCache.getOrPut(book.id) {
-                collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+            val collectionIds = if (resolveCollections) {
+                collectionCache.getOrPut(book.id) {
+                    collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
+                }
+            } else {
+                emptySet()
             }
             if (!scope.includesBook(book.id, tagIds, collectionIds, book.seriesId, book.status)) {
                 excluded.add(book.id)

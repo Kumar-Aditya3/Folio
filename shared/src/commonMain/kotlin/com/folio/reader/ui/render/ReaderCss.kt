@@ -37,7 +37,9 @@ object ReaderCss {
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
         val original = settings.formattingMode == FormattingMode.ORIGINAL
         val normalized = settings.formattingMode == FormattingMode.NORMALIZED
-        // In ORIGINAL the publisher owns the sheet, so the reader states nothing.
+        // ORIGINAL keeps the publisher's typography/layout; the theme still owns
+        // paper & ink (always `!important` there — the only way a plain element
+        // rule beats publisher class rules).
         val imp = if (original) "" else " !important"
         val align = when (settings.alignment) {
             TextAlignment.CENTER -> "center"
@@ -59,21 +61,52 @@ object ReaderCss {
                     "font-weight:${settings.fontWeight}$imp;line-height:${settings.lineHeight}$imp;" +
                     "letter-spacing:${settings.letterSpacing}em$imp;word-spacing:${settings.wordSpacing}em$imp;"
         val alignCss = if (original) "" else "text-align:$align$imp;"
-        val colorCss = if (original) "" else "color:#${theme.primaryText.rgb()}$imp;"
+        // Ink on body is always forced (even in ORIGINAL) so a theme switch always
+        // repaints the page; the element-level force below handles publisher rules.
+        val colorCss = "color:#${theme.primaryText.rgb()} !important;"
         val hyphenCss = if (!original && settings.hyphenation) "-webkit-hyphens:auto;hyphens:auto;" else ""
         val paragraphCss = if (original) "" else
             "p{margin-top:0 !important;margin-bottom:${settings.paragraphSpacing}em !important;}"
-        val themeBgCss = if (original) "" else
-            "body,body div,body section,body article,body figure{background-color:transparent !important;}"
+        // The background wash: transparent on the containers that would otherwise
+        // paint publisher white/black over the theme's paper. `mark`, `img`, `svg`
+        // and `a` are deliberately excluded — the highlight wash, artwork and link
+        // tints must survive this rule (HighlightPaint paints mark backgrounds
+        // inline, which beats any stylesheet, but exclusion keeps the contract
+        // explicit). Applies in every mode: ORIGINAL still owns the page's field.
+        val themeBgCss =
+            "body,body div,body section,body article,body figure,body table,body td,body th," +
+                    "body aside,body blockquote,body pre,body header,body footer,body nav," +
+                    "body ul,body ol,body main,body dl" +
+                    "{background-color:transparent !important;}"
         val normalizedExtra = if (!normalized || original) "" else
             "body p,body div,body h1,body h2,body h3,body h4,body h5,body h6,body li,body blockquote" +
                     "{text-align:$align !important;$forceFamily}"
         // Publisher rules declared on elements (e.g. .calibre p{color:#000}) outrank an
-        // inherited body rule, so the reader's ink goes on the elements themselves.
-        val elementForceCss = if (original) "" else
-            "body p,body div,body span,body li,body blockquote{color:#${theme.primaryText.rgb()} !important;$forceFamily}" +
-                    (if (publisherFonts) "" else "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}") +
-                    "body,body p,body div,body li,body blockquote{text-indent:0 !important;}"
+        // inherited body rule, so the reader's ink goes on the elements themselves —
+        // and on the full set of text-bearing elements, not just body text: publisher
+        // colours used to survive on td/th/figcaption/pre/code and the like. Ink is
+        // forced in every mode (the theme always owns paper & ink); fonts only when
+        // the reader owns typography (HYBRID/NORMALIZED, not ORIGINAL).
+        val inkElements = "body p,body div,body span,body li,body blockquote," +
+                "body td,body th,body dd,body dt,body figcaption,body pre,body code," +
+                "body em,body strong,body i,body b,body u,body small,body aside," +
+                "body details,body summary"
+        val elementForceCss =
+            "$inkElements{color:#${theme.primaryText.rgb()} !important;}" +
+                    (if (original) "" else
+                        "$inkElements{$forceFamily}" +
+                                (if (publisherFonts) "" else "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}")) +
+                    (if (original) "" else "body,body p,body div,body li,body blockquote{text-indent:0 !important;}")
+        // Secondary ink: figcaptions and small print sit back from body text.
+        val secondaryInkCss =
+            "body figcaption,body small,body dt,body caption{color:#${theme.secondaryText.rgb()} !important;}"
+        // The theme's own divider colour on horizontal rules.
+        val dividerCss =
+            "hr{background:#${theme.divider.rgb()} !important;border-color:#${theme.divider.rgb()} !important;border:none;}"
+        // A whisper of the theme's surface on block elements — HYBRID/NORMALIZED
+        // only; ORIGINAL keeps the publisher's plain page furniture.
+        val surfaceCss = if (original) "" else
+            "body pre,body blockquote{background-color:#${theme.surface.rgb()} !important;}"
 
         // Paged modes cap the measure per column inside the engine, and need body
         // exactly 100vw wide for its page steps to line up.
@@ -99,8 +132,12 @@ object ReaderCss {
 
         val selectionInk = if (theme.selection.isLight()) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
 
-        return "html,body{margin:0;padding:0;background:#${theme.background.rgb()};color:#${theme.primaryText.rgb()};}" +
-                "::selection{background:#${theme.selection.rgb()};color:#${selectionInk.rgb()};}" +
+        // Paper & ink are forced (`!important`) in every mode including ORIGINAL:
+        // a plain html,body rule loses to even the weakest publisher class rule,
+        // which is why themes used to have no effect at all in ORIGINAL mode.
+        return "html,body{margin:0;padding:0;background:#${theme.background.rgb()} !important;" +
+                "color:#${theme.primaryText.rgb()} !important;}" +
+                "::selection{background:#${theme.selection.rgb()} !important;color:#${selectionInk.rgb()} !important;}" +
                 themeBgCss +
                 "body{padding:$pad$imp;$typography$alignCss$colorCss$hyphenCss}" +
                 (if (pagedCols > 0)
@@ -111,10 +148,13 @@ object ReaderCss {
                 paragraphCss +
                 normalizedExtra +
                 elementForceCss +
-                "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()}$imp;}" +
+                secondaryInkCss +
+                dividerCss +
+                surfaceCss +
+                "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()} !important;}" +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
-                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()}$imp;}"
+                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
     }
 }

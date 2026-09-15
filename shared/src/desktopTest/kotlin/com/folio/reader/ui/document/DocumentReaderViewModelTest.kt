@@ -151,6 +151,41 @@ class DocumentReaderViewModelTest {
         assertTrue(bookmarked.isCurrentPositionBookmarked)
     }
 
+    @Test
+    fun persistedDefaultModeSeedsTheReaderAndModeChangesReportForPersistence() = runBlocking {
+        val original = File(platform.fileSystem.getDocumentDir("mode-default"), "original.pdf")
+            .apply { parentFile.mkdirs(); writeBytes(byteArrayOf(1)) }
+        repository.upsertDocument(document("mode-default", DocumentFormat.PDF, original))
+
+        var reported: DocumentReaderMode? = null
+        val reader = DocumentReaderViewModel(
+            repository = repository,
+            fileSystem = platform.fileSystem,
+            initialMode = DocumentReaderMode.CONTINUOUS,
+            onModeChanged = { reported = it },
+            dispatcher = Dispatchers.Unconfined,
+            ioDispatcher = Dispatchers.IO
+        ).also { viewModel = it }
+
+        // The persisted default is honored on open — the mode is no longer
+        // per-visit memory reset to single-page every time.
+        val restored = awaitReady(reader.also { it.open("mode-default") })
+        assertEquals(DocumentReaderMode.CONTINUOUS, restored.mode)
+
+        // A mode change reports through, so the host can write it into the
+        // reader defaults (and it then syncs like any other setting). The
+        // Unconfined dispatcher + non-suspending callback land the report
+        // before setMode returns.
+        reader.setMode(DocumentReaderMode.SINGLE_PAGE)
+        assertEquals(DocumentReaderMode.SINGLE_PAGE, reported)
+        assertEquals(DocumentReaderMode.SINGLE_PAGE, reader.state.value.mode)
+
+        // Setting the mode it already holds is a no-op — no spurious writes.
+        reported = null
+        reader.setMode(DocumentReaderMode.SINGLE_PAGE)
+        assertEquals(null, reported)
+    }
+
     private fun reader() = DocumentReaderViewModel(
         repository = repository,
         fileSystem = platform.fileSystem,

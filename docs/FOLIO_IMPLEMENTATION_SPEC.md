@@ -877,3 +877,185 @@ backup/restore only.
 the chip appears without an app restart; unchecking removes it; the tag's detail page lists
 the book; a backup export/import round-trip preserves the link; `shared:desktopTest` stays
 green and no `composeUi` file exceeds 600 lines (Rule 9).
+
+## 16. Liquid glass (added 2026-09-15)
+
+Implements `.kilo/plans/1789447790988-liquid-glass-android.md`. Android only; the
+shared module keeps compiling for desktop and desktop keeps today's visuals exactly
+(gated by capability, never forked — Rule 1).
+
+**Rule 25 — glass is the material of the overlay layer only.** Surfaces that sit
+*over* content may be glass; in-flow content stays paper or sunken. The overlay
+layer is: bars, the floating nav capsule, sheets, the status banner, the manga
+reader's chrome. Not the overlay layer: cards, wells, cover plates, chips, the
+reader's page block. The material itself is upgraded once — in `folioVeil` and
+the masthead — so every eligible surface inherits it (Rule 3, extend never fork).
+
+**The degradation ladder** (a contract, resolved in one pure function,
+`glassCapabilitiesFor`, provided once at the activity root):
+
+| Condition | Result |
+|---|---|
+| Blur supported (API ≥ 32), pref on, low-RAM off, Compose backdrop present | Blur + specular + noise under the existing fill |
+| Pref on, no Compose backdrop (any API — reader chrome over the WebView, reflowed documents) | Specular + grain only |
+| Pref off | Today's look: rim + sheen + hairline + fill |
+| Desktop / un-provided tree | Today's look, byte-for-byte |
+
+The blur floor is **API 32**, not the 31 both planning docs assumed: Haze disables
+31 itself for observed RenderNode invalidation issues, and a stale blur frame is
+worse than the clean fallback. Blur is a material, not motion — it is *not* gated
+on reduce-motion (§14.3.2), only on platform, memory class and preference.
+
+**Blur is additive under the fill.** The user's opacity knobs keep governing the
+fill alphas on top; at 100% the surface is a lid and the blur is invisible (§15's
+glass-not-lid window holds with blur on and off — pinned in `GlassCapabilityTest`).
+
+**The seam.** Haze 1.2.2 (the newest release declaring Compose 1.7.3 exactly —
+§14.1's resolution step) is imported by exactly one file,
+`ui/components/Glass.kt`. Everything else reaches blur through
+`LocalGlassBackdrop`, `folioBackdropSource()` and `folioGlassEffect()`;
+`Select-String 'dev\.chrisbanes\.haze'` must keep returning only that file plus
+`libs.versions.toml`. Screens attach the source to their **scrolling child**,
+never an ancestor of the chrome — the masthead must sample the page, not itself.
+The EPUB reader attaches no source at all (WebView cannot be sampled), which is
+the ladder's second row by construction; the manga reader and the PDF strip are
+pure Compose and attach one.
+
+**Tokens** (Rule 2): `FolioTokens.blurRadius` 20dp, `blurRadiusMax` 28dp —
+the cap is enforced at the effect site so no caller can buy a 60dp mush —
+`glassNoise` 0.12, `glassGrainAlpha` 0.035, `radiusSheetSweep`/`radiusSheetCapsule`
+26/96dp for the sheet morph.
+
+**Motion:** the press response for glass is a rim flash + settle tick (nav capsule
+and sheet handles only); the reader's end-edge sheets enter with a capsule→sheet
+corner morph and dismiss elastically (rubber band, ~0.75 damping overshoot);
+predictive back (API 33+) recedes the capsule and banner with the gesture.
+Corner *softening* while pressed needs `GraphicsLayer.shape` (Compose 1.8) and is
+deliberately not approximated on the pinned 1.7.3. AGSL refraction (plan Phase 6)
+was **not attempted**: its success criterion is measurable perf headroom on a
+mid-tier device, which no emulator-free session can establish; ship-nothing was
+the designed outcome of that check.
+
+**Material You:** a System theme pack leads the picker on API 31+ (hidden below,
+and below 31 a persisted `system` id falls back to the gallery faces). The
+wallpaper scheme flows through `deriveSystemPalette` — a pure, deterministic
+derivation that enforces the ThemeSchemeTest invariants (accent ΔE ≥ 10 pairwise,
+accents ≥ 4.5:1 on surface, ink ≥ 7:1) by construction, because a wallpaper is
+art, not a palette. Both faces flow through the pack mechanism so `flipThemeMode`
+just works.
+
+**Tests:** `GlassCapabilityTest` (the ladder matrix, the radius cap, fill-alpha
+independence), `ThemeSchemeTest` (system pack reachability/polarity/flip, the
+allowlisted achromatic placeholders, the derivation invariants against synthetic
+light/monochrome/dark schemes), `SettingsMergeTest` (the `liquidGlassEffects`
+round-trip, serializer-driven as always).
+
+**Known boundary:** on-device verification (§14.6's gfxinfo jank pass, the API 24
+scrim check, three-theme contrast over blur) still has to run on real hardware
+before release; the emulator-free session that wrote this validated by compile,
+unit test and the §14.1 metadata check instead.
+
+## 17. Living glass (added 2026-09-15)
+
+The §16 follow-up for the problem §16 could not solve on its own: liquid glass
+is only perceptible while something behind or upon it changes, and a resting
+page changes nothing — so the blur read as a flat tint and the whole material
+looked inert. §17 makes the room itself move, very slowly, and makes selection
+carry motion. Android-focused; the shared module keeps compiling for desktop
+and desktop renders the still room byte-for-byte (the ambient local's default
+is the identity — same mechanism as §16's capability default).
+
+**Rule 26 — one living light, read in the draw phase.** `FolioAmbient`
+(`ui/theme/FolioAmbient.kt`) is a slow animated light provided once at the
+Android root: two sine oscillators on distinct periods (47s/71s, coprime-ish so
+they never beat), frozen at `Neutral` under reduce-motion. Every consumer reads
+it **in the draw phase only** (`onDrawBehind`, the `FolioShimmer` precedent),
+so the living room costs one drawing pass per lit surface and zero
+recompositions. Ceilings pinned by `AmbientLightTest`: the light may swing at
+most ±0.35 azimuth around the hour's own (scaled by daylight intensity, so
+night stays nearly still — the room does not invent a midnight sun), and a
+field pool may drift at most 5% of the width.
+
+What moves, all from the one light: the sheen axis of every directional
+material (`folioRaised`, `folioSunken`, `folioVeil`'s specular and bevel, the
+masthead's crown catch) via a new ambient parameter on `daylightGradient`
+(default `Neutral` = today's axis exactly), and the page field's colour pools
+(`folioField`), which is the motion *behind* the glass that the capsule and the
+translucent bars refract at rest. The EPUB reader inherits it through
+`folioVeil` on all of its chrome (top bar, floating rail, page block, sheets):
+over the WebView, where blur is impossible (§13.1), the travelling specular
+over the genuinely moving page is the honest liquid read; the manga reader
+blurs for real over its moving pages. §13.8's "no motion during reading" is
+amended, not broken: the *page* stays still; only the chrome's catch on the
+room's light travels.
+
+**Liquid selection.** `FolioSegmented` (Books/Manga/Documents) draws one lit
+segment that glides between slots — slot geometry measured with the same text
+measurer that renders the labels, `segmentedSlotBounds` pure and pinned by
+test — instead of two fills cross-fading in place. The nav capsule sends one
+specular band across its glass in the direction of the tab change
+(`navSweepBand`/`navSweepAlpha`, off-edge at both ends like `shimmerSweep`,
+420ms `motionLiquidSweep`), drawn under the items, skipped under reduce-motion
+and on first composition. Selection contrast: selected = filled glyph at full
+accent over a 0.20 pill; unselected = outlined glyph at 0.78 ink.
+
+**Morphing tabs.** Tab↔tab transitions in `FolioNavHost` morph (scale 0.94→1
+plus fade, origin below centre, so the incoming page rises out of the field)
+while every push/pop keeps the existing slide. `popEnter` mirrors.
+
+**Rule 27 — the ink deepens once, at the seam.** `deepenInkRoles`
+(`ui/theme/FolioInk.kt`) pushes `onSurface`/`onBackground` 35% of the way to
+the palette's own extreme at `FolioTheme.MaterialTheme` — one place, so all
+~30 palettes, custom themes, Material You and the previews inherit it. The raw
+palettes stay exactly as authored and as tested; the secondary ink is
+deliberately untouched (widening the primary alone widens the hierarchy, and
+pushing the variant could drop a near-floor palette under WCAG AA).
+`InkDeepeningTest` pins monotone contrast, untouched roles, the 7:1 floor,
+subordination and chroma monotonicity. Home's "Reading now" anchor finally
+carries §13.4's drifting mesh (`heroMesh` was defined and unreached).
+
+**Tests:** `AmbientLightTest` (identity, ceilings, slow-band periods, gradient
+axis neutrality), `LiquidSelectionTest` (slot landing/abutting/clamping, sweep
+off-edge/monotone/alpha envelope), `InkDeepeningTest`. 417/417 desktop.
+
+**Known boundary:** as with §16, the gfxinfo jank pass and three-theme check
+run on hardware before release; the emulator-free session validated by
+compile, unit test and the degradation ladder's identity pins instead.
+
+### §17.1 Startup pass, bulk collections, doc defaults (2026-09-15, afternoon)
+
+**Home's first emission.** Three costs sat on `loaded=true`, none of them
+rendering: (1) Discover's live browse fetch — bounded at 6s but still seconds
+on a cold cache — held the whole page hostage; (2) the §11.2 exclusion pass
+resolved every book's tags *and* collections, two repository roundtrips per
+book, even when no BOOK_TAG or BOOK_COLLECTION rule existed to match against
+(the default for every reader); (3) the goal and cover-tint flows each fetched
+and deserialized the whole global-settings row. Fixes: `StatsScope.hasRules`
+lets both `HomeViewModel` and `StatisticsViewModel` skip group resolution when
+no such rules exist (behavior identical, `HomeStatsScopeTest` pins zero calls);
+the goal and tint share one settings read inside `Inputs`; and Discover moved
+off the critical path entirely — `state` is now `combine(base, discoverFlow)`
+where `discoverFlow` emits the cache (or empty) instantly and fetches only
+when the window has actually lapsed, updating the surface in place. The
+"one browse request per cache window" contract survives (pinned); the
+Discover tests wait for the settled surface (`first { it.discover.isNotEmpty() }`)
+because that is now the observable order.
+
+**Bulk collections for books.** Selection mode already existed on all three
+shelves, and manga and documents already led their selection bars with a
+Label/"set categories" action — books had Share/Mark/Delete but no collection
+action. `LibraryViewModel` gains the manga picker's contract: the initial
+check set is the intersection of the selected books' collections, taps apply
+immediately, and apply is the add/remove diff `BookDetailViewModel` runs for
+one book fanned out over the selection; a collection can be created inline.
+`BookCollectionPickerDialog` mirrors the document picker.
+
+**Doc defaults in the reader defaults.** `documentReaderMode` was per-visit
+memory: reset to single-page on every open, invisible to Settings, sync and
+backup. `ReaderSettings` now carries `documentReaderMode` (the compose layer's
+enum name, as a string; unknown values fall back at the read site), the
+document reader VM accepts `initialMode`/`onModeChanged`, both hosts wire it
+through their canonical settings paths, and the Reader Defaults panel gained
+its Documents section — no inheritance escape hatch, because documents do not
+take per-item copies of this field. `SettingsMergeTest`'s fixture covers the
+new field, so diff/apply is proven for it like every other.

@@ -26,12 +26,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -98,8 +101,9 @@ internal fun ReaderPage(
     placeholderHeight: Dp? = null,
     placeholderWidthPx: Int = 0,
     onTap: (Int) -> Unit = {},
-    onDoubleTap: () -> Unit = {},
+    onDoubleTap: (Offset) -> Unit = {},
     onLongPress: () -> Unit = {},
+    onPinchZoom: ((ratio: Float, centroidInWindow: Offset) -> Unit)? = null,
 ) {
     val density = LocalDensity.current
 
@@ -137,6 +141,11 @@ internal fun ReaderPage(
     var offsetY by remember(cacheKey) { mutableFloatStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var pinchActive by remember { mutableStateOf(false) }
+    // Window-space frame of this page: the page-level pinch handler wins
+    // gesture arbitration in webtoon, and the reader-level compensation needs
+    // the centroid in window space (this node sits deep inside the LazyColumn,
+    // so its local coordinates are item-offset).
+    var pageCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     // Zooming back toward fit must recenter: stale pan offsets from a deeper zoom
     // otherwise leave the page translated partly or fully off-screen. An axis with
@@ -171,8 +180,20 @@ internal fun ReaderPage(
             .background(Color.Black)
             // A zoomed sheet must never draw into the neighbouring page.
             .clip(RectangleShape)
-            .pinchZoom(viewModel, fallback = false, onPinch = { pinchActive = it })
+            .pinchZoom(
+                viewModel,
+                fallback = false,
+                onPinch = { pinchActive = it },
+                onZoom = if (onPinchZoom != null) {
+                    { ratio, centroidLocal ->
+                        onPinchZoom(ratio, pageCoords?.localToWindow(centroidLocal) ?: centroidLocal)
+                    }
+                } else {
+                    null
+                },
+            )
             .onSizeChanged { viewSize = it }
+            .onGloballyPositioned { pageCoords = it }
             .pointerInput(tapZones, rtl) {
                 detectTapGestures(
                     onTap = { pos ->
@@ -183,10 +204,13 @@ internal fun ReaderPage(
                         }
                         onTap(zone)
                     },
-                    onDoubleTap = {
+                    onDoubleTap = { pos ->
                         offsetX = 0f
                         offsetY = 0f
-                        onDoubleTap()
+                        // pos is page-local; the webtoon compensation anchors on
+                        // the reader frame, so convert through window space.
+                        // Paged modes ignore the position entirely.
+                        onDoubleTap(pageCoords?.localToWindow(pos) ?: pos)
                     },
                     // A two-finger gesture is a zoom, not a hold: no note/save sheet.
                     onLongPress = { if (!pinchActive) onLongPress() },

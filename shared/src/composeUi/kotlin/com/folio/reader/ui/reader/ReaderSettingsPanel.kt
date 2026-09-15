@@ -44,13 +44,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.settings.readerFontFamily
 import com.folio.reader.ui.settings.readerFontLabel
@@ -105,7 +108,8 @@ fun ReaderSettingsPanel(
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
     val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
-    val panelShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+    // §16: the sweep enters reading as a capsule and settles to 26dp.
+    val panelShape = rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
     val accentText = rememberLegibleAccent(FolioTheme.colors.primary)
 
     Column(
@@ -251,15 +255,36 @@ fun ReaderSettingsPanel(
                         .glassPanel(RoundedCornerShape(8.dp))
                 ) {
                     availableFonts.forEach { font ->
+                        // The label is the app UI font (uniform size, aligned
+                        // rows); the specimen keeps each option's own face at a
+                        // fixed size so the font's character stays visible
+                        // without its optical size dictating the row.
                         DropdownMenuItem(
                             text = {
-                                Text(
-                                    actualFontName(font),
-                                    fontFamily = com.folio.reader.ui.components.systemFontFamily(actualFontName(font)),
-                                    fontWeight = if (font == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (font == settings.fontFamily) accentText
-                                    else FolioTheme.colors.onSurface
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        actualFontName(font),
+                                        style = FolioTheme.typography.bodyMedium,
+                                        fontWeight = if (font == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (font == settings.fontFamily) accentText
+                                        else FolioTheme.colors.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        "Ag",
+                                        fontFamily = com.folio.reader.ui.components.systemFontFamily(
+                                            actualFontName(font)
+                                        ),
+                                        fontSize = 18.sp,
+                                        lineHeight = 22.sp,
+                                        color = FolioTheme.colors.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.width(34.dp)
+                                    )
+                                }
                             },
                             onClick = {
                                 apply(settings.copy(fontFamily = font))

@@ -32,6 +32,16 @@ class StatsScope(private val excluded: Set<Pair<Scope, String>>) {
         idsByScope[scope]?.contains(targetId) == true
 
     /**
+     * True when at least one exclusion rule of [scope] exists. Resolving a book's
+     * tags and collections costs two repository roundtrips per book — on a
+     * several-hundred-title library that is the single slowest step on Home's
+     * first emission — and the answers are only ever *matched against* BOOK_TAG
+     * and BOOK_COLLECTION rules. A reader with no such rules (the default) can
+     * skip the resolution entirely, which is what this lets callers do.
+     */
+    fun hasRules(scope: Scope): Boolean = !idsByScope[scope].isNullOrEmpty()
+
+    /**
      * True when the book counts toward the statistics. A book is excluded when
      * listed directly, when any of its tags or collections is listed, when its
      * series is listed (which removes every book sharing that seriesId), or

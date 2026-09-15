@@ -16,6 +16,7 @@ import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.folioSheetDragToDismiss
 
 /**
  * Scrim plus the three end-edge slide-in panels (TOC, annotations, quick
@@ -91,14 +92,16 @@ internal fun BoxScope.ReaderSidePanels(
         enter = panelEnter,
         exit = panelExit
     ) {
-        TOCSidebar(
-            chapters = chapters,
-            currentIndex = currentChapterIndex,
-            onChapterClick = { index ->
-                onChapterChange(index)
-            },
-            onDismiss = onToggleToc
-        )
+        Box(Modifier.folioSheetDragToDismiss(onToggleToc)) {
+            TOCSidebar(
+                chapters = chapters,
+                currentIndex = currentChapterIndex,
+                onChapterClick = { index ->
+                    onChapterChange(index)
+                },
+                onDismiss = onToggleToc
+            )
+        }
     }
 
     // Annotations sidebar: slide in from the end edge
@@ -108,18 +111,20 @@ internal fun BoxScope.ReaderSidePanels(
         enter = panelEnter,
         exit = panelExit
     ) {
-        AnnotationsSidebar(
-            bookmarks = bookmarks,
-            highlights = highlights,
-            notes = notes,
-            onDismiss = onToggleAnnotations,
-            onRemoveBookmark = onRemoveBookmark,
-            onRemoveHighlight = onRemoveHighlight,
-            onRemoveNote = onRemoveNote,
-            onSetHighlightNote = onSetHighlightNote,
-            chapterLabel = chapterLabel,
-            onJump = onJumpToAnnotation
-        )
+        Box(Modifier.folioSheetDragToDismiss(onToggleAnnotations)) {
+            AnnotationsSidebar(
+                bookmarks = bookmarks,
+                highlights = highlights,
+                notes = notes,
+                onDismiss = onToggleAnnotations,
+                onRemoveBookmark = onRemoveBookmark,
+                onRemoveHighlight = onRemoveHighlight,
+                onRemoveNote = onRemoveNote,
+                onSetHighlightNote = onSetHighlightNote,
+                chapterLabel = chapterLabel,
+                onJump = onJumpToAnnotation
+            )
+        }
     }
 
     // Thorium-style reading settings panel: slides in from the right edge
@@ -129,15 +134,17 @@ internal fun BoxScope.ReaderSidePanels(
         enter = panelEnter,
         exit = panelExit
     ) {
-        ReaderSettingsPanel(
-            settings = settings,
-            onSettingsChange = onSettingsChange,
-            onDismiss = onDismissReaderPanel,
-            onOpenFullSettings = onOpenFullSettings,
-            scopeControlEnabled = scopeControlEnabled,
-            overriddenFields = overriddenFields,
-            onWriteGlobal = onWriteGlobal,
-            onResetBook = onResetBook
-        )
+        Box(Modifier.folioSheetDragToDismiss(onDismissReaderPanel)) {
+            ReaderSettingsPanel(
+                settings = settings,
+                onSettingsChange = onSettingsChange,
+                onDismiss = onDismissReaderPanel,
+                onOpenFullSettings = onOpenFullSettings,
+                scopeControlEnabled = scopeControlEnabled,
+                overriddenFields = overriddenFields,
+                onWriteGlobal = onWriteGlobal,
+                onResetBook = onResetBook
+            )
+        }
     }
 }

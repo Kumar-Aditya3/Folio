@@ -11,13 +11,18 @@ import com.folio.reader.model.Series
 import com.folio.reader.ui.components.finishHorizon
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.mapSaver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import java.util.UUID
 import kotlin.time.Duration.Companion.days
 
 class LibraryViewModel(
@@ -31,6 +36,9 @@ class LibraryViewModel(
      */
     private val sessionRepository: ReadingSessionRepository? = null
 ) {
+    /** Backing scope for the bulk-collection picker's reads; mirrors the manga VM's. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     /** Books bulk-selection; hoisted so system back can clear it instead of exiting. */
     val selectedBookIds = MutableStateFlow<Set<String>>(emptySet())
     val isSelectionMode = MutableStateFlow(false)
@@ -44,6 +52,65 @@ class LibraryViewModel(
     fun clearSelection() {
         selectedBookIds.value = emptySet()
         isSelectionMode.value = false
+    }
+
+    /**
+     * Bulk collection picker, opened from the selection top bar — the books
+     * counterpart of the manga and document pickers, so all three libraries
+     * offer the same hold-select-and-shelve gesture. The initial check set is
+     * the collections shared by *every* selected book (the manga picker's
+     * intersection rule): what is checked is each book's complete membership
+     * after apply, so unchecking removes as deliberately as checking adds.
+     */
+    val bulkCollectionPickerInitial = MutableStateFlow<Set<String>?>(null)
+
+    fun requestBulkCollections() {
+        val ids = selectedBookIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            val memberships: List<Set<String>> = ids.map { bookId ->
+                collectionRepository.getCollectionsForBook(bookId).mapTo(mutableSetOf()) { it.id }
+            }
+            bulkCollectionPickerInitial.value =
+                memberships.reduceOrNull { a, b -> a intersect b } ?: emptySet()
+        }
+    }
+
+    fun closeBulkPicker() {
+        bulkCollectionPickerInitial.value = null
+    }
+
+    /**
+     * Live-applies the picker's current set to every selected book — the
+     * add/remove diff `BookDetailViewModel.saveMetadata` runs for one book,
+     * fanned out over the selection. Selection stays, so a second collection
+     * can be filled without re-picking the books.
+     */
+    fun applyBulkCollections(collectionIds: Set<String>) {
+        val ids = selectedBookIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            for (bookId in ids) {
+                val current = collectionRepository.getCollectionsForBook(bookId)
+                    .mapTo(mutableSetOf()) { it.id }
+                (current - collectionIds).forEach {
+                    collectionRepository.removeBookFromCollection(bookId, it)
+                }
+                (collectionIds - current).forEach {
+                    collectionRepository.addBookToCollection(bookId, it)
+                }
+            }
+        }
+    }
+
+    /** Creates (or finds) a collection by name; the picker's inline "new shelf" row. */
+    suspend fun createCollection(name: String): String? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        return collectionRepository.getCollectionByName(trimmed)?.id
+            ?: Collection(id = UUID.randomUUID().toString(), name = trimmed)
+                .also { collectionRepository.insertCollection(it) }
+                .id
     }
 
     enum class ViewMode {

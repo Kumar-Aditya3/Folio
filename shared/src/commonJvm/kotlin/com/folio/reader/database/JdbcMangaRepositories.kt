@@ -1370,13 +1370,15 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
             st.executeQuery().use { rs -> if (rs.next()) totalReadMinutes = rs.getLong(1) }
         }
         var readActiveDays = 0
+        var biggestDayChapters = 0
         conn.prepareStatement(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
+            "SELECT COUNT(*), COALESCE(MAX(per_day),0) FROM (SELECT date(c.updated_at/1000,'unixepoch','localtime') AS d, COUNT(*) AS per_day " +
+                "FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
                 "WHERE c.read = 1" + notIn("c.manga_id") +
-                " GROUP BY date(c.updated_at/1000,'unixepoch','localtime'))"
+                " GROUP BY d)"
         ).use { st ->
             bindExclusions(st, 1)
-            st.executeQuery().use { rs -> if (rs.next()) readActiveDays = rs.getInt(1) }
+            st.executeQuery().use { rs -> if (rs.next()) { readActiveDays = rs.getInt(1); biggestDayChapters = rs.getInt(2) } }
         }
         val week = MutableList(7) { 0 }
         val labels = MutableList(7) { "" }
@@ -1405,6 +1407,7 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
             libraryCount = libraryCount, completedCount = completedCount, readChapters = readChapters,
             unreadChapters = unreadChapters, downloadedChapters = downloadedChapters, bookmarkedChapters = bookmarkedChapters,
             notesCount = notesCount, totalReadMinutes = totalReadMinutes, readActiveDays = readActiveDays,
+            biggestDayChapters = biggestDayChapters,
             weekReadChapters = week, weekLabels = labels, topManga = top,
         )
     }

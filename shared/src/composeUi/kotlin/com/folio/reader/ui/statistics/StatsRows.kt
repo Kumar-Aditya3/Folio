@@ -1,5 +1,6 @@
 package com.folio.reader.ui.statistics
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -112,22 +115,32 @@ internal fun FinishPredictionsCard(
 }
 
 /**
- * Top books: a ranked shelf with the rank set as a figure. Numbering a
- * leaderboard is what makes it read as a leaderboard — the old version was three
- * anonymous rows in a card and could have been any list on the screen.
+ * Where your time went: the leaderboard and the composition question, merged.
+ *
+ * Ranked rows carry a proportional bar (window minutes over the peak), so the
+ * section answers *how the reading time was distributed* — the question the
+ * drill core used to ask with strata — using the leaderboard's own data. Rank
+ * figures number the shelf, the peak row marks itself in accentStreak (Rule
+ * 15), and the tail aggregates into one honest "Everything else" row instead
+ * of pretending the top five is the whole library. A closing caption states
+ * how much of the library the window actually touched.
  */
 @Composable
-internal fun TopBooksCard(
+internal fun WhereYourTimeWentCard(
     books: List<TopBook>,
+    everythingElseMinutes: Long,
+    booksOpened: Int,
+    librarySize: Int,
     onBookClick: (String) -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-        FolioSectionHead(title = "Most read", eyebrow = "This year")
+        FolioSectionHead(title = "Where your time went", eyebrow = "This year")
         Spacer(Modifier.height(FolioTokens.space3))
+        val peak = (books.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
         books.forEachIndexed { index, entry ->
             if (index > 0) FolioRule()
             val interaction = rememberFolioInteraction()
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .folioPressable(interaction, scaleTo = 0.99f)
@@ -135,52 +148,121 @@ internal fun TopBooksCard(
                         onBookClick(entry.id)
                     }
                     .padding(vertical = FolioTokens.space2),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "${index + 1}",
-                    style = FolioTheme.typography.titleLarge,
-                    color = FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.55f),
-                    modifier = Modifier.width(26.dp),
-                )
-                FolioCoverPlate(
-                    coverPath = entry.coverPath,
-                    title = entry.title,
-                    author = entry.author,
-                    width = FolioTokens.coverInline,
-                    shape = FolioShapes.plateSmall,
-                    elevation = 5.dp,
-                    small = true,
-                )
-                Spacer(Modifier.width(FolioTokens.space3))
-                Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = entry.title,
-                        style = FolioTheme.typography.titleSmall,
-                        color = FolioTheme.colors.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text = "${index + 1}",
+                        style = FolioTheme.typography.titleLarge,
+                        color = FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.55f),
+                        modifier = Modifier.width(26.dp),
                     )
-                    if (entry.author.isNotBlank()) {
+                    FolioCoverPlate(
+                        coverPath = entry.coverPath,
+                        title = entry.title,
+                        author = entry.author,
+                        width = FolioTokens.coverInline,
+                        shape = FolioShapes.plateSmall,
+                        elevation = 5.dp,
+                        small = true,
+                    )
+                    Spacer(Modifier.width(FolioTokens.space3))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = entry.author,
-                            style = FolioTheme.typography.bodySmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
+                            text = entry.title,
+                            style = FolioTheme.typography.titleSmall,
+                            color = FolioTheme.colors.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        if (entry.author.isNotBlank()) {
+                            Text(
+                                text = entry.author,
+                                style = FolioTheme.typography.bodySmall,
+                                color = FolioTheme.colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
+                    Spacer(Modifier.width(FolioTokens.space2))
+                    Text(
+                        text = shortMinutes(entry.minutes),
+                        style = FolioTheme.typography.titleSmall,
+                        color = FolioTheme.colors.accentProgress,
+                    )
                 }
-                Spacer(Modifier.width(FolioTokens.space2))
-                Text(
-                    text = shortMinutes(entry.minutes),
-                    style = FolioTheme.typography.titleSmall,
-                    color = FolioTheme.colors.accentProgress,
-                )
+                Spacer(Modifier.height(FolioTokens.spaceHair))
+                TimeBar(progress = entry.minutes.toFloat() / peak, peak = entry.minutes >= peak)
             }
+        }
+        if (everythingElseMinutes > 0L) {
+            FolioRule()
+            Column(Modifier.padding(vertical = FolioTokens.space2)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Everything else",
+                        style = FolioTheme.typography.bodyMedium,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = shortMinutes(everythingElseMinutes),
+                        style = FolioTheme.typography.titleSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(FolioTokens.spaceHair))
+                TimeBar(progress = everythingElseMinutes.toFloat() / peak, subdued = true)
+            }
+        }
+        if (booksOpened > 0 && librarySize > 0) {
+            Text(
+                text = whereYourTimeCaption(booksOpened, librarySize),
+                style = FolioTheme.typography.labelSmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = FolioTokens.space1),
+            )
         }
     }
 }
+
+/** One proportional bar under a ranked row — the genre-well idiom, one row tall. */
+@Composable
+private fun TimeBar(progress: Float, peak: Boolean = false, subdued: Boolean = false) {
+    val hue = when {
+        peak -> FolioTheme.colors.accentStreak
+        subdued -> FolioTheme.colors.onSurfaceVariant
+        else -> FolioTheme.colors.accentProgress
+    }
+    Box(
+        Modifier
+            .fillMaxWidth(progress.coerceIn(0.04f, 1f))
+            .height(5.dp)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
+                ),
+                RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp),
+            )
+    )
+}
+
+/** The closing caption's copy, pure so its plurals are testable. */
+internal fun whereYourTimeCaption(booksOpened: Int, librarySize: Int): String = when {
+    booksOpened <= 0 -> ""
+    booksOpened >= librarySize -> if (librarySize == 1) "1 of 1 book opened" else "all $librarySize books opened"
+    else -> "$booksOpened of $librarySize books opened"
+}
+
+/**
+ * The remainder the ranked rows do not show: total minutes minus the top rows',
+ * floored at zero (a capped leaderboard can never exceed the total, but the
+ * aggregation is pure and pinned by tests anyway).
+ */
+internal fun everythingElseMinutes(topBooks: List<TopBook>, totalMinutes: Long): Long =
+    (totalMinutes - topBooks.sumOf { it.minutes }).coerceAtLeast(0L)
 
 /**
  * Genre breakdown, as a **sunken well of stacked bars**. §12.6: one hue per row
@@ -358,22 +440,16 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
 }
 
 /**
- * The ledger: four figures on the page, no tiles. Two per row, generous gaps, a
- * hairline rule between rows. The streak figure runs at Standard emphasis while
- * the rest are Quiet, so even inside a group of small numbers there is a rank.
+ * The ledger: figures on the page, no tiles, ranked by how much they matter.
+ * The streak leads at Standard emphasis (it is the one number worth a pause);
+ * active days sits beside it. The year's totals — time, words, finished — are
+ * tertiary Quiet context beneath a rule. The session count lives here nowhere:
+ * sessions are an implementation detail, not a reading habit.
  */
 @Composable
 internal fun HeadlineRow(stats: StatisticsUiState) {
     Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            FolioFigure(
-                value = formatDuration(stats.timeThisWeekMs),
-                label = "This week",
-                caption = plural(stats.sessionsThisWeek, "session"),
-                accent = FolioTheme.colors.accentProgress,
-                emphasis = FigureScale.Quiet,
-                modifier = Modifier.weight(1f),
-            )
             FolioFigure(
                 value = stats.streakDays.toString(),
                 unit = if (stats.streakDays == 1) "day" else "days",
@@ -385,22 +461,31 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
                 emphasis = FigureScale.Standard,
                 modifier = Modifier.weight(1f),
             )
+            FolioFigure(
+                value = "${stats.activeDaysThisWeek}",
+                unit = "of 7",
+                label = "Active days",
+                caption = "this week",
+                accent = FolioTheme.colors.accentProgress,
+                emphasis = FigureScale.Quiet,
+                modifier = Modifier.weight(1f),
+            )
         }
         Spacer(Modifier.height(FolioTokens.spaceBeat))
         FolioRule()
         Spacer(Modifier.height(FolioTokens.spaceBeat))
         Row(modifier = Modifier.fillMaxWidth()) {
             FolioFigure(
-                value = stats.booksFinished.toString(),
-                label = "Finished",
-                caption = "books completed",
+                value = formatHours(stats.timeThisYearMs),
+                label = "This year",
+                caption = "${formatCount(stats.wordsReadThisYear)} words",
                 emphasis = FigureScale.Quiet,
                 modifier = Modifier.weight(1f),
             )
             FolioFigure(
-                value = formatHours(stats.timeThisYearMs),
-                label = "This year",
-                caption = "${formatCount(stats.wordsReadThisYear)} words",
+                value = stats.booksFinished.toString(),
+                label = "Finished",
+                caption = "books completed",
                 emphasis = FigureScale.Quiet,
                 modifier = Modifier.weight(1f),
             )
@@ -410,9 +495,9 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
 
 /**
  * Reading patterns as a narrative, not a settings list. The chronotype is a
- * headline, the peak window is its sentence, and the numbers below it are ruled
- * rows in a sunken well — data that supports a statement rather than eleven
- * equal-weight facts in a box.
+ * headline, the peak window is its sentence, and beneath them a 24-hour band
+ * shows *when* the reading happens — one thin bar per hour, the peak hour in
+ * accentStreak — with the supporting numbers as ruled rows in a sunken well.
  */
 @Composable
 internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?) {
@@ -444,6 +529,9 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
             }
         }
         Spacer(Modifier.height(FolioTokens.space3))
+        // The 24-hour band: minutes per start-hour, the day's shape at a glance.
+        HourBand(hourTotals = stats.hourTotals, mostReadHour = stats.mostReadHour)
+        Spacer(Modifier.height(FolioTokens.space3))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -451,11 +539,9 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
                 .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)
         ) {
             PatternRow("Average session", shortMinutes(stats.averageSessionMinutes.toLong()))
-            if (mangaStats != null && mangaStats.readActiveDays > 0) {
-                PatternRow(
-                    "Average binge",
-                    "%.1f chapters".format(mangaStats.readChapters.toDouble() / mangaStats.readActiveDays)
-                )
+            PatternRow("Longest session", shortMinutes(stats.longestSessionMinutes))
+            if (mangaStats != null && mangaStats.biggestDayChapters > 0) {
+                PatternRow("Biggest day", plural(mangaStats.biggestDayChapters, "chapter"))
             }
             PatternRow("Current streak", plural(stats.streakDays, "day"))
             PatternRow("Most active hour", stats.mostReadHour.ifBlank { "—" })
@@ -464,6 +550,83 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
             PatternRow("Longest streak", plural(stats.longestStreakDays, "day"))
             PatternRow("Active days this week", "${stats.activeDaysThisWeek} of 7")
             PatternRow("Synced from", plural(stats.sourceDevices, "device"), last = true)
+        }
+    }
+}
+
+/**
+ * The day's shape: 24 thin bars in a sunken well, edge-labelled 12a–11p. The
+ * peak hour carries accentStreak (Rule 15's peak mark) and a "your peak"
+ * caption; every other bar is accentProgress at the §12.6 gradient floor.
+ */
+@Composable
+private fun HourBand(hourTotals: List<Long>, mostReadHour: String) {
+    val colors = FolioTheme.colors
+    val peak = hourTotals.maxOrNull() ?: 0L
+    val peakIndex = hourTotals.indexOfFirst { it == peak && peak > 0L }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .folioSunken(FolioShapes.edgeStart)
+            .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
+            val n = 24
+            val gap = 1.5.dp.toPx()
+            val barWidth = (size.width - gap * (n - 1)) / n
+            hourTotals.forEachIndexed { hour, minutes ->
+                val h = if (peak > 0L) (minutes.toFloat() / peak) * size.height else 0f
+                if (h <= 0f) {
+                    // A silent hour still shows its slot: a hairline at the base.
+                    drawRect(
+                        color = colors.onSurfaceVariant.copy(alpha = 0.14f),
+                        topLeft = Offset(hour * (barWidth + gap), size.height - 1.dp.toPx()),
+                        size = Size(barWidth, 1.dp.toPx()),
+                    )
+                } else {
+                    val isPeak = hour == peakIndex
+                    val hue = if (isPeak) colors.accentStreak else colors.accentProgress
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
+                        ),
+                        topLeft = Offset(hour * (barWidth + gap), size.height - h),
+                        size = Size(barWidth, h),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(FolioTokens.space1))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "12a",
+                style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "12p",
+                style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "11p",
+                style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+        if (mostReadHour.isNotBlank()) {
+            Text(
+                text = "▲ your peak · $mostReadHour",
+                style = FolioTheme.typography.labelSmall,
+                color = colors.accentStreak,
+                modifier = Modifier.padding(top = FolioTokens.space1),
+            )
         }
     }
 }

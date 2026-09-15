@@ -47,7 +47,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "gray" to Theme(
         id = "gray", name = "Gray",
-        background = 0xFFF0F0F0.toInt(), surface = 0xFFE0E0E0.toInt(),
+        background = 0xFFEDEDED.toInt(), surface = 0xFFDCDCDC.toInt(),
         primaryText = 0xFF222222.toInt(), secondaryText = 0xFF505050.toInt(),
         headingText = 0xFF111111.toInt(), link = 0xFF006699.toInt(),
         selection = 0xFFB0D0F0.toInt(), bookmark = 0xFFCC3366.toInt(),
@@ -55,7 +55,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
             0xFFFFD700.toInt(), 0xFF4A90D9.toInt(), 0xFF50C878.toInt(), 0xFFE04040.toInt(),
             0xFF9B59B6.toInt(), 0xFFF39F12.toInt(), 0xFF1ABC9C.toInt(), 0xFFE91E63.toInt()
         ),
-        progress = 0xFF006699.toInt(), divider = 0xFFC8C8C8.toInt(),
+        progress = 0xFF006699.toInt(), divider = 0xFFC0C0C0.toInt(),
         isDark = false
     ),
     "matcha" to Theme(
@@ -178,7 +178,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "graphite" to Theme(
         id = "graphite", name = "Graphite",
-        background = 0xFF1A1B1D.toInt(), surface = 0xFF242628.toInt(),
+        background = 0xFF212326.toInt(), surface = 0xFF2B2E31.toInt(),
         primaryText = 0xFFEDEEEF.toInt(), secondaryText = 0xFFA8AEB5.toInt(),
         headingText = 0xFFF5F6F7.toInt(), link = 0xFF7FB0D9.toInt(),
         selection = 0xFF3E4247.toInt(), bookmark = 0xFFC89BB5.toInt(),
@@ -191,7 +191,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "blossom" to Theme(
         id = "blossom", name = "Blossom",
-        background = 0xFF0A0508.toInt(), surface = 0xFF141013.toInt(),
+        background = 0xFF170B12.toInt(), surface = 0xFF221419.toInt(),
         primaryText = 0xFFF2E6EA.toInt(), secondaryText = 0xFFB9A6AE.toInt(),
         headingText = 0xFFF7EFF2.toInt(), link = 0xFFF8A0B4.toInt(),
         selection = 0xFF4A2530.toInt(), bookmark = 0xFFE8748C.toInt(),
@@ -204,7 +204,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "high_contrast" to Theme(
         id = "high_contrast", name = "High Contrast",
-        background = 0xFF000000.toInt(), surface = 0xFF1A1A1A.toInt(),
+        background = 0xFF050505.toInt(), surface = 0xFF1A1A1A.toInt(),
         primaryText = 0xFFFFFFFF.toInt(), secondaryText = 0xFFCCCCCC.toInt(),
         headingText = 0xFFFFFF00.toInt(), link = 0xFF00FFFF.toInt(),
         selection = 0xFF333333.toInt(), bookmark = 0xFFFF00FF.toInt(),
@@ -243,7 +243,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "ember" to Theme(
         id = "ember", name = "Ember",
-        background = 0xFF1A0E08.toInt(), surface = 0xFF26140C.toInt(),
+        background = 0xFF1F0D05.toInt(), surface = 0xFF2D160A.toInt(),
         primaryText = 0xFFF8E4D4.toInt(), secondaryText = 0xFFC09878.toInt(),
         headingText = 0xFFFFCFA0.toInt(), link = 0xFFFF7A2E.toInt(),
         selection = 0xFF442818.toInt(), bookmark = 0xFFFF2E63.toInt(),
@@ -295,7 +295,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "monokai" to Theme(
         id = "monokai", name = "Monokai",
-        background = 0xFF272822.toInt(), surface = 0xFF3E3D32.toInt(),
+        background = 0xFF1E1F1C.toInt(), surface = 0xFF2E2D26.toInt(),
         primaryText = 0xFFF8F8F2.toInt(), secondaryText = 0xFF75715E.toInt(),
         headingText = 0xFFF8F8F2.toInt(), link = 0xFFA6E22E.toInt(),
         selection = 0xFF49483E.toInt(), bookmark = 0xFFF92672.toInt(),
@@ -321,7 +321,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "synthwave" to Theme(
         id = "synthwave", name = "Synthwave",
-        background = 0xFF0D0221.toInt(), surface = 0xFF1A0B38.toInt(),
+        background = 0xFF150430.toInt(), surface = 0xFF230B4A.toInt(),
         primaryText = 0xFFF0E6FF.toInt(), secondaryText = 0xFF9D8BC4.toInt(),
         headingText = 0xFFFF7BE5.toInt(), link = 0xFF00E5FF.toInt(),
         selection = 0xFF3D1A6E.toInt(), bookmark = 0xFFFF2FD6.toInt(),
@@ -347,7 +347,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "acid" to Theme(
         id = "acid", name = "Acid Rave",
-        background = 0xFF060806.toInt(), surface = 0xFF0E120C.toInt(),
+        background = 0xFF0A1408.toInt(), surface = 0xFF12200C.toInt(),
         primaryText = 0xFFE8FFD6.toInt(), secondaryText = 0xFF98B878.toInt(),
         headingText = 0xFFCCFF00.toInt(), link = 0xFFFF2ED1.toInt(),
         selection = 0xFF2A3A18.toInt(), bookmark = 0xFFCCFF00.toInt(),
@@ -373,7 +373,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "sherbet" to Theme(
         id = "sherbet", name = "Sherbet",
-        background = 0xFFFFF7EE.toInt(), surface = 0xFFFFEEDA.toInt(),
+        background = 0xFFFCEBDD.toInt(), surface = 0xFFF8E0CB.toInt(),
         primaryText = 0xFF4A2E14.toInt(), secondaryText = 0xFF9A7854.toInt(),
         headingText = 0xFFE05A2B.toInt(), link = 0xFF2ED9A3.toInt(),
         selection = 0xFFFFDCB8.toInt(), bookmark = 0xFFFF7A4D.toInt(),
@@ -381,7 +381,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
             0xFFFF7A4D.toInt(), 0xFF2ED9A3.toInt(), 0xFF4DC3FF.toInt(), 0xFFFFB340.toInt(),
             0xFFFF5C8A.toInt(), 0xFF9CE86B.toInt(), 0xFFB085FF.toInt(), 0xFF40D0E8.toInt()
         ),
-        progress = 0xFFFF7A4D.toInt(), divider = 0xFFF0DCC0.toInt(),
+        progress = 0xFFFF7A4D.toInt(), divider = 0xFFEDD5B8.toInt(),
         isDark = false
     ),
     // ── VIBRANT READER THEMES (mirror the vibrant app palettes) ──
@@ -413,7 +413,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "toxiclime" to Theme(
         id = "toxiclime", name = "Toxic Lime",
-        background = 0xFF050A02.toInt(), surface = 0xFF0D1808.toInt(),
+        background = 0xFF040C14.toInt(), surface = 0xFF071420.toInt(),
         primaryText = 0xFFE2FFD0.toInt(), secondaryText = 0xFF88B060.toInt(),
         headingText = 0xFFB6FF00.toInt(), link = 0xFF32E6A0.toInt(),
         selection = 0xFF223A0A.toInt(), bookmark = 0xFFFF00A0.toInt(),
@@ -421,7 +421,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
             0xFFB6FF00.toInt(), 0xFF32E6A0.toInt(), 0xFF00E5FF.toInt(), 0xFFFFFF00.toInt(),
             0xFFFF4FD8.toInt(), 0xFFFF9E2C.toInt(), 0xFF7CFF3D.toInt(), 0xFF00FFD1.toInt()
         ),
-        progress = 0xFFB6FF00.toInt(), divider = 0xFF16240A.toInt(),
+        progress = 0xFFB6FF00.toInt(), divider = 0xFF102018.toInt(),
         isDark = true
     ),
     "retrosunset" to Theme(
@@ -465,7 +465,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "candypop" to Theme(
         id = "candypop", name = "Candy Pop",
-        background = 0xFFFFF4FA.toInt(), surface = 0xFFFFE4F2.toInt(),
+        background = 0xFFF3E5FF.toInt(), surface = 0xFFEAD3FA.toInt(),
         primaryText = 0xFF3A0A2A.toInt(), secondaryText = 0xFF9A5A80.toInt(),
         headingText = 0xFFFF1F8E.toInt(), link = 0xFF0091FF.toInt(),
         selection = 0xFFFFC2E5.toInt(), bookmark = 0xFF7A2EFF.toInt(),
@@ -473,12 +473,12 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
             0xFFFF1F8E.toInt(), 0xFF00A3FF.toInt(), 0xFF7A2EFF.toInt(), 0xFFFFD400.toInt(),
             0xFF00D9A3.toInt(), 0xFFFF6B35.toInt(), 0xFF4DC3FF.toInt(), 0xFF3DDE8A.toInt()
         ),
-        progress = 0xFFFF1F8E.toInt(), divider = 0xFFF7CFE6.toInt(),
+        progress = 0xFFFF1F8E.toInt(), divider = 0xFFE9C7F2.toInt(),
         isDark = false
     ),
     "rainbow" to Theme(
         id = "rainbow", name = "Rainbow",
-        background = 0xFFFFFBF0.toInt(), surface = 0xFFFFF0D8.toInt(),
+        background = 0xFFF7FAF0.toInt(), surface = 0xFFEAF2DE.toInt(),
         primaryText = 0xFF2A1A08.toInt(), secondaryText = 0xFF8A6A48.toInt(),
         headingText = 0xFFFF2E63.toInt(), link = 0xFF0091FF.toInt(),
         selection = 0xFFFFE08A.toInt(), bookmark = 0xFF8A2EFF.toInt(),
@@ -486,7 +486,7 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
             0xFFFF2E63.toInt(), 0xFFFF9E2C.toInt(), 0xFFFFD400.toInt(), 0xFF3DDE8A.toInt(),
             0xFF00A3FF.toInt(), 0xFF8A2EFF.toInt(), 0xFFFF4FD8.toInt(), 0xFF00C2C7.toInt()
         ),
-        progress = 0xFFFF2E63.toInt(), divider = 0xFFF2E2C4.toInt(),
+        progress = 0xFFFF2E63.toInt(), divider = 0xFFE3E8CC.toInt(),
         isDark = false
     )
 )

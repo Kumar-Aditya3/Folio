@@ -59,6 +59,10 @@ kotlin {
                 api(libs.compose.multiplatform.material3)
                 api(libs.compose.multiplatform.material.icons.extended)
                 api(libs.androidx.lifecycle.viewmodel)
+                // §16 liquid glass. implementation, not api: the Haze types must stay
+                // invisible to consumers so the blur seam cannot scatter (the whole
+                // library is imported by exactly one file, Glass.kt).
+                implementation(libs.haze)
             }
         }
 

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberFolioHeaderState
@@ -80,6 +82,17 @@ fun SettingsHubScreen(
     onOpenHistory: () -> Unit
 ) {
     val headerState = rememberFolioHeaderState()
+    // Re-tap on the More nav item scrolls the hub back to its top.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(listState) {
+        com.folio.reader.ui.components.FolioTabReselect.events.collect { (route, _) ->
+            if (route == "more" &&
+                (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0)
+            ) {
+                listState.animateScrollToItem(0)
+            }
+        }
+    }
     // The bar's at-rest height: status icons plus the bar row. Paid by the list
     // alone, and static — tracking the scrolled glass would translate every row
     // mid-scroll.
@@ -88,9 +101,13 @@ fun SettingsHubScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(headerState.nestedScrollConnection),
+                .nestedScroll(headerState.nestedScrollConnection)
+                // §16: the hub list is the backdrop the "More" masthead and the
+                // capsule blur.
+                .folioBackdropSource(),
             contentPadding = PaddingValues(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,

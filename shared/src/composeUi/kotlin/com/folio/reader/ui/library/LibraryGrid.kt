@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -30,6 +31,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,7 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberCoverAccent
@@ -97,7 +100,19 @@ fun BookGrid(
     val rest = remember(books, featured, showFeature) {
         if (showFeature) books.filter { it.id != featured!!.id } else books
     }
+    // Re-tap on the Library nav item scrolls the shelf back to its top.
+    val gridScroll = rememberLazyGridState()
+    LaunchedEffect(gridScroll) {
+        FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library" &&
+                (gridScroll.firstVisibleItemIndex > 0 || gridScroll.firstVisibleItemScrollOffset > 0)
+            ) {
+                gridScroll.animateScrollToItem(0)
+            }
+        }
+    }
     LazyVerticalGrid(
+        state = gridScroll,
         columns = GridCells.Adaptive(minSize = 116.dp),
         contentPadding = PaddingValues(
             start = FolioTokens.gutter,

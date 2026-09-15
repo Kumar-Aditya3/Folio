@@ -3,14 +3,11 @@ package com.folio.reader.ui.reader
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,10 +34,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.PageBlock
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
@@ -235,19 +233,55 @@ internal fun ReaderFloatingRail(
     }
 }
 
+/**
+ * The bottom chrome's height with the page block alone: an 18dp block inside a
+ * 34dp band, so the thumb never has to hit a hairline to seek.
+ */
+internal val pageBlockChromeHeight: Dp = 34.dp
+
+/**
+ * [pageBlockChromeHeight] plus the chapter line under it. This is what a platform
+ * whose page paints over Compose has to reserve, and what the end-of-chapter chip
+ * clears.
+ */
+internal val pageBlockChromeHeightWithChapter: Dp = 56.dp
+
+/**
+ * The reader's bottom chrome: the **page block**, and the chapter line under it
+ * when the reader has asked for one.
+ *
+ * This replaced a progress bar and a "3 / 12" readout. The bar was chrome *about*
+ * the page; the block is the page — a codex seen edge-on, the read stack thickening
+ * under the left thumb while the unread stack thins under the right, with the leaf
+ * the reader is on standing proud between them. It is also the seek affordance: the
+ * band takes the same tap and drag the scrubber did, so nothing was stranded by
+ * losing the bar.
+ *
+ * [fraction] is the **whole book**, never the chapter — a block that emptied at
+ * every chapter boundary would be a lie about how much of the book is left. The
+ * chapter structure is still legible: [chapterStops] are struck as notches and the
+ * chapter the reader is inside carries a faint wash.
+ *
+ * [paper] and [ink] are the *reader* theme's, not the app palette's: the reader
+ * re-themes itself independently of the app, and the block is cut from the page the
+ * reader is holding.
+ *
+ * [stateLabel] is the position announced to a screen reader. The block carries no
+ * numerals, so this is where the information the "3 / 12" used to give lives.
+ */
 @Composable
-fun BottomProgressBar(
+fun BottomPageBlock(
     chapterTitle: String,
-    currentPage: Int = 1,
-    totalPages: Int = 1,
-    progress: Float? = null,
+    fraction: Float,
+    paper: Color,
+    ink: Color,
+    stateLabel: String,
+    pageCountHint: Int = 0,
+    chapterStops: List<Float> = emptyList(),
     onSeek: ((Float) -> Unit)? = null
 ) {
-    val fraction = progress?.coerceIn(0f, 1f)
-        ?: if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
-    // Same glass as the top bar, so the two ends of the reader chrome are the
-    // same material; the raw 0.92 surface fill let page text bleed through.
-    val accent = com.folio.reader.ui.components.rememberLegibleAccent(FolioTheme.colors.primary)
+    // Same glass as the top bar, so the two ends of the reader chrome are the same
+    // material; the raw 0.92 surface fill let page text bleed through.
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -255,55 +289,34 @@ fun BottomProgressBar(
                 RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                 fillAlpha = FolioTheme.readerVeilAlpha,
             )
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = 14.dp)
     ) {
-        Box(
+        PageBlock(
+            fraction = fraction,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(18.dp)
-                .then(
-                    if (onSeek != null) Modifier.pointerInput(onSeek) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            onSeek((down.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
-                            do {
-                                val event = awaitPointerEvent()
-                                event.changes.firstOrNull { it.pressed }?.let { change ->
-                                    onSeek((change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
-                                }
-                            } while (event.changes.any { it.pressed })
-                        }
-                    } else Modifier
-                ),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            com.folio.reader.ui.components.FolioProgressBar(
-                progress = fraction,
-                color = accent
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (chapterTitle.isNotBlank()) {
-                Text(
-                    text = chapterTitle,
-                    style = FolioTheme.typography.labelMedium,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
-            }
+                .height(pageBlockChromeHeight),
+            paper = paper,
+            ink = ink,
+            // Rule 14: forward motion is accentProgress, never primary. Guarded
+            // against the paper inside PageBlock, because the leaf is a fine line
+            // drawn on the page's own material.
+            accent = FolioTheme.colors.accentProgress,
+            pageCountHint = pageCountHint,
+            chapterStops = chapterStops,
+            stateLabel = stateLabel,
+            onSeek = onSeek
+        )
+        if (chapterTitle.isNotBlank()) {
             Text(
-                text = "$currentPage / $totalPages",
+                text = chapterTitle,
                 style = FolioTheme.typography.labelMedium,
-                color = accent
+                color = FolioTheme.colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
             )
         }
     }

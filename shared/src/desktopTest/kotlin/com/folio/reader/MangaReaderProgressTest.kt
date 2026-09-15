@@ -31,6 +31,7 @@ import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.manga.chapterId
+import com.folio.reader.manga.downloadPathSafe
 import com.folio.reader.manga.mangaId
 import com.folio.reader.platform.DesktopPlatform
 import com.folio.reader.settings.ReaderSettings
@@ -342,7 +343,14 @@ class MangaReaderProgressTest {
     )
 
     private fun seedDownloadedPages(chapter: MangaChapter, count: Int) {
-        val dir = File(tempRoot, "downloads/${chapter.mangaId}/${chapter.id}").apply { mkdirs() }
+        // Seed where the reader actually reads: the download manager folds ids
+        // into path-safe segments, and a raw id like "1:/manga/one" is not a
+        // legal directory name at all (least of all on Windows, where the ":"
+        // fails the write outright).
+        val dir = File(
+            tempRoot,
+            "downloads/${chapter.mangaId.downloadPathSafe()}/${chapter.id.downloadPathSafe()}",
+        ).apply { mkdirs() }
         repeat(count) { index -> File(dir, "%03d.png".format(index + 1)).writeBytes(byteArrayOf(1)) }
     }
 

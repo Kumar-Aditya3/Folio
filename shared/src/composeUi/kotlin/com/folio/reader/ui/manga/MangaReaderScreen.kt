@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.launch
 
@@ -94,7 +95,13 @@ fun MangaReaderScreen(
             pages.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No pages", color = Color.White)
             }
-            else -> BoxWithConstraints(Modifier.fillMaxSize()) {
+            else -> BoxWithConstraints(
+                Modifier
+                    .fillMaxSize()
+                    // §16: the pages are pure Compose, so the pager is a real
+                    // blur backdrop for the chrome floating over it.
+                    .folioBackdropSource()
+            ) {
                 // Decode budget: ~3x the viewport keeps zoom sharp without paying for
                 // source-resolution bitmaps (webtoon strips can be tens of thousands of
                 // pixels tall and dominate memory/GC when decoded raw).

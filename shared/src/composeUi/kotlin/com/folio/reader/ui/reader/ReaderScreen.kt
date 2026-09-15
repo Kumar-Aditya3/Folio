@@ -26,8 +26,13 @@ import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.pageBlockBandFraction
+import com.folio.reader.ui.components.pageBlockChapterStops
+import com.folio.reader.ui.components.pageBlockSeekTarget
+import com.folio.reader.ui.components.pageFoxing
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.readerVeilAlpha
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,6 +136,69 @@ fun ReaderScreen(
         when {
             target != null -> seekTargetReq = target to seekNonce
             fraction != null -> seekReq = fraction to seekNonce
+        }
+    }
+
+    // ── The page block (diegetic progress) ──────────────────────────────────────
+    // Chapter ends along the block, word-weighted so a long chapter takes the length
+    // of block it is worth. The block is whole-book on purpose: one that emptied at
+    // every chapter boundary would be a lie about how much of the book is left.
+    val chapterStops = remember(chapters) {
+        pageBlockChapterStops(chapters.map { it.wordCount })
+    }
+    // The span of the book the page surface is actually rendering: one chapter in
+    // paged mode, the whole chapter window in continuous mode. The fraction the
+    // surface reports — and the fraction a seek is given — are fractions of *that*
+    // document, so expressing both in this span is what keeps the cue and the
+    // gesture agreeing with each other.
+    val renderedSpan = remember(chapters, sections, documentSections, windowed, currentChapterIndex) {
+        val rendered: List<com.folio.reader.ui.render.ReaderSection> = when {
+            !windowed -> emptyList()
+            documentSections.isNotEmpty() -> documentSections
+            else -> sections
+        }
+        val found = rendered.mapNotNull { section ->
+            chapters.indexOfFirst { it.id == section.chapterId }.takeIf { it >= 0 }
+                ?: chapters.indexOfFirst { section.spineIndex >= 0 && it.spineIndex == section.spineIndex }
+                    .takeIf { it >= 0 }
+        }
+        if (found.isEmpty()) currentChapterIndex..currentChapterIndex else found.min()..found.max()
+    }
+    val bookFraction = pageBlockBandFraction(
+        stops = chapterStops,
+        bandFirst = renderedSpan.first,
+        bandLast = renderedSpan.last,
+        bandFraction = position?.chapterProgress?.toFloat()
+            ?: if (totalPages > 0) (currentPage.toFloat() / totalPages).coerceIn(0f, 1f) else 0f,
+    )
+    val showChapterLine = settings.showChapterTitle && !currentChapter?.title.isNullOrBlank()
+    // The block carries no numerals, so the position the "3 / 12" used to print is
+    // announced instead — without this a screen reader loses the reader's place.
+    val pageBlockLabel = buildString {
+        append("${(bookFraction * 100).roundToInt()}% read")
+        if (chapters.size > 1) append(", chapter ${currentChapterIndex + 1} of ${chapters.size}")
+        append(". Drag to jump elsewhere in the book.")
+    }
+    // The band spans the whole book, so a drag can land in any chapter. Inside the
+    // rendered span the seek goes straight to the page; outside it the chapter is
+    // loaded first and the seek waits for it — the path annotation jumps already use.
+    // A drag emits on every pointer move, and a chapter change flushes the position
+    // and can reload content, so a foreign chapter is asked for once: the pending
+    // jump keeps the latest fraction and lands it when the chapter is on screen.
+    val seekToBookFraction: (Float) -> Unit = { bookTarget ->
+        val landing = pageBlockSeekTarget(chapterStops, bookTarget)
+        if (landing.chapterIndex in renderedSpan) {
+            val start = chapterStops.getOrElse(renderedSpan.first) { 0f }
+            val width = chapterStops.getOrElse(renderedSpan.last + 1) { 1f } - start
+            seekNonce += 1L
+            seekReq = (if (width > 0f) ((bookTarget - start) / width).coerceIn(0f, 1f) else 0f) to seekNonce
+        } else {
+            val alreadyAsked = pendingJump?.first == landing.chapterIndex
+            val alreadyThere = landing.chapterIndex == currentChapterIndex
+            if (!alreadyAsked && !alreadyThere) {
+                pendingJump = Triple(landing.chapterIndex, null, landing.chapterFraction)
+                onChapterChange(landing.chapterIndex)
+            }
         }
     }
 
@@ -286,7 +354,9 @@ fun ReaderScreen(
             val contentInsets = if (occludes) {
                 PaddingValues(
                     top = if (showControls) 56.dp else 0.dp,
-                    bottom = if (showControls && settings.showProgress) 44.dp else 0.dp,
+                    bottom = if (showControls && settings.showProgress) {
+                        if (showChapterLine) pageBlockChromeHeightWithChapter else pageBlockChromeHeight
+                    } else 0.dp,
                     end = reservedEnd
                 )
             } else {
@@ -344,6 +414,24 @@ fun ReaderScreen(
             ReaderNoChapters(onBackPress = onBackPress)
         }
 
+        // Foxing: the page's outer margins wear a little, and the wear concentrates
+        // on the edge the reader's thumb has been working, so the page looks handled
+        // rather than printed. It carries no pointer modifier, so it never steals a
+        // tap from the page, and it is skipped where the page is a heavyweight native
+        // window that paints over Compose layers — there it would cost a layer and
+        // never appear.
+        if (!occludes && settings.showProgress) {
+            androidx.compose.foundation.layout.Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pageFoxing(
+                        fraction = bookFraction,
+                        paper = Color(readerThemePreset.background),
+                        ink = Color(readerThemePreset.primaryText)
+                    )
+            )
+        }
+
         // Floating sync indicator pill - manages its own visibility (hides when idle)
         if (syncState != null) {
             ReaderSyncPill(showControls = showControls, syncState = syncState)
@@ -382,21 +470,23 @@ fun ReaderScreen(
             )
         }
 
-        // Bottom progress bar overlay - slides over content
+        // Bottom chrome overlay - slides over content. The page block, not a bar:
+        // position carried by the material of the page itself.
         androidx.compose.animation.AnimatedVisibility(
             visible = settings.showProgress && showControls,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it },
             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it }
         ) {
-            BottomProgressBar(
-                chapterTitle = if (settings.showChapterTitle) currentChapter?.title ?: "" else "",
-                currentPage = currentPage,
-                totalPages = totalPages,
-                onSeek = { f ->
-                    seekNonce += 1L
-                    seekReq = f to seekNonce
-                }
+            BottomPageBlock(
+                chapterTitle = if (showChapterLine) currentChapter?.title ?: "" else "",
+                fraction = bookFraction,
+                paper = Color(readerThemePreset.background),
+                ink = Color(readerThemePreset.primaryText),
+                stateLabel = pageBlockLabel,
+                pageCountHint = totalPages,
+                chapterStops = chapterStops,
+                onSeek = seekToBookFraction
             )
         }
 

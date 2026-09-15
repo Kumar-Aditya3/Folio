@@ -19,6 +19,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.DropdownMenuButton
 import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.document.DocumentReaderMode
 import com.folio.reader.ui.manga.MangaReaderMode
 import com.folio.reader.ui.theme.FolioTheme
 
@@ -125,8 +126,47 @@ fun ReaderDefaultsPanel(
                 "default mode above. Reading progress and downloads are untouched.",
             onApply = onApplyToOpenedManga,
         )
+
+        FolioEyebrow("Documents", accent = colors.accentStreak)
+        val docModes = listOf(
+            DocumentReaderMode.SINGLE_PAGE to "Single page",
+            DocumentReaderMode.CONTINUOUS to "Continuous",
+        )
+        DropdownMenuButton(
+            label = "Page mode",
+            selected = docModeLabel(settings.documentReaderMode),
+            options = docModes.map { it.second },
+            onChange = { label ->
+                onSettingsChange(
+                    settings.copy(
+                        documentReaderMode = docModes.first { it.second == label }.first.name
+                    )
+                )
+            },
+        )
+        Text(
+            "Single page turns a screen at a time. Continuous runs the pages into one scroll.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        Text(
+            "Documents do not take their own copy — every document opens in this mode.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
     }
 }
+
+/** The stored document-reader default as this panel spells it. */
+private fun docModeLabel(stored: String): String =
+    if (
+        runCatching { DocumentReaderMode.valueOf(stored) }
+            .getOrDefault(DocumentReaderMode.SINGLE_PAGE) == DocumentReaderMode.CONTINUOUS
+    ) {
+        "Continuous"
+    } else {
+        "Single page"
+    }
 
 /**
  * Turns the inheritance rule from a trap into a choice. Hidden at zero — there

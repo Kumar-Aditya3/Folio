@@ -110,8 +110,12 @@ actual fun HtmlContentSurface(
     }
     // The document: a window is assembled from its sections with every resource
     // reference rewritten to the canonical file URL the interceptor serves; a
-    // single section loads exactly as it always did.
-    val content = remember(sections, windowed, settings) {
+    // single section loads exactly as it always did. Keyed on settings *minus
+    // the theme fields*: a theme switch only swaps the style element in place
+    // (see the CSS-swap effect below), so it never rewrites the document — the
+    // full reload it used to trigger restored scroll from the last *reported*
+    // progress fraction, which lags the finger and jumps the page up.
+    val content = remember(sections, windowed, settings.copy(themeId = "", customTheme = null)) {
         if (windowed) {
             val rewritten = sections.map { section ->
                 section.copy(html = rewriteToCanonicalUrls(section.html, section.href))
@@ -120,6 +124,19 @@ actual fun HtmlContentSurface(
         } else {
             injectReaderCss(sections.firstOrNull()?.html.orEmpty(), settings)
         }
+    }
+    // Live CSS swap: a theme-only change rewrites the baked <style> element's
+    // text in place — colors change, scroll position and DOM stay untouched.
+    // Patterned on the highlight-repaint effect above; also fires once after
+    // each real load (setting identical CSS), which is a harmless no-op.
+    LaunchedEffect(settings.themeId, settings.customTheme, content, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        val css = readerStyleSheet(settings)
+        wv.evaluateJavascript(
+            "(function(){var s=document.getElementById('folio-reader-style');" +
+                "if(s)s.textContent=" + jsLiteral(css) + ";})();",
+            null
+        )
     }
     val resourceCache = remember { ConcurrentHashMap<String, File>() }
     var resourcesReady by remember(loadKey) { mutableStateOf(false) }
@@ -613,19 +630,29 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
     return segments.joinToString("/")
 }
 
-private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
-    val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
+/**
+ * The Android reader sheet: the shared [ReaderCss] stylesheet with this
+ * platform's font stack and scrolling-mode rules. Both the baked document
+ * ([injectReaderCss]) and the live theme swap write exactly this, so the two
+ * cannot drift.
+ */
+private fun readerStyleSheet(settings: ReaderSettings): String {
     // Coerce SPREAD → PAGINATED on Android: spread is desktop-only.
     val safeLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
         com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
+    return ReaderCss.styleSheet(
+        settings,
+        PageEngine.colsFor(safeLayoutMode),
+        fontStack = { "'$it',serif" },
+        // Scrolling mode: publisher height rules otherwise clamp the document
+        // box and the page cannot grow.
+        continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}"
+    )
+}
+
+private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
+    val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
-            ReaderCss.styleSheet(
-                settings,
-                PageEngine.colsFor(safeLayoutMode),
-                fontStack = { "'$it',serif" },
-                // Scrolling mode: publisher height rules otherwise clamp the document
-                // box and the page cannot grow.
-                continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}"
-            ) + "</style>"
+            readerStyleSheet(settings) + "</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
 }

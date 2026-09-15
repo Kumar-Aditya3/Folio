@@ -65,6 +65,7 @@ import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -399,7 +400,8 @@ fun MangaDetailScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(headerState.nestedScrollConnection),
+                .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource(),
             contentPadding = PaddingValues(
                 start = FolioTokens.space3,
                 top = topInset + FolioTokens.space3,

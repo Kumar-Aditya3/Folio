@@ -53,6 +53,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -91,7 +92,12 @@ internal fun readerOverlayHtml(
         themeId = settings.themeId,
         layoutMode = settings.layoutMode.normalized.name,
         themes = com.folio.reader.settings.Theme.PICKER.map { t ->
-            Triple(t.id, t.name, t.background.argbHex())
+            com.folio.reader.ui.render.OverlayUi.ThemeSwatch(
+                id = t.id,
+                name = t.name,
+                background = t.background.argbHex(),
+                ink = t.primaryText.argbHex(),
+            )
         },
         highlightColors = readerThemePreset.highlightColors.map { it.argbHex() },
         highlightIndex = settings.highlightColorIndex,
@@ -143,8 +149,9 @@ fun TOCSidebar(
     onDismiss: () -> Unit
 ) {
     // Glass, because it sits over the page. A 26dp leading sweep so the panel
-    // reads as sliding in from the edge rather than being pasted on.
-    val tocShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+    // reads as sliding in from the edge rather than being pasted on. §16: the
+    // sweep enters reading as a capsule and settles to 26dp.
+    val tocShape = rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
     // Monochromatic palettes put `primary` within a hair of `surface`, so the
     // current-chapter marker has to pass the contrast guard rather than trust the
     // raw accent. Each theme keeps its own hue; only unreadable values move.
@@ -249,7 +256,7 @@ fun AnnotationsSidebar(
             .fillMaxHeight()
             .width(300.dp)
             .folioVeil(
-                RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp),
+                rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)),
                 fillAlpha = FolioTheme.readerVeilAlpha,
             )
             .padding(vertical = 16.dp)
