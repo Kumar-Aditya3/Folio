@@ -999,9 +999,23 @@ specular band across its glass in the direction of the tab change
 and on first composition. Selection contrast: selected = filled glyph at full
 accent over a 0.20 pill; unselected = outlined glyph at 0.78 ink.
 
-**Morphing tabs.** Tab↔tab transitions in `FolioNavHost` morph (scale 0.94→1
-plus fade, origin below centre, so the incoming page rises out of the field)
-while every push/pop keeps the existing slide. `popEnter` mirrors.
+**Morphing tabs.** Tab↔tab transitions in `FolioNavHost` dissolve — fade, no
+travel — while every push/pop keeps its slide. `popEnter` mirrors. A page-wide
+scale (0.94→1, origin below centre) shipped first and is gone: scaling a whole
+page re-rasterises every cover and glyph on it for the duration, so the screen
+goes soft and then sharpens, which reads as a glitch instead of as motion.
+
+**One rail, three shelves.** The Library's Books/Manga/Documents swap dissolves in
+place too, through `folioFadeSwap` (180/120ms, reduce-motion snaps). Two things had
+made it visibly re-lay-out, and both are structural rather than timing: the manga
+shelf pinned its own chrome row inside the shelf while Books and Documents used the
+masthead's rail slot, so entering Manga changed the header's shape; and the rail
+height every shelf's top padding derives from was one shared value, so an incoming
+shelf was measured under the outgoing mode's height for a frame before jumping.
+`MangaLibraryRail` now renders in the masthead slot like the other two modes, and
+the measured height is cached per mode. The swap takes no slide, no scale and no
+`SizeTransform` — a size transform measures a lazy grid against an interpolated
+width, which changes its column count and snaps it back when the cross ends.
 
 **Rule 27 — the ink deepens once, at the seam.** `deepenInkRoles`
 (`ui/theme/FolioInk.kt`) pushes `onSurface`/`onBackground` 35% of the way to

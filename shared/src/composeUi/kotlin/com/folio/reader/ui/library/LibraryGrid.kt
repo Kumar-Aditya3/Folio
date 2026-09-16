@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
@@ -187,6 +189,7 @@ private fun FeaturedShelfEntry(
             coverPath = book.coverPath,
             title = book.title,
             author = book.displayAuthor,
+            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
             width = FolioTokens.coverFeature,
             halo = accent,
             elevation = 14.dp,
@@ -304,10 +307,13 @@ fun BookCard(
             )
             .folioRightClick { if (!isSelectionMode) menuOpen = true }
     ) {
+        // §17 shared element: the plate is the same object on the shelf and on the
+        // book's own page, so it travels between them instead of being redrawn.
         FolioCoverPlate(
             coverPath = book.coverPath,
             title = book.title,
             author = book.displayAuthor,
+            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
             // null width: the plate fills the grid cell and derives its height from
             // the printed trim, so a wide column never squashes the cover.
             width = null,

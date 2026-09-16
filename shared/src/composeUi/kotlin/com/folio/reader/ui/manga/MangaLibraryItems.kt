@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioPressable
@@ -146,6 +148,7 @@ fun FeaturedMangaShelfEntry(
             sourceId = manga.sourceId,
             thumbnailUrl = manga.thumbnailUrl,
             coverPath = manga.coverPath,
+            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
             width = FolioTokens.coverFeature,
             halo = accent,
             elevation = 14.dp,
@@ -270,6 +273,8 @@ internal fun MangaGridItem(
             )
             .folioRightClick { if (!inSelectionMode) menuOpen = true },
     ) {
+        // §17 shared element: the plate the shelf shows is the plate the series'
+        // own page shows, so it travels rather than being redrawn there.
         MangaCoverPlate(
             backend = backend,
             sourceId = manga.sourceId,
@@ -281,6 +286,7 @@ internal fun MangaGridItem(
             // `width` parameter documents as needing null.
             width = null,
             dimmed = fullyRead,
+            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
             overlay = {
                 if (selected) {
                     Box(
@@ -490,6 +496,9 @@ internal fun MangaListItem(
                     modifier = Modifier
                         .width(FolioTokens.coverInline)
                         .height(FolioTokens.coverInline * FolioTokens.coverAspect)
+                        // §17: the list shelf hands the same plate to the detail
+                        // page the grid does, so both view modes morph.
+                        .sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id))
                         .clip(FolioShapes.plateSmall)
                 ) {
                     MangaCover(

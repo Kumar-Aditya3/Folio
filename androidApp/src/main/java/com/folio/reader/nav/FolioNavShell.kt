@@ -107,10 +107,6 @@ fun FolioNavShell(
     // §16 predictive back: 0 at rest, 1 at a fully-swiped back gesture. Drives
     // the capsule's recede; inert below API 33.
     backProgress: Float = 0f,
-    // In-screen identity that swaps content without a route change (the
-    // library's Books/Manga/Documents mode). The capsule's blur-hold keys on
-    // this too, or the mode switch flashes the previous shelf's backdrop.
-    screenKey: String = "",
     content: @Composable () -> Unit
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
@@ -160,8 +156,13 @@ fun FolioNavShell(
             // showed the previous screen ("renders a bit later than the rest").
             // For the first frames after a route change the capsule falls back to
             // the designed near-opaque fill, which hides the gap entirely.
+            //
+            // Only routes need that. A shelf swap inside one screen dissolves *in*
+            // the registered source rather than swapping the node that owns it, so
+            // there is never a stale layer to sample — and holding the blur off for
+            // a mode switch would only add a capsule that goes opaque and clears.
             var suppressBlur by remember { mutableStateOf(false) }
-            LaunchedEffect(currentRoute, screenKey) {
+            LaunchedEffect(currentRoute) {
                 suppressBlur = true
                 kotlinx.coroutines.delay(120)
                 suppressBlur = false

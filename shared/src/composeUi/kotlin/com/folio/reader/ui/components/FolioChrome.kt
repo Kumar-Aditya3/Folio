@@ -23,11 +23,14 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,8 +101,9 @@ import kotlin.math.sin
 class FolioHeaderState internal constructor(
     private val rangePx: Float,
     private val enabled: Boolean,
+    private val offsetState: MutableFloatState,
 ) {
-    private var offset by mutableStateOf(0f)
+    private var offset by offsetState
 
     /** 0 at rest, 1 fully collapsed. */
     val collapse: Float
@@ -113,6 +117,18 @@ class FolioHeaderState internal constructor(
      */
     fun reset() {
         offset = 0f
+    }
+
+    /**
+     * Publish a progress the screen computed for itself, where §13.9's rules keep the
+     * maths out of the bar: Home's hero must track its list offset 1:1, not through a
+     * nested-scroll connection, so `HomeScreen` derives the fraction and hands it
+     * here. Storing it in this state rather than a loose float is what lets Home's
+     * masthead be restored with the page like every other one, and the same
+     * reduce-motion freeze applies — with motion off the bar never collapses.
+     */
+    fun setProgress(fraction: Float) {
+        if (enabled) offset = fraction.coerceIn(0f, 1f) * rangePx
     }
 
     /** Attach to the container that holds the scrolling content. */
@@ -132,7 +148,14 @@ class FolioHeaderState internal constructor(
 fun rememberFolioHeaderState(range: Dp = 56.dp): FolioHeaderState {
     val rangePx = with(LocalDensity.current) { range.toPx() }
     val motion = rememberMotionEnabled()
-    return remember(rangePx, motion) { FolioHeaderState(rangePx, motion) }
+    // Saveable, not merely remembered. The bar's collapse belongs to its screen, but
+    // switching tabs throws that screen's composition away, so a remembered offset
+    // came back as expanded — over a shelf that *does* restore its scroll (the same
+    // mechanism), which left the first rows of the page under the glass. The
+    // bottom-bar tabs navigate with saveState/restoreState, so each destination's
+    // registry survives the switch and this restores with it.
+    val offset = rememberSaveable { mutableFloatStateOf(0f) }
+    return remember(rangePx, motion, offset) { FolioHeaderState(rangePx, motion, offset) }
 }
 
 /**

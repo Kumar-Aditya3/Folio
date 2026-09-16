@@ -1139,6 +1139,10 @@ fun main(args: Array<String>) {
                                         onMangaHistoryClick = { pushScreen(Screen.MangaHistory) },
                                         onMangaImportClick = { pickAndImportManga() },
                                         onMangaSearchClick = { mangaSearchActive = !mangaSearchActive },
+                                        mangaSearchActive = mangaSearchActive,
+                                        onMangaSearchActiveChange = { mangaSearchActive = it },
+                                        mangaSourcesAvailable = mangaLibBrowseVM != null,
+                                        onOpenMangaDownloads = { pushScreen(Screen.MangaDownloads) },
                                         onMangaBackupImport = { importMangaBackup() },
                                         onMangaBackupExport = { exportMangaBackup() },
                                         mangaContent = {
@@ -1149,21 +1153,11 @@ fun main(args: Array<String>) {
                                                 onOpenManga = { id -> pushScreen(Screen.MangaDetail(id)) },
                                                 onOpenBrowse = { pushScreen(Screen.MangaBrowse) },
                                                 onOpenExtensions = { pushScreen(Screen.MangaExtensions) },
-                                                onOpenDownloads = { pushScreen(Screen.MangaDownloads) },
                                                 onOpenSource = { source, q -> pushScreen(Screen.MangaSourceBrowse(source.id, q)) },
                                                 onImportLocal = { pickAndImportManga() },
                                                 searchActive = mangaSearchActive,
                                                 onSearchActiveChange = { mangaSearchActive = it },
                                                 browseViewModel = mangaLibBrowseVM,
-                                                // The Books/Manga switch rides the manga
-                                                // shelf's own chip rail here, so the shelf
-                                                // keeps a single row of chrome.
-                                                railLeading = {
-                                                    com.folio.reader.ui.library.LibraryModeSwitch(
-                                                        mode = libraryMode,
-                                                        onModeChange = { libraryMode = it },
-                                                    )
-                                                },
                                             )
                                         },
                                         onOpenStats = { pushScreen(Screen.Stats) }

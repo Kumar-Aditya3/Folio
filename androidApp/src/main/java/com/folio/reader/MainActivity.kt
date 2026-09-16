@@ -381,7 +381,6 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             showBottomBar = showBottomBar,
                             backProgress = backProgress,
-                            screenKey = model.libraryMode.name,
                         ) {
                             FolioNavHost(
                                 navController = navController,
