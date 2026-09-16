@@ -47,6 +47,12 @@ class MangaLibraryViewModel(
 
     val library: StateFlow<List<MangaEntry>> = mangaRepo.observeLibrary()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
+    /** True once the library flow has landed its first emission. The shelf's
+     *  first frame after a mode switch renders the loading placeholder instead
+     *  of flashing the empty state ("another version of the same screen"). */
+    val ready: StateFlow<Boolean> = mangaRepo.observeLibrary()
+        .map { true }
+        .stateIn(scope, SharingStarted.Lazily, false)
     val unreadCounts: StateFlow<Map<String, Int>> = chapterRepo.observeUnreadCounts()
         .stateIn(scope, SharingStarted.Lazily, emptyMap())
     val progress: StateFlow<Map<String, Float>> = chapterRepo.observeProgress()
@@ -140,6 +146,16 @@ class MangaLibraryViewModel(
     }
 
     init {
+        // Self-heal exactly like the books and document shelves: seed Main and
+        // shelve every in-library manga the moment this screen is reached, so the
+        // rail never depends on the app-start hook having run (or survived) — and
+        // a membership wipe (a stale remote category doc, a crashed seed) repairs
+        // on the next visit instead of leaving the shelf blank under a selected
+        // category.
+        scope.launch {
+            runCatching { categoryRepo.ensureSeeded() }
+                .onFailure { println("⚠️ Manga category seed failed: $it") }
+        }
         // Follow the category list so a fresh default selection lands as soon as Main
         // exists, and a deleted selection falls back to the default instead of nothing.
         scope.launch {

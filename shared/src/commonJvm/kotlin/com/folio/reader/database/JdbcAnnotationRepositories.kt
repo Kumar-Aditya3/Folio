@@ -78,6 +78,20 @@ class JdbcTagRepository(private val db: Database) : TagRepository {
         emit(tags)
     }
 
+    override suspend fun getBookTagLinks(): Map<String, Set<String>> = withContext(Dispatchers.IO) {
+        db.withConnection { conn ->
+            val out = mutableMapOf<String, MutableSet<String>>()
+            conn.prepareStatement("SELECT tag_id, book_id FROM book_tags").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        out.getOrPut(rs.getString(1)) { mutableSetOf() }.add(rs.getString(2))
+                    }
+                }
+            }
+            out
+        }
+    }
+
     override suspend fun getTagsForBook(bookId: String): List<Tag> = withContext(Dispatchers.IO) {
         db.withConnection { conn ->
             val out = mutableListOf<Tag>()

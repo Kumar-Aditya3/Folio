@@ -10,6 +10,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -54,6 +56,7 @@ import com.folio.reader.ui.theme.toFolioColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -84,12 +87,19 @@ class MainActivity : ComponentActivity() {
 
     internal val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     internal var importStatus by mutableStateOf("")
+    /** Imported books waiting for the collection picker; non-null shows the dialog. */
+    internal var pendingImportBooks by mutableStateOf<List<com.folio.reader.model.Book>?>(null)
+    /** First imported item's route, opened once the shelf prompt is done. */
+    private var pendingImportRoute: String? = null
     internal lateinit var navModel: FolioNavModelImpl
     private var pendingOpenRoute: String? = null
 
     override fun onDestroy() {
         super.onDestroy()
-        (application as? FolioApplication)?.graph?.shutdown()
+        // Only a real exit may close the graph: a configuration-change relaunch
+        // destroys the activity too, and shutdown() stops sync and drops the
+        // database connection under the surviving view models.
+        if (isFinishing) (application as? FolioApplication)?.graph?.shutdown()
     }
 
     /**
@@ -118,7 +128,15 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val navController = rememberNavController()
-            val model = remember { FolioNavModelImpl(this@MainActivity) }
+            // The nav model survives configuration changes inside a ViewModel
+            // holder: rebuilding it per relaunch reset every tab view model and
+            // flow mid-rotation — the shelves flashed the empty state ("library
+            // empty screen flashes" / "manga appear and disappear") and each
+            // rebuild leaked its own update-loop scope. Rebind re-points the
+            // model at the new activity instance instead.
+            val holder: NavModelHolder = viewModel()
+            val model = holder.model ?: FolioNavModelImpl(this@MainActivity).also { holder.model = it }
+            model.rebind(this@MainActivity)
             SideEffect {
                 navModel = model
                 model.navController = navController
@@ -363,6 +381,7 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             showBottomBar = showBottomBar,
                             backProgress = backProgress,
+                            screenKey = model.libraryMode.name,
                         ) {
                             FolioNavHost(
                                 navController = navController,
@@ -382,6 +401,52 @@ class MainActivity : ComponentActivity() {
                             contentAlignment = Alignment.BottomCenter
                         ) {
                             com.folio.reader.ui.components.FolioStatusBanner(importStatus)
+                        }
+
+                        // Post-import shelf prompt: file the batch into collections
+                        // (Main pre-checked — that is where the imports already are),
+                        // then open the first imported item.
+                        pendingImportBooks?.let { books ->
+                            val graph = (application as FolioApplication).graph
+                            var shelfCollections by remember {
+                                mutableStateOf(emptyList<com.folio.reader.model.Collection>())
+                            }
+                            LaunchedEffect(Unit) {
+                                shelfCollections = runCatching {
+                                    graph.collectionRepository.getAllCollections().first()
+                                }.getOrDefault(emptyList())
+                            }
+                            if (shelfCollections.isNotEmpty()) {
+                                com.folio.reader.ui.library.BookImportCollectionsDialog(
+                                    bookCount = books.size,
+                                    collections = shelfCollections,
+                                    onCreate = { name ->
+                                        runCatching {
+                                            graph.collectionRepository.getCollectionByName(name)?.id
+                                                ?: graph.collectionRepository.createCollection(name).id
+                                        }.getOrNull()
+                                    },
+                                    onSave = { ids ->
+                                        appScope.launch(Dispatchers.IO) {
+                                            if (ids.isNotEmpty()) {
+                                                books.forEach { book ->
+                                                    runCatching {
+                                                        graph.collectionRepository.assign(book.id, ids)
+                                                    }
+                                                }
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                pendingImportBooks = null
+                                                openPendingImportRoute()
+                                            }
+                                        }
+                                    },
+                                    onDismiss = {
+                                        pendingImportBooks = null
+                                        openPendingImportRoute()
+                                    }
+                                )
+                            }
                         }
                     }
                     }
@@ -442,6 +507,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val results = graph.incomingContentCoordinator.importMany(incoming)
                 var restored = 0
+                val importedBooks = mutableListOf<com.folio.reader.model.Book>()
                 results.forEach { result ->
                     val book = when (result) {
                         is IncomingContentResult.ImportedBook -> result.book
@@ -449,6 +515,7 @@ class MainActivity : ComponentActivity() {
                         else -> null
                     }
                     if (book != null) {
+                        importedBooks += book
                         restored += runCatching {
                             graph.syncEngine?.adoptCloudProgressForBook(
                                 book.id,
@@ -470,9 +537,16 @@ class MainActivity : ComponentActivity() {
                     if (restored > 0) {
                         importStatus += " • progress restored from cloud"
                     }
-                    val controller =
-                        if (::navModel.isInitialized) navModel.navController else null
-                    if (firstRoute != null) {
+                    // Imported books get the shelf prompt before anything opens:
+                    // the batch already sits on Main, and this is the one moment
+                    // filing them elsewhere is a single tap (the manga library's
+                    // add-to-library prompt, on the books side).
+                    if (importedBooks.isNotEmpty()) {
+                        pendingImportRoute = firstRoute
+                        pendingImportBooks = importedBooks
+                    } else if (firstRoute != null) {
+                        val controller =
+                            if (::navModel.isInitialized) navModel.navController else null
                         if (controller != null) {
                             controller.navigate(firstRoute)
                         } else {
@@ -483,6 +557,18 @@ class MainActivity : ComponentActivity() {
             } finally {
                 temporaryFiles.forEach { runCatching { it.delete() } }
             }
+        }
+    }
+
+    /** Opens the first imported item once the shelf prompt is done with it. */
+    private fun openPendingImportRoute() {
+        val route = pendingImportRoute ?: return
+        pendingImportRoute = null
+        val controller = if (::navModel.isInitialized) navModel.navController else null
+        if (controller != null) {
+            controller.navigate(route)
+        } else {
+            pendingOpenRoute = route
         }
     }
 
@@ -790,4 +876,11 @@ class MainActivity : ComponentActivity() {
         }
         startActivity(Intent.createChooser(shareIntent, "Share EPUB"))
     }
+}
+
+/** Retains [FolioNavModelImpl] (and every tab view model it owns) across rotation. */
+// Public: the ViewModel provider instantiates it reflectively — a private class
+// crashes with IllegalAccessException on first access.
+class NavModelHolder : ViewModel() {
+    var model: FolioNavModelImpl? = null
 }

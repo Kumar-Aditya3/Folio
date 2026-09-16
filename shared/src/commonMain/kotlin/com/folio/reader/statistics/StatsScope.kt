@@ -1,14 +1,17 @@
 package com.folio.reader.statistics
 
+import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.model.BookStatus
 
 /**
  * What kind of entity a stats-exclusion row targets (§11.2). Stored as its name
  * in the `stats_exclusions.scope` column. `BOOK_STATUS` rows carry the enum
  * name as their target id, so "exclude every DNF book" is one row that keeps
- * working as more books are abandoned.
+ * working as more books are abandoned. `EXTENSION` rows carry the extension's
+ * package name and are resolved to `MANGA_SOURCE` rows by
+ * [expandExtensionExclusions] before any consumer sees them.
  */
-enum class Scope { BOOK, BOOK_TAG, BOOK_COLLECTION, BOOK_SERIES, BOOK_STATUS, MANGA, MANGA_CATEGORY, MANGA_SOURCE }
+enum class Scope { BOOK, BOOK_TAG, BOOK_COLLECTION, BOOK_SERIES, BOOK_STATUS, MANGA, MANGA_CATEGORY, MANGA_SOURCE, EXTENSION }
 
 /**
  * The one resolver for stats exclusions (§11.2) — the single place that answers
@@ -76,4 +79,31 @@ class StatsScope(private val excluded: Set<Pair<Scope, String>>) {
         if (isExcluded(Scope.MANGA_SOURCE, sourceId.toString())) return false
         return true
     }
+}
+
+/**
+ * Resolves `EXTENSION` rows (target id = extension package name) into
+ * `MANGA_SOURCE` rows (target id = decimal source id).
+ *
+ * The database stores only numeric source ids on its manga rows, while
+ * extension identity (the package name) lives in the runtime's source list —
+ * so the expansion runs once, where both are available (the view models that
+ * hold a [com.folio.reader.manga.MangaBackend]), and every downstream consumer
+ * (`StatsScope`, the manga-statistics SQL, the new-chapter badges and Discover)
+ * keeps answering a single question about source ids. An excluded extension
+ * with no installed sources simply contributes nothing.
+ */
+fun expandExtensionExclusions(
+    exclusions: Set<Pair<Scope, String>>,
+    sources: List<MangaSourceInfo>
+): Set<Pair<Scope, String>> {
+    val pkgs = exclusions.asSequence()
+        .filter { it.first == Scope.EXTENSION }
+        .mapTo(HashSet()) { it.second }
+    if (pkgs.isEmpty()) return exclusions
+    val sourceRows = sources
+        .filter { source -> source.extensionPkg?.let { it in pkgs } == true }
+        .map { Scope.MANGA_SOURCE to it.id.toString() }
+    if (sourceRows.isEmpty()) return exclusions
+    return exclusions + sourceRows
 }

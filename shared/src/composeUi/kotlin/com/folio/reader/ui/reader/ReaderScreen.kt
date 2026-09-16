@@ -221,10 +221,7 @@ fun ReaderScreen(
         veilAlpha = FolioTheme.readerVeilAlpha
     )
     val quickFontNames = remember(settings.customFonts) {
-        (listOf(
-            "Calluna", "Comfortaa", "Literata", "Merriweather", "Georgia", "EB Garamond", "Lora",
-            "Open Sans", "Inter", "Noto Serif", "Serif", "Sans Serif", "Monospace"
-        ) + settings.customFonts.map { it.name }).distinct()
+        (platformBaseReaderFonts() + settings.customFonts.map { it.name }).distinct()
     }
     fun chapterLabel(spineIndex: Int?, chapterId: String?): String =
         chapters.firstOrNull { spineIndex != null && it.spineIndex == spineIndex }?.title

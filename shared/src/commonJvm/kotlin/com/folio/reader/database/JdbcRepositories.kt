@@ -959,17 +959,29 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
 
     override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) = insertCollection(collection, emitSyncEvent)
 
-    override suspend fun deleteCollection(collectionId: String) {
+    override suspend fun deleteCollection(collectionId: String): Boolean {
+        if (getCollection(collectionId) == null) return false
+        // Main is the guaranteed home shelf: it can only be removed while another
+        // collection exists, so the library never loses its last bucket.
+        if (collectionId == Collection.MAIN_ID && countCollections() <= 1) return false
+        val affectedBookIds = bookIdsInCollection(collectionId)
         db.withTransaction { conn ->
-            conn.prepareStatement("DELETE FROM collections WHERE id = ?").use { stmt ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE collection_id = ?").use { stmt ->
                 stmt.setString(1, collectionId); stmt.executeUpdate()
             }
-            conn.prepareStatement("DELETE FROM book_collections WHERE collection_id = ?").use { stmt ->
+            conn.prepareStatement("DELETE FROM collections WHERE id = ?").use { stmt ->
                 stmt.setString(1, collectionId); stmt.executeUpdate()
             }
         }
         db.bumpBookData()
-        db.onEntityChanged?.invoke("collection", collectionId, "DELETE", "{}")
+        // Members of the deleted collection land back on the (possibly new)
+        // default shelf — with one shelf at a time, an orphaned book would be
+        // invisible.
+        affectedBookIds.forEach { ensureMembership(it) }
+        db.onEntityChanged?.invoke(
+            "collection", collectionId, "DELETE", "{}"
+        )
+        return true
     }
 
     override fun getAllCollections(): Flow<List<Collection>> = db.bookDataRevision.map {
@@ -988,6 +1000,15 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
         return db.withConnection { conn ->
             conn.prepareStatement("SELECT * FROM collections WHERE name = ? COLLATE NOCASE").use { stmt ->
                 stmt.setString(1, name.trim())
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getCollection(id: String): Collection? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM collections WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
                 stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
             }
         }
@@ -1031,6 +1052,141 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
             }
         }
         db.bumpBookData()
+    }
+
+    // ── The manga category model (§ collections as shelves) ─────────────────
+
+    override suspend fun createCollection(name: String): Collection {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Collection name must not be empty" }
+        val collection = Collection(
+            id = java.util.UUID.randomUUID().toString(),
+            name = trimmed,
+            sortOrder = nextSortOrder()
+        )
+        insertCollection(collection)
+        return collection
+    }
+
+    override suspend fun renameCollection(id: String, name: String) {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Collection name must not be empty" }
+        val existing = getCollection(id) ?: return
+        val renamed = existing.copy(name = trimmed, updatedAt = Clock.System.now())
+        insertCollection(renamed)
+    }
+
+    override suspend fun defaultCollection(): Collection? {
+        getCollection(Collection.MAIN_ID)?.let { return it }
+        // A pre-Feature library may already have a "Main" under another id —
+        // prefer it over reshuffling the reader's existing sort order.
+        getCollectionByName(Collection.MAIN_NAME)?.let { return it }
+        return db.withConnection { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT * FROM collections ORDER BY sort_order, name LIMIT 1").use { rs ->
+                    if (rs.next()) mapRow(rs) else null
+                }
+            }
+        }
+    }
+
+    override suspend fun assign(bookId: String, collectionIds: Set<String>) {
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE book_id = ?").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement(
+                "INSERT OR IGNORE INTO book_collections (book_id, collection_id, added_at) VALUES (?, ?, ?)"
+            ).use { stmt ->
+                collectionIds.forEach { collectionId ->
+                    stmt.setString(1, bookId)
+                    stmt.setString(2, collectionId)
+                    stmt.setLong(3, Clock.System.now().toEpochMilliseconds())
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpBookData()
+    }
+
+    override fun observeCollectionsFor(bookId: String): Flow<Set<String>> =
+        db.bookDataRevision.map { getCollectionsForBook(bookId).mapTo(HashSet()) { it.id } }
+
+    override fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>> =
+        db.bookDataRevision.map { bookIdsInCollection(collectionId) }
+
+    override suspend fun bookIdsInCollection(collectionId: String): Set<String> {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT book_id FROM book_collections WHERE collection_id = ?").use { stmt ->
+                stmt.setString(1, collectionId)
+                stmt.executeQuery().use { rs ->
+                    buildSet {
+                        while (rs.next()) add(rs.getString(1))
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun ensureMembership(bookId: String) {
+        if (getCollectionsForBook(bookId).isNotEmpty()) return
+        val target = defaultCollection() ?: run {
+            ensureSeeded()
+            defaultCollection()
+        } ?: return
+        assign(bookId, setOf(target.id))
+    }
+
+    override suspend fun ensureSeeded() {
+        // Seed Main whenever it is missing (not only on an empty table): a
+        // pre-Feature library keeps its collections and gains the default
+        // shelf, with Main sorting ahead of them. A user-created "Main" under
+        // another id is adopted by setting its sortOrder to -1.
+        val existingMain = getCollectionByName(Collection.MAIN_NAME)
+        if (existingMain == null) {
+            val main = Collection(
+                id = Collection.MAIN_ID,
+                name = Collection.MAIN_NAME,
+                sortOrder = -1
+            )
+            insertCollection(main)
+        } else if (existingMain.sortOrder != -1) {
+            // Adopt existing "Main" as the default shelf by giving it priority sortOrder
+            insertCollection(existingMain.copy(sortOrder = -1, updatedAt = Clock.System.now()))
+        }
+        // Pre-collection libraries: give every collection-less book the default
+        // shelf so nothing disappears now that the rail shows one shelf at a time.
+        val orphaned = db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT b.id FROM books b WHERE NOT EXISTS " +
+                    "(SELECT 1 FROM book_collections bc WHERE bc.book_id = b.id)"
+            ).use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add(rs.getString(1))
+                    }
+                }
+            }
+        }
+        orphaned.forEach { ensureMembership(it) }
+    }
+
+    private suspend fun nextSortOrder(): Int = db.withConnection { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM collections").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+
+    private suspend fun countCollections(): Int = db.withConnection { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT COUNT(*) FROM collections").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
     }
 }
 

@@ -760,6 +760,13 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
         }
     }
 
+    override suspend fun getCategoryByName(name: String): MangaCategory? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT id, name, sort_order, updated_at FROM manga_categories WHERE name = ? COLLATE NOCASE").use { stmt ->
+            stmt.setString(1, name.trim())
+            stmt.executeQuery().use { rs -> if (rs.next()) mapCategoryRow(rs) else null }
+        }
+    }
+
     override suspend fun defaultCategory(): MangaCategory? {
         get(MangaCategory.MAIN_ID)?.let { return it }
         return db.withConnection { conn ->
@@ -778,15 +785,25 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
     }
 
     override suspend fun ensureSeeded() {
-        if (countCategories() == 0) {
+        // Seed Main whenever it is missing (not only on an empty table): a
+        // pre-Feature library keeps its categories and gains the default
+        // shelf, with Main sorting ahead of them. A user-created "Main" under
+        // another id is adopted by setting its sortOrder to -1.
+        val existingMain = getCategoryByName(MangaCategory.MAIN_NAME)
+        if (existingMain == null) {
             val main = MangaCategory(
                 id = MangaCategory.MAIN_ID,
                 name = MangaCategory.MAIN_NAME,
-                sortOrder = 0,
+                sortOrder = -1
             )
             insertCategoryRow(main)
             db.bumpMangaData()
             emitCategoryEvent(main, "UPSERT", isDeleted = false)
+        } else if (existingMain.sortOrder != -1) {
+            // Adopt existing "Main" as the default shelf by giving it priority sortOrder
+            insertCategoryRow(existingMain.copy(sortOrder = -1, updatedAt = Clock.System.now()))
+            db.bumpMangaData()
+            emitCategoryEvent(existingMain.copy(sortOrder = -1), "UPSERT", isDeleted = false)
         }
         // Pre-category libraries: give every in-library manga the default shelf so
         // nothing disappears when the virtual All bucket went away.

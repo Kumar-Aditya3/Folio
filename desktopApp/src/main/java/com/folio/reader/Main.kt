@@ -192,7 +192,9 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         bookRepository = bookRepository,
         positionRepository = positionRepository,
         searchIndexer = searchIndexer,
-        hashUtil = platform.hasher
+        hashUtil = platform.hasher,
+        // Imported books land on a real collection shelf (Main) right away.
+        collectionRepository = collectionRepository
     )
     val documentImporter = DocumentImporter(
         platform,
@@ -223,6 +225,13 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         // the sync hook above is live, so the seed document reaches other devices too.
         appScope.launch {
             runCatching { mangaCategoryRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Manga category seed failed: $it") }
+        }
+        // Same repair for book collections: seed Main and give every
+        // collection-less book its shelf, so the rail never hides a book.
+        appScope.launch {
+            runCatching { collectionRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Book collection seed failed: $it") }
         }
         appScope.launch {
             runCatching { applyStoredMangaDownloadsLocation() }
@@ -527,6 +536,10 @@ fun main(args: Array<String>) {
             if (navStack.size > 1) navStack.removeAt(navStack.size - 1)
         }
         var importStatus by remember { mutableStateOf("") }
+        // Imported books waiting for the collection picker; non-null shows the
+        // dialog, and the first imported screen opens once it is answered.
+        var pendingImportBooks by remember { mutableStateOf<List<com.folio.reader.model.Book>?>(null) }
+        var pendingImportScreen by remember { mutableStateOf<Screen?>(null) }
         var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
         var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
         var libraryModeLoaded by remember { mutableStateOf(false) }
@@ -594,7 +607,8 @@ fun main(args: Array<String>) {
             LibraryViewModel(
                 bookRepository = deps.bookRepository,
                 collectionRepository = deps.collectionRepository,
-                seriesRepository = deps.seriesRepository
+                seriesRepository = deps.seriesRepository,
+                settingsRepository = deps.settingsRepository
             )
         }
         val documentLibraryVM = remember {
@@ -653,7 +667,8 @@ fun main(args: Array<String>) {
                         )
                     }
                 )
-                results.mapNotNull { it.importedBook() }.forEach(::adoptBookProgress)
+                val importedBooks = results.mapNotNull { it.importedBook() }
+                importedBooks.forEach(::adoptBookProgress)
                 val firstScreen = results.firstNotNullOfOrNull { it.openScreen() }
                 val imported = results.count { it.openScreen() != null }
                 val failure = results.firstNotNullOfOrNull { it.failureReason() }
@@ -664,7 +679,15 @@ fun main(args: Array<String>) {
                         failure != null -> "Import failed: $failure"
                         else -> "No supported files were imported"
                     }
-                    if (openFirst && firstScreen != null) pushScreen(firstScreen)
+                    // Imported books get the shelf prompt before anything opens:
+                    // the batch already sits on Main, and this is the one moment
+                    // filing them elsewhere is a single tap.
+                    if (openFirst && importedBooks.isNotEmpty()) {
+                        pendingImportScreen = firstScreen
+                        pendingImportBooks = importedBooks
+                    } else if (openFirst && firstScreen != null) {
+                        pushScreen(firstScreen)
+                    }
                 }
             }
         }
@@ -1625,6 +1648,53 @@ fun main(args: Array<String>) {
                         contentAlignment = Alignment.BottomCenter
                     ) {
                         com.folio.reader.ui.components.FolioStatusBanner(importStatus)
+                    }
+
+                    // Post-import shelf prompt: file the batch into collections
+                    // (Main pre-checked — that is where the imports already are),
+                    // then open the first imported item.
+                    pendingImportBooks?.let { books ->
+                        var shelfCollections by remember {
+                            mutableStateOf(emptyList<com.folio.reader.model.Collection>())
+                        }
+                        LaunchedEffect(Unit) {
+                            shelfCollections = runCatching {
+                                deps.collectionRepository.getAllCollections().first()
+                            }.getOrDefault(emptyList())
+                        }
+                        if (shelfCollections.isNotEmpty()) {
+                            com.folio.reader.ui.library.BookImportCollectionsDialog(
+                                bookCount = books.size,
+                                collections = shelfCollections,
+                                onCreate = { name ->
+                                    runCatching {
+                                        deps.collectionRepository.getCollectionByName(name)?.id
+                                            ?: deps.collectionRepository.createCollection(name).id
+                                    }.getOrNull()
+                                },
+                                onSave = { ids ->
+                                    appScope.launch(Dispatchers.IO) {
+                                        if (ids.isNotEmpty()) {
+                                            books.forEach { book ->
+                                                runCatching {
+                                                    deps.collectionRepository.assign(book.id, ids)
+                                                }
+                                            }
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            pendingImportBooks = null
+                                            pendingImportScreen?.let { pushScreen(it) }
+                                            pendingImportScreen = null
+                                        }
+                                    }
+                                },
+                                onDismiss = {
+                                    pendingImportBooks = null
+                                    pendingImportScreen?.let { pushScreen(it) }
+                                    pendingImportScreen = null
+                                }
+                            )
+                        }
                     }
                 }
             }

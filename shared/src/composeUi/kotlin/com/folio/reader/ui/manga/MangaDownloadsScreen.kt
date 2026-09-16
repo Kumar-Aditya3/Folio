@@ -388,6 +388,7 @@ fun DownloadsScreen(
             title = "Downloads",
             collapse = headerState.collapse,
             modifier = Modifier.align(Alignment.TopCenter),
+            bottomRule = false,
             navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             },

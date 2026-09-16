@@ -19,8 +19,12 @@ import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.library.LibraryViewModel
 import com.folio.reader.ui.search.SearchUiState
 import com.folio.reader.ui.statistics.StatisticsViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,7 +37,18 @@ private val SETTINGS_CREDENTIAL_FIELDS =
  * [FolioNavModel] by delegating each destination to its route composable
  * (§3.2/§3.4 FOLIO_IMPLEMENTATION_SPEC).
  */
-class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
+class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
+
+    /**
+     * Re-points the model at the new activity instance after a configuration
+     * change. The model itself survives relaunches in a ViewModel holder —
+     * rebuilding it per rotation recreated every tab view model and flow, which
+     * flashed the shelves blank (the "manga appear and disappear" report) and
+     * leaked one update-loop per rebuild.
+     */
+    internal fun rebind(activity: MainActivity) {
+        this.activity = activity
+    }
 
     override val graph: AppGraph get() = (activity.application as FolioApplication).graph
 
@@ -88,7 +103,10 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             collectionRepository = graph.collectionRepository,
             seriesRepository = graph.seriesRepository,
             // §5.1: enables the "~6 days left" captions on the Android shelf.
-            sessionRepository = graph.sessionRepository
+            sessionRepository = graph.sessionRepository,
+            // Collection shelves: the selection is remembered in settings, so
+            // the shelf the reader left reopens on the next visit.
+            settingsRepository = graph.settingsRepository
         )
     }
     val documentLibraryVM by lazy {
@@ -97,6 +115,56 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             categoryRepository = graph.documentCategoryRepository,
             settingsRepository = graph.settingsRepository
         )
+    }
+
+    /**
+     * Home, hoisted like the other tab view models: one instance for the app's
+     * lifetime. It used to be `remember`ed inside the route, so every visit
+     * rebuilt it and re-ran its whole query set behind a skeleton.
+     */
+    val homeVM by lazy {
+        com.folio.reader.ui.home.HomeViewModel(
+            graph.bookRepository,
+            graph.sessionRepository,
+            graph.settingsRepository,
+            // §11.2/§12.9: exclusions gate every Home content selection;
+            // group repos resolve each book's tags and collections.
+            com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
+            graph.tagRepository,
+            graph.collectionRepository,
+            // §11.4: the New-chapters card reads manga_update_state through
+            // the same exclusions the worker's badges are gated by.
+            graph.mangaUpdateRepository,
+            // §11.4 Phase 9: manga Continue reading + Discover.
+            graph.mangaHistoryRepository,
+            graph.mangaRepository,
+            graph.mangaChapterRepository,
+            graph.mangaCategoryRepository,
+            graph.mangaBackend,
+            // §11.4: chapter pace for the manga predictions on Reading now.
+            com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
+        )
+    }
+
+    /**
+     * Home's state, kept hot for the app's whole lifetime. `state` is a cold
+     * flow that re-runs every query per collection; collecting it eagerly from
+     * the moment the app opens means the first Home visit renders real content
+     * (not a skeleton) and tab morphs into Home compose against live data.
+     */
+    val homeState: kotlinx.coroutines.flow.StateFlow<com.folio.reader.ui.home.HomeUiState> by lazy {
+        homeVM.state.stateIn(
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            com.folio.reader.ui.home.HomeUiState()
+        )
+    }
+
+    init {
+        // Cold-start warm-up: touching the lazy state starts the eager
+        // collection now, in parallel with the first frame of the Library.
+        // By the time the reader reaches the Home tab, the data is waiting.
+        homeState
     }
     val mangaLibVM by lazy {
         com.folio.reader.ui.manga.MangaLibraryViewModel(
@@ -120,7 +188,10 @@ class FolioNavModelImpl(internal val activity: MainActivity) : FolioNavModel {
             // settings UI is a later slice.
             statsExclusionRepository = com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
             tagRepository = graph.tagRepository,
-            collectionRepository = graph.collectionRepository
+            collectionRepository = graph.collectionRepository,
+            // EXTENSION exclusions expand to source ids through the backend's
+            // source list, so the manga statistics resolve them too.
+            mangaBackend = graph.mangaBackend
         )
     }
     val mangaBrowseVM by lazy {

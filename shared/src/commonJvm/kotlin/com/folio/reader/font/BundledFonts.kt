@@ -33,6 +33,44 @@ object BundledFonts {
             displayName = "Comfortaa",
             fileName = "comfortaa_variable.ttf",
             familyName = "Comfortaa"
+        ),
+        // Standard reading faces (Google Fonts, all OFL — licenses ship next to
+        // the files). Variable builds, so every reader weight renders from the
+        // one file on both platforms.
+        BundledFont(
+            displayName = "Literata",
+            fileName = "literata_variable.ttf",
+            familyName = "Literata"
+        ),
+        BundledFont(
+            displayName = "Merriweather",
+            fileName = "merriweather_variable.ttf",
+            familyName = "Merriweather"
+        ),
+        BundledFont(
+            displayName = "Lora",
+            fileName = "lora_variable.ttf",
+            familyName = "Lora"
+        ),
+        BundledFont(
+            displayName = "EB Garamond",
+            fileName = "ebgaramond_variable.ttf",
+            familyName = "EB Garamond"
+        ),
+        BundledFont(
+            displayName = "Open Sans",
+            fileName = "opensans_variable.ttf",
+            familyName = "Open Sans"
+        ),
+        BundledFont(
+            displayName = "Inter",
+            fileName = "inter_variable.ttf",
+            familyName = "Inter"
+        ),
+        BundledFont(
+            displayName = "Noto Serif",
+            fileName = "notoserif_variable.ttf",
+            familyName = "Noto Serif"
         )
     )
 

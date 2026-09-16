@@ -152,10 +152,7 @@ internal fun Enum<*>.settingsLabel(): String =
 internal fun readerFontOptions(settings: ReaderSettings): List<String> =
     (settings.customFonts.map { it.name } + BASE_READER_FONTS).distinct()
 
-private val BASE_READER_FONTS = listOf(
-    "Literata", "Merriweather", "Georgia", "EB Garamond", "Lora",
-    "Open Sans", "Inter", "Noto Serif", "Serif", "Sans Serif", "Monospace"
-)
+private val BASE_READER_FONTS = com.folio.reader.ui.reader.platformBaseReaderFonts()
 
 /** The display name for a persisted font key — custom fonts show their real family. */
 internal fun readerFontLabel(settings: ReaderSettings, key: String): String =

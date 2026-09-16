@@ -145,12 +145,14 @@ class BookDetailViewModel(
             ).also { it.updateProgress(current.normalizedProgress) }
             bookRepository.updateBook(updated)
 
-            val assignedCollectionIds = collectionRepository.getCollectionsForBook(bookId).mapTo(mutableSetOf()) { it.id }
-            (assignedCollectionIds - selectedCollectionIds).forEach {
-                collectionRepository.removeBookFromCollection(bookId, it)
+            // Full membership replace (the manga picker's assign contract). An
+            // empty selection falls back to the default collection, so a book
+            // can be moved off Main but never left without a shelf.
+            val targetCollectionIds = selectedCollectionIds.ifEmpty {
+                collectionRepository.defaultCollection()?.let { default -> setOf(default.id) } ?: emptySet()
             }
-            (selectedCollectionIds - assignedCollectionIds).forEach {
-                collectionRepository.addBookToCollection(bookId, it)
+            if (targetCollectionIds.isNotEmpty()) {
+                collectionRepository.assign(bookId, targetCollectionIds)
             }
             refreshMetadata(bookId)
         }

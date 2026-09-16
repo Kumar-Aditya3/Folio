@@ -133,7 +133,17 @@ data class Collection(
     val sortOrder: Int = 0,
     val createdAt: Instant = Clock.System.now(),
     val updatedAt: Instant = Clock.System.now()
-)
+) {
+    companion object {
+        /**
+         * Stable id of the built-in default collection, the books counterpart of
+         * the manga library's Main category. Every device seeds it with this
+         * same id, so sync merges all devices' defaults into one collection.
+         */
+        const val MAIN_ID = "main"
+        const val MAIN_NAME = "Main"
+    }
+}
 
 @Serializable
 data class Tag(

@@ -183,6 +183,8 @@ class MangaReaderProgressTest {
         override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {}
         override suspend fun categoriesFor(mangaId: String): Set<String> = emptySet()
         override suspend fun get(id: String): MangaCategory? = null
+        override suspend fun getCategoryByName(name: String): MangaCategory? =
+            categoriesList.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
         override fun observeCategoriesFor(mangaId: String): Flow<Set<String>> = flowOf(emptySet())
         override fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>> = flowOf(emptySet())
         override suspend fun mangaIdsInCategory(categoryId: String): Set<String> = emptySet()

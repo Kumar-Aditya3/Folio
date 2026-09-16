@@ -331,7 +331,9 @@ class AppGraph(private val app: Application) {
         bookRepository = bookRepository,
         positionRepository = positionRepository,
         searchIndexer = searchIndexer,
-        hashUtil = platform.hasher
+        hashUtil = platform.hasher,
+        // Imported books land on a real collection shelf (Main) right away.
+        collectionRepository = collectionRepository
     )
     val documentImporter = DocumentImporter(
         platform,
@@ -361,8 +363,18 @@ class AppGraph(private val app: Application) {
         }
         // Seed the built-in Main category and adopt uncategorized library manga once
         // the sync hook above is live, so the seed document reaches other devices too.
+        // android.util.Log, never println: stdout is not wired to logcat on a release
+        // build, so a failed seed here — the exact failure that leaves a shelf blank
+        // under a selected category — was completely silent on device.
         appScope.launch {
             runCatching { mangaCategoryRepository.ensureSeeded() }
+                .onFailure { android.util.Log.e("FolioSeed", "Manga category seed failed", it) }
+        }
+        // Same repair for book collections: seed Main and give every
+        // collection-less book its shelf, so the rail never hides a book.
+        appScope.launch {
+            runCatching { collectionRepository.ensureSeeded() }
+                .onFailure { android.util.Log.e("FolioSeed", "Book collection seed failed", it) }
         }
         // §11.3: align the manga update worker with the stored interval (0 = off cancels it).
         appScope.launch {

@@ -4,6 +4,7 @@ import com.folio.reader.database.BookRepository
 import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.SeriesRepository
+import com.folio.reader.database.SettingsRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection
@@ -16,13 +17,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
-import java.util.UUID
 import kotlin.time.Duration.Companion.days
 
 class LibraryViewModel(
@@ -34,9 +38,15 @@ class LibraryViewModel(
      * "~6 days left" caption. Left null elsewhere, which yields no captions
      * rather than a per-book query storm.
      */
-    private val sessionRepository: ReadingSessionRepository? = null
+    private val sessionRepository: ReadingSessionRepository? = null,
+    /**
+     * Optional: persists the selected collection shelf across launches. The
+     * shelves themselves work without it — the selection just doesn't survive
+     * a restart.
+     */
+    private val settingsRepository: SettingsRepository? = null
 ) {
-    /** Backing scope for the bulk-collection picker's reads; mirrors the manga VM's. */
+    /** Backing scope for the shelf selection and the bulk-collection picker. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Books bulk-selection; hoisted so system back can clear it instead of exiting. */
@@ -52,6 +62,90 @@ class LibraryViewModel(
     fun clearSelection() {
         selectedBookIds.value = emptySet()
         isSelectionMode.value = false
+    }
+
+    // ── Collection shelves (the manga category model, over collections) ─────
+    //
+    // Collections are the books library's categories: Main is seeded and always
+    // first, one shelf shows at a time, and every book lives on at least one
+    // shelf. The selection is remembered per device and restored on the next
+    // visit — the manga library's category row, on the books side.
+
+    /** The shelf row: every collection, Main first (sortOrder = -1), then sort order and name. */
+    val collections: StateFlow<List<Collection>> = collectionRepository.getAllCollections()
+        .map { list ->
+            list.sortedWith(compareBy({ it.sortOrder != -1 }, { it.sortOrder }, { it.name }))
+        }
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    /** The selected shelf's collection id; null while no selection has landed. */
+    val selectedCollectionId = MutableStateFlow<String?>(null)
+
+    /**
+     * Live membership of the selected collection. A stale snapshot here is what
+     * made freshly shelved manga invisible until the library was re-entered.
+     */
+    val shelfBookIds: StateFlow<Set<String>?> = selectedCollectionId
+        .flatMapLatest { id ->
+            if (id == null) flowOf<Set<String>?>(null)
+            else collectionRepository.observeBookIdsInCollection(id).map { ids -> ids as Set<String>? }
+        }
+        .stateIn(scope, SharingStarted.Lazily, null)
+
+    /** No virtual All bucket: the shelf always shows one real collection. */
+    fun selectCollection(collectionId: String) {
+        selectedCollectionId.value = collectionId
+        scope.launch { settingsRepository?.setRaw(KEY_BOOKS_COLLECTION, collectionId) }
+    }
+
+    /** Selects Main when present, otherwise the first collection; startup and after deletes. */
+    fun selectDefaultCollection() {
+        scope.launch {
+            val target = runCatching { collectionRepository.defaultCollection() }.getOrNull() ?: return@launch
+            if (selectedCollectionId.value != target.id) selectCollection(target.id)
+        }
+    }
+
+    init {
+        // Self-heal exactly like DocumentLibraryViewModel: seed Main and shelve
+        // every collection-less book the moment this screen is reached, so the
+        // rail never depends on the app-start hook having run (or survived) —
+        // a library imported by an older build ports itself on first visit.
+        scope.launch {
+            runCatching { collectionRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Book collection seed failed: $it") }
+        }
+        // Follow the collection list so a fresh default selection lands as soon
+        // as Main exists, and a deleted selection falls back to the default
+        // instead of an empty grid.
+        scope.launch {
+            collections.collect { list ->
+                val current = selectedCollectionId.value
+                if (list.none { it.id == current }) {
+                    // First selection of the session: reopen the shelf the reader
+                    // left, but only while it still exists; a gone or stale
+                    // remembered id degrades to the default rather than
+                    // resurrecting a deleted collection.
+                    val remembered = if (current == null) settingsRepository?.getRaw(KEY_BOOKS_COLLECTION) else null
+                    if (remembered != null && list.any { it.id == remembered }) selectCollection(remembered)
+                    else selectDefaultCollection()
+                }
+            }
+        }
+    }
+
+    fun renameCollection(id: String, name: String) {
+        scope.launch { runCatching { collectionRepository.renameCollection(id, name) } }
+    }
+
+    fun deleteCollection(id: String) {
+        scope.launch {
+            if (runCatching { collectionRepository.deleteCollection(id) }.getOrDefault(false) &&
+                selectedCollectionId.value == id
+            ) {
+                selectDefaultCollection()
+            }
+        }
     }
 
     /**
@@ -81,25 +175,22 @@ class LibraryViewModel(
     }
 
     /**
-     * Live-applies the picker's current set to every selected book — the
-     * add/remove diff `BookDetailViewModel.saveMetadata` runs for one book,
-     * fanned out over the selection. Selection stays, so a second collection
-     * can be filled without re-picking the books.
+     * Live-applies the picker's current set to every selected book — a full
+     * membership replace per book (the manga picker's `assign` contract), with
+     * the default shelf substituted for an empty set so a book never ends up
+     * shelfless. Selection stays, so a second collection can be filled without
+     * re-picking the books.
      */
     fun applyBulkCollections(collectionIds: Set<String>) {
         val ids = selectedBookIds.value
         if (ids.isEmpty()) return
         scope.launch {
-            for (bookId in ids) {
-                val current = collectionRepository.getCollectionsForBook(bookId)
-                    .mapTo(mutableSetOf()) { it.id }
-                (current - collectionIds).forEach {
-                    collectionRepository.removeBookFromCollection(bookId, it)
-                }
-                (collectionIds - current).forEach {
-                    collectionRepository.addBookToCollection(bookId, it)
-                }
+            val target = collectionIds.ifEmpty {
+                runCatching { collectionRepository.defaultCollection() }.getOrNull()
+                    ?.let { setOf(it.id) }
+                    ?: return@launch
             }
+            ids.forEach { bookId -> runCatching { collectionRepository.assign(bookId, target) } }
         }
     }
 
@@ -108,9 +199,7 @@ class LibraryViewModel(
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return null
         return collectionRepository.getCollectionByName(trimmed)?.id
-            ?: Collection(id = UUID.randomUUID().toString(), name = trimmed)
-                .also { collectionRepository.insertCollection(it) }
-                .id
+            ?: runCatching { collectionRepository.createCollection(trimmed).id }.getOrNull()
     }
 
     enum class ViewMode {
@@ -125,7 +214,6 @@ class LibraryViewModel(
         val statuses: Set<BookStatus> = emptySet(),
         val author: String? = null,
         val seriesId: String? = null,
-        val collectionId: String? = null,
         val tagId: String? = null,
         val progressMin: Int = 0,
         val progressMax: Int = 100,
@@ -137,7 +225,7 @@ class LibraryViewModel(
         val completionDateBefore: Instant? = null
     ) {
         fun hasFilters(): Boolean {
-            return statuses.isNotEmpty() || author != null || seriesId != null || collectionId != null ||
+            return statuses.isNotEmpty() || author != null || seriesId != null ||
                 tagId != null || progressMin > 0 || progressMax < 100 ||
                 dateAddedAfter != null || dateAddedBefore != null ||
                 lastReadAfter != null || lastReadBefore != null ||
@@ -166,8 +254,6 @@ class LibraryViewModel(
     fun booksByStatus(status: BookStatus): Flow<List<Book>> = bookRepository.getBooksByStatus(status)
 
     fun booksBySeries(seriesId: String): Flow<List<Book>> = bookRepository.getBooksBySeries(seriesId)
-
-    fun booksByCollection(collectionId: String): Flow<List<Book>> = bookRepository.getBooksByCollection(collectionId)
 
     fun searchBooks(query: String): Flow<List<Book>> = bookRepository.searchBooks(query)
 
@@ -202,17 +288,18 @@ class LibraryViewModel(
     }
 
     fun filteredBooks(state: LibraryState): Flow<List<Book>> {
-        // Series/collection pick the source flow (they are join-based, not columns);
-        // status/author/progress/date filters are applied on top so they combine.
+        // Series picks the source flow (join-based, not a column); the status
+        // and date filters apply on top so they combine. The collection shelf
+        // rides along as a membership filter, so shelf + filters compose the
+        // way the manga library's category + filters do.
         val baseFlow = when {
-            state.filter.collectionId != null -> booksByCollection(state.filter.collectionId!!)
             state.filter.seriesId != null -> booksBySeries(state.filter.seriesId!!)
             else -> allBooks()
         }
 
-        return baseFlow.map { books ->
+        return combine(baseFlow, shelfBookIds) { books, shelfIds ->
             books.filter { book ->
-                applyFilters(book, state.filter)
+                (shelfIds == null || book.id in shelfIds) && applyFilters(book, state.filter)
             }.sortedWith(compareBooks(state.sortBy, state.sortAscending))
         }
     }
@@ -246,6 +333,9 @@ class LibraryViewModel(
     private companion object {
         /** Matches ReadingPace's own trailing window so both agree on "pace". */
         const val PACE_WINDOW_DAYS = 7
+
+        /** Raw settings key for the selected collection shelf (same scheme as manga's). */
+        const val KEY_BOOKS_COLLECTION = "library.books.collection"
     }
 }
 
@@ -287,7 +377,6 @@ val FilterStateSaver: Saver<LibraryViewModel.FilterState, Any> = mapSaver(
             "statuses" to state.statuses.map { it.name },
             "author" to state.author,
             "seriesId" to state.seriesId,
-            "collectionId" to state.collectionId,
             "tagId" to state.tagId,
             "progressMin" to state.progressMin,
             "progressMax" to state.progressMax,
@@ -310,7 +399,6 @@ val FilterStateSaver: Saver<LibraryViewModel.FilterState, Any> = mapSaver(
             statuses = statuses,
             author = map["author"] as? String,
             seriesId = map["seriesId"] as? String,
-            collectionId = map["collectionId"] as? String,
             tagId = map["tagId"] as? String,
             progressMin = (map["progressMin"] as? Number)?.toInt() ?: 0,
             progressMax = (map["progressMax"] as? Number)?.toInt() ?: 100,

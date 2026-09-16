@@ -243,6 +243,20 @@ eval "set -- $(
         xargs -n1 |
         sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
         tr '\n' ' '
-    )" '"$@"'
+    )" '"@"'
 
-exec "$JAVACMD" "$@"
+# Folio repo convention (AGENTS.md): no Gradle daemons are left running after a
+# build. Run the command, then stop the daemon ourselves — preserving the
+# build's exit code — unless the command already stops it.
+case " $* " in
+    *" --stop "*|*" -stop "*)
+        "$JAVACMD" "$@"
+        exit $?
+        ;;
+    *)
+        "$JAVACMD" "$@"
+        rc=$?
+        "$JAVACMD" "-Dorg.gradle.appname=$APP_BASE_NAME" -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" --stop
+        exit $rc
+        ;;
+esac

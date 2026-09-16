@@ -56,7 +56,10 @@ internal fun Modifier.heroMesh(layers: List<Color>, animate: Boolean): Modifier 
                 val phase = angles?.get(index)?.value ?: (index * 2.1f)
                 val center = Offset(
                     x = size.width * (0.5f + 0.9f * cos(phase + index * 2.1f)),
-                    y = size.height * (0.5f + 0.9f * sin(phase * 0.8f + index * 1.7f)),
+                    // The y term must advance by a whole multiple of the wrap's
+                    // 2π or the light snaps vertically at every Restart — a
+                    // scaled phase (0.8×) ends its cycle at 1.6π, mid-oscillation.
+                    y = size.height * (0.5f + 0.9f * sin(phase + index * 1.7f)),
                 )
                 val radius = radii[index % radii.size]
                 drawCircle(

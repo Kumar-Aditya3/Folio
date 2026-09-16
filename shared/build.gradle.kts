@@ -72,6 +72,9 @@ kotlin {
             dependencies {
                 implementation(libs.androidx.lifecycle.runtime)
                 implementation(libs.androidx.core.ktx)
+                // FolioBackHandler's Android actual — system-back interception
+                // for the shared selection screens.
+                implementation(libs.androidx.activity.compose)
                 implementation(libs.coil.compose)
                 // Mihon manga backend: extension runtime + source engine. okhttp 5.5.0
                 // matches what Mihon ships; extensions are compiled against it.

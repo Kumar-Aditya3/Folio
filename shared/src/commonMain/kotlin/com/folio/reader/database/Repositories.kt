@@ -145,6 +145,13 @@ interface TagRepository {
     suspend fun getTagsForHighlight(highlightId: String): List<Tag>
     suspend fun getBooksForTag(tagId: String): List<Book>
     suspend fun getHighlightsForTag(tagId: String): List<Highlight>
+
+    /**
+     * Every book-tag membership in one pass, as tagId → book ids. The books
+     * shelf uses this to resolve its tag shelves without a query per book;
+     * the default matches an empty repository.
+     */
+    suspend fun getBookTagLinks(): Map<String, Set<String>> = emptyMap()
     suspend fun addTagToBook(bookId: String, tagId: String)
     suspend fun removeTagFromBook(bookId: String, tagId: String)
     suspend fun addTagToHighlight(highlightId: String, tagId: String)
@@ -156,15 +163,50 @@ interface TagRepository {
     suspend fun removeTagFromManga(mangaId: String, tagId: String)
 }
 
+/**
+ * Book collections — the manga library's category model on the books side:
+ * a real seeded Main, one shelf at a time, and every book always on some shelf.
+ */
 interface CollectionRepository {
     suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean = true)
     suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean = true)
-    suspend fun deleteCollection(collectionId: String)
+
+    /**
+     * Removes the collection and its memberships. Returns false when refused:
+     * Main survives while it is the only collection, and members of a deleted
+     * collection are re-homed to the default so no book is left shelfless.
+     */
+    suspend fun deleteCollection(collectionId: String): Boolean
+
     fun getAllCollections(): Flow<List<Collection>>
     suspend fun getCollectionByName(name: String): Collection?
     suspend fun getCollectionsForBook(bookId: String): List<Collection>
     suspend fun addBookToCollection(bookId: String, collectionId: String)
     suspend fun removeBookFromCollection(bookId: String, collectionId: String)
+
+    /** Creates a collection with a fresh id and the next sort order. */
+    suspend fun createCollection(name: String): Collection
+    suspend fun renameCollection(id: String, name: String)
+    suspend fun getCollection(id: String): Collection?
+
+    /** Main when present, otherwise the first collection by sort order; null when there are none. */
+    suspend fun defaultCollection(): Collection?
+
+    /** Full membership replace, in one transaction — the manga `assign` contract. */
+    suspend fun assign(bookId: String, collectionIds: Set<String>)
+    fun observeCollectionsFor(bookId: String): Flow<Set<String>>
+    fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>>
+    suspend fun bookIdsInCollection(collectionId: String): Set<String>
+
+    /** Gives the book the default collection when it belongs to no collection yet. */
+    suspend fun ensureMembership(bookId: String)
+
+    /**
+     * Startup repair: creates Main when missing and moves every collection-less
+     * book into the default collection, so nothing is invisible now that the
+     * library shows one shelf at a time.
+     */
+    suspend fun ensureSeeded()
 }
 
 interface SeriesRepository {

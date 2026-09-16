@@ -1,6 +1,7 @@
 package com.folio.reader.importer
 
 import com.folio.reader.database.BookRepository
+import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.ReadingPositionRepository
 import com.folio.reader.epub.EpubParser
 import com.folio.reader.model.Book
@@ -24,13 +25,19 @@ class BookImporter(
     private val bookRepository: BookRepository,
     private val positionRepository: ReadingPositionRepository,
     private val searchIndexer: SearchIndexer,
-    private val hashUtil: com.folio.reader.platform.FileHasher
+    private val hashUtil: com.folio.reader.platform.FileHasher,
+    /**
+     * Optional: gives every imported (or re-linked) book its default collection
+     * so it lands on a real shelf — the manga library's Main-category rule.
+     * Null keeps imports exactly as they were (tests).
+     */
+    private val collectionRepository: CollectionRepository? = null
 ) {
     suspend fun importEpub(filePath: String): Result<Book> {
         return withContext(Dispatchers.IO) {
             try {
                 println("Import: Starting import of $filePath")
-                
+
                 // 1. Calculate hash
                 println("Import: Calculating file hash...")
                 val hash = hashUtil.sha256File(filePath)
@@ -45,6 +52,7 @@ class BookImporter(
                     val fileExists = File(platform.fileSystem.getBookEpubPath(existingByHash.id)).exists()
                     if (fileExists) {
                         println("Import: Duplicate detected (same file hash)")
+                        runCatching { collectionRepository?.ensureMembership(existingByHash.id) }
                         return@withContext Result.failure(DuplicateBookException("Book already imported (same file)", existingByHash))
                     }
                     println("Import: Linking local EPUB file to existing synced metadata record (${existingByHash.id})")
@@ -62,6 +70,7 @@ class BookImporter(
                         val fileExists = File(platform.fileSystem.getBookEpubPath(existingByIsbn.id)).exists()
                         if (fileExists) {
                             println("Import: Duplicate detected (same ISBN)")
+                            runCatching { collectionRepository?.ensureMembership(existingByIsbn.id) }
                             return@withContext Result.failure(DuplicateBookException("Book with same ISBN exists", existingByIsbn))
                         }
                     }
@@ -113,6 +122,10 @@ class BookImporter(
                 println("Import: Saving to database...")
                 bookRepository.insertBook(book)
                 bookRepository.insertChapters(bookId, chaptersWithBookId)
+
+                // A fresh import always lands on a real shelf — Main unless the
+                // reader moves it (the manga library's ensureMembership rule).
+                runCatching { collectionRepository?.ensureMembership(bookId) }
 
                 // 11. Index for search — one bulk transaction (150-chapter books
                 // were doing 150 separate commits, hanging the import for minutes).
