@@ -1,5 +1,8 @@
 package com.folio.reader.ui.library
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,7 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -72,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.folio.reader.model.Book
@@ -82,6 +86,10 @@ import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.folioFadeSwap
+import com.folio.reader.ui.components.FolioSharedElementsSuppressed
+import com.folio.reader.ui.components.rememberSwapInFlight
+import com.folio.reader.ui.manga.MangaLibraryRail
 import com.folio.reader.ui.search.BookHit
 import com.folio.reader.ui.search.BookSearchController
 import com.folio.reader.ui.search.BookSearchResultsList
@@ -90,6 +98,7 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioTopInset
 import com.folio.reader.ui.theme.folioBarTopInset
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.launch
 
 /** Top-level library category. Names are persisted, so existing values must remain stable. */
@@ -161,6 +170,11 @@ fun LibraryScreen(
     /** Documents rail search: same pattern as books, backed by the document query flow. */
     documentSearchActive: Boolean = false,
     onDocumentSearchActiveChange: (Boolean) -> Unit = {},
+    /** Manga rail search + chrome, hosted here for the same reason as the other two. */
+    mangaSearchActive: Boolean = false,
+    onMangaSearchActiveChange: (Boolean) -> Unit = {},
+    mangaSourcesAvailable: Boolean = false,
+    onOpenMangaDownloads: () -> Unit = {},
 ) {
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
@@ -359,19 +373,38 @@ fun LibraryScreen(
             (syncState.pendingUploadCount + syncState.pendingDownloadCount) > 0
         )
 
-    // The books rail: the Books/Manga switch, then the status and grouping filters,
-    // on one scrollable row. Built here so the masthead can fold it away as a unit.
+    // The rail: the Books/Manga/Documents switch, then that mode's filters, on one
+    // scrollable row. Built here so the masthead can fold it away as a unit.
     // Measured on the content, not the folding box the masthead wraps it in — that
     // one reports a shrinking height as the shelf scrolls, by design.
-    var railPx by remember { mutableIntStateOf(0) }
+    //
+    // Cached per mode rather than one shared value, because a shared value survives
+    // the switch by exactly the one layout pass that matters: the incoming shelf is
+    // measured under the *outgoing* mode's rail height and jumps when the new rail
+    // reports its own. That hop was the reported "layout changes for a split second".
+    val railPxByMode = remember { mutableStateMapOf<LibraryMode, Int>() }
     val railContent: (@Composable () -> Unit)? = when (libraryMode) {
-        LibraryMode.MANGA -> null
+        LibraryMode.MANGA -> mangaLibraryViewModel?.let { mangaVm -> ({
+            // Manga's chrome, in the same slot the other two modes use. It used to
+            // be a row pinned inside the shelf, which is why entering Manga changed
+            // the header's structure and the incoming grid had to be re-laid out.
+            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
+                MangaLibraryRail(
+                    viewModel = mangaVm,
+                    searchActive = mangaSearchActive,
+                    onSearchActiveChange = onMangaSearchActiveChange,
+                    sourcesAvailable = mangaSourcesAvailable,
+                    onOpenDownloads = onOpenMangaDownloads,
+                    leading = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                )
+            }
+        }) }
         LibraryMode.DOCUMENTS -> ({
             // One rail, exactly like Books and Manga: the switch leads the
             // category chips, so no mode stacks its categories below the
             // selector. While searching, the chips give way to the field but
             // the switch stays at the head of the row.
-            Box(Modifier.onSizeChanged { railPx = it.height }) {
+            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
                 if (documentSearchActive && documentLibraryViewModel != null) {
                     LibrarySearchRail(
                         switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
@@ -414,7 +447,7 @@ fun LibraryScreen(
             }
         })
         LibraryMode.BOOKS -> ({
-            Box(Modifier.onSizeChanged { railPx = it.height }) {
+            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
                 val controller = bookSearchController
                 if (bookSearchActive && controller != null) {
                     LibrarySearchRail(
@@ -461,12 +494,21 @@ fun LibraryScreen(
     }
 
     // Published rather than imposed, exactly like LocalFolioBarInset at the bottom
-    // edge: the shelves add it to their own contentPadding so their first row
-    // clears the glass while everything past it scrolls underneath. They are
-    // reached through the opaque `mangaContent` lambda, so it could not be passed.
-    val topInset = folioBarTopInset(
-        if (mangaMode) 0.dp else with(LocalDensity.current) { railPx.toDp() }
-    )
+    // edge: the shelves add it to their own contentPadding so their first row clears
+    // the glass while everything past it scrolls underneath. It is a function of the
+    // mode rather than one value, because a swap has two layers alive at once and the
+    // one still fading out must keep *its own* rail's height — hand it the newly
+    // selected mode's and it re-pads and slides under the incoming chrome, which is
+    // the flash at the start of a switch. The fallback to any measured rail is exact
+    // here: all three rails are one row of the same chips.
+    val shelfDensity = LocalDensity.current
+    val shelfInset: @Composable (LibraryMode) -> Dp = { mode ->
+        folioBarTopInset(
+            with(shelfDensity) {
+                (railPxByMode[mode] ?: railPxByMode.values.firstOrNull() ?: 0).toDp()
+            }
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -580,10 +622,6 @@ fun LibraryScreen(
                 title = "Library",
                 collapse = headerState.collapse,
                 modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
-                // The manga shelf hangs its chip rail below the bar instead of in the
-                // bar's own rail slot, so the foot rule would land between the two —
-                // a divider the other two modes don't have.
-                bottomRule = !mangaMode,
                 actions = {
                     if (syncState != null && syncNeedsAttention) {
                         com.folio.reader.ui.components.SyncStatusBadge(
@@ -888,11 +926,11 @@ fun LibraryScreen(
                         }
                     }
                 },
-                // One rail instead of three stacked rows. The Library mode switch leads
-                // the same scrollable row the filters live on, and the whole row folds
-                // up under the bar as the shelf scrolls. In manga mode the shelf's own
-                // rail carries the switch (MangaLibraryScreen.railLeading), so there is
-                // still exactly one row either way.
+                // One rail instead of three stacked rows. The Library mode switch
+                // leads the same scrollable row the filters live on, and the whole
+                // row folds up under the bar as the shelf scrolls. All three modes
+                // — manga included, since §17 — put their chrome here, so a switch
+                // never changes the header's structure underneath the shelf.
                 rail = railContent,
             )
             }
@@ -903,13 +941,18 @@ fun LibraryScreen(
         // full-bleed to the top of the window with the masthead floating over it —
         // the only arrangement in which there is anything behind the glass to see.
         //
-        // No crossfade between the shelves: a fade disposes the outgoing shelf and
-        // rebuilds the incoming one from scratch every toggle — scroll positions lost,
-        // covers re-resolving — which is exactly what made the switch feel slow. Each
-        // shelf keeps its saveable state (LazyGrid scroll, selection) through the
-        // state holder, so a swap is a single-frame recomposition.
+        // A short dissolve between the shelves. The hard cut read as a jump, and the
+        // slide + scale + SizeTransform the §17 pass put in its place read worse: the
+        // chrome above the shelf is *shared*, so a swap has to leave the page exactly
+        // where it is. A slide uncovers a bare band at the page edge, a scale softens
+        // every cover and glyph for the whole cross, and SizeTransform measures the
+        // incoming grid against an interpolated width, which changes its column count
+        // and then snaps it back — the "layout changes for a split second" report.
+        // Scroll and selection ride the saveable state holder, so each shelf returns
+        // exactly where it was; only the dissolve is animated.
         val shelfStateHolder = rememberSaveableStateHolder()
-        CompositionLocalProvider(LocalFolioTopInset provides topInset) {
+        val swapMotion = rememberMotionEnabled()
+        CompositionLocalProvider(LocalFolioTopInset provides shelfInset(libraryMode)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -917,85 +960,94 @@ fun LibraryScreen(
                     // §16: the shelf (books grid, documents, manga, or the stats
                     // hub when embedded here) is the backdrop the masthead and
                     // capsule blur. One box, one source — never the grids
-                    // themselves, so a shelf swap never stacks two.
+                    // themselves, so a swap dissolves inside a single registered
+                    // backdrop instead of registering two.
                     .folioBackdropSource(),
             ) {
-                when (libraryMode) {
-                    LibraryMode.MANGA -> shelfStateHolder.SaveableStateProvider("manga") {
-                        mangaContent?.invoke()
-                    }
-                    LibraryMode.DOCUMENTS -> shelfStateHolder.SaveableStateProvider("documents") {
-                        DocumentLibraryContent(
-                            state = documentState,
-                            selectedIds = selectedDocumentIds,
-                            isSelectionMode = documentSelectionActive,
-                            onImport = onDocumentImportClick,
-                            onOpen = onDocumentOpen,
-                            onDelete = { documentToDelete = it },
-                            onCategories = { document ->
-                                documentScope.launch {
-                                    val initial = documentLibraryViewModel
-                                        ?.categoriesFor(document.id)
-                                        ?: emptySet()
-                                    documentPicker = document to initial
-                                }
-                            },
-                            onToggleSelection = {
-                                documentLibraryViewModel?.toggleSelection(it)
+                AnimatedContent(
+                    targetState = libraryMode,
+                    transitionSpec = { folioFadeSwap(swapMotion) },
+                    label = "shelf swap",
+                ) { mode ->
+                    CompositionLocalProvider(LocalFolioTopInset provides shelfInset(mode)) {
+                        when (mode) {
+                            LibraryMode.MANGA -> shelfStateHolder.SaveableStateProvider("manga") {
+                                mangaContent?.invoke()
                             }
-                        )
-                    }
-                    LibraryMode.BOOKS -> shelfStateHolder.SaveableStateProvider("books") {
-                        // Searching the shelf: the Titles scope filters the grid in
-                        // place; every other scope replaces the shelf with the same
-                        // hit list the full-screen search renders, so one interaction
-                        // covers both surfaces.
-                        val controller = bookSearchController
-                        if (bookSearchActive && controller != null && controller.scope != SearchScope.TITLES) {
-                            BookSearchResultsList(
-                                query = controller.query,
-                                scope = controller.scope,
-                                titleMatches = controller.titleMatches,
-                                results = controller.results,
-                                annotationResults = controller.annotationResults,
-                                onOpenTitle = onBookDetailClick,
-                                onOpenHit = onOpenBookHit,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            val queryText = if (bookSearchActive) controller?.query?.trim().orEmpty() else ""
-                            val displayed = if (queryText.isNotEmpty()) {
-                                books?.filter {
-                                    it.title.contains(queryText, ignoreCase = true) ||
-                                        it.displayAuthor.contains(queryText, ignoreCase = true)
-                                }
-                            } else {
-                                books
-                            }
-                            if (displayed != null && displayed.isEmpty() && queryText.isNotEmpty()) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    com.folio.reader.ui.components.EmptyState(
-                                        icon = Icons.Filled.Search,
-                                        headline = "No matches for \"$queryText\"",
-                                    )
-                                }
-                            } else {
-                                LibraryContent(
-                                    books = displayed,
-                                    libraryEmpty = allBooks.isEmpty(),
-                                    viewMode = booksViewMode,
-                                    selectedBooks = selectedBooks,
-                                    isSelectionMode = isSelectionMode,
-                                    preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
-                                    finishEstimates = finishEstimates,
-                                    onBookClick = {
-                                        if (isSelectionMode) viewModel.toggleSelection(it.id)
-                                        else onBookDetailClick(it)
+                            LibraryMode.DOCUMENTS -> shelfStateHolder.SaveableStateProvider("documents") {
+                                DocumentLibraryContent(
+                                    state = documentState,
+                                    selectedIds = selectedDocumentIds,
+                                    isSelectionMode = documentSelectionActive,
+                                    onImport = onDocumentImportClick,
+                                    onOpen = onDocumentOpen,
+                                    onDelete = { documentToDelete = it },
+                                    onCategories = { document ->
+                                        documentScope.launch {
+                                            val initial = documentLibraryViewModel
+                                                ?.categoriesFor(document.id)
+                                                ?: emptySet()
+                                            documentPicker = document to initial
+                                        }
                                     },
-                                    onBookLongClick = { viewModel.toggleSelection(it.id) },
-                                    onDeleteBook = { bookToDelete = it },
-                                    onImportClick = onImportClick
+                                    onToggleSelection = {
+                                        documentLibraryViewModel?.toggleSelection(it)
+                                    }
                                 )
+                            }
+                            LibraryMode.BOOKS -> shelfStateHolder.SaveableStateProvider("books") {
+                                // Searching the shelf: the Titles scope filters the grid in
+                                // place; every other scope replaces the shelf with the same
+                                // hit list the full-screen search renders, so one interaction
+                                // covers both surfaces.
+                                val controller = bookSearchController
+                                if (bookSearchActive && controller != null && controller.scope != SearchScope.TITLES) {
+                                    BookSearchResultsList(
+                                        query = controller.query,
+                                        scope = controller.scope,
+                                        titleMatches = controller.titleMatches,
+                                        results = controller.results,
+                                        annotationResults = controller.annotationResults,
+                                        onOpenTitle = onBookDetailClick,
+                                        onOpenHit = onOpenBookHit,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    val queryText = if (bookSearchActive) controller?.query?.trim().orEmpty() else ""
+                                    val displayed = if (queryText.isNotEmpty()) {
+                                        books?.filter {
+                                            it.title.contains(queryText, ignoreCase = true) ||
+                                                it.displayAuthor.contains(queryText, ignoreCase = true)
+                                        }
+                                    } else {
+                                        books
+                                    }
+                                    if (displayed != null && displayed.isEmpty() && queryText.isNotEmpty()) {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            com.folio.reader.ui.components.EmptyState(
+                                                icon = Icons.Filled.Search,
+                                                headline = "No matches for \"$queryText\"",
+                                            )
+                                        }
+                                    } else {
+                                        LibraryContent(
+                                            books = displayed,
+                                            libraryEmpty = allBooks.isEmpty(),
+                                            viewMode = booksViewMode,
+                                            selectedBooks = selectedBooks,
+                                            isSelectionMode = isSelectionMode,
+                                            preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
+                                            finishEstimates = finishEstimates,
+                                            onBookClick = {
+                                                if (isSelectionMode) viewModel.toggleSelection(it.id)
+                                                else onBookDetailClick(it)
+                                            },
+                                            onBookLongClick = { viewModel.toggleSelection(it.id) },
+                                            onDeleteBook = { bookToDelete = it },
+                                            onImportClick = onImportClick
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1524,37 +1576,53 @@ private fun LibraryContent(
                 )
             }
         } else {
-            when (viewMode) {
-                LibraryViewModel.ViewMode.GRID -> BookGrid(
-                    books = books,
-                    onBookClick = onBookClick,
-                    onBookLongClick = onBookLongClick,
-                    onDeleteBook = onDeleteBook,
-                    selectedBooks = selectedBooks,
-                    isSelectionMode = isSelectionMode,
-                    finishEstimates = finishEstimates,
-                    preserveFeaturedDuringSelection = preserveFeaturedDuringSelection,
-                )
+            // Grid↔List↔Compact dissolves as one surface reconfiguring rather than a
+            // hard cut between two different lazy layouts. The cover morph is
+            // suspended for the length of the cross: while it runs, the outgoing
+            // grid and the incoming list are composed together and each holds this
+            // book's cover key, and two live copies of one key in one scope is the
+            // case the shared-transition registry cannot resolve.
+            val swapMotion = rememberMotionEnabled()
+            val swapInFlight = rememberSwapInFlight(viewMode)
+            AnimatedContent(
+                targetState = viewMode,
+                transitionSpec = { folioFadeSwap(swapMotion) },
+                label = "view mode swap",
+            ) { mode ->
+                FolioSharedElementsSuppressed(swapInFlight) {
+                    when (mode) {
+                        LibraryViewModel.ViewMode.GRID -> BookGrid(
+                            books = books,
+                            onBookClick = onBookClick,
+                            onBookLongClick = onBookLongClick,
+                            onDeleteBook = onDeleteBook,
+                            selectedBooks = selectedBooks,
+                            isSelectionMode = isSelectionMode,
+                            finishEstimates = finishEstimates,
+                            preserveFeaturedDuringSelection = preserveFeaturedDuringSelection,
+                        )
 
-                LibraryViewModel.ViewMode.LIST -> BookList(
-                    books,
-                    onBookClick,
-                    onBookLongClick,
-                    onDeleteBook,
-                    selectedBooks,
-                    isSelectionMode,
-                    finishEstimates
-                )
+                        LibraryViewModel.ViewMode.LIST -> BookList(
+                            books,
+                            onBookClick,
+                            onBookLongClick,
+                            onDeleteBook,
+                            selectedBooks,
+                            isSelectionMode,
+                            finishEstimates
+                        )
 
-                LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
-                    books,
-                    onBookClick,
-                    onBookLongClick,
-                    onDeleteBook,
-                    selectedBooks,
-                    isSelectionMode,
-                    finishEstimates
-                )
+                        LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
+                            books,
+                            onBookClick,
+                            onBookLongClick,
+                            onDeleteBook,
+                            selectedBooks,
+                            isSelectionMode,
+                            finishEstimates
+                        )
+                    }
+                }
             }
         }
     }

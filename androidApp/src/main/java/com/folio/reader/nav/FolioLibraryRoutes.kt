@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.home.HomeScreen
 import com.folio.reader.ui.library.LibraryMode
@@ -59,15 +60,15 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
     val navController = navModel.navController ?: return
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // §13.9 hero collapse: Home reports the fully-collapsed flip, the hero title
-    // and the hero tint; the bar swaps its title to titleMedium and bleeds the
-    // hero gradient upward while the collapse tracks the finger inside HomeScreen.
     // §13.9 hero collapse: Home reports the fraction continuously, plus the hero title
     // and the hero tint. The masthead cross-fades the wordmark out and the book's title
     // in across the same scroll, gains its glass at the same rate, and takes a bleed of
     // the hero's own colour — so the card does not dissolve into a bar that is still
-    // saying something else.
-    var heroCollapse by remember { mutableStateOf(0f) }
+    // saying something else. The fraction stays offset-derived, as §13.9 requires, but
+    // it is *stored* in the same state the other mastheads use: that is what lets Home's
+    // bar come back collapsed along with the page it belongs to instead of resetting to
+    // glass-free at the top. Home keeps its own 160dp range.
+    val heroHeader = rememberFolioHeaderState(range = 160.dp)
     var heroTitle by remember { mutableStateOf<String?>(null) }
     var heroTint by remember { mutableStateOf<Color?>(null) }
     // Overlay: the page runs to the top of the window and the masthead floats over
@@ -77,7 +78,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
         // uses matchParentSize, which resolves against this box. Hoisting align to
         // the full-screen one would size that tint to the viewport and flood the page.
         Box(modifier = Modifier.align(Alignment.TopCenter).zIndex(1f)) {
-            val fraction = heroCollapse
+            val fraction = heroHeader.collapse
             FolioTopBar(
                 title = "Folio",
                 collapse = fraction,
@@ -174,7 +175,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     }
                 },
                 onHeroCollapse = { collapsed, title, tint ->
-                    heroCollapse = collapsed
+                    heroHeader.setProgress(collapsed)
                     heroTitle = title
                     heroTint = tint
                 }
@@ -304,6 +305,10 @@ fun LibraryRoute(
         mangaViewMode = com.folio.reader.ui.manga.MangaViewMode.entries[navModel.sharedViewIndex],
         onMangaViewModeChange = { navModel.sharedViewIndex = it.ordinal },
         onMangaSearchClick = { navModel.mangaSearchActive = !navModel.mangaSearchActive },
+        mangaSearchActive = navModel.mangaSearchActive,
+        onMangaSearchActiveChange = { navModel.mangaSearchActive = it },
+        mangaSourcesAvailable = navModel.mangaBrowseVM != null,
+        onOpenMangaDownloads = onOpenMangaDownloads,
         onMangaImportClick = { callbacks.onImportMangaChoice() },
         onRemoveSelectedManga = { ids ->
             mangaRemovalIds = ids
@@ -318,7 +323,6 @@ fun LibraryRoute(
                 onOpenManga = { id -> onOpenMangaDetail(id) },
                 onOpenBrowse = onOpenMangaBrowse,
                 onOpenExtensions = onOpenMangaExtensions,
-                onOpenDownloads = onOpenMangaDownloads,
                 onOpenSource = { source, q -> onOpenMangaSource(source.id, q) },
                 viewMode = com.folio.reader.ui.manga.MangaViewMode.entries[navModel.sharedViewIndex],
                 onViewModeChange = { navModel.sharedViewIndex = it.ordinal },
@@ -331,14 +335,6 @@ fun LibraryRoute(
                     deleteMangaDownloads = false
                     clearMangaSelectionAfterRemoval = false
                 },
-                // One rail on the manga shelf too: the Books/Manga switch leads the
-                // category chips instead of sitting on a row of its own above them.
-                railLeading = {
-                    com.folio.reader.ui.library.LibraryModeSwitch(
-                        mode = navModel.libraryMode,
-                        onModeChange = { navModel.libraryMode = it },
-                    )
-                }
             )
         }
     )

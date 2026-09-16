@@ -63,6 +63,8 @@ import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
@@ -417,10 +419,13 @@ fun MangaDetailScreen(
         ) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+                    // §17 shared element: the plate flies in from the shelf cell
+                    // the reader tapped, rather than being drawn fresh here.
                     Box(
                         modifier = Modifier
                             .width(110.dp)
                             .aspectRatio(0.68f)
+                            .sharedElementOrNoop(FolioSharedKeys.mangaCover(m.id))
                             .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
                     ) {
                         MangaCover(

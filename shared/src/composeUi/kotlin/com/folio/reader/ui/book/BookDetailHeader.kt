@@ -29,6 +29,8 @@ import com.folio.reader.model.Series
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
@@ -85,7 +87,11 @@ internal fun BookHeaderSection(
                 width = FolioTokens.coverFeature,
                 halo = accent,
                 elevation = 16.dp,
-                modifier = Modifier.clickable { onCoverClick() },
+                modifier = Modifier
+                    // §17: the same plate the shelf handed over — matching key,
+                    // so the cover flies from the grid cell into this page.
+                    .sharedElementOrNoop(FolioSharedKeys.bookCover(book.id))
+                    .clickable { onCoverClick() },
             )
 
             Column(
