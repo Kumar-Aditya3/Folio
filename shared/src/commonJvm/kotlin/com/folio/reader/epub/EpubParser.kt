@@ -421,7 +421,8 @@ class EpubParser(
             // Ignore generic toc labels that equal the book title (common in NCX fallback)
             val tocLabel = tocMatch?.label?.takeIf { it.trim() != metadata.title.trim() && it.isNotBlank() }
             val title = tocLabel ?: extractTitle(html, metadata.title)
-                ?: "Chapter ${spineIndex + 1}"
+                ?: FrontMatterLabels.label(html, manifestItem.href, metadata.title)
+                ?: unlabeledTitle(wordCount, spineIndex)
 
             val chapter = Chapter(
                 id = manifestItem.id,
@@ -444,6 +445,14 @@ class EpubParser(
         // Build hierarchy from TOC
         return buildChapterHierarchy(chapters, toc)
     }
+
+    /**
+     * A spine position is not a chapter number. Numbering every unnamed page from it put
+     * "Chapter 10" between "Acknowledgments" and "Dramatis Personae", so only pages that carry
+     * prose get the number; covers, flaps and blank leaves get a neutral label instead.
+     */
+    private fun unlabeledTitle(wordCount: Long, spineIndex: Int): String =
+        if (wordCount >= FrontMatterLabels.MIN_BODY_WORDS) "Chapter ${spineIndex + 1}" else "Untitled"
 
     private fun extractText(html: String): Pair<String, Long> {
         // Simple HTML text extraction - in production use a proper HTML parser

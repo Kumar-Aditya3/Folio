@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.folio.reader.AppGraph
+import com.folio.reader.epub.repairStoredChapterTitles
 import com.folio.reader.model.Book
 import com.folio.reader.settings.normalized
 import com.folio.reader.settings.overriddenFields
@@ -117,17 +118,13 @@ private fun ReaderRouteContent(
     }.collectAsState(initial = null)
 
     LaunchedEffect(Unit) {
-        // Self-heal generic chapter titles (imports before the title fix)
-        runCatching {
-            val existing = graph.bookRepository.getChaptersForBook(book.id)
-            if (existing.size > 2 && existing.distinctBy { it.title }.size == 1) {
-                val parsed = graph.epubParser.parseEpub(graph.platform.fileSystem.getBookEpubPath(book.id))
-                val fixed = parsed.chapters.map { it.copy(bookId = book.id) }
-                if (fixed.size == existing.size && fixed.distinctBy { it.title }.size > 1) {
-                    graph.bookRepository.insertChapters(book.id, fixed)
-                }
-            }
-        }
+        // Re-derive chapter titles stored before the labeling fixes (see ChapterTitleRepair).
+        repairStoredChapterTitles(
+            bookId = book.id,
+            epubPath = graph.platform.fileSystem.getBookEpubPath(book.id),
+            parser = graph.epubParser,
+            repository = graph.bookRepository
+        )
         viewModel.openBook(
             book.id,
             graph.deviceId,

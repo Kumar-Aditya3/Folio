@@ -44,6 +44,7 @@ import com.folio.reader.database.JdbcStatisticsRepository
 import com.folio.reader.database.JdbcSyncQueueRepository
 import com.folio.reader.epub.EpubParser
 import com.folio.reader.epub.JvmChapterContentProvider
+import com.folio.reader.epub.repairStoredChapterTitles
 import com.folio.reader.importer.BookImporter
 import com.folio.reader.importer.DocumentDeletionService
 import com.folio.reader.importer.DocumentFormatDetector
@@ -1791,18 +1792,13 @@ private fun ReaderRoute(
     }.collectAsState(initial = null)
 
     LaunchedEffect(Unit) {
-        // Self-heal: books imported before the title-extraction fix stored the book
-        // title as EVERY chapter name. Re-derive from the EPUB when detected.
-        runCatching {
-            val existing = deps.bookRepository.getChaptersForBook(book.id)
-            if (existing.size > 2 && existing.distinctBy { it.title }.size == 1) {
-                val parsed = deps.epubParser.parseEpub(deps.platform.fileSystem.getBookEpubPath(book.id))
-                val fixed = parsed.chapters.map { it.copy(bookId = book.id) }
-                if (fixed.size == existing.size && fixed.distinctBy { it.title }.size > 1) {
-                    deps.bookRepository.insertChapters(book.id, fixed)
-                }
-            }
-        }
+        // Re-derive chapter titles stored before the labeling fixes (see ChapterTitleRepair).
+        repairStoredChapterTitles(
+            bookId = book.id,
+            epubPath = deps.platform.fileSystem.getBookEpubPath(book.id),
+            parser = deps.epubParser,
+            repository = deps.bookRepository
+        )
         viewModel.openBook(
             book.id,
             deps.deviceId,

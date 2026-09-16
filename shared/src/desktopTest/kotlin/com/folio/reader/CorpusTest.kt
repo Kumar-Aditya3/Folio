@@ -5,6 +5,7 @@ import com.folio.reader.database.JdbcBookRepository
 import com.folio.reader.database.JdbcReadingPositionRepository
 import com.folio.reader.database.JdbcSettingsRepository
 import com.folio.reader.epub.EpubParser
+import com.folio.reader.epub.FrontMatterLabels
 import com.folio.reader.importer.BookImporter
 import com.folio.reader.importer.DuplicateBookException
 import com.folio.reader.importer.SearchIndexer
@@ -96,6 +97,42 @@ class CorpusTest {
             assertTrue(parsed.totalCharacters > 0, "${file.name}: totalCharacters not computed")
         }
     }
+
+    @Test
+    fun `corpus furniture pages are never numbered as chapters`() = runBlocking {
+        val offenders = mutableListOf<String>()
+        for (file in corpusFiles()) {
+            for (chapter in parser.parseEpub(file.absolutePath).chapters) {
+                if (chapter.wordCount < FrontMatterLabels.MIN_BODY_WORDS &&
+                    chapter.title.matches(Regex("Chapter \\d+"))
+                ) {
+                    offenders += "${file.name}: spine ${chapter.spineIndex} '${chapter.title}' @${chapter.wordCount}w"
+                }
+            }
+        }
+        assertTrue(
+            offenders.isEmpty(),
+            "book furniture must not read as a chapter:\n" + offenders.joinToString("\n")
+        )
+    }
+
+    @Test
+    fun `corpus names its front matter instead of numbering it`() = runBlocking {
+        val named = corpusFiles().filter { file ->
+            parser.parseEpub(file.absolutePath).chapters.take(10).any { it.title in matterNames }
+        }
+        assertTrue(
+            named.size >= corpusFiles().size * 4 / 5,
+            "expected at least 80% of the corpus to name its front matter, got ${named.size}/${corpusFiles().size}"
+        )
+    }
+
+    private val matterNames = setOf(
+        "Cover", "Back Cover", "Title Page", "Half Title", "Copyright", "Contents",
+        "Dedication", "Epigraph", "Foreword", "Preface", "Introduction", "Acknowledgments",
+        "Also By", "About the Author", "Dramatis Personae", "Author's Note", "Note to Readers",
+        "Glossary", "Appendix", "Map", "Illustrations", "About This eBook"
+    )
 
     @Test
     fun `import persists book, copies file, and computes progress fields`() = runBlocking {
