@@ -20,6 +20,7 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
+import com.folio.reader.statistics.expandExtensionExclusions
 import com.folio.reader.ui.components.currentStreak
 import com.folio.reader.ui.components.finishEstimate
 import com.folio.reader.ui.components.mangaFinishEstimate
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
@@ -245,39 +247,62 @@ class HomeViewModel(
      * because `combine` tears the whole state down when any source finishes.
      */
     private val discoverFlow: Flow<List<MangaDiscoverItem>> = flow {
+        // The exclusion set this fetch runs under (extension rows already
+        // expanded to source ids); it doubles as the cache signature.
+        val exclusions = currentExclusions()
+        val signature = exclusions.hashCode()
         // Fresh cache: one emission, no network — the "one browse request per
         // cache window" contract. Stale cache: show the stale rows immediately
         // (stale beats blank), then refresh in place. No cache: empty, then
         // fetch. The fetch only ever runs when the window has actually lapsed.
+        // A cache written under a different exclusion set is a miss, not a
+        // window: rows sourced from a now-excluded extension must not linger.
         val now = Clock.System.now()
         val cached = discoverCache
         if (cached != null) {
-            val ttl = if (cached.second.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
-            if (now - cached.first < ttl) {
-                emit(cached.second)
-                awaitCancellation()
+            val ttl = if (cached.items.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
+            if (cached.signature == signature) {
+                if (now - cached.at < ttl) {
+                    emit(cached.items)
+                    awaitCancellation()
+                }
+                emit(cached.items)
+            } else {
+                emit(emptyList())
             }
-            emit(cached.second)
         } else {
             emit(emptyList())
         }
-        val exclusions = statsExclusionRepository?.observeExclusions()?.first() ?: emptySet()
         emit(fetchDiscover(exclusions))
         awaitCancellation()
+    }
+
+    /** The exclusion snapshot Discover fetches under, extension rows expanded to sources. */
+    private suspend fun currentExclusions(): Set<Pair<Scope, String>>? {
+        val raw = statsExclusionRepository?.observeExclusions()?.first() ?: return null
+        val backend = mangaBackend ?: return raw
+        return expandExtensionExclusions(raw, backend.observeSources().first())
     }
 
     /**
      * Home's state. The base pipeline (books, sessions, settings, exclusions,
      * the manga shelves) emits as soon as the local database answers; Discover
      * rides in on top through [discoverFlow] whenever the network gets there.
+     *
+     * EXTENSION exclusions are expanded to MANGA_SOURCE rows here — once, where
+     * the backend's source list is available — so the badges, the manga stats
+     * and the continue shelf all resolve them through the same source-id path.
      */
     val state: Flow<HomeUiState> = run {
         val exclusionRepo = statsExclusionRepository
+        val sourcesFlow: Flow<List<com.folio.reader.manga.MangaSourceInfo>> =
+            mangaBackend?.observeSources() ?: flowOf(emptyList())
         val base = if (exclusionRepo == null) {
-            inputs.map { value -> value.build(null, discover = cachedDiscover()) }
+            inputs.map { value -> value.build(null, discover = cachedDiscover(0)) }
         } else {
-            combine(inputs, exclusionRepo.observeExclusions()) { value, exclusions ->
-                value.build(exclusions, discover = cachedDiscover())
+            combine(inputs, exclusionRepo.observeExclusions(), sourcesFlow) { value, raw, sources ->
+                val exclusions = expandExtensionExclusions(raw, sources)
+                value.build(exclusions, discover = cachedDiscover(exclusions.hashCode()))
             }
         }
         combine(base, discoverFlow) { value, discover ->
@@ -285,8 +310,13 @@ class HomeViewModel(
         }
     }
 
-    /** Discover's cached rows, however stale — the instant first paint. */
-    private fun cachedDiscover(): List<MangaDiscoverItem> = discoverCache?.second.orEmpty()
+    /**
+     * Discover's cached rows when they were fetched under the same exclusion
+     * signature — stale beats blank, but rows from a now-excluded extension
+     * must not linger. 0 is the null-exclusions signature.
+     */
+    private fun cachedDiscover(signature: Int): List<MangaDiscoverItem> =
+        discoverCache?.takeIf { it.signature == signature }?.items.orEmpty()
 
     private suspend fun Inputs.build(
         exclusions: Set<Pair<Scope, String>>?,
@@ -506,10 +536,17 @@ class HomeViewModel(
     }
 
     /**
-     * §11.4 Discover fetch: LATEST from the source of the most recently read
-     * library manga, minus titles already in the library, cap 6. One browse
-     * request per cache window, silently absent on failure, without a backend,
-     * without history, or when the source cannot serve LATEST.
+     * §11.4 Discover fetch: LATEST from the sources of the reader's recent
+     * history, minus titles already in the library, cap 6. One browse request
+     * per cache window, silently absent on failure, without a backend,
+     * without history, or when no candidate source can serve LATEST.
+     *
+     * Exclusions decide which sources may feed the shelf: the source of every
+     * library manga excluded from the statistics — directly, through its
+     * category, its source, or its extension — is banned, and the walk
+     * continues down the history until a clean source is found. Excluding a
+     * title therefore takes its whole extension off Discover, the same way it
+     * takes the title off every other recommendation surface.
      *
      * The live network half only — the cache is read by [discoverFlow] and
      * [cachedDiscover], so this runs *off* Home's first-emission path and its
@@ -520,33 +557,71 @@ class HomeViewModel(
         val history = mangaHistoryRepository ?: return emptyList()
         val mangaRepo = mangaRepository ?: return emptyList()
         val now = Clock.System.now()
+        val signature = exclusions.hashCode()
         val fetched: List<MangaDiscoverItem> = runCatching {
-            val recent = history.observeRecent(1).first().firstOrNull() ?: return emptyList()
-            val entry = mangaRepo.get(recent.mangaId) ?: return emptyList()
-            if (!entry.inLibrary || entry.isLocal) return emptyList()
-            val categories = mangaCategoryRepository?.categoriesFor(entry.id).orEmpty()
-            if (exclusions != null &&
-                !StatsScope(exclusions).includesManga(entry.id, categories, entry.sourceId)
-            ) return emptyList()
-            val source = backend.observeSources().first().firstOrNull { it.id == entry.sourceId }
-            if (source?.supportsLatest != true) return emptyList()
-            val inLibraryTitles = mangaRepo.observeLibrary().first()
+            val scope = exclusions?.let(::StatsScope)
+            val library = mangaRepo.observeLibrary().first()
+            val sources = backend.observeSources().first()
+            // A source is banned when any of its library manga fails StatsScope
+            // — direct, category, source and (expanded) extension rules all
+            // land here, so one excluded title bans its whole extension. Direct
+            // MANGA rows are also resolved outside the library, so an excluded
+            // manga that was since removed still bans the source it came from.
+            val bannedSources: Set<Long> = if (exclusions == null || scope == null) {
+                emptySet()
+            } else {
+                val resolveCategories = scope.hasRules(Scope.MANGA_CATEGORY)
+                buildSet {
+                    for (manga in library) {
+                        val categories = if (resolveCategories) {
+                            mangaCategoryRepository?.categoriesFor(manga.id).orEmpty()
+                        } else {
+                            emptySet()
+                        }
+                        if (!scope.includesManga(manga.id, categories, manga.sourceId)) {
+                            add(manga.sourceId)
+                        }
+                    }
+                    if (scope.hasRules(Scope.MANGA)) {
+                        for ((kind, id) in exclusions) {
+                            if (kind != Scope.MANGA || library.any { it.id == id }) continue
+                            mangaRepo.get(id)?.let { add(it.sourceId) }
+                        }
+                    }
+                }
+            }
+            // Walk the reading history, newest first, until a library manga
+            // from a clean, LATEST-capable source is found. (A plain loop, not
+            // a sequence chain: the entry lookup is a suspend call.)
+            var anchor: com.folio.reader.manga.MangaEntry? = null
+            for (item in history.observeRecent(DISCOVER_CANDIDATE_POOL).first().distinctBy { it.mangaId }) {
+                val entry = mangaRepo.get(item.mangaId) ?: continue
+                if (!entry.inLibrary || entry.isLocal) continue
+                if (entry.sourceId in bannedSources) continue
+                if (sources.firstOrNull { it.id == entry.sourceId }?.supportsLatest != true) continue
+                anchor = entry
+                break
+            }
+            val anchorEntry = anchor ?: return@runCatching emptyList()
+            val inLibraryTitles = library
                 .map { it.title.trim().lowercase() }
                 .toSet()
             val browsePage = withTimeoutOrNull(DISCOVER_FETCH_TIMEOUT_MS) {
-                backend.fetchBrowse(entry.sourceId, page = 1, mode = BrowseMode.LATEST)
+                backend.fetchBrowse(anchorEntry.sourceId, page = 1, mode = BrowseMode.LATEST)
             }
             // Slowness, unlike failure, is not handled by runCatching: without a
             // timeout this await can hold Home's loaded=true for OkHttp's full
             // two-minute call timeout. On timeout fall back to the last cached rows
             // (even if stale) so Discover degrades gracefully instead of stalling;
             // the labeled return still writes the fallback to the cache below.
-            if (browsePage == null) return@runCatching discoverCache?.second ?: emptyList()
+            if (browsePage == null) {
+                return@runCatching discoverCache?.takeIf { it.signature == signature }?.items.orEmpty()
+            }
             browsePage.items
                 .filter { it.title.trim().lowercase() !in inLibraryTitles }
                 .take(DISCOVER_CAP)
                 .map {
-                    MangaDiscoverItem(entry.sourceId, entry.sourceName, it.url, it.title, it.thumbnailUrl)
+                    MangaDiscoverItem(anchorEntry.sourceId, anchorEntry.sourceName, it.url, it.title, it.thumbnailUrl)
                 }
         }.getOrElse { error ->
             // runCatching absorbs CancellationException, which would mis-cache a
@@ -554,7 +629,7 @@ class HomeViewModel(
             if (error is CancellationException) throw error
             emptyList()
         }
-        discoverCache = now to fetched
+        discoverCache = DiscoverCacheEntry(now, signature, fetched)
         return fetched
     }
 
@@ -629,6 +704,11 @@ class HomeViewModel(
         /** Browse hits surfaced in Discover (§11.4). */
         private const val DISCOVER_CAP = 6
         /**
+         * How deep the Discover anchor search walks the reading history: enough
+         * to step past every source banned by the stats exclusions.
+         */
+        private const val DISCOVER_CANDIDATE_POOL = 25
+        /**
          * Bound on the live Discover browse call: OkHttp's own call timeout is two
          * minutes, which would otherwise hold Home's loaded=true that long on a bad
          * network. Discover degrades to cache/empty instead of stalling the surface.
@@ -645,9 +725,18 @@ class HomeViewModel(
         /**
          * The Discover cache must outlive Home's composition — HomeRoute recreates
          * the view model per visit, so an instance field would re-fetch every time.
+         * [signature] records the exclusion set the rows were fetched under; a
+         * change is a cache miss so rows from a since-excluded extension never
+         * linger (0 = fetched with no exclusions wired).
          */
+        private data class DiscoverCacheEntry(
+            val at: Instant,
+            val signature: Int,
+            val items: List<MangaDiscoverItem>
+        )
+
         @Volatile
-        private var discoverCache: Pair<Instant, List<MangaDiscoverItem>>? = null
+        private var discoverCache: DiscoverCacheEntry? = null
 
         internal fun resetDiscoverCache() {
             discoverCache = null

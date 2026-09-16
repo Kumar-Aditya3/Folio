@@ -39,8 +39,6 @@ import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.home.HomeScreen
-import com.folio.reader.ui.home.HomeUiState
-import com.folio.reader.ui.home.HomeViewModel
 import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.library.LibraryScreen
 import com.folio.reader.ui.library.DocumentLibraryViewModel
@@ -127,30 +125,10 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             }
         }
         Box(modifier = Modifier.fillMaxSize().folioBackdropSource()) {
-            val viewModel = remember {
-                HomeViewModel(
-                    graph.bookRepository,
-                    graph.sessionRepository,
-                    graph.settingsRepository,
-                    // §11.2/§12.9: exclusions gate every Home content selection;
-                    // group repos resolve each book's tags and collections.
-                    com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
-                    graph.tagRepository,
-                    graph.collectionRepository,
-                    // §11.4: the New-chapters card reads manga_update_state through
-                    // the same exclusions the worker's badges are gated by.
-                    graph.mangaUpdateRepository,
-                    // §11.4 Phase 9: manga Continue reading + Discover.
-                    graph.mangaHistoryRepository,
-                    graph.mangaRepository,
-                    graph.mangaChapterRepository,
-                    graph.mangaCategoryRepository,
-                    graph.mangaBackend,
-                    // §11.4: chapter pace for the manga predictions on Reading now.
-                    com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database)
-                )
-            }
-            val state by viewModel.state.collectAsState(initial = HomeUiState())
+            // One view model for the app's lifetime, with its state kept hot
+            // from app start (FolioNavModelImpl.homeState) — the skeleton used
+            // to re-run on every visit because the route rebuilt the VM.
+            val state by navModel.homeState.collectAsState()
             HomeScreen(
                 state = state,
                 topInset = folioBarTopInset(),

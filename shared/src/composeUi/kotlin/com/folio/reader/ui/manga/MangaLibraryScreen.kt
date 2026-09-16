@@ -1,7 +1,7 @@
 package com.folio.reader.ui.manga
 
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -61,10 +62,10 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
-import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.LocalFolioTopInset
 import kotlinx.coroutines.launch
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MangaLibraryScreen(
     viewModel: MangaLibraryViewModel,
@@ -90,6 +91,9 @@ fun MangaLibraryScreen(
     railLeading: (@Composable () -> Unit)? = null,
 ) {
     val visible by viewModel.visible.collectAsState()
+    val library by viewModel.library.collectAsState()
+    val ready by viewModel.ready.collectAsState()
+    val activeFilters by viewModel.activeFilters.collectAsState()
     val unread by viewModel.unreadCounts.collectAsState()
     val progress by viewModel.progress.collectAsState()
     val lastRead by viewModel.lastRead.collectAsState()
@@ -136,6 +140,24 @@ fun MangaLibraryScreen(
             viewModel.listScrollOffset = listState.firstVisibleItemScrollOffset
             viewModel.gridScrollIndex = gridState.firstVisibleItemIndex
             viewModel.gridScrollOffset = gridState.firstVisibleItemScrollOffset
+        }
+    }
+
+    // A restored scroll index can outlive the list it indexed. The shelf shrinks
+    // under it constantly: the feature slot pulls one series out of `rest`, a
+    // category switch swaps the whole set, and removing a series drops the count.
+    // A LazyGrid/LazyColumn created at an index past the end lays out an empty
+    // viewport — no items, nothing to fling, and no empty state either, because
+    // `visible` is not empty — which is exactly the blank shelf that a rotation
+    // "fixed": the dispose wrote back a clamped index and the rebuilt state
+    // landed in range. Clamp it here instead of relying on an accident.
+    LaunchedEffect(visible.size, viewMode) {
+        if (visible.isEmpty()) return@LaunchedEffect
+        val last = visible.lastIndex
+        if (viewMode == MangaViewMode.LIST || viewMode == MangaViewMode.COMPACT) {
+            if (listState.firstVisibleItemIndex > last) listState.scrollToItem(0)
+        } else if (gridState.firstVisibleItemIndex > last) {
+            gridState.scrollToItem(0)
         }
     }
 
@@ -196,7 +218,6 @@ fun MangaLibraryScreen(
                 .zIndex(1f)
                 .fillMaxWidth()
                 .padding(top = barInset)
-                .background(FolioTheme.atmosphere.fieldTop)
                 .onSizeChanged { furniturePx = it.height },
         ) {
             if (searchActive) {
@@ -311,6 +332,13 @@ fun MangaLibraryScreen(
                     onOpenSource = { source -> onOpenSource(source, query.trim()) },
                 )
             }
+        } else if (visible.isEmpty() && !isSelectionMode && !ready) {
+            // First frames after the shelf (re)mounts: the flows have not landed
+            // yet, and flashing the empty state here read as "another version of
+            // the same screen" on every mode switch.
+            Box(Modifier.fillMaxSize().padding(top = topInset)) {
+                com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
+            }
         } else if (visible.isEmpty() && !isSelectionMode) {
             Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 if (searchActive && query.isNotBlank()) {
@@ -319,11 +347,48 @@ fun MangaLibraryScreen(
                         headline = "No matches in your library"
                     )
                 } else {
+                    // The library and the shelf are different empties: a shelf can
+                    // be empty because everything lives in another category, and
+                    // "your library is empty" + a Browse button would be a lie there.
+                    // Read from the collected state, never viewModel.library.value:
+                    // a raw .value read is not a snapshot subscription, so when the
+                    // library loaded *without* changing `visible` (the membership set
+                    // is empty — precisely the blank-shelf case) nothing invalidated
+                    // this branch and it kept claiming the library was empty.
+                    val libraryEmpty = library.isEmpty()
+                    // A filter is the third, and worst, way this shelf empties: the
+                    // quick filters live in the Display-and-sort dropdown, so an
+                    // active Unread/Reading/Completed filter leaves no mark on the
+                    // rail. Reading one chapter moves a series from progress 0 to
+                    // >0 and the Unread filter then drops it mid-session — the
+                    // "it was there, I read a chapter, it vanished" report — with a
+                    // blank shelf and nothing on screen explaining why. Name the
+                    // filter and give it a one-tap escape.
+                    val filtered = activeFilters.any { it != MangaLibFilter.DOWNLOADED }
                     com.folio.reader.ui.components.EmptyState(
                         icon = Icons.Filled.MenuBook,
-                        headline = "Your manga library is empty",
-                        body = "Browse sources or import CBZ files to get started.",
-                        action = { Button(onClick = onOpenBrowse) { Text("Browse") } }
+                        headline = when {
+                            filtered -> "No manga match your filters"
+                            libraryEmpty -> "Your manga library is empty"
+                            else -> "No manga in this category"
+                        },
+                        body = when {
+                            filtered -> activeFilters
+                                .filter { it != MangaLibFilter.DOWNLOADED }
+                                .joinToString(", ") { it.label }
+                                .let { "Active: $it" }
+                            libraryEmpty -> "Browse sources or import CBZ files to get started."
+                            else -> "Move manga here or choose another category."
+                        },
+                        action = when {
+                            filtered -> ({
+                                Button(onClick = { viewModel.setQuickFilter(null) }) {
+                                    Text("Clear filters")
+                                }
+                            })
+                            libraryEmpty -> ({ Button(onClick = onOpenBrowse) { Text("Browse") } })
+                            else -> null
+                        }
                     )
                 }
             }
@@ -367,6 +432,16 @@ fun MangaLibraryScreen(
                 }
             }
         } else {
+            // The feature slot goes to the first in-progress manga in the current
+            // (already sorted and filtered) list, so it always reflects the user's
+            // own ordering.
+            val featured = remember(visible) {
+                visible.firstOrNull { (progress[it.id] ?: 0f) > 0f && (progress[it.id] ?: 0f) < 0.99f }
+            }
+            val showFeature = featured != null && !isSelectionMode
+            val rest = remember(visible, featured, showFeature) {
+                if (showFeature) visible.filter { it.id != featured!!.id } else visible
+            }
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Adaptive(minSize = 116.dp),
@@ -380,7 +455,41 @@ fun MangaLibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat),
             ) {
-                items(visible, key = { it.id }) { manga ->
+                if (showFeature) {
+                    // maxLineSpan, never Int.MAX_VALUE: a span wider than the line
+                    // makes the cell compute to zero width — the hero composes as a
+                    // 0×0 node and the shelf reads as blank (the books grid's
+                    // FeaturedShelfEntry uses maxLineSpan and renders).
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        val prog = progress[featured!!.id] ?: 0f
+                        FeaturedMangaShelfEntry(
+                            manga = featured!!,
+                            backend = backend,
+                            unreadCount = unread[featured.id] ?: 0,
+                            progress = prog,
+                            fullyRead = prog >= 1f,
+                            isSelected = featured.id in selectedIds,
+                            isSelectionMode = isSelectionMode,
+                            onClick = {
+                                if (isSelectionMode) viewModel.toggleSelection(featured.id) else onOpenManga(featured.id)
+                            },
+                            onLongClick = { viewModel.toggleSelection(featured.id) },
+                            onRemove = {
+                                onRemoveManga?.invoke(featured.id)
+                                    ?: viewModel.removeFromLibrary(featured.id)
+                            },
+                            onMarkRead = { read -> viewModel.markOneRead(featured.id, read) },
+                            onCategories = {
+                                singlePickerManga = featured
+                                singlePickerInitial = null
+                                libraryScope.launch {
+                                    singlePickerInitial = viewModel.categoriesFor(featured.id)
+                                }
+                            },
+                        )
+                    }
+                }
+                items(rest, key = { it.id }) { manga ->
                     val prog = progress[manga.id] ?: 0f
                     MangaGridItem(
                         manga = manga,

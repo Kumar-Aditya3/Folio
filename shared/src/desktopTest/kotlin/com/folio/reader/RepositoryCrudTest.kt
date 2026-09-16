@@ -216,8 +216,12 @@ class RepositoryCrudTest {
 
         collections.addBookToCollection("b1", "col-1")
         collections.deleteCollection("col-1")
-        assertTrue(collections.getAllCollections().first().isEmpty())
-        assertTrue(collections.getCollectionsForBook("b2").isEmpty())
+        // The new shelf model: deleting a collection re-homes its members onto
+        // the default shelf (seeding Main when it must), so no book is ever
+        // left collection-less and invisible on the rail.
+        val remaining = collections.getAllCollections().first()
+        assertEquals(listOf(Collection.MAIN_ID), remaining.map { it.id })
+        assertTrue(collections.getCollectionsForBook("b2").any { it.id == Collection.MAIN_ID })
     }
 
     @Test

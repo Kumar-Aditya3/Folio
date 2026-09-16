@@ -70,13 +70,30 @@ echo location of your Java installation. 1>&2
 :execute
 @rem Setup the command line
 
-
+@rem Folio repo convention (AGENTS.md): no Gradle daemons are left running after
+@rem a build. The wrapper stops the daemon itself once the build finishes — the
+@rem build's own exit code is preserved, and the stop is skipped when the
+@rem command already stops the daemon.
+set AUTO_STOP=1
+for %%a in (%*) do (
+    if /I "%%~a"=="--stop" set AUTO_STOP=0
+    if /I "%%~a"=="-stop" set AUTO_STOP=0
+)
 
 @rem Execute gradlew
-@rem endlocal doesn't take effect until after the line is parsed and variables are expanded
-@rem which allows us to clear the local environment before executing the java command
-endlocal & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* & call :exitWithErrorLevel
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
+call :stopDaemonAndExit
 
-:exitWithErrorLevel
-@rem Use "%COMSPEC%" /c exit to allow operators to work properly in scripts
-"%COMSPEC%" /c exit %ERRORLEVEL%
+@rem endlocal doesn't take effect until after the line is parsed and variables are expanded
+@rem which allows us to clear the local environment before exiting
+endlocal & "%COMSPEC%" /c exit %SAVED_ERRORLEVEL%
+goto :eof
+
+:stopDaemonAndExit
+@rem Saves the build's exit code, stops the daemon (repo convention), and lets
+@rem the caller exit with the saved code.
+set SAVED_ERRORLEVEL=%ERRORLEVEL%
+if "%AUTO_STOP%"=="1" (
+    "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" --stop
+)
+goto :eof

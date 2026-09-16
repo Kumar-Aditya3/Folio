@@ -59,9 +59,12 @@ function markSection(sec){
 }
 // Window extension, answered by the host with append/prepend. Two viewports of
 // lead keeps content under the reader's finger while the next chapter loads.
+// A window may legitimately hold a SINGLE section (the seed chapter, when the
+// next one failed to resolve) — the old `length<2` guard made the first forward
+// extension impossible there, and the reader stuck on the title page forever.
 var lastFwd=0,lastBwd=0;
 function maybeExtend(){
-  var all=secs();if(all.length<2)return;
+  var all=secs();if(!all.length)return;
   var s=scroller(),st=s.scrollTop||0;
   if(Date.now()-lastFwd>600&&st+vh()*2>=topOf(all[all.length-1])+all[all.length-1].offsetHeight){
     lastFwd=Date.now();document.title='folio-extend:fwd:'+(++nonce);
@@ -130,6 +133,47 @@ window.__folioSeekTo=function(t){
   if(el){el.scrollIntoView({block:'start'});restorePending=false;schedule();}
 };
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+// Reflow-safe anchor: the paragraph holding the viewport's centre, plus how far
+// into it the eye sits. A font change reflows the text, so a scroll FRACTION
+// (or pixel offset) lands somewhere else — this anchor keeps the same words
+// under the reader's eye across the swap.
+window.__folioAnchorSave=function(){
+  var s=scroller(),cy=(s.scrollTop||0)+vh()*0.5,sec=visibleSection();
+  if(!sec)return '';
+  var spine=parseInt(sec.getAttribute('data-folio-spine'),10);if(isNaN(spine))spine=-1;
+  var ps=sec.querySelectorAll('p');if(!ps.length)return '';
+  var i=0,el=null;
+  for(i=0;i<ps.length;i++){
+    var r=ps[i].getBoundingClientRect();
+    if(r.top<=cy&&r.bottom>=cy){el=ps[i];break;}
+    if(r.top>cy){el=ps[i];break;}
+  }
+  if(!el){el=ps[ps.length-1];i=ps.length-1;}
+  var fr=0,r2=el.getBoundingClientRect();
+  if(r2.height>0)fr=Math.min(1,Math.max(0,(cy-r2.top)/r2.height));
+  return spine+':'+i+':'+fr.toFixed(4);
+};
+window.__folioAnchorRestore=function(a){
+  var p=String(a||'').split(':');if(p.length<3)return;
+  var sp=parseInt(p[0],10),idx=parseInt(p[1],10),fr=parseFloat(p[2]);
+  if(isNaN(sp)||isNaN(idx)||isNaN(fr))return;
+  var sec=secBySpine(sp)||visibleSection();if(!sec)return;
+  var ps=sec.querySelectorAll('p');if(!ps.length)return;
+  var el=ps[Math.min(Math.max(0,idx),ps.length-1)];
+  var s=scroller();
+  s.scrollTop=Math.max(0,topOf(el)+el.offsetHeight*fr-vh()*0.5);
+  restorePending=false;schedule();
+};
+// In-place stylesheet swap for typography/theme changes: anchor, swap, wait for
+// the fonts and reflow to settle, then put the same words back under the eye.
+window.__folioRestyle=function(fc,sc){
+  var a=window.__folioAnchorSave();
+  var f=document.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
+  var st=document.getElementById('folio-reader-style');if(st)st.textContent=sc;
+  var done=function(){window.__folioAnchorRestore(a);};
+  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){setTimeout(done,80);});
+  setTimeout(done,120);setTimeout(done,500);
+};
 function restore(){
   var s=scroller();
   var sec=secBySpine(SEED_SPINE)||secs()[0];

@@ -171,6 +171,7 @@ class HomeMangaCardsTest {
         override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {}
         override suspend fun categoriesFor(mangaId: String): Set<String> = byManga[mangaId].orEmpty()
         override suspend fun get(id: String): MangaCategory? = null
+        override suspend fun getCategoryByName(name: String): MangaCategory? = null
         override fun observeCategoriesFor(mangaId: String): Flow<Set<String>> = flowOf(byManga[mangaId].orEmpty())
         override fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>> = flowOf(emptySet())
         override suspend fun mangaIdsInCategory(categoryId: String): Set<String> = emptySet()
@@ -463,6 +464,63 @@ class HomeMangaCardsTest {
         HomeViewModel.resetDiscoverCache()
         viewModel.state.first { it.discover.isNotEmpty() }
         assertEquals(2, backend.browseCount)
+        Unit
+    }
+
+    @Test
+    fun `discover skips the source of an excluded manga and serves the next history source`() = runBlocking {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply {
+            upsert(entry("m1", sourceId = 10L))
+            upsert(entry("m2", sourceId = 20L))
+        }
+        val backend = DiscoverBackend(
+            sources = listOf(
+                MangaSourceInfo(id = 10L, name = "Src 10", lang = "en", supportsLatest = true),
+                MangaSourceInfo(id = 20L, name = "Src 20", lang = "en", supportsLatest = true),
+            ),
+            latest = MangaBrowsePage(listOf(MangaBrowseItem("/x", "X", null)), false)
+        )
+        // m1 is excluded from the statistics, so its whole source — its
+        // extension — is off Discover; the walk continues to m2's source.
+        val state = homeViewModel(
+            exclusions = FakeExclusionRepo(setOf(Scope.MANGA to "m1")),
+            mangaRepo = repo,
+            history = FakeHistoryRepo(listOf(historyRow("m1"), historyRow("m2"))),
+            chapters = FakeChapterRepo(),
+            backend = backend
+        ).state.first { it.discover.isNotEmpty() }
+
+        assertEquals("Src 20", state.discover.first().sourceName)
+        assertEquals(20L, state.discover.first().sourceId)
+        Unit
+    }
+
+    @Test
+    fun `an excluded extension is expanded to its sources for stats and discover`() = runBlocking {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply {
+            upsert(entry("m1", sourceId = 10L))
+            upsert(entry("m2", sourceId = 20L))
+        }
+        val backend = DiscoverBackend(
+            sources = listOf(
+                // Both sources come from different extensions; excluding one
+                // package must ban only its own source.
+                MangaSourceInfo(id = 10L, name = "Src 10", lang = "en", extensionPkg = "ext.a", supportsLatest = true),
+                MangaSourceInfo(id = 20L, name = "Src 20", lang = "en", extensionPkg = "ext.b", supportsLatest = true),
+            ),
+            latest = MangaBrowsePage(listOf(MangaBrowseItem("/x", "X", null)), false)
+        )
+        val state = homeViewModel(
+            exclusions = FakeExclusionRepo(setOf(Scope.EXTENSION to "ext.a")),
+            mangaRepo = repo,
+            history = FakeHistoryRepo(listOf(historyRow("m1"), historyRow("m2"))),
+            chapters = FakeChapterRepo(),
+            backend = backend
+        ).state.first { it.discover.isNotEmpty() }
+
+        assertEquals("Src 20", state.discover.first().sourceName)
         Unit
     }
 

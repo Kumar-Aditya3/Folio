@@ -2,6 +2,7 @@ package com.folio.reader.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -182,12 +183,14 @@ fun FolioQuietRow(
  * Selection is carried by fill and by an accent rim, never by weight: a heavier
  * label widens the chip, reflows the row and nudges the grid below it.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FolioChip(
     selected: Boolean,
     onClick: () -> Unit,
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null
 ) {
     val shape = com.folio.reader.ui.theme.FolioShapes.pill
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
@@ -206,7 +209,18 @@ fun FolioChip(
                 if (selected) colors.primary else atmos.hairline,
                 shape
             )
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .then(
+                if (onLongClick == null) {
+                    Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        onClick = onClick,
+                        onLongClick = onLongClick
+                    )
+                }
+            )
             .padding(horizontal = 15.dp, vertical = 8.dp)
     ) {
         Text(

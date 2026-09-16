@@ -190,6 +190,11 @@ fun MangaDetailScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
+        // Back clears the chapter selection instead of popping the screen —
+        // same rule the three library shelves follow.
+        com.folio.reader.ui.components.FolioBackHandler(
+            enabled = chapterSelectionMode
+        ) { viewModel.clearChapterSelection() }
         if (chapterSelectionMode) {
             // Chapter selection swaps the regular chrome for bulk actions in the same
             // bar — no extra block, no layout shift below.

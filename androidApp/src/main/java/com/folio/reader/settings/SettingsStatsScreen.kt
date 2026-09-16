@@ -34,10 +34,10 @@ import kotlinx.coroutines.launch
 private data class ExcludeOption(val scope: Scope, val id: String, val label: String)
 
 /** Which multi-select is open; null when none. */
-private enum class ExcludeDialog { BOOKS, TAGS_COLLECTIONS, SERIES, STATUSES, MANGA_CATEGORIES, SOURCES }
+private enum class ExcludeDialog { BOOKS, TAGS_COLLECTIONS, SERIES, STATUSES, MANGA_CATEGORIES, SOURCES, EXTENSIONS }
 
 /**
- * §11.2 statistics exclusions (settings/stats): six multi-selects over one
+ * §11.2 statistics exclusions (settings/stats): seven multi-selects over one
  * `stats_exclusions` table. Resolution is one-way — an entity is excluded when
  * listed directly or through any group it belongs to; there is no per-entity
  * include-override (the user removes the group exclusion instead).
@@ -54,6 +54,7 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     var series by remember { mutableStateOf(emptyList<com.folio.reader.model.Series>()) }
     var manga by remember { mutableStateOf(emptyList<com.folio.reader.manga.MangaEntry>()) }
     var categories by remember { mutableStateOf(emptyList<com.folio.reader.manga.MangaCategory>()) }
+    var extensions by remember { mutableStateOf(emptyList<com.folio.reader.manga.ExtensionEntry>()) }
 
     LaunchedEffect(Unit) {
         books = graph.bookRepository.getAllBooks().first()
@@ -62,6 +63,11 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
         series = graph.seriesRepository.getAllSeries().first()
         manga = graph.mangaRepository.observeLibrary().first()
         categories = graph.mangaCategoryRepository.observeCategories().first()
+        // Installed extensions only: an uninstalled one cannot feed Discover
+        // and has no manga left to exclude from the statistics.
+        extensions = runCatching { graph.mangaBackend.observeExtensions().first() }
+            .getOrDefault(emptyList())
+            .filter { it.isInstalled }
     }
 
     var dialog by remember { mutableStateOf<ExcludeDialog?>(null) }
@@ -80,10 +86,14 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     val mangaExcluded = exclusions.count { it.first == Scope.MANGA }
     val categoryExcluded = exclusions.count { it.first == Scope.MANGA_CATEGORY }
     val sourceExcluded = exclusions.count { it.first == Scope.MANGA_SOURCE }
+    val extensionExcluded = exclusions.count { it.first == Scope.EXTENSION }
     val sources = manga.groupBy { it.sourceId }
         .map { (sourceId, entries) ->
             ExcludeOption(Scope.MANGA_SOURCE, sourceId.toString(), entries.first().sourceName)
         }
+    val extensionOptions = extensions.map {
+        ExcludeOption(Scope.EXTENSION, it.pkgName, it.lang?.let { lang -> "${it.name} ($lang)" } ?: it.name)
+    }
 
     SettingsCategoryScaffold(title = "Statistics exclusions", onBack = onBack) {
         SettingsStatRow("Excluded books", "${bookExcluded} of ${books.size} books") { dialog = ExcludeDialog.BOOKS }
@@ -100,9 +110,14 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
             "$mangaExcluded of ${manga.size} manga · $categoryExcluded categories"
         ) { dialog = ExcludeDialog.MANGA_CATEGORIES }
         SettingsStatRow("Excluded manga sources", "$sourceExcluded of ${sources.size} sources") { dialog = ExcludeDialog.SOURCES }
+        SettingsStatRow(
+            "Excluded extensions",
+            "$extensionExcluded of ${extensionOptions.size} extensions"
+        ) { dialog = ExcludeDialog.EXTENSIONS }
         Text(
             "Excluded titles leave the statistics and every Home suggestion — but stay in " +
-                "your library, search and the reader, and keep recording progress.",
+                "your library, search and the reader, and keep recording progress. Excluding a " +
+                "manga, source or extension also keeps it out of Discover (New from your sources).",
             style = FolioTheme.typography.bodySmall,
             color = FolioTheme.colors.onSurfaceVariant
         )
@@ -121,6 +136,7 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
                 manga.map { ExcludeOption(Scope.MANGA, it.id, it.title) } +
                     categories.map { ExcludeOption(Scope.MANGA_CATEGORY, it.id, it.name) }
             ExcludeDialog.SOURCES -> sources
+            ExcludeDialog.EXTENSIONS -> extensionOptions
         }
         ExclusionDialog(
             title = when (kind) {
@@ -130,6 +146,7 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
                 ExcludeDialog.STATUSES -> "Excluded statuses"
                 ExcludeDialog.MANGA_CATEGORIES -> "Excluded manga & categories"
                 ExcludeDialog.SOURCES -> "Excluded sources"
+                ExcludeDialog.EXTENSIONS -> "Excluded extensions"
             },
             options = options,
             selected = exclusions,

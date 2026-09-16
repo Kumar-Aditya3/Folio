@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -166,6 +167,13 @@ fun FolioTopBar(
     titleContent: (@Composable () -> Unit)? = null,
     rail: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
+    /**
+     * The hairline rule at the bar's foot. Screens whose rail hangs *outside*
+     * the bar — the manga shelf draws its own chip band below — turn it off:
+     * between the glass and a pinned rail the rule reads as a divider, not as
+     * the bar's edge.
+     */
+    bottomRule: Boolean = true,
 ) {
     val colors = FolioTheme.colors
     val atmos = FolioTheme.atmosphere
@@ -291,16 +299,18 @@ fun FolioTopBar(
                         topLeft = Offset(0f, size.height - fadePx),
                         size = Size(size.width, fadePx),
                     )
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(
-                                atmos.hairline.copy(alpha = 0.55f * fill.presence),
-                                atmos.hairline.copy(alpha = 0.10f * fill.presence),
-                            )
-                        ),
-                        topLeft = Offset(0f, size.height - rulePx),
-                        size = Size(size.width, rulePx),
-                    )
+                    if (bottomRule) {
+                        drawRect(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    atmos.hairline.copy(alpha = 0.55f * fill.presence),
+                                    atmos.hairline.copy(alpha = 0.10f * fill.presence),
+                                )
+                            ),
+                            topLeft = Offset(0f, size.height - rulePx),
+                            size = Size(size.width, rulePx),
+                        )
+                    }
                 }
             }
     ) {
@@ -332,7 +342,7 @@ fun FolioTopBar(
                 } else {
                     FolioBarTitle(
                         title = title,
-                        preferred = titleStyle ?: FolioTheme.typography.headlineMedium,
+                        preferred = titleStyle ?: FolioTheme.typography.headlineSmall,
                         collapse = f,
                         color = colors.onSurface,
                     )
@@ -381,31 +391,46 @@ private fun FolioBarTitle(
 ) {
     val typography = FolioTheme.typography
     BoxWithConstraints {
-        val measurer = rememberTextMeasurer()
-        val slot = constraints.maxWidth
-        val ladder = listOf(preferred, typography.titleLarge, typography.titleMedium)
-        val style = if (slot <= 0) {
-            preferred
-        } else {
-            ladder.firstOrNull { candidate ->
-                measurer.measure(text = title, style = candidate, maxLines = 1).size.width <= slot
-            } ?: ladder.last()
+        // Keyed on the font theme: the typeface preset changes families without
+        // changing the title, and a measurer/cache artifact left the masthead
+        // painting the previous face until something else recomposed it (tab
+        // switches, relaunch). A key boundary forces a clean re-measure.
+        key(typography.fontTheme) {
+            val measurer = rememberTextMeasurer()
+            val slot = constraints.maxWidth
+            // The ladder shrinks the DISPLAY face rather than stepping down to the
+            // text face: dropping families made the masthead stop matching the app
+            // theme the moment a wide preset (Soft/Comfortaa) stopped fitting. The
+            // text-face tier stays only as the last resort.
+            val ladder = listOf(
+                preferred,
+                preferred.copy(fontSize = preferred.fontSize * 0.82f),
+                preferred.copy(fontSize = preferred.fontSize * 0.68f),
+                typography.titleMedium,
+            )
+            val style = if (slot <= 0) {
+                preferred
+            } else {
+                ladder.firstOrNull { candidate ->
+                    measurer.measure(text = title, style = candidate, maxLines = 1).size.width <= slot
+                } ?: ladder.last()
+            }
+            Text(
+                text = title,
+                style = style,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                // Scaled, not re-styled, for the collapse: a font-size change here
+                // relayouts the whole bar on every scroll frame.
+                modifier = Modifier.graphicsLayer {
+                    val scale = lerp(1f, 0.84f, collapse)
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                },
+            )
         }
-        Text(
-            text = title,
-            style = style,
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            // Scaled, not re-styled, for the collapse: a font-size change here
-            // relayouts the whole bar on every scroll frame.
-            modifier = Modifier.graphicsLayer {
-                val scale = lerp(1f, 0.84f, collapse)
-                scaleX = scale
-                scaleY = scale
-                transformOrigin = TransformOrigin(0f, 0.5f)
-            },
-        )
     }
 }
 

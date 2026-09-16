@@ -631,9 +631,15 @@ private class JcefSession private constructor(
 
     /** Swaps the reader stylesheet in place (theme/typography) without navigating. */
     fun applyStyle(fontsCss: String, styleCss: String) {
-        val js = "(function(){var f=document.getElementById('folio-fonts');if(f){f.textContent=${fontsCss.toJsStringLiteral()};}" +
-                "var s=document.getElementById('folio-reader-style');if(s){s.textContent=${styleCss.toJsStringLiteral()};}" +
-                "if(window.__folioRelayout)window.__folioRelayout();})();"
+        val fontsLit = fontsCss.toJsStringLiteral()
+        val styleLit = styleCss.toJsStringLiteral()
+        // __folioRestyle (both engines) anchors the viewport to its paragraph/block
+        // across the swap — without it the pixel offset survives a reflow and the
+        // reader's eye lands on different words ("changing fonts jumps page position").
+        val js = "(function(){if(window.__folioRestyle){window.__folioRestyle($fontsLit,$styleLit);}" +
+                "else{var f=document.getElementById('folio-fonts');if(f)f.textContent=$fontsLit;" +
+                "var s=document.getElementById('folio-reader-style');if(s)s.textContent=$styleLit;" +
+                "if(window.__folioRelayout)window.__folioRelayout();}})();"
         EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
     }
 
@@ -867,8 +873,10 @@ private fun fontFaceCss(settings: ReaderSettings): String =
     settings.customFonts.mapNotNull { font ->
         val file = fontCandidates(font.fileName).firstOrNull { it.exists() } ?: return@mapNotNull null
         val format = if (font.fileName.endsWith(".otf", true)) "opentype" else "truetype"
+        // Variable files declare a weight RANGE so real weights resolve from the axis.
+        val weight = if (font.fileName.contains("variable")) "300 900" else "${font.weight}"
         "@font-face{font-family:'${font.familyName}';src:url('${file.toFileUrl()}') format('$format');" +
-                "font-weight:${font.weight};font-style:normal;font-display:swap;}"
+                "font-weight:$weight;font-style:normal;font-display:swap;}"
     }.joinToString("")
 
 /**

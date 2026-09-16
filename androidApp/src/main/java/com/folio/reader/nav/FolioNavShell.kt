@@ -107,6 +107,10 @@ fun FolioNavShell(
     // §16 predictive back: 0 at rest, 1 at a fully-swiped back gesture. Drives
     // the capsule's recede; inert below API 33.
     backProgress: Float = 0f,
+    // In-screen identity that swaps content without a route change (the
+    // library's Books/Manga/Documents mode). The capsule's blur-hold keys on
+    // this too, or the mode switch flashes the previous shelf's backdrop.
+    screenKey: String = "",
     content: @Composable () -> Unit
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
@@ -149,7 +153,20 @@ fun FolioNavShell(
             // capsule reads as liquid glass instead of the same pill with better
             // anti-aliasing. No blur (pref off, low RAM, no backdrop): the
             // designed alpha, unchanged.
-            val capsuleFill = FolioTheme.surfaceOpacity.navCapsuleFill(glassBlurred())
+            //
+            // On a destination change the new screen's hazeSource registers a
+            // frame after the old one's backdrop layer is dropped, and the effect
+            // samples the stale layer in that gap — the strip behind the capsule
+            // showed the previous screen ("renders a bit later than the rest").
+            // For the first frames after a route change the capsule falls back to
+            // the designed near-opaque fill, which hides the gap entirely.
+            var suppressBlur by remember { mutableStateOf(false) }
+            LaunchedEffect(currentRoute, screenKey) {
+                suppressBlur = true
+                kotlinx.coroutines.delay(120)
+                suppressBlur = false
+            }
+            val capsuleFill = FolioTheme.surfaceOpacity.navCapsuleFill(glassBlurred() && !suppressBlur)
             // §17 liquid selection: the tab the reader lands on sends one
             // specular band across the capsule's glass in the direction of
             // travel — the selection's own motion, caught by the material it

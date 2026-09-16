@@ -98,12 +98,10 @@ fun ReaderSettingsPanel(
         if (scopeControlEnabled && applyToAll && onWriteGlobal != null) onWriteGlobal(updated)
         else onSettingsChange(updated)
     }
-    // Calluna and Comfortaa ship with the app (see BundledFonts) and appear both
-    // here and via the customFonts entries; the rest resolve to system fonts.
-    val fonts = listOf(
-        "Calluna", "Comfortaa", "Literata", "Merriweather", "Georgia", "EB Garamond", "Lora",
-        "Open Sans", "Inter", "Noto Serif", "Serif", "Sans Serif", "Monospace"
-    )
+    // Platform-resolvable faces first (the Android WebView can only render the
+    // generics and the imported faces — no @font-face exists for the bundled
+    // names, where they read as placeholders that did nothing when tapped).
+    val fonts = platformBaseReaderFonts()
     val availableFonts = (fonts + settings.customFonts.map { it.name }).distinct()
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font

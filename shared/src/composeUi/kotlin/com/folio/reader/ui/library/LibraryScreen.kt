@@ -169,6 +169,12 @@ fun LibraryScreen(
     // clear it instead of falling through and exiting the app.
     val selectedBooks by viewModel.selectedBookIds.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    // Collection shelves: the manga/documents category row, over collections.
+    // The selection is hoisted in the view model, so it survives navigation and
+    // is remembered per device across launches.
+    val shelfCollections by viewModel.collections.collectAsState()
+    val selectedCollectionId by viewModel.selectedCollectionId.collectAsState()
+    var manageCollectionsOpen by remember { mutableStateOf(false) }
     // Bulk collections: non-null while the picker is open (the manga/document
     // picker's `bulkPickerInitial` contract — the value is the shared check set).
     val bulkCollectionPickerInitial by viewModel.bulkCollectionPickerInitial.collectAsState()
@@ -180,8 +186,6 @@ fun LibraryScreen(
     // the screen — the manga one especially.
     var displayOpen by remember { mutableStateOf(false) }
     var mangaDisplayOpen by remember { mutableStateOf(false) }
-    var seriesFilterOpen by remember { mutableStateOf(false) }
-    var collectionFilterOpen by remember { mutableStateOf(false) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
     var documentToDelete by remember { mutableStateOf<Document?>(null) }
     var documentPicker by remember { mutableStateOf<Pair<Document, Set<String>>?>(null) }
@@ -229,6 +233,16 @@ fun LibraryScreen(
             onDismiss = { bookToDelete = null }
         )
     }
+    if (manageCollectionsOpen) {
+        val manageScope = rememberCoroutineScope()
+        BookCollectionManagerDialog(
+            collections = shelfCollections,
+            onCreate = { name -> manageScope.launch { viewModel.createCollection(name) } },
+            onRename = { id, name -> viewModel.renameCollection(id, name) },
+            onDelete = { id -> viewModel.deleteCollection(id) },
+            onDismiss = { manageCollectionsOpen = false }
+        )
+    }
     if (documentToDelete != null) {
         com.folio.reader.ui.components.ConfirmDialog(
             title = "Delete document",
@@ -271,12 +285,11 @@ fun LibraryScreen(
     }
 
     val allSeries by viewModel.allSeries().collectAsState(initial = emptyList())
-    val allCollections by viewModel.allCollections().collectAsState(initial = emptyList())
     bulkCollectionPickerInitial?.let { initial ->
         // The books counterpart of the dialog above: check set = each selected
         // book's complete collection membership after apply (§5.3's shelf rule).
         BookCollectionPickerDialog(
-            collections = allCollections,
+            collections = shelfCollections,
             initialSelected = initial,
             onCreate = { name -> viewModel.createCollection(name) },
             onApply = { viewModel.applyBulkCollections(it) },
@@ -308,17 +321,34 @@ fun LibraryScreen(
     }.collectAsState()
     val mangaMode = libraryMode == LibraryMode.MANGA
     val documentMode = libraryMode == LibraryMode.DOCUMENTS
+
+    // System back clears a bulk selection before it can do anything else. The
+    // handlers are claimed here — inside the screen that shows the selection
+    // bar — because the host-level handler only sees a back the nav stack
+    // could not consume first, and a hold-selected shelf must never leak a
+    // back press into navigation.
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = !mangaMode && !documentMode && isSelectionMode
+    ) { viewModel.clearSelection() }
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = documentMode && documentSelectionActive
+    ) { documentLibraryViewModel?.clearSelection() }
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = mangaMode && mangaSelActive
+    ) { mangaLibraryViewModel?.clearSelection() }
     // The masthead collapses off whatever the shelf below it consumed, so the grid
     // dissolves into the bar the way Home's hero does instead of sliding under a
     // fixed slab of chrome.
     val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
-    // The collapse is a sticky accumulator, so a shelf scrolled down hands its
-    // collapse to the shelf that replaces it — the Books/Manga switch would arrive
-    // still folded under the bar exactly when it is the thing you need. Raising the
-    // masthead on every shelf swap re-anchors it; the shelf keeps its own scroll.
-    androidx.compose.runtime.LaunchedEffect(libraryMode) {
-        headerState.reset()
-    }
+    // The collapse is a sticky accumulator shared by all three shelves. v1.2.11
+    // reset it on every mode switch so an incoming shelf could not arrive with its
+    // rail folded under the bar — but the collapse also drives the masthead title's
+    // scale (FolioChrome.FolioBarTitle scales 1.0 → 0.84), so that blanket reset
+    // snapped the title back to full size on every switch and left it there: the
+    // "Documents changed the masthead and it persisted back into Books/Manga"
+    // report. The masthead now stays where the reader put it and simply follows
+    // the shelf's own scroll, so the type never resizes under a mode switch. The
+    // rail stays reachable because the switch rides inside each mode's own rail.
     // A green tick with a red "1" on it was the loudest object in the bar and said
     // nothing a reader can act on. The badge now appears only when sync actually
     // wants attention.
@@ -359,7 +389,7 @@ fun LibraryScreen(
                     )
                 } else {
                     LazyRow(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -414,12 +444,11 @@ fun LibraryScreen(
                     LibraryFilterChips(
                         filter = filter,
                         allSeries = allSeries,
-                        allCollections = allCollections,
-                        seriesFilterOpen = seriesFilterOpen,
-                        collectionFilterOpen = collectionFilterOpen,
                         onFilterChange = { filter = it },
-                        onSeriesFilterOpen = { seriesFilterOpen = it },
-                        onCollectionFilterOpen = { collectionFilterOpen = it },
+                        collections = shelfCollections,
+                        selectedCollectionId = selectedCollectionId,
+                        onSelectCollection = { viewModel.selectCollection(it) },
+                        onEditCollections = { manageCollectionsOpen = true },
                         leading = if (mangaContent != null || documentLibraryViewModel != null) {
                             ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
                         } else {
@@ -472,6 +501,7 @@ fun LibraryScreen(
                     title = "${mangaSelIds.size} selected",
                     collapse = headerState.collapse,
                     modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
+                    bottomRule = false,
                     navigationIcon = {
                         IconButton(onClick = { mangaLibraryViewModel?.clearSelection() }) {
                             Icon(Icons.Filled.Close, contentDescription = "Clear selection")
@@ -550,6 +580,10 @@ fun LibraryScreen(
                 title = "Library",
                 collapse = headerState.collapse,
                 modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
+                // The manga shelf hangs its chip rail below the bar instead of in the
+                // bar's own rail slot, so the foot rule would land between the two —
+                // a divider the other two modes don't have.
+                bottomRule = !mangaMode,
                 actions = {
                     if (syncState != null && syncNeedsAttention) {
                         com.folio.reader.ui.components.SyncStatusBadge(
@@ -742,6 +776,14 @@ fun LibraryScreen(
                             IconButton(onClick = { if (mangaMode) mangaOverflowOpen = true else overflowOpen = true }) {
                                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
                             }
+                        } else {
+                            // The kebab's slot is reserved even when its menu is
+                            // empty (Android documents, whose only entry would be
+                            // Settings): without it the title box widens by one
+                            // icon, "Library" steps back up the type ladder, and
+                            // the documents masthead reads as a different screen
+                            // from the books and manga ones.
+                            Spacer(Modifier.width(48.dp))
                         }
                         if (mangaMode) {
                             DropdownMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
@@ -940,24 +982,12 @@ fun LibraryScreen(
                             } else {
                                 LibraryContent(
                                     books = displayed,
+                                    libraryEmpty = allBooks.isEmpty(),
                                     viewMode = booksViewMode,
-                                    sortBy = sortBy,
-                                    sortAscending = sortAscending,
-                                    filter = filter,
-                                    allSeries = allSeries,
-                                    allCollections = allCollections,
                                     selectedBooks = selectedBooks,
                                     isSelectionMode = isSelectionMode,
                                     preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
                                     finishEstimates = finishEstimates,
-                                    onViewMode = onBooksViewModeChange,
-                                    onSortChange = { sortBy = it },
-                                    onDirectionChange = { sortAscending = it },
-                                    onFilterChange = { filter = it },
-                                    onSeriesFilterOpen = { seriesFilterOpen = it },
-                                    onCollectionFilterOpen = { collectionFilterOpen = it },
-                                    seriesFilterOpen = seriesFilterOpen,
-                                    collectionFilterOpen = collectionFilterOpen,
                                     onBookClick = {
                                         if (isSelectionMode) viewModel.toggleSelection(it.id)
                                         else onBookDetailClick(it)
@@ -970,6 +1000,124 @@ fun LibraryScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The books collection editor — the same manage dialog the manga and documents
+ * shelves open from their rail's Edit chip: create inline, rename in place,
+ * delete (Main only while another collection exists, so the library never
+ * loses its last shelf).
+ */
+@Composable
+private fun BookCollectionManagerDialog(
+    collections: List<FolioCollection>,
+    onCreate: (String) -> Unit,
+    onRename: (String, String) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newCollection by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Collections") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newCollection,
+                        onValueChange = { newCollection = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("New collection") },
+                        singleLine = true
+                    )
+                    TextButton(
+                        onClick = {
+                            val name = newCollection.trim()
+                            if (name.isNotEmpty()) {
+                                onCreate(name)
+                                newCollection = ""
+                            }
+                        },
+                        enabled = newCollection.isNotBlank()
+                    ) {
+                        Text("Add")
+                    }
+                }
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(collections, key = { it.id }) { collection ->
+                        BookCollectionRow(
+                            collection = collection,
+                            canDelete = collection.id != FolioCollection.MAIN_ID || collections.size > 1,
+                            onRename = { onRename(collection.id, it) },
+                            onDelete = { onDelete(collection.id) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
+}
+
+@Composable
+private fun BookCollectionRow(
+    collection: FolioCollection,
+    canDelete: Boolean,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit
+) {
+    var editing by remember(collection.id) { mutableStateOf(false) }
+    var name by remember(collection.id, collection.name) { mutableStateOf(collection.name) }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (editing) {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank()) onRename(name.trim())
+                    editing = false
+                }
+            ) {
+                Text("Save")
+            }
+        } else {
+            Text(
+                collection.name,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            TextButton(onClick = { editing = true }) {
+                Text("Rename")
+            }
+            IconButton(onClick = onDelete, enabled = canDelete) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = if (canDelete) {
+                        "Remove"
+                    } else {
+                        "Create another collection before removing this one"
+                    }
+                )
             }
         }
     }
@@ -1336,34 +1484,21 @@ private fun DocumentLibraryContent(
 @Composable
 private fun LibraryContent(
     books: List<Book>?,
+    libraryEmpty: Boolean,
     viewMode: LibraryViewModel.ViewMode,
-    sortBy: LibraryViewModel.SortBy,
-    sortAscending: Boolean,
-    filter: LibraryViewModel.FilterState,
-    allSeries: List<Series>,
-    allCollections: List<FolioCollection>,
     selectedBooks: Set<String>,
     isSelectionMode: Boolean,
     preserveFeaturedDuringSelection: Boolean,
     finishEstimates: Map<String, String>,
-    onViewMode: (LibraryViewModel.ViewMode) -> Unit,
-    onSortChange: (LibraryViewModel.SortBy) -> Unit,
-    onDirectionChange: (Boolean) -> Unit,
-    onFilterChange: (LibraryViewModel.FilterState) -> Unit,
-    onSeriesFilterOpen: (Boolean) -> Unit,
-    onCollectionFilterOpen: (Boolean) -> Unit,
-    seriesFilterOpen: Boolean,
-    collectionFilterOpen: Boolean,
     onBookClick: (Book) -> Unit,
     onBookLongClick: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
     onImportClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // The filter chips now ride the masthead's rail (LibraryScreen's `railContent`),
-        // where they fold away with it as the shelf scrolls, so the shelf itself starts
-        // straight at the content. The filter/sort parameters below are still the ones
-        // the rail and the Display menu write through.
+        // The filter chips ride the masthead's rail (LibraryScreen's `railContent`)
+        // where they fold away with it as the shelf scrolls, so the shelf itself
+        // starts straight at the content.
         if (books == null) {
             com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
         } else if (books.isEmpty()) {
@@ -1373,13 +1508,19 @@ private fun LibraryContent(
             ) {
                 com.folio.reader.ui.components.EmptyState(
                     icon = Icons.Filled.MenuBook,
-                    headline = "No books in library",
-                    body = "Import your first EPUB to get started",
-                    action = {
-                        Button(onClick = onImportClick) {
-                            Text("Import EPUB")
+                    headline = if (libraryEmpty) "No books in library" else "No books in this collection",
+                    body = if (libraryEmpty) {
+                        "Import your first EPUB to get started"
+                    } else {
+                        "Move books here or choose another collection"
+                    },
+                    action = if (libraryEmpty) {
+                        {
+                            Button(onClick = onImportClick) {
+                                Text("Import EPUB")
+                            }
                         }
-                    }
+                    } else null
                 )
             }
         } else {

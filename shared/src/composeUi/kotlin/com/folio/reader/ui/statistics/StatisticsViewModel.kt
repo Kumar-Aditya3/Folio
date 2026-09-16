@@ -159,7 +159,13 @@ class StatisticsViewModel(
     // themselves). The settings UI is a later slice.
     private val statsExclusionRepository: StatsExclusionRepository? = null,
     private val tagRepository: TagRepository? = null,
-    private val collectionRepository: CollectionRepository? = null
+    private val collectionRepository: CollectionRepository? = null,
+    /**
+     * Optional manga backend: when supplied, EXTENSION exclusions are expanded
+     * to MANGA_SOURCE rows in [exclusions] so the manga statistics resolve them
+     * through the same source-id path everything else uses.
+     */
+    private val mangaBackend: com.folio.reader.manga.MangaBackend? = null
 ) {
     companion object {
         /** Days of history pulled into every calculation. */
@@ -243,9 +249,20 @@ class StatisticsViewModel(
      * §11.2/Rule 8: the live exclusion set, for hosts that must react to it —
      * the "Some titles are excluded — review" line and the manga stats pass it
      * straight into [com.folio.reader.manga.MangaStatisticsRepository.getStatistics].
+     *
+     * When a manga backend is wired, EXTENSION rows are expanded to MANGA_SOURCE
+     * rows here — the database only knows numeric source ids, so the extension
+     * exclusion a reader set in Settings resolves to every source of that
+     * extension before the manga statistics compute with it.
      */
     val exclusions: Flow<Set<Pair<Scope, String>>> =
-        statsExclusionRepository?.observeExclusions() ?: flowOf(emptySet())
+        statsExclusionRepository?.observeExclusions()?.let { flow ->
+            val backend = mangaBackend
+            if (backend == null) flow
+            else combine(flow, backend.observeSources()) { raw, sources ->
+                com.folio.reader.statistics.expandExtensionExclusions(raw, sources)
+            }
+        } ?: flowOf(emptySet())
 
     /**
      * §11.2 one-way resolution, evaluated once per emission: a book is excluded

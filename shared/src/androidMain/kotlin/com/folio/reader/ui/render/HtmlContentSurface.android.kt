@@ -111,11 +111,20 @@ actual fun HtmlContentSurface(
     // The document: a window is assembled from its sections with every resource
     // reference rewritten to the canonical file URL the interceptor serves; a
     // single section loads exactly as it always did. Keyed on settings *minus
-    // the theme fields*: a theme switch only swaps the style element in place
-    // (see the CSS-swap effect below), so it never rewrites the document — the
-    // full reload it used to trigger restored scroll from the last *reported*
-    // progress fraction, which lags the finger and jumps the page up.
-    val content = remember(sections, windowed, settings.copy(themeId = "", customTheme = null)) {
+    // the theme and typography fields*: those are pure stylesheet — they swap in
+    // place (see the restyle effect below) with a paragraph anchor, so a font
+    // change never reloads the document (the reload restored scroll from the
+    // last *reported* progress fraction, which both lags the finger and means
+    // something else after a reflow — the "changing fonts jumps page position"
+    // report). Geometry (margins/text width/layout mode) still reloads.
+    val content = remember(
+        sections, windowed,
+        settings.copy(
+            themeId = "", customTheme = null,
+            fontFamily = "", fontSize = 0f, fontWeight = 0,
+            lineHeight = 0f, letterSpacing = 0f, paragraphSpacing = 0f,
+        ),
+    ) {
         if (windowed) {
             val rewritten = sections.map { section ->
                 section.copy(html = rewriteToCanonicalUrls(section.html, section.href))
@@ -125,16 +134,17 @@ actual fun HtmlContentSurface(
             injectReaderCss(sections.firstOrNull()?.html.orEmpty(), settings)
         }
     }
-    // Live CSS swap: a theme-only change rewrites the baked <style> element's
-    // text in place — colors change, scroll position and DOM stay untouched.
-    // Patterned on the highlight-repaint effect above; also fires once after
-    // each real load (setting identical CSS), which is a harmless no-op.
-    LaunchedEffect(settings.themeId, settings.customTheme, content, webViewRef) {
+    // Live stylesheet swap: a theme or typography change rewrites the baked
+    // <style> element's text in place through the engine's anchored restyle —
+    // the same words stay under the reader's eye across the reflow. Also fires
+    // once after each real load (setting identical CSS), which is a no-op.
+    LaunchedEffect(settings, content, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val css = readerStyleSheet(settings)
         wv.evaluateJavascript(
-            "(function(){var s=document.getElementById('folio-reader-style');" +
-                "if(s)s.textContent=" + jsLiteral(css) + ";})();",
+            "(function(){if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) + ");}" +
+                "else{var s=document.getElementById('folio-reader-style');" +
+                "if(s)s.textContent=" + jsLiteral(css) + ";}})();",
             null
         )
     }
@@ -428,7 +438,10 @@ actual fun HtmlContentSurface(
                 webView.tag = contentKey
                 val importedFonts = settings.customFonts.joinToString("") { font ->
                     val url = "file://${webView.context.filesDir.absolutePath}/fonts/${font.fileName}"
-                    "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:${font.weight};font-style:normal;font-display:swap;}"
+                    // Variable files declare a weight RANGE so real weights resolve
+                    // from the axis; static files pin their single weight.
+                    val weight = if (font.fileName.contains("variable")) "300 900" else "${font.weight}"
+                    "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:$weight;font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
                 // Android never offers spread; coerce to single-page paginated if a

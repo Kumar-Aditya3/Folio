@@ -120,12 +120,23 @@ class HomeStatsScopeTest {
     private open class EmptyCollectionRepo : CollectionRepository {
         override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) {}
-        override suspend fun deleteCollection(collectionId: String) {}
+        override suspend fun deleteCollection(collectionId: String): Boolean = false
         override fun getAllCollections(): Flow<List<Collection>> = MutableStateFlow(emptyList())
         override suspend fun getCollectionByName(name: String): Collection? = null
         override suspend fun getCollectionsForBook(bookId: String): List<Collection> = emptyList()
         override suspend fun addBookToCollection(bookId: String, collectionId: String) {}
         override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {}
+        override suspend fun createCollection(name: String): Collection =
+            Collection(id = name, name = name)
+        override suspend fun renameCollection(id: String, name: String) {}
+        override suspend fun getCollection(id: String): Collection? = null
+        override suspend fun defaultCollection(): Collection? = null
+        override suspend fun assign(bookId: String, collectionIds: Set<String>) {}
+        override fun observeCollectionsFor(bookId: String): Flow<Set<String>> = MutableStateFlow(emptySet())
+        override fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>> = MutableStateFlow(emptySet())
+        override suspend fun bookIdsInCollection(collectionId: String): Set<String> = emptySet()
+        override suspend fun ensureMembership(bookId: String) {}
+        override suspend fun ensureSeeded() {}
     }
 
     /** Counts group lookups — the N+1 the §11.2 fast path exists to avoid. */

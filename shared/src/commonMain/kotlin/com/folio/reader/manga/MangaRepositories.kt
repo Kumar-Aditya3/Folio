@@ -71,6 +71,7 @@ interface MangaCategoryRepository {
     suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean = true)
     suspend fun categoriesFor(mangaId: String): Set<String>
     suspend fun get(id: String): MangaCategory?
+    suspend fun getCategoryByName(name: String): MangaCategory?
     fun observeCategoriesFor(mangaId: String): Flow<Set<String>>
     fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>>
     suspend fun mangaIdsInCategory(categoryId: String): Set<String>

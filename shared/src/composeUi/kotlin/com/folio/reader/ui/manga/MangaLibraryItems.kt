@@ -49,6 +49,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaEntry
+import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberFolioInteraction
@@ -100,6 +103,135 @@ internal fun CollectionRow(
 }
 
 /**
+ * The featured manga entry: a wide, image-led composition where the cover sits at
+ * `coverFeature` beside its own typography and throws a halo onto the page behind
+ * it. Mirrors [FeaturedShelfEntry] for books so the manga shelf has the same
+ * visual hierarchy — the one you're reading comes forward.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun FeaturedMangaShelfEntry(
+    manga: MangaEntry,
+    backend: MangaBackend,
+    unreadCount: Int,
+    progress: Float,
+    fullyRead: Boolean,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onRemove: () -> Unit,
+    onMarkRead: (Boolean) -> Unit,
+    onCategories: () -> Unit,
+) {
+    val accent = rememberCoverAccent(manga.coverPath, FolioTheme.colors.accentProgress)
+    val interaction = rememberFolioInteraction()
+    var menuOpen by remember { mutableStateOf(false) }
+    val inProgress = progress > 0f && progress < 1f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .folioPressable(interaction, scaleTo = 0.985f)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true },
+            )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MangaCoverPlate(
+            backend = backend,
+            sourceId = manga.sourceId,
+            thumbnailUrl = manga.thumbnailUrl,
+            coverPath = manga.coverPath,
+            width = FolioTokens.coverFeature,
+            halo = accent,
+            elevation = 14.dp,
+            dimmed = fullyRead,
+            overlay = {
+                if (isSelected) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
+                            .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(FolioTheme.colors.primary),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = FolioTheme.colors.onPrimary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+            },
+        )
+        Spacer(Modifier.width(FolioTokens.space4))
+        Column(modifier = Modifier.weight(1f)) {
+            FolioEyebrow("Reading", accent = accent)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = manga.title,
+                style = FolioTheme.typography.titleLarge,
+                color = FolioTheme.colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = manga.sourceName,
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(FolioTokens.space2))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = FolioTheme.typography.titleSmall,
+                    color = accent,
+                )
+                if (unreadCount > 0) {
+                    Spacer(Modifier.width(FolioTokens.space2))
+                    Text(
+                        text = "$unreadCount unread",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.accentDiscovery,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            if (inProgress) {
+                FolioProgressBar(progress = progress, color = accent)
+            }
+        }
+        MangaItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onOpen = onClick,
+            onSelect = onLongClick,
+            onCategories = onCategories,
+            onMarkRead = onMarkRead,
+            onRemove = onRemove,
+        )
+    }
+}
+
+/**
  * A manga shelf entry, in the same object language as the books shelf: a plate
  * with a contact shadow, type beneath, no card. Read-through titles sit back at
  * 0.86 alpha the way finished books do, so the shelf has depth.
@@ -123,8 +255,8 @@ internal fun MangaGridItem(
     onCategories: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val atmos = FolioTheme.atmosphere
     val interaction = rememberFolioInteraction()
+    val inProgress = progress > 0f && progress < 1f
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -138,96 +270,89 @@ internal fun MangaGridItem(
             )
             .folioRightClick { if (!inSelectionMode) menuOpen = true },
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.68f)
-                .shadow(
-                    elevation = 8.dp * atmos.shadowScale,
-                    shape = FolioShapes.plate,
-                    ambientColor = atmos.shadowAmbient,
-                    spotColor = atmos.shadowSpot,
-                )
-                .clip(FolioShapes.plate),
-        ) {
-            MangaCover(
-                backend = backend,
-                sourceId = manga.sourceId,
-                thumbnailUrl = manga.thumbnailUrl,
-                coverPath = manga.coverPath,
-                modifier = Modifier.fillMaxSize(),
-                dimmed = fullyRead,
-            )
-            if (selected) {
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
-                        .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
-                )
-            }
-            if (inSelectionMode) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (selected) FolioTheme.colors.primary else Color.Black.copy(alpha = 0.45f),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        if (selected) Icons.Filled.Check else Icons.Filled.Close,
-                        contentDescription = null,
-                        tint = if (selected) FolioTheme.colors.onPrimary else Color.White,
-                        modifier = Modifier.size(14.dp),
+        MangaCoverPlate(
+            backend = backend,
+            sourceId = manga.sourceId,
+            thumbnailUrl = manga.thumbnailUrl,
+            coverPath = manga.coverPath,
+            // A grid cell sizes the plate, not the other way round. Left at the
+            // default the plate takes FolioTokens.coverShelf — a fixed width — and
+            // stops tracking the adaptive column, which is exactly the case the
+            // `width` parameter documents as needing null.
+            width = null,
+            dimmed = fullyRead,
+            overlay = {
+                if (selected) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
+                            .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
                     )
                 }
-            } else {
-                if (unreadCount > 0) {
+                if (inSelectionMode) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
-                            .background(FolioTheme.colors.primary, FolioShapes.pill)
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (selected) FolioTheme.colors.primary else Color.Black.copy(alpha = 0.45f),
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = unreadCount.toString(),
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onPrimary,
+                        Icon(
+                            if (selected) Icons.Filled.Check else Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = if (selected) FolioTheme.colors.onPrimary else Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                } else {
+                    if (unreadCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                                .background(FolioTheme.colors.primary, FolioShapes.pill)
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = unreadCount.toString(),
+                                style = FolioTheme.typography.labelSmall,
+                                color = FolioTheme.colors.onPrimary,
+                            )
+                        }
+                    }
+                    if (downloadedCount > 0) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = "Downloaded",
+                            tint = Color.White,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).size(15.dp),
                         )
                     }
                 }
-                if (downloadedCount > 0) {
-                    Icon(
-                        Icons.Filled.Download,
-                        contentDescription = "Downloaded",
-                        tint = Color.White,
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).size(15.dp),
-                    )
-                }
-            }
-            // Progress as a seam on the plate's foot — identical to the books shelf.
-            if (progress > 0f && progress < 1f) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(Color.Black.copy(alpha = 0.35f))
-                ) {
+                // Progress as a seam on the plate's foot — identical to the books shelf.
+                if (inProgress) {
                     Box(
                         Modifier
-                            .fillMaxWidth(progress)
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
                             .height(3.dp)
-                            .background(FolioTheme.colors.accentProgress)
-                    )
+                            .background(Color.Black.copy(alpha = 0.35f))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(progress)
+                                .height(3.dp)
+                                .background(FolioTheme.colors.accentProgress)
+                        )
+                    }
                 }
-            }
-        }
+            },
+        )
         Spacer(Modifier.height(FolioTokens.space2))
         Text(
             text = manga.title,
@@ -246,7 +371,7 @@ internal fun MangaGridItem(
             modifier = Modifier.fillMaxWidth(),
         )
         // One caption line, matching the books shelf exactly.
-        if (progress > 0f) {
+        if (inProgress) {
             Text(
                 text = "${(progress * 100).toInt()}%",
                 style = FolioTheme.typography.labelSmall,
@@ -443,7 +568,7 @@ internal fun MangaListItem(
  * bulk selection.
  */
 @Composable
-private fun MangaItemMenu(
+fun MangaItemMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     onOpen: () -> Unit,

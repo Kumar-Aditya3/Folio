@@ -157,7 +157,8 @@ class DocumentLibraryViewModel(
 
     init {
         scope.launch {
-            categoryRepository.ensureSeeded()
+            runCatching { categoryRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Document category seed failed: $it") }
         }
         scope.launch {
             categories.collect { list ->

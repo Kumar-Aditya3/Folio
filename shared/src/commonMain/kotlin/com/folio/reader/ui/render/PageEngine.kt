@@ -314,6 +314,41 @@ window.__folioSeekTo=function(t){
   if(!isNaN(f))window.__folioSeek(f);
 };
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+// Reflow-safe anchor: paged layout keeps a stable kids[] block list (relayout
+// only repositions), so the anchor is the index of the first block visible on
+// the current page. A font change reflows every column, but landing on the
+// same block keeps the same words in view.
+window.__folioAnchorSave=function(){
+  if(!kids.length)return '';
+  var cw=colW(),first=Math.floor(page*COLS),last=first+COLS;
+  for(var i=0;i<kids.length;i++){
+    var col=Math.floor((parseFloat(kids[i].style.left)||0)/cw);
+    if(col>=first&&col<last)return 'b:'+i;
+  }
+  return 'b:0';
+};
+window.__folioAnchorRestore=function(a){
+  var p=String(a||'').split(':');
+  if(p.length!==2||p[0]!=='b')return;
+  var idx=parseInt(p[1],10);if(isNaN(idx))return;
+  if(dirty)layout();
+  if(!kids.length)return;
+  var el=kids[Math.min(Math.max(0,idx),kids.length-1)];
+  var x=el.getBoundingClientRect().left+page*vw();
+  var col=Math.floor((x+8)/colW());
+  var tt=Math.min(maxPage(),Math.floor(col/COLS));
+  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
+};
+// In-place stylesheet swap for typography/theme changes: anchor, swap, repaginate,
+// then land back on the same block. Repeated at 400ms for late font metrics.
+window.__folioRestyle=function(fc,sc){
+  var a=window.__folioAnchorSave();
+  var f=document.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
+  var st=document.getElementById('folio-reader-style');if(st)st.textContent=sc;
+  dirty=true;relayout();
+  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},80);
+  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},400);
+};
 
 window.addEventListener('resize',function(){dirty=true;relayout();});
 window.addEventListener('load',function(){dirty=true;relayout();});
