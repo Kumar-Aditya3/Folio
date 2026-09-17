@@ -153,6 +153,11 @@ fun EpubImage(
  * import time). Shows a small centred spinner while decoding, the image once
  * loaded, and a generated typographic fallback when the file is missing,
  * unreadable, or [coverPath] is null.
+ *
+ * [suppressFallbackText] keeps the fallback's gradient but drops its title and
+ * author. Morph destinations set it: the paired title is already flying in under
+ * a shared key, and drawing it inside the plate as well puts the same words on
+ * screen twice. See [FolioCoverPlate].
  */
 @Composable
 fun BookCover(
@@ -160,7 +165,8 @@ fun BookCover(
     title: String,
     author: String,
     modifier: Modifier = Modifier,
-    small: Boolean = false
+    small: Boolean = false,
+    suppressFallbackText: Boolean = false
 ) {
     var bitmap by remember(coverPath) { mutableStateOf<ImageBitmap?>(null) }
     var failed by remember(coverPath) { mutableStateOf(false) }
@@ -194,20 +200,28 @@ fun BookCover(
         val current = bitmap
         // Covers fade in over 260ms instead of popping: a grid of eight covers
         // snapping in at different moments reads as jank, while a short fade reads
-        // as paper developing. Honours reduce-motion via rememberEntryProgress.
+        // as paper developing. Honours reduce-motion via rememberEntryState.
         when {
             current != null -> {
-                val reveal = rememberEntryProgress(coverPath)
+                // Draw-phase, not composition-phase. `rememberEntryProgress` returns
+                // the value, which makes this branch recompose on *every frame* of
+                // the reveal; `rememberEntryState` is the draw-phase form (see
+                // EntryMotion) so the same fade animates without recomposing. The
+                // difference is not academic on a shelf: a grid entering the
+                // Home→Library morph composes a dozen covers at once, and every one
+                // of them used to recompose per frame for 260ms — right through the
+                // part of the morph the reader is watching.
+                val reveal = rememberEntryState(coverPath)
                 Image(
                     bitmap = current,
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer { alpha = reveal }
+                        .graphicsLayer { alpha = reveal.value }
                 )
             }
-            failed -> FallbackCover(title, author, small)
+            failed -> FallbackCover(title, author, small, suppressText = suppressFallbackText)
             else -> CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
                 strokeWidth = 2.dp,
@@ -217,9 +231,19 @@ fun BookCover(
     }
 }
 
-/** Generated typographic cover used when no image is available. */
+/**
+ * Generated typographic cover used when no image is available.
+ *
+ * [suppressText] drops the title and author but keeps the gradient, which is what
+ * a morph destination wants — see [BookCover].
+ */
 @Composable
-fun FallbackCover(title: String, author: String, small: Boolean = false) {
+fun FallbackCover(
+    title: String,
+    author: String,
+    small: Boolean = false,
+    suppressText: Boolean = false,
+) {
     val palettes = listOf(
         Color(0xFF4F46E5) to Color(0xFF818CF8),
         Color(0xFF0F766E) to Color(0xFF2DD4BF),
@@ -247,6 +271,7 @@ fun FallbackCover(title: String, author: String, small: Boolean = false) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (suppressText) return@Column
             Text(
                 text = title.take(24),
                 style = if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium,

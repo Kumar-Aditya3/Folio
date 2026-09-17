@@ -9,6 +9,26 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.Serializable
 
+/**
+ * Per-book statistics, as persisted in the `book_statistics` table.
+ *
+ * Note this table is **backup-only**: it is written on restore and read on export,
+ * and nothing in the UI reads it. Every figure the reader actually sees — streaks,
+ * days active, per-book pace, the finish projection — is derived at query time from
+ * `daily_statistics` and the raw session stream (see `StatisticsViewModel` and
+ * `HomeViewModel`). That is deliberate: `daily_statistics` is per-device and
+ * reconcilable, whereas a folded per-book counter drifts the moment a session is
+ * re-synced, edited or deleted.
+ *
+ * There used to be a `fun addSession(session)` here that folded one session into a
+ * copy of this object, including a `calculateReadingDays` helper whose body was
+ * `return readingDays` — it never advanced, because counting distinct dates needs a
+ * query over the session history, not a fold over one record. It was removed rather
+ * than fixed: it had no callers, and its only output (`readingDays`) has no reader.
+ * If per-book reading days are ever needed in the UI, compute them from
+ * `daily_statistics` alongside the other derived figures — do not reintroduce a
+ * running counter here.
+ */
 @Serializable
 data class BookStatistics(
     val bookId: String,
@@ -35,31 +55,6 @@ data class BookStatistics(
 
     val completionTimeDays: Double?
         get() = completionTimeMs?.let { it / 86_400_000.0 }
-
-    fun addSession(session: ReadingSession): BookStatistics {
-        val newTotalTime = totalReadingTimeMs + session.durationMs
-        val newTotalSessions = totalSessions + 1
-        val newTotalWords = totalWordsRead + session.wordsRead
-        val newAvgSession = if (newTotalSessions > 0) newTotalTime / newTotalSessions else 0L
-        val newLongest = maxOf(longestSessionMs, session.durationMs)
-        val newAvgSpeed = if (newTotalTime > 0) (newTotalWords.toDouble() / (newTotalTime / 60_000.0)) else 0.0
-
-        return copy(
-            totalReadingTimeMs = newTotalTime,
-            totalSessions = newTotalSessions,
-            totalWordsRead = newTotalWords,
-            averageSessionTimeMs = newAvgSession,
-            longestSessionMs = newLongest,
-            lastOpenedAt = session.endedAt ?: Clock.System.now(),
-            averageReadingSpeedWpm = newAvgSpeed,
-            readingDays = calculateReadingDays(session)
-        )
-    }
-
-    private fun calculateReadingDays(session: ReadingSession): Int {
-        // Simplified - in reality would track unique dates
-        return readingDays
-    }
 
     fun startReading(now: Instant = Clock.System.now()): BookStatistics {
         return copy(

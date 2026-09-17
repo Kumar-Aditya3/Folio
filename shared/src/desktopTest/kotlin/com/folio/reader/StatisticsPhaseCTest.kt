@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlin.test.Test
@@ -190,6 +192,41 @@ class StatisticsPhaseCTest {
     )
 
     // ── §12.5 acceptance ─────────────────────────────────────────────────────
+
+    @Test
+    fun `ready stays false until the first real state arrives`() = runBlocking {
+        // The load-abruptness contract. The tab reads `collectAsState(initial =
+        // StatisticsUiState())`, so before this signal existed it painted zeroed
+        // figures and the "Nothing measured yet" card for the whole of the combine
+        // — four suspense queries — and then changed every value at once.
+        //
+        // Hosts gate on `ready` to draw a skeleton of the same shape instead, so
+        // this pins that the first emission of the signal is `false` and that it
+        // flips only when a real state is available.
+        val books = listOf(book("a"))
+        val sessions = listOf(session("a", 30))
+
+        val emissions = viewModel(books, sessions).ready.take(2).toList()
+
+        assertEquals(listOf(false, true), emissions)
+        assertEquals(false, emissions.first(), "the first frame must not claim the data has arrived")
+    }
+
+    @Test
+    fun `ready does not gate the state itself`() = runBlocking {
+        // A regression guard on the shape of the fix: `ready` is derived from
+        // `state` (`onStart { emit(false) }`), so it can never disagree with the
+        // emission it describes. The state flow must still produce its real value
+        // on the first emission — the gate belongs to the caller, not the model.
+        val books = listOf(book("a"))
+        val sessions = listOf(session("a", 30))
+
+        val vm = viewModel(books, sessions)
+        val state = vm.state.first()
+
+        assertEquals(listOf("a"), state.topBooks.map { it.id })
+        assertTrue(state.hasData, "the underlying state carries real data regardless of the gate")
+    }
 
     @Test
     fun `top books rank by window minutes and drop titles without rows`() = runBlocking {

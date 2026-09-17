@@ -39,6 +39,16 @@ import com.folio.reader.ui.theme.atmosphere
  * [halo] additionally spills the cover's own dominant colour onto the surface
  * behind it, which is how the artwork starts lighting its neighbourhood. Off by
  * default: only the anchored and featured covers earn it.
+ *
+ * [suppressFallbackText] hides the typographic title/author that [BookCover]
+ * draws when there is no artwork. It exists for morph destinations: the source
+ * tile already shows that book's title beside the plate, and a paired title is
+ * flying in under the same shared key, so a generated cover underneath would put
+ * the same words on screen twice at two different sizes for the length of the
+ * morph. The gradient stays — the plate still has to look like a cover, it just
+ * stops repeating the label. Defaulted rather than read from a CompositionLocal
+ * on purpose: a local is scoped to a subtree, and the hazard here is per-item
+ * (one tile in a grid is a morph destination, its neighbours are not).
  */
 @Composable
 fun FolioCoverPlate(
@@ -58,6 +68,7 @@ fun FolioCoverPlate(
     halo: Color? = null,
     elevation: Dp = 8.dp,
     small: Boolean = false,
+    suppressFallbackText: Boolean = false,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val atmos = FolioTheme.atmosphere
@@ -78,7 +89,13 @@ fun FolioCoverPlate(
             )
             .clip(shape),
     ) {
-        BookCover(coverPath = coverPath, title = title, author = author, small = small)
+        BookCover(
+            coverPath = coverPath,
+            title = title,
+            author = author,
+            small = small,
+            suppressFallbackText = suppressFallbackText,
+        )
         // The spine: the cue that separates a book from a picture.
         Box(
             Modifier

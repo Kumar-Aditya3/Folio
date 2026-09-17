@@ -184,7 +184,11 @@ fun BookDetailScreen(
                         onSeriesClick = onSeriesClick,
                         onCollectionClick = onCollectionClick,
                         onAddTags = { showTagPicker = true },
-                        onCoverClick = onStartReading
+                        onCoverClick = onStartReading,
+                        // Drives the finish projection from the reader's measured pace
+                        // rather than a fixed wpm — same source the library rows and
+                        // Home use, so the three surfaces agree about this book.
+                        sessions = sessions,
                     )
                 }
 

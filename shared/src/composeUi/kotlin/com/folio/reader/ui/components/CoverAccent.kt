@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toPixelMap
 import com.folio.reader.ui.theme.FolioTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
@@ -169,7 +171,18 @@ fun rememberCoverAccent(coverPath: String?, fallback: Color): Color {
     var sampled by remember(coverPath) { mutableStateOf<Color?>(null) }
     LaunchedEffect(coverPath) {
         val bitmap = awaitCoverBitmapForAccent(coverPath) ?: return@LaunchedEffect
-        sampled = sampleFromBitmap(bitmap)
+        // Off the main thread. `sampleFromBitmap` reads the entire bitmap out into
+        // an IntArray (`toPixelMap`), which is the one genuinely heavy thing this
+        // app does with a cover — and `LaunchedEffect` runs on the composition's
+        // own dispatcher, i.e. the UI thread, so leaving it inline put that read
+        // inside a frame. It is worse than one frame's worth: a shelf composes a
+        // dozen covers at once, their decodes finish together, and
+        // `awaitCoverBitmapForAccent` polls on a 100ms tick, so the samples land
+        // in the same one or two frames. Measured on device as a ~10ms
+        // recomposition spike just after the shelf's covers finished decoding,
+        // inside the Home→Library morph. The bitmap is immutable and already
+        // cached, so hopping to Default is safe.
+        sampled = withContext(Dispatchers.Default) { sampleFromBitmap(bitmap) }
     }
     val raw = sampled ?: return fallback
     return guardCoverContrast(raw, FolioTheme.colors.surface, fallback)

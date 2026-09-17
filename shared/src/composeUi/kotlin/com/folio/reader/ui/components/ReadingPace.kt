@@ -102,6 +102,46 @@ fun finishEstimate(
     return "On pace to finish in ${horizonPhrase(wholeDays)} · around $target"
 }
 
+/**
+ * The caption under a book-detail progress figure: how much is left, at the pace
+ * the reader has actually been reading.
+ *
+ * Prefers the measured projection ([finishHorizon], which averages the last seven
+ * days of real session history) and only falls back to a fixed-rate figure when
+ * there is no measurement to project from — a book just started, a week too thin
+ * to extrapolate (under ~100 words/day), or a caller with no session history.
+ *
+ * The fallback exists because an unstarted book has no pace to contradict, and
+ * "3h 12m left at 220 wpm" tells the reader more than a blank caption would. It is
+ * deliberately the *second* choice: the rest of the app projects from measurements,
+ * and a book-detail page that disagreed with the shelf about the same book was the
+ * inconsistency this function exists to remove.
+ *
+ * @param fallbackWpm the fixed rate to use when no measurement exists.
+ * @return the caption, or null when the caller should render nothing.
+ */
+fun readingTimeCaption(
+    totalWords: Long,
+    progress: Double,
+    wordsRead: Long,
+    bookSessions: List<ReadingSession>,
+    paceSessions: List<ReadingSession> = bookSessions,
+    fallbackWpm: Long = 220,
+): String? {
+    if (progress >= 1.0) return "Finished"
+    finishHorizon(totalWords, progress, bookSessions, paceSessions)?.let { return it }
+    if (totalWords <= 0) return null
+    val remainingWords = (totalWords - wordsRead).coerceAtLeast(0L)
+    val totalMinutes = remainingWords / fallbackWpm
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return when {
+        hours == 0L && minutes == 0L -> "Finished"
+        hours == 0L -> "${minutes}m left at ${fallbackWpm} wpm"
+        else -> "${hours}h ${minutes}m left at ${fallbackWpm} wpm"
+    }
+}
+
 /** Consecutive reading days ending today — or yesterday, if today hasn't started yet. */
 internal fun currentStreak(readDays: Set<LocalDate>, today: LocalDate): Int {
     var day = if (today in readDays) today else today.minus(DatePeriod(days = 1))

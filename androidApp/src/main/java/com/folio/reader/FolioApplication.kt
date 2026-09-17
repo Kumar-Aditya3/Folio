@@ -41,7 +41,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -630,16 +629,6 @@ class FolioApplication : Application() {
             // Last-resort: rethrow so the crash is visible in logcat rather than a blank hang
             throw e
         }
-        // Extract bundled fonts (Calluna, Comfortaa) and register them in settings.
-        // Local file copy + one settings row — fast enough to run on the main thread
-        // and guarantees the activity sees them on first launch.
-        runCatching {
-            kotlinx.coroutines.runBlocking {
-                com.folio.reader.font.BundledFonts.ensureInstalled(graph.platform, graph.settingsRepository) { path ->
-                    runCatching { assets.open(path).use { it.readBytes() } }.getOrNull()
-                }
-            }
-        }.onFailure { it.printStackTrace() }
         // Same directory holds the interface faces (Fraunces/Manrope); installed here
         // so the first frame is never drawn in the system font.
         com.folio.reader.ui.theme.UiFonts.install(graph.platform.fileSystem.getFontsDir())
@@ -647,6 +636,34 @@ class FolioApplication : Application() {
         // thumbnails survive cold starts instead of refetching every launch.
         com.folio.reader.ui.manga.MangaCoverDiskCache.directory =
             graph.platform.fileSystem.mangaCoversDir
+
+        // Extract the bundled reader fonts off the main thread.
+        //
+        // This used to be a `runBlocking` here, on the reasoning that "a local file
+        // copy + one settings row" was fast enough. On a cold start it is neither:
+        // every `if (!dest.exists())` branch is true, so the block reads every font
+        // out of assets, writes each one to disk, then does a settings **read** and a
+        // settings **write** — all before the first frame could be drawn, which is
+        // what put seconds of empty screen in front of Home.
+        //
+        // Nothing on the first frame needs a custom face: `UiFonts.load` resolves
+        // lazily by file name and falls back to the system family if a file is not
+        // there yet, and the reader re-composes once the fonts land. So the work
+        // moves to a background scope and the UI starts immediately.
+        //
+        // `UiFonts.install` above stays on the main thread deliberately — it only
+        // records the directory and clears a cache, and the fallback it enables has
+        // to be in place before anything asks for a family.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                com.folio.reader.font.BundledFonts.ensureInstalled(
+                    graph.platform,
+                    graph.settingsRepository
+                ) { path ->
+                    runCatching { assets.open(path).use { it.readBytes() } }.getOrNull()
+                }
+            }.onFailure { it.printStackTrace() }
+        }
     }
 
     override fun onTerminate() {

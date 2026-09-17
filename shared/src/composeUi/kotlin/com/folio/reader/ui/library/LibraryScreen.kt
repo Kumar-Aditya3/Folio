@@ -87,6 +87,8 @@ import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioFadeSwap
+import com.folio.reader.ui.components.folioSizeTransformEligible
+import com.folio.reader.ui.components.folioSwapSizeTransform
 import com.folio.reader.ui.components.FolioSharedElementsSuppressed
 import com.folio.reader.ui.components.rememberSwapInFlight
 import com.folio.reader.ui.manga.MangaLibraryRail
@@ -136,6 +138,25 @@ fun LibraryScreen(
     onShareBooks: (Set<String>) -> Unit = {},
     onSetBookStatus: (Set<String>, BookStatus) -> Unit = { _, _ -> },
     viewModel: LibraryViewModel,
+    /**
+     * The unfiltered library, collected by the host for the app's whole lifetime
+     * (`FolioNavModelImpl.libraryBooks`). Read for two things: the rail's books
+     * search, and — more importantly — the value the shelf's own flow *seeds*
+     * from, so the opening frame of a visit already shows the real shelf instead
+     * of the skeleton. See [libraryShelfSeed] for why that matters and
+     * `libraryBooks` for what it costs when it is missing.
+     *
+     * Deliberately a `StateFlow` and not a bare `Flow`: the seed has to be
+     * correct on the destination's *first* composition, and `collectAsState`
+     * cannot hand over a value until the frame after that — which is one frame
+     * of skeleton inside the morph all over again, the exact thing this exists
+     * to remove. The current value is read synchronously; the `collectAsState`
+     * below only drives later updates.
+     *
+     * Null on hosts that do not hoist it (desktop, tests): the screen then falls
+     * back to its own cold read and behaves exactly as it did before.
+     */
+    knownBooks: kotlinx.coroutines.flow.StateFlow<List<Book>>? = null,
     syncState: com.folio.reader.sync.SyncState? = null,
     onSyncNow: () -> Unit = {},
     libraryMode: LibraryMode = LibraryMode.BOOKS,
@@ -298,7 +319,12 @@ fun LibraryScreen(
         )
     }
 
-    val allSeries by viewModel.allSeries().collectAsState(initial = emptyList())
+    // `remember`ed for the same reason as the shelf flows below: `allSeries()`
+    // builds a *new* flow per call, and a flow whose identity changes on every
+    // recomposition makes `collectAsState` tear down and resubscribe — a fresh
+    // database read each time this screen recomposes.
+    val allSeriesFlow = remember(viewModel) { viewModel.allSeries() }
+    val allSeries by allSeriesFlow.collectAsState(initial = emptyList())
     bulkCollectionPickerInitial?.let { initial ->
         // The books counterpart of the dialog above: check set = each selected
         // book's complete collection membership after apply (§5.3's shelf rule).
@@ -312,23 +338,44 @@ fun LibraryScreen(
     }
     // The whole library, unfiltered: the rail's books search fans out over every
     // book, not just the ones the status/series chips are currently showing.
-    val allBooks by viewModel.allBooks().collectAsState(initial = emptyList())
+    //
+    // The fallback is `remember`ed rather than called inline because
+    // `allBooks()` returns a *new* flow per call: a flow rebuilt on every
+    // recomposition makes `collectAsState` tear down and re-subscribe each time,
+    // which is a fresh database read per recomposition of this screen.
+    val knownBooksFlow: kotlinx.coroutines.flow.Flow<List<Book>> =
+        knownBooks ?: remember(viewModel) { viewModel.allBooks() }
+    val allBooks by knownBooksFlow.collectAsState(initial = emptyList())
     val railScope = rememberCoroutineScope()
     // §5.1: pace captions keyed by book id. Empty unless the host supplied a
     // session repository, so callers that don't want the extra read pay nothing.
     val finishEstimates by remember(viewModel) { viewModel.finishEstimates() }
         .collectAsState(initial = emptyMap())
 
-    val books by viewModel.filteredBooks(
-        LibraryViewModel.LibraryState(
-            viewMode = booksViewMode,
-            sortBy = sortBy,
-            sortAscending = sortAscending,
-            filter = filter,
-            selectedBookIds = selectedBooks,
-            isSelectionMode = isSelectionMode
-        )
-    ).collectAsState(initial = null as List<Book>?)
+    // `null` means "the shelf has not been measured yet" and is what the loading
+    // branch keys off. It must not be the *initial* value on a warm entry — see
+    // libraryShelfSeed, which is where the reasoning and the tests live.
+    //
+    // Sampled from the hoisted flow's *current* value rather than from
+    // `allBooks` above: this is the argument to `collectAsState`, which reads it
+    // once at subscription time, and it has to be right on the destination's
+    // first frame. `allBooks` cannot be — `collectAsState` only delivers a
+    // flow's value on the frame *after* the first composition, so seeding from
+    // it would put one frame of skeleton inside the morph. See
+    // [libraryShelfSeedFrom], which is where the reasoning and the tests live.
+    val booksInitial: List<Book>? = remember(knownBooks) { libraryShelfSeedFrom(knownBooks) }
+    // Keyed on the shelf's own inputs so the flow is only rebuilt when the shelf
+    // actually changes, for the same reason as `knownBooksFlow` above.
+    val shelfState = LibraryViewModel.LibraryState(
+        viewMode = booksViewMode,
+        sortBy = sortBy,
+        sortAscending = sortAscending,
+        filter = filter,
+        selectedBookIds = selectedBooks,
+        isSelectionMode = isSelectionMode
+    )
+    val shelfFlow = remember(viewModel, shelfState) { viewModel.filteredBooks(shelfState) }
+    val books by shelfFlow.collectAsState(initial = booksInitial)
 
     val documentState by remember(documentLibraryViewModel) {
         documentLibraryViewModel?.state ?: kotlinx.coroutines.flow.MutableStateFlow(DocumentLibraryState())
@@ -952,6 +999,16 @@ fun LibraryScreen(
         // exactly where it was; only the dissolve is animated.
         val shelfStateHolder = rememberSaveableStateHolder()
         val swapMotion = rememberMotionEnabled()
+        // SizeTransform is opt-in per swap and gated on the two shelves' item
+        // counts: the re-column failure above is a function of how many rows the
+        // incoming grid has to measure, so a swap between two small shelves
+        // (a handful of documents, a couple of manga) gets the smoothness and a
+        // swap involving a full shelf keeps the plain dissolve. maxOf because it
+        // is the taller side that decides the row count.
+        val shelfItemCount = maxOf(
+            books?.size ?: 0,
+            documentState.items.size,
+        )
         CompositionLocalProvider(LocalFolioTopInset provides shelfInset(libraryMode)) {
             Box(
                 modifier = Modifier
@@ -966,7 +1023,13 @@ fun LibraryScreen(
             ) {
                 AnimatedContent(
                     targetState = libraryMode,
-                    transitionSpec = { folioFadeSwap(swapMotion) },
+                    transitionSpec = {
+                        folioFadeSwap(
+                            swapMotion,
+                            sizeTransform = folioSwapSizeTransform()
+                                .takeIf { folioSizeTransformEligible(shelfItemCount) },
+                        )
+                    },
                     label = "shelf swap",
                 ) { mode ->
                     CompositionLocalProvider(LocalFolioTopInset provides shelfInset(mode)) {
@@ -1552,7 +1615,10 @@ private fun LibraryContent(
         // where they fold away with it as the shelf scrolls, so the shelf itself
         // starts straight at the content.
         if (books == null) {
-            com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
+            // The shelf is measured, not spun for. See LibrarySkeleton: a lone
+            // spinner on an empty page is what the tab cross-fade carries in, and
+            // the page then appears all at once when the read lands.
+            LibrarySkeleton(modifier = Modifier.fillMaxSize())
         } else if (books.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -1582,11 +1648,22 @@ private fun LibraryContent(
             // grid and the incoming list are composed together and each holds this
             // book's cover key, and two live copies of one key in one scope is the
             // case the shared-transition registry cannot resolve.
+            //
+            // A SizeTransform is safe here in a way it is not for the shelf swap: both
+            // sides render the identical book list, so the row count cannot change
+            // and the incoming layout never re-columns. Only a short shelf qualifies —
+            // see folioSizeTransformEligible.
             val swapMotion = rememberMotionEnabled()
             val swapInFlight = rememberSwapInFlight(viewMode)
             AnimatedContent(
                 targetState = viewMode,
-                transitionSpec = { folioFadeSwap(swapMotion) },
+                transitionSpec = {
+                    folioFadeSwap(
+                        swapMotion,
+                        sizeTransform = folioSwapSizeTransform()
+                            .takeIf { folioSizeTransformEligible(books.size) },
+                    )
+                },
                 label = "view mode swap",
             ) { mode ->
                 FolioSharedElementsSuppressed(swapInFlight) {

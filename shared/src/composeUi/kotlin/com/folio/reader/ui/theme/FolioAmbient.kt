@@ -1,18 +1,15 @@
 package com.folio.reader.ui.theme
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import kotlin.math.sin
 import kotlin.math.PI
 
@@ -132,41 +129,112 @@ private val STILL_ROOM: State<FolioAmbient> = mutableStateOf(FolioAmbient.Neutra
 val LocalFolioAmbient = compositionLocalOf<State<FolioAmbient>> { STILL_ROOM }
 
 /**
+ * How often the two never-ending animations in the app are re-sampled — this
+ * light and §13.4's hero mesh — in milliseconds.
+ *
+ * Both are slow past the point where their *value* depends on the sampling rate
+ * at all. A 47s swing advances its phase by 0.0134 rad per 100ms tick — 0.27° of
+ * azimuth at [AMBIENT_SWING_MAX], a fraction of a percent of the light's
+ * displacement — and the mesh's shortest cycle is 18 seconds, where a tick moves
+ * a pool centre by ~1% of its own radius. Ten samples a second of either is
+ * indistinguishable from ninety.
+ *
+ * Their *cost*, however, was not rate-independent. Both are read in the draw
+ * phase by surfaces that cover the screen — the light by `folioField`, the mesh
+ * by the hero — so a per-frame read invalidated the whole page every frame and
+ * the app never went idle. Measured on the test device (1080x2392 @90Hz,
+ * `dumpsys gfxinfo … framestats`): at rest the app rendered ~118 frames in four
+ * seconds with 100% of them over the 90Hz budget, and with motion disabled it
+ * rendered **zero**. The room was paying a full-screen redraw, forever, to move
+ * a light far below the eye's threshold.
+ *
+ * So the clock ticks on its own schedule instead of the display's. Between ticks
+ * nothing is invalidated, the frame loop stops, and the device is free to fall
+ * back to its resting refresh rate. The motion is unchanged: the phase is
+ * computed from elapsed time, so a tick that lands late still reports the phase
+ * that instant actually has — the light is never behind, it simply is not drawn
+ * in between. A drift-and-catch-up clock would make the room stutter, which is
+ * the one thing an effect whose whole job is to be below notice cannot do.
+ */
+internal const val SLOW_MOTION_TICK_MS = 100L
+
+/** One whole turn, the value every phase in this file is expressed against. */
+internal val TWO_PI = (2.0 * PI).toFloat()
+
+/** `withFrameNanos` counts nanoseconds; every period in this file is milliseconds. */
+private const val NANOS_PER_MS = 1_000_000L
+
+/**
+ * The phase, in 0..2π, that a [periodMs] oscillator has reached after
+ * [elapsedMs] of running. One whole turn per period, linear — the same ramp
+ * `tween(periodMs, LinearEasing)` produces, which is what §17 and §13.4 both
+ * specified.
+ *
+ * Pure and public-internal so `AmbientLightTest` can pin the *rate*: the one
+ * property of this clock that a reader cannot check by looking at it, and the
+ * one this file has already got wrong once (an elapsed time in nanoseconds
+ * against a period in milliseconds wraps every 47µs, not every 47s, and strobes
+ * the light). See [SLOW_MOTION_TICK_MS].
+ */
+internal fun slowPhaseAt(elapsedMs: Long, periodMs: Long): Float {
+    val ms = periodMs.coerceAtLeast(1L)
+    val elapsed = elapsedMs.coerceAtLeast(0L)
+    return ((elapsed % ms).toFloat() / ms.toFloat()) * TWO_PI
+}
+
+/**
+ * [periodsMs].size phases, each advancing 0..2π once per its own period, re-sampled
+ * every [tickMs] rather than every frame — see [SLOW_MOTION_TICK_MS].
+ *
+ * Returns a `State` of the phase list, so callers keep reading it in the draw
+ * phase and never recompose for it. Reduce-motion is *not* handled here: the
+ * callers own that decision, and they park their own value at its static form.
+ */
+@Composable
+internal fun rememberSlowPhases(
+    periodsMs: List<Long>,
+    tickMs: Long = SLOW_MOTION_TICK_MS,
+): State<List<Float>> {
+    val phases = remember(periodsMs, tickMs) { mutableStateOf(periodsMs.map { 0f }) }
+    LaunchedEffect(periodsMs, tickMs) {
+        // `delay` for the spacing, not `withFrameNanos`: asking the Choreographer
+        // for a frame every vsync would keep the frame loop alive and defeat the
+        // whole point. One frame request per tick is all this needs.
+        val origin = withFrameNanos { it }
+        while (true) {
+            delay(tickMs)
+            val now = withFrameNanos { it }
+            // Nanoseconds in, milliseconds out — see slowPhaseAt.
+            val elapsedMs = (now - origin).coerceAtLeast(0L) / NANOS_PER_MS
+            phases.value = periodsMs.map { period -> slowPhaseAt(elapsedMs, period) }
+        }
+    }
+    return phases
+}
+
+/**
  * The ambient light's clock: two sines on distinct slow periods, combined into
  * one [FolioAmbient]. Frozen at [FolioAmbient.Neutral] under reduce-motion.
+ *
+ * Sampled on [SLOW_MOTION_TICK_MS] rather than per frame; see there for why a
+ * light this slow is the same picture at 10Hz and why the frames it gives back
+ * are the difference between an app that idles and one that does not.
  */
 @Composable
 fun rememberAmbientLight(): State<FolioAmbient> {
     if (!rememberMotionEnabled()) {
         return remember { mutableStateOf(FolioAmbient.Neutral) }
     }
-    val transition = rememberInfiniteTransition(label = "ambientLight")
+    val phases = rememberSlowPhases(AMBIENT_PERIODS_MS)
     // Full-circle phases rather than ±1 triangles: a triangle wave kinks its
     // slope at each extreme, and a kink is a visible tick in something whose
     // entire job is to be below notice.
-    val swingPhase = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = AMBIENT_PERIODS_MS[0].toInt(), easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "ambientSwingPhase",
-    )
-    val breathPhase = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = AMBIENT_PERIODS_MS[1].toInt(), easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "ambientBreathPhase",
-    )
-    return remember(swingPhase, breathPhase) {
+    return remember(phases) {
         derivedStateOf {
+            val p = phases.value
             FolioAmbient(
-                swing = sin(swingPhase.value),
-                breath = 0.5f + 0.5f * sin(breathPhase.value),
+                swing = sin(p[0]),
+                breath = 0.5f + 0.5f * sin(p[1]),
             )
         }
     }

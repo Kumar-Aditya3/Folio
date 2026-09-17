@@ -1,11 +1,16 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.reader
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,11 +31,14 @@ import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.pageBlockBandFraction
 import com.folio.reader.ui.components.pageBlockChapterStops
 import com.folio.reader.ui.components.pageBlockSeekTarget
 import com.folio.reader.ui.components.pageFoxing
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 import kotlin.math.roundToInt
 
@@ -92,11 +100,32 @@ fun ReaderScreen(
     scopeControlEnabled: Boolean = false,
     overriddenFields: Set<String> = emptySet(),
     onWriteGlobal: ((ReaderSettings) -> Unit)? = null,
-    onResetBook: (() -> Unit)? = null
+    onResetBook: (() -> Unit)? = null,
+    /**
+     * §17 morph landing. When non-null the reader holds a plate carrying the
+     * book's cover key in the middle of the page while the first chapter loads, so
+     * the cover tapped on a shelf has somewhere to land and the reader appears to
+     * open *from* that cover rather than replacing the page with a spinner.
+     *
+     * Null — the default — disables the whole thing and the reader is byte-identical
+     * to before. That is deliberate: the arriving content here is a native browser
+     * surface on Android, which Compose cannot composite over, so the plate and the
+     * page can only agree about when the handoff happens by luck. It is opt-in
+     * behind a settings flag until that seam is measured on a device.
+     */
+    morphBookId: String? = null
 ) {
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
     var totalPages by remember(currentChapterIndex) { mutableStateOf(1) }
+
+    // §17 morph landing: the book id to land the tapped cover on, but only while
+    // there is nothing on the page yet. The moment a chapter, its HTML or its
+    // cover chapter arrives the plate has served its purpose and is dropped, which
+    // is also what stops the key being registered twice.
+    val morphLanding = morphBookId?.takeIf {
+        isLoadingContent || chapterHtml.isBlank() || currentChapter == null
+    }
 
     // Desktop's embedded browser is a heavyweight native window that paints over
     // Compose overlays, so the chrome reserves its own space there instead of
@@ -200,6 +229,18 @@ fun ReaderScreen(
                 onChapterChange(landing.chapterIndex)
             }
         }
+    }
+
+    /**
+     * A Contents tap or chapter turn aimed at a neighbour already inside the loaded window
+     * changes no document, so `setChapter` returns without reloading and the reader never
+     * moves. The move is a seek, and `pendingJump` is the only thing that issues one —
+     * annotation jumps already route through it, so chapter taps do too. The "p:0" target is
+     * scoped to the target's own section by the surface, landing the reader at its top.
+     */
+    fun jumpToChapter(index: Int) {
+        if (index != currentChapterIndex) pendingJump = Triple(index, "p:0", null)
+        onChapterChange(index)
     }
 
     // The reading theme paints the page and nothing else. Chrome and overlays are app
@@ -322,7 +363,7 @@ fun ReaderScreen(
                     showReaderPanel = false
                     onSettingsClick()
                 },
-                onChapterChange = onChapterChange,
+                onChapterChange = { jumpToChapter(it) },
                 onSettingsChange = onSettingsChange,
                 onSaveNote = { id, text ->
                     if (text.isNotBlank()) onSetHighlightNote(id, text)
@@ -381,8 +422,8 @@ fun ReaderScreen(
                 highlights = highlights,
                 onRetry = onRetryChapter,
                 onLinkClick = onLinkClick,
-                onNextChapter = if (currentChapterIndex < chapters.size - 1) { { onChapterChange(currentChapterIndex + 1) } } else null,
-                onPrevChapter = if (currentChapterIndex > 0) { { onChapterChange(currentChapterIndex - 1) } } else null,
+                onNextChapter = if (currentChapterIndex < chapters.size - 1) { { jumpToChapter(currentChapterIndex + 1) } } else null,
+                onPrevChapter = if (currentChapterIndex > 0) { { jumpToChapter(currentChapterIndex - 1) } } else null,
                 hasNextChapter = currentChapterIndex < chapters.size - 1,
                 hasPrevChapter = currentChapterIndex > 0,
                 onResolveImage = onResolveImage,
@@ -409,6 +450,33 @@ fun ReaderScreen(
             )
         } else {
             ReaderNoChapters(onBackPress = onBackPress)
+        }
+
+        // §17 morph landing. Composed after the page surface, so it sits *over*
+        // it: the plate arrives with the cover the reader tapped and the page
+        // fades up beneath it once the chapter is up. Held only while the chapter
+        // is loading, then dropped — leaving it composed would keep a second copy of
+        // the cover key alive for the whole reading session and strand the morph.
+        if (morphLanding != null) {
+            com.folio.reader.ui.components.FolioCoverPlate(
+                coverPath = coverPath,
+                title = bookTitle,
+                author = "",
+                // The cover key is the one the shelf published, so the plate the
+                // reader tapped *is* the plate that lands here. `fillMaxWidth(null)`
+                // rather than `fillMaxWidth(fraction)`: the plate needs a bounded
+                // width to derive its height from, and an exact-width fill would
+                // squash the trim on a wide window.
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = FolioTokens.gutter)
+                    .widthIn(max = 280.dp)
+                    .fillMaxWidth()
+                    .sharedElementOrNoop(FolioSharedKeys.bookCover(morphLanding)),
+                width = null,
+                halo = null,
+                suppressFallbackText = true,
+            )
         }
 
         // Foxing: the page's outer margins wear a little, and the wear concentrates
@@ -443,11 +511,45 @@ fun ReaderScreen(
         )
 
         // Top bar overlay - slides over content
+        //
+        // The transitions are explicit `tween`s on [FolioTokens.motionStandard],
+        // not the default spring. With no spec, `AnimatedVisibility` uses Compose's
+        // default *spring*, whose start time comes from the frame clock — so on the
+        // reader's first frames, where the chapter decode, the window build and the
+        // WebView load all land together, a dropped frame can leave the bar pinned
+        // at its start value (fully off-screen, since the slide begins at `-it`)
+        // until the clock catches up. That reads as "the chrome arrives a second
+        // late" rather than "the chrome slides in", and it is worst on exactly the
+        // heavy first frame the reader always has.
+        //
+        // Rule 19: with motion off the bars render their final static form, so the
+        // transition is skipped entirely rather than run at zero duration.
+        val chromeMotion = com.folio.reader.ui.theme.rememberMotionEnabled()
+        val chromeSpec = androidx.compose.animation.core.tween<Float>(
+            durationMillis = com.folio.reader.ui.theme.FolioTokens.motionStandard.toInt(),
+            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+        )
+        // The slide animates an offset, so it needs its own spec: the fade's
+        // `tween<Float>` will not unify with `FiniteAnimationSpec<IntOffset>`.
+        val chromeSlideSpec = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(
+            durationMillis = com.folio.reader.ui.theme.FolioTokens.motionStandard.toInt(),
+            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+        )
         androidx.compose.animation.AnimatedVisibility(
             visible = showControls,
             modifier = Modifier.align(Alignment.TopCenter),
-            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
-            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it }
+            enter = if (chromeMotion) {
+                androidx.compose.animation.fadeIn(chromeSpec) +
+                    androidx.compose.animation.slideInVertically(chromeSlideSpec) { -it }
+            } else {
+                androidx.compose.animation.EnterTransition.None
+            },
+            exit = if (chromeMotion) {
+                androidx.compose.animation.fadeOut(chromeSpec) +
+                    androidx.compose.animation.slideOutVertically(chromeSlideSpec) { -it }
+            } else {
+                androidx.compose.animation.ExitTransition.None
+            }
         ) {
             ReaderTopBar(
                 bookTitle = bookTitle,
@@ -468,12 +570,23 @@ fun ReaderScreen(
         }
 
         // Bottom chrome overlay - slides over content. The page block, not a bar:
-        // position carried by the material of the page itself.
+        // position carried by the material of the page itself. Same explicit spec
+        // and Rule 19 skip as the top bar above.
         androidx.compose.animation.AnimatedVisibility(
             visible = settings.showProgress && showControls,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it },
-            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it }
+            enter = if (chromeMotion) {
+                androidx.compose.animation.fadeIn(chromeSpec) +
+                    androidx.compose.animation.slideInVertically(chromeSlideSpec) { it }
+            } else {
+                androidx.compose.animation.EnterTransition.None
+            },
+            exit = if (chromeMotion) {
+                androidx.compose.animation.fadeOut(chromeSpec) +
+                    androidx.compose.animation.slideOutVertically(chromeSlideSpec) { it }
+            } else {
+                androidx.compose.animation.ExitTransition.None
+            }
         ) {
             BottomPageBlock(
                 chapterTitle = if (showChapterLine) currentChapter?.title ?: "" else "",
@@ -532,7 +645,7 @@ fun ReaderScreen(
             showReaderPanel = showReaderPanel,
             chapters = chapters,
             currentChapterIndex = currentChapterIndex,
-            onChapterChange = onChapterChange,
+            onChapterChange = { jumpToChapter(it) },
             onToggleToc = onToggleToc,
             onToggleAnnotations = onToggleAnnotations,
             bookmarks = bookmarks,

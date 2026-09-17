@@ -35,6 +35,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -225,6 +226,71 @@ class HomeViewModel(
         val settings: HomeSettings
     )
 
+    /**
+     * The §11.4 manga cards, resolved separately from the book pipeline.
+     *
+     * [EMPTY] is what the base emission carries: [HomeUiState.loaded] can go true
+     * as soon as the local book/session reads answer, and these three fields fill
+     * in on the next emission. Nothing else on Home reads them, so the reading
+     * ring, the streak and the Continue-reading shelf are never held behind a
+     * manga query.
+     */
+    private data class MangaSections(
+        val newChapters: List<MangaNewChapterBadge>,
+        val mangaContinue: List<MangaContinueItem>,
+        val hasManga: Boolean
+    ) {
+        companion object {
+            val EMPTY = MangaSections(emptyList(), emptyList(), false)
+        }
+    }
+
+    /**
+     * The manga sections as their own flow, so they cost nothing on the path that
+     * gates [HomeUiState.loaded].
+     *
+     * Every call here is a suspend query, and [build] used to await them in
+     * sequence before it could return — which is why the skeleton stayed up until
+     * the manga side had finished, on every cold start. Emitting them separately
+     * lets the numbers paint first and the cards arrive after.
+     *
+     * The extension expansion lives here rather than on the caller's path for the
+     * same reason, and it is the more important half of it: `sourcesFlow` is
+     * `mangaBackend.observeSources()`, which on Android is
+     * `installedExtensionsFlow` — a flow that **emits nothing until
+     * `ExtensionManager.initExtensions()` completes** (see
+     * `mapExtensionsWhenInitialized`). Awaiting it before the first emission held
+     * Home's skeleton for the whole extension load (measured: 7.0s on a device
+     * with three extensions installed, against 155ms for every local read Home
+     * actually needs). Nothing in the book pipeline needs the source list, so the
+     * base emission must never wait on it.
+     *
+     * Empty when no manga repository is wired (desktop), which is the same shape
+     * the old inline code produced.
+     */
+    private fun mangaSectionsFlow(rawExclusions: Set<Pair<Scope, String>>?): Flow<MangaSections> = flow {
+        if (mangaRepository == null && mangaUpdateRepository == null) {
+            emit(MangaSections.EMPTY)
+            return@flow
+        }
+        // The one place the extension→source expansion is resolved, and the only
+        // thing here that waits on the source list. A no-op when no EXTENSION row
+        // is present, which `expandExtensionExclusions` short-circuits itself.
+        val exclusions = rawExclusions?.let { expandExtensionExclusions(it, sourcesFlow.first()) }
+        val newChapters = runCatching {
+            mangaUpdateRepository?.getNewChapterBadges(exclusions ?: emptySet()).orEmpty()
+        }.getOrDefault(emptyList())
+        val mangaContinue = runCatching { buildMangaContinue(exclusions) }.getOrDefault(emptyList())
+        val hasManga = runCatching {
+            mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
+        }.getOrDefault(false)
+        emit(MangaSections(newChapters, mangaContinue, hasManga))
+    }
+
+    /** The source list the extension expansion resolves against; empty without a backend. */
+    private val sourcesFlow: Flow<List<com.folio.reader.manga.MangaSourceInfo>>
+        get() = mangaBackend?.observeSources() ?: flowOf(emptyList())
+
     private val inputs: Flow<Inputs> = combine(
         bookRepository.getAllBooks(),
         sessionRepository.observeSessionsSince(
@@ -245,12 +311,21 @@ class HomeViewModel(
      * afterward and updates the surface in place. `loaded=true` is never held
      * hostage by the network again. The flow never completes while collected,
      * because `combine` tears the whole state down when any source finishes.
+     *
+     * The source list is awaited **after** the first emission, never before.
+     * Resolving the extension expansion up front put `observeSources()` — on
+     * Android, a flow that emits nothing until the extension runtime has finished
+     * loading — on the path of the very first value, so this flow could not
+     * produce one and `combine` therefore could not produce Home's state at all.
+     * The first emission only needs the *raw* exclusion rows as its cache
+     * signature, and a raw row is a local read.
      */
     private val discoverFlow: Flow<List<MangaDiscoverItem>> = flow {
-        // The exclusion set this fetch runs under (extension rows already
-        // expanded to source ids); it doubles as the cache signature.
-        val exclusions = currentExclusions()
-        val signature = exclusions.hashCode()
+        // Raw rows first: a local read, and enough to key the cache. Extension
+        // rows are expanded to source ids only for the live fetch below, which
+        // runs after the cache has already been shown.
+        val raw = statsExclusionRepository?.observeExclusions()?.first()
+        val rawSignature = raw.hashCode()
         // Fresh cache: one emission, no network — the "one browse request per
         // cache window" contract. Stale cache: show the stale rows immediately
         // (stale beats blank), then refresh in place. No cache: empty, then
@@ -261,7 +336,7 @@ class HomeViewModel(
         val cached = discoverCache
         if (cached != null) {
             val ttl = if (cached.items.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
-            if (cached.signature == signature) {
+            if (cached.signature == rawSignature) {
                 if (now - cached.at < ttl) {
                     emit(cached.items)
                     awaitCancellation()
@@ -273,37 +348,71 @@ class HomeViewModel(
         } else {
             emit(emptyList())
         }
-        emit(fetchDiscover(exclusions))
+        emit(fetchDiscover(raw))
         awaitCancellation()
     }
 
-    /** The exclusion snapshot Discover fetches under, extension rows expanded to sources. */
-    private suspend fun currentExclusions(): Set<Pair<Scope, String>>? {
-        val raw = statsExclusionRepository?.observeExclusions()?.first() ?: return null
+    /**
+     * The exclusion snapshot Discover fetches under, extension rows expanded to
+     * sources. Called only from [fetchDiscover], i.e. after Discover's first
+     * emission — awaiting the source list here is what makes the expansion free
+     * on the path that gates the surface.
+     */
+    private suspend fun expandForDiscover(
+        raw: Set<Pair<Scope, String>>?
+    ): Set<Pair<Scope, String>>? {
+        if (raw == null) return null
         val backend = mangaBackend ?: return raw
         return expandExtensionExclusions(raw, backend.observeSources().first())
     }
 
     /**
-     * Home's state. The base pipeline (books, sessions, settings, exclusions,
-     * the manga shelves) emits as soon as the local database answers; Discover
-     * rides in on top through [discoverFlow] whenever the network gets there.
+     * Home's state. The base pipeline (books, sessions, settings, exclusions)
+     * emits as soon as the local database answers, carrying empty manga sections;
+     * the §11.4 manga cards ride in on a second emission through
+     * [mangaSectionsFlow], and Discover on top of that through [discoverFlow]
+     * whenever the network gets there.
      *
-     * EXTENSION exclusions are expanded to MANGA_SOURCE rows here — once, where
-     * the backend's source list is available — so the badges, the manga stats
-     * and the continue shelf all resolve them through the same source-id path.
+     * EXTENSION exclusions are expanded to MANGA_SOURCE rows inside
+     * [mangaSectionsFlow] — once, where the backend's source list is available —
+     * so the badges, the manga stats and the continue shelf all resolve them
+     * through the same source-id path.
      */
     val state: Flow<HomeUiState> = run {
         val exclusionRepo = statsExclusionRepository
-        val sourcesFlow: Flow<List<com.folio.reader.manga.MangaSourceInfo>> =
-            mangaBackend?.observeSources() ?: flowOf(emptyList())
-        val base = if (exclusionRepo == null) {
-            inputs.map { value -> value.build(null, discover = cachedDiscover(0)) }
-        } else {
-            combine(inputs, exclusionRepo.observeExclusions(), sourcesFlow) { value, raw, sources ->
-                val exclusions = expandExtensionExclusions(raw, sources)
-                value.build(exclusions, discover = cachedDiscover(exclusions.hashCode()))
+        // Emits (exclusions, manga) twice per exclusion set: EMPTY first so the
+        // book pipeline is never held, then the resolved sections. Two separate
+        // emissions rather than a `combine` because a combine would wait for the
+        // manga flow — exactly the dependency this split exists to remove.
+        //
+        // Driven by `observeExclusions()` rather than a one-shot `.first()`: the
+        // reader can toggle a stats exclusion on the Stats tab, and Home must
+        // re-gate its manga cards when they come back. A one-shot read would have
+        // frozen the set for the process lifetime.
+        //
+        // The EXTENSION→MANGA_SOURCE expansion happens inside [mangaSectionsFlow],
+        // not here: it needs the backend's source list, and on Android that list
+        // does not emit until extension loading finishes. Expanding here would
+        // put the whole extension load back in front of `loaded = true`, which is
+        // exactly the multi-second skeleton this split removed. So the base
+        // emission carries the raw rows and the book pipeline gates on those —
+        // correct, because an EXTENSION row names an extension package and no
+        // book can ever match one.
+        val rawExclusions: Flow<Set<Pair<Scope, String>>?> =
+            if (exclusionRepo == null) flowOf(null) else exclusionRepo.observeExclusions()
+        val sections: Flow<Pair<Set<Pair<Scope, String>>?, MangaSections>> =
+            rawExclusions.flatMapConcat { raw ->
+                flow {
+                    emit(raw to MangaSections.EMPTY)
+                    emit(raw to mangaSectionsFlow(raw).first())
+                }
             }
+        val base = combine(inputs, sections) { value, (raw, manga) ->
+            value.build(
+                exclusions = raw,
+                discover = cachedDiscover(raw.hashCode()),
+                manga = manga
+            )
         }
         combine(base, discoverFlow) { value, discover ->
             if (discover.isEmpty()) value else value.copy(discover = discover)
@@ -320,7 +429,8 @@ class HomeViewModel(
 
     private suspend fun Inputs.build(
         exclusions: Set<Pair<Scope, String>>?,
-        discover: List<MangaDiscoverItem>
+        discover: List<MangaDiscoverItem>,
+        manga: MangaSections = MangaSections.EMPTY
     ): HomeUiState {
         val coverTint = settings.coverTint
         val today = today()
@@ -388,13 +498,15 @@ class HomeViewModel(
             .count { (_, group) -> group.minOf { it.startedAt } >= weekStartInstant }
         val finishedThisWeek = gatedFinished.count { it.updatedAt >= weekStartInstant }
 
-        // §11.4: the update repository resolves the same exclusions against the
-        // manga side; null on desktop keeps the legacy shape.
-        val newChapters = mangaUpdateRepository
-            ?.getNewChapterBadges(exclusions ?: emptySet())
-            .orEmpty()
-        val mangaContinue = buildMangaContinue(exclusions)
-        val hasManga = mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
+        // §11.4 manga sections. Supplied by [mangaSectionsFlow] rather than
+        // resolved here, because this function runs on Home's cold-start path and
+        // the manga side is a serial fan-out of roughly a dozen queries. The
+        // reading numbers above need none of it, so the base emission ships them
+        // with the manga fields empty and the sections land on a later emission —
+        // see [state].
+        val newChapters = manga.newChapters
+        val mangaContinue = manga.mangaContinue
+        val hasManga = manga.hasManga
         // One ranked list for the anchor and the shelf behind it.
         val readingNow = buildReadingNow(heroBook, gatedInProgress, gatedSessions, mangaContinue)
 
@@ -552,11 +664,20 @@ class HomeViewModel(
      * [cachedDiscover], so this runs *off* Home's first-emission path and its
      * result lands as an in-place update.
      */
-    private suspend fun fetchDiscover(exclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
+    private suspend fun fetchDiscover(rawExclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
         val backend = mangaBackend ?: return emptyList()
         val history = mangaHistoryRepository ?: return emptyList()
         val mangaRepo = mangaRepository ?: return emptyList()
         val now = Clock.System.now()
+        // The source list is awaited here, after Discover's first emission has
+        // already been handed to the surface — see [discoverFlow]. A backend that
+        // never answers the source list costs Discover its live rows, not Home
+        // its surface, so the expansion failing is not fatal to this call.
+        val exclusions = runCatching { expandForDiscover(rawExclusions) }
+            .getOrElse { error ->
+                if (error is CancellationException) throw error
+                rawExclusions
+            }
         val signature = exclusions.hashCode()
         val fetched: List<MangaDiscoverItem> = runCatching {
             val scope = exclusions?.let(::StatsScope)

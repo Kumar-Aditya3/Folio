@@ -74,6 +74,38 @@ class GlassCapabilityTest {
     }
 
     @Test
+    fun `a surface can hold its blur off while the backdrop is stale`() {
+        // The nav capsule's window after a route change: the registered backdrop
+        // still describes the screen we just left, so blurring it paints the old
+        // page under the new chrome. `blurEnabled` is how the call site stands the
+        // *effect* down without standing the surface down — the veil keeps its
+        // fill, sheen, grain and bevel, which is a complete material.
+        assertTrue(GlassSpec.Default.blurEnabled, "blur is on unless a caller says otherwise")
+        assertFalse(GlassSpec.Default.copy(blurEnabled = false).blurEnabled)
+    }
+
+    @Test
+    fun `holding the blur off does not change the requested radius`() {
+        // The two knobs answer different questions — "how thick" vs "whether" —
+        // so suppression must not silently rewrite the radius a surface asked
+        // for. Restoring the blur has to restore exactly the material that was
+        // there before, not a thinner one.
+        val held = GlassSpec(blurRadius = 18.dp, blurEnabled = false)
+        assertEquals(18.dp, held.blurRadius)
+        assertTrue(held.copy(blurEnabled = true).blurRadius == 18.dp)
+    }
+
+    @Test
+    fun `suppression is not a capability`() {
+        // A caller cannot buy glass by asking for it: blurEnabled=false only ever
+        // removes the effect. The ladder still decides whether glass exists at
+        // all, and the default local never blurs regardless of any GlassSpec.
+        assertFalse(GlassCapabilities.None.blur)
+        assertTrue(GlassSpec(blurEnabled = true).blurEnabled)
+        assertFalse(GlassCapabilities.None.blur, "capability verdict is unaffected by GlassSpec")
+    }
+
+    @Test
     fun `fill knobs are independent of the glass ladder`() {
         // §15's "glass, not lid" window: the knobs the sliders write are
         // constants of the design, whatever the device can do. The ladder gates

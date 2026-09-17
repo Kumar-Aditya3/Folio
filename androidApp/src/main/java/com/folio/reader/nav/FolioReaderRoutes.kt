@@ -54,7 +54,21 @@ fun ReaderRoute(
         onBackPress = onBack,
         onSearchClick = onOpenSearch,
         onSettingsClick = onOpenSettings,
-        onSettingsChanged = { navModel.globalSettings = it }
+        onSettingsChanged = { navModel.globalSettings = it },
+        // Read off the global row here — the only place in this route that still
+        // holds the nav model. [globalSettings] is a Compose `mutableStateOf`, so
+        // this read subscribes the whole reader route to it: whenever the settings
+        // read lands, the route recomposes and `morphIntoReader` becomes the
+        // reader's own value instead of the default.
+        //
+        // It used to be a plain parameter read at the call site, which happened to
+        // look identical — until the settings read landed late, at which point the
+        // reader had already composed with `morphIntoReader = false` and, because
+        // nothing in the route *observed* the setting, it never recomposed to pick
+        // the real value up. Reading it here rather than passing it in is what makes
+        // the flag converge; `warmGlobalSettings()` is what makes it usually already
+        // correct on the first frame.
+        morphIntoReader = navModel.globalSettings.morphIntoReader
     )
 }
 
@@ -67,7 +81,9 @@ private fun ReaderRouteContent(
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {}
+    onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {},
+    /** §17 morph landing opt-in; see [com.folio.reader.settings.ReaderSettings.morphIntoReader]. */
+    morphIntoReader: Boolean = false
 ) {
     val viewModel = remember {
         ReaderViewModel(
@@ -87,8 +103,12 @@ private fun ReaderRouteContent(
 
     val chapters by viewModel.chapters.collectAsState(initial = emptyList())
     val chapterIndex by viewModel.currentChapterIndex.collectAsState(initial = 0)
-    val html by viewModel.chapterHtml.collectAsState(initial = "")
-    val loadingContent by viewModel.isLoadingContent.collectAsState(initial = true)
+    // Both are StateFlows, so these calls resolve to the no-`initial` overload and
+    // read the current value on the first frame. Passing `initial` here was the
+    // bug: the view model said "not loading" while the html was still empty, and a
+    // supplied `initial = true` only papered over it for one frame.
+    val html by viewModel.chapterHtml.collectAsState()
+    val loadingContent by viewModel.isLoadingContent.collectAsState()
     val position by viewModel.position.collectAsState(initial = null)
     val settings by viewModel.effectiveSettings.collectAsState(initial = initialSettings)
     val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
@@ -208,7 +228,12 @@ private fun ReaderRouteContent(
             // effective-derived and carries this book's overrides.
             onSettingsChanged(viewModel.global())
         },
-        onResetBook = { viewModel.resetBookToDefaults() }
+        onResetBook = { viewModel.resetBookToDefaults() },
+        // §17 morph landing, opt-in (see ReaderSettings.morphIntoReader). Decided by
+        // the caller from the *global* settings row rather than from `settings`,
+        // which is this book's effective copy: it is a device-confidence flag, not a
+        // reading preference, so it must not vary per book.
+        morphBookId = book.id.takeIf { morphIntoReader }
     )
 }
 
@@ -252,7 +277,11 @@ fun DocumentReaderRoute(
     DocumentReaderScreen(
         viewModel = viewModel,
         settings = navModel.globalSettings,
-        onBack = onBack
+        onBack = onBack,
+        // §17 morph landing. Unconditional, unlike the EPUB reader's: this path is
+        // pure Compose on both platforms, so there is no native surface whose paint
+        // timing could disagree with the plate being dropped.
+        morphDocumentId = documentId
     )
 }
 

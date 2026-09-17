@@ -85,6 +85,28 @@ fun ReadingSettingsPanel(
             )
         }
 
+        // §17 morph into the EPUB reader. Off by default — see the field's own
+        // comment for why this one morph is opt-in when every other is not.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Cover morph into reader", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Fly the tapped cover onto the page while the first chapter loads. " +
+                        "Turn off if the handover flickers on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.morphIntoReader,
+                onCheckedChange = { onSettingsChange(settings.copy(morphIntoReader = it)) }
+            )
+        }
+
         // The device's own screen brightness. Hidden where unsupported: dimming the
         // page to imitate a brightness control washed the paper, and brightness is a
         // property of the hardware rather than a reading preference to store or sync.

@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.library
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -39,6 +42,9 @@ import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
@@ -136,10 +142,17 @@ fun BookListItem(
                 coverPath = book.coverPath,
                 title = book.title,
                 author = book.displayAuthor,
+                // §17: the list shelf hands the same plate to the detail page the
+                // grid does, so both view modes morph. Without a key the list was
+                // the one shelf that hard-cut on the way into a book.
+                modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
                 width = com.folio.reader.ui.theme.FolioTokens.coverInline,
                 shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
                 elevation = 5.dp,
                 small = true,
+                // The paired title flies in under its own key, so the plate must not
+                // also draw the fallback's copy of it.
+                suppressFallbackText = true,
             )
 
             Spacer(modifier = Modifier.width(com.folio.reader.ui.theme.FolioTokens.space3))
@@ -150,7 +163,8 @@ fun BookListItem(
                     style = FolioTheme.typography.titleSmall,
                     color = colors.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id))
                 )
                 Text(
                     book.displayAuthor,
@@ -286,10 +300,17 @@ fun BookCompactItem(
                 coverPath = book.coverPath,
                 title = book.title,
                 author = book.displayAuthor,
+                // §17: compact is a shelf view like grid and list, so it hands the
+                // same plate on too. Its 30dp trim is the smallest source in the
+                // app, which is exactly the case the morph earns its keep — a
+                // cover growing from a thumbnail to a detail header is legible as
+                // one object, where a cross-fade reads as two.
+                modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
                 width = 30.dp,
                 shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
                 elevation = 3.dp,
                 small = true,
+                suppressFallbackText = true,
             )
 
             Spacer(Modifier.width(com.folio.reader.ui.theme.FolioTokens.space3))
@@ -300,7 +321,8 @@ fun BookCompactItem(
                     style = FolioTheme.typography.bodyMedium,
                     color = colors.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id))
                 )
                 val statusPart = if (book.status != BookStatus.UNREAD && book.status != BookStatus.READING)
                     " · ${book.toCardData().statusLabel}" else ""

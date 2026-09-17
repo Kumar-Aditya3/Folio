@@ -1,8 +1,13 @@
 package com.folio.reader
 
 import com.folio.reader.ui.components.chartStagger
+import com.folio.reader.ui.components.folioFadeSwap
+import com.folio.reader.ui.components.folioSizeTransformEligible
+import com.folio.reader.ui.components.folioSwapSizeTransform
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -68,5 +73,63 @@ class EntryMotionTest {
             }
             entry += 0.1f
         }
+    }
+
+    /**
+     * The shelf/view-mode swap's `SizeTransform` is opt-in and threshold-gated, so
+     * the gate has to be exact at both ends. It exists because a `SizeTransform`
+     * measures the incoming lazy grid against an interpolated width, which past a
+     * handful of rows changes its column count and re-flows every row — the
+     * "layout changes for a split second" report the plain dissolve was chosen to
+     * fix.
+     */
+    @Test
+    fun sizeTransformGateIsInclusiveAtTheBoundaryAndRefusesEmptyAndLarge() {
+        assertTrue(folioSizeTransformEligible(1), "a one-item shelf is the safest case there is")
+        assertTrue(folioSizeTransformEligible(8), "the threshold itself must be eligible")
+        assertTrue(!folioSizeTransformEligible(9), "past the threshold the grid can re-column")
+        assertTrue(!folioSizeTransformEligible(0), "an empty shelf has no rows to interpolate")
+        assertTrue(!folioSizeTransformEligible(-1), "a negative count is not a shelf")
+        // Monotonic off the boundary: nothing larger than the threshold sneaks in.
+        for (count in 100..400 step 100) {
+            assertTrue(!folioSizeTransformEligible(count), "count $count must not be eligible")
+        }
+    }
+
+    /** The swap keeps its dissolve when nothing supplies a size spec. */
+    @Test
+    fun fadeSwapDefaultsToNoSizeTransform() {
+        assertNull(
+            folioFadeSwap(motionEnabled = true).sizeTransform,
+            "the default swap must stay a pure dissolve — the size spec is opt-in",
+        )
+    }
+
+    /** When a caller does supply one, it survives the transform. */
+    @Test
+    fun fadeSwapCarriesAnOfferedSizeTransform() {
+        assertNotNull(
+            folioFadeSwap(
+                motionEnabled = true,
+                sizeTransform = folioSwapSizeTransform(),
+            ).sizeTransform,
+            "an offered SizeTransform must reach the ContentTransform",
+        )
+    }
+
+    /**
+     * Rule 19: with motion off the swap is instant, and that includes its size.
+     * A size spec left live under reduce-motion would animate the layout on a
+     * device whose owner has explicitly asked the system for no animation.
+     */
+    @Test
+    fun fadeSwapDropsSizeTransformWhenMotionIsOff() {
+        assertNull(
+            folioFadeSwap(
+                motionEnabled = false,
+                sizeTransform = folioSwapSizeTransform(),
+            ).sizeTransform,
+            "reduce-motion must degrade the swap to static, size included",
+        )
     }
 }

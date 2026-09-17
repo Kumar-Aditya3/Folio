@@ -58,9 +58,25 @@ class ReaderViewModel(
     private val _showAnnotations = MutableStateFlow(false)
     private val _chapterHtml = MutableStateFlow("")
     private val _chapterChip = MutableStateFlow<String?>(null)
-    private val _isLoadingContent = MutableStateFlow(false)
+    /**
+     * True while a chapter is being loaded.
+     *
+     * Starts **true**, not false. A reader is only ever constructed in order to
+     * open a book, so at construction a load is pending by definition — and the
+     * `false` default was a lie that the UI could not tell apart from a finished
+     * empty chapter. That lie is what put "This page is empty." on screen before
+     * the first chapter arrived: the screen consumed a real `isLoading = false`
+     * with `html` still empty and `loadError` still null, which is
+     * indistinguishable from a genuinely empty chapter.
+     *
+     * Every load path sets this true and clears it in a `finally`, so the only
+     * cost of the honest default is that a reader which never loads anything
+     * shows its spinner rather than an empty-page dead end — which is the correct
+     * thing to show for a book that has not opened yet.
+     */
+    private val _isLoadingContent = MutableStateFlow(true)
     private val _loadError = MutableStateFlow<String?>(null)
-    val loadError: Flow<String?> = _loadError
+    val loadError: kotlinx.coroutines.flow.StateFlow<String?> = _loadError
 
     private var currentBookId: String? = null
     private var deviceId: String = ""
@@ -139,9 +155,18 @@ class ReaderViewModel(
     val showControls: Flow<Boolean> = _showControls
     val showToc: Flow<Boolean> = _showToc
     val showAnnotations: Flow<Boolean> = _showAnnotations
-    val chapterHtml: Flow<String> = _chapterHtml
+    /**
+     * Declared [StateFlow], not the erased `Flow`, so callers read the current
+     * value synchronously and cannot be handed an `initial` that disagrees with
+     * it. `collectAsState` resolves on the *declared* type: typed as `Flow`, the
+     * route had to pass `initial = …`, and it passed `true` for a state whose
+     * real value was `false` — the contradiction behind the "This page is empty."
+     * flash. As `StateFlow` the no-`initial` overload is selected and the first
+     * frame paints the truth.
+     */
+    val chapterHtml: kotlinx.coroutines.flow.StateFlow<String> = _chapterHtml
     val chapterChip: Flow<String?> = _chapterChip
-    val isLoadingContent: Flow<Boolean> = _isLoadingContent
+    val isLoadingContent: kotlinx.coroutines.flow.StateFlow<Boolean> = _isLoadingContent
     val linkClickResult: Flow<LinkClickResult?> = links.linkClickResult
 
     // Continuous-mode chapter window: the chapters on screen together, the range

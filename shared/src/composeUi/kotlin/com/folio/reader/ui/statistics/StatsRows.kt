@@ -527,6 +527,18 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
                     color = FolioTheme.colors.onSurfaceVariant
                 )
             }
+            // The one line here that compares rather than reports. It is absent far
+            // more often than it is present — `trendSentence` is null unless the
+            // reader's recent pace has genuinely moved against their own baseline,
+            // so the card never carries a sentence that says "you are normal".
+            stats.trendSentence?.let { sentence ->
+                Spacer(Modifier.height(FolioTokens.space2))
+                Text(
+                    text = sentence,
+                    style = FolioTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.accentStreak
+                )
+            }
         }
         Spacer(Modifier.height(FolioTokens.space3))
         // The 24-hour band: minutes per start-hour, the day's shape at a glance.

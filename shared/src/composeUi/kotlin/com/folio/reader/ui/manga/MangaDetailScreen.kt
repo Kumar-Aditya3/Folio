@@ -1,5 +1,9 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -65,6 +69,7 @@ import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
@@ -421,11 +426,26 @@ fun MangaDetailScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
                     // §17 shared element: the plate flies in from the shelf cell
                     // the reader tapped, rather than being drawn fresh here.
+                    //
+                    // `contentSize` because this is a destination across several
+                    // different sizes: a grid cell hands over `coverFeature`, a
+                    // rail cell a `width = null` fill, a history row `coverInline`,
+                    // and this box is 110dp at a 0.68 ratio. Under the API default
+                    // the placeholder follows the interpolated bounds while the
+                    // cover inside keeps its own size, so they agree only on the
+                    // last frame and the cover jumps into place as the flight ends.
+                    // `contentSize` keeps the artwork the size of its box.
+                    //
+                    // The attachment stays ahead of `.width(110.dp)` so the box is
+                    // the shared node and the plate is what travels inside it.
                     Box(
                         modifier = Modifier
+                            .sharedElementOrNoop(
+                                FolioSharedKeys.mangaCover(m.id),
+                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                            )
                             .width(110.dp)
                             .aspectRatio(0.68f)
-                            .sharedElementOrNoop(FolioSharedKeys.mangaCover(m.id))
                             .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
                     ) {
                         MangaCover(
@@ -441,6 +461,12 @@ fun MangaDetailScreen(
                             m.title,
                             style = MaterialTheme.typography.headlineSmall,
                             color = FolioTheme.colors.onSurface,
+                            // Paired with the shelf tile's title and with a history
+                            // row's, so the run of text travels with its cover from
+                            // whichever surface the reader came in from.
+                            modifier = Modifier.sharedTextOrNoop(
+                                FolioSharedKeys.mangaTitle(m.id)
+                            ),
                         )
                         listOfNotNull(m.author, m.artist).distinct().forEach {
                             Text(it, style = MaterialTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)

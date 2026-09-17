@@ -45,6 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import java.io.File
@@ -211,7 +212,18 @@ class MangaReaderProgressTest {
         private val pageLists: Map<String, List<MangaPageRef>>,
         private val gates: Map<String, CompletableDeferred<Unit>> = emptyMap(),
     ) : MangaBackend {
-        val pageListFetches = mutableListOf<String>()
+        /**
+         * Every page-list fetch, in the order the source was asked.
+         *
+         * A concurrent queue rather than a `mutableListOf`: the reader assembles
+         * its window by fetching neighbours in parallel, so this is appended from
+         * several coroutines at once, and an unsynchronized `ArrayList` silently
+         * drops entries under that race. The symptom was
+         * `openPublishesCurrentChapterBeforeNeighbours` intermittently seeing
+         * `[/c2, /c3]` — the *first* write lost — which reads as a product bug
+         * about fetch ordering and is not one.
+         */
+        val pageListFetches = java.util.concurrent.ConcurrentLinkedQueue<String>()
         private val fakeBytes = ByteArray(16) { it.toByte() }
 
         override val supportsExtensions: Boolean = false
@@ -397,7 +409,7 @@ class MangaReaderProgressTest {
             !vm.loading.value && vm.pages.value.size == 3
         }
 
-        assertEquals(listOf(chapter.url), backend.pageListFetches)
+        assertEquals(listOf(chapter.url), backend.pageListFetches.toList())
         vm.close()
     }
 
@@ -799,6 +811,76 @@ class MangaReaderProgressTest {
         vm.selectCategory("main")
         awaitCondition(message = "new selection persisted") {
             settings.values["manga.library.category"] == "main"
+        }
+    }
+
+    @Test
+    fun libraryIsNotSettledUntilTheRememberedCategoryIsRestored() = runBlocking {
+        // The category flash, as a contract. `selectedCategoryId` opens null, and
+        // null means "no membership filter" — so a shelf that renders before the
+        // remembered category resolves shows the *whole* library and then snaps to
+        // the category the reader was last in.
+        //
+        // `ready` cannot catch that: it tracks whether the library flow has
+        // emitted, which happens first. Hosts gate on `categoryReady` instead, and
+        // this pins the shape of that signal.
+        val catRepo = FakeCategoryRepo()
+        catRepo.categoriesList = listOf(
+            MangaCategory(id = "main", name = "Main"),
+            MangaCategory(id = "reading", name = "Reading"),
+        )
+        val settings = FakeSettingsRepo(mutableMapOf("manga.library.category" to "reading"))
+        val vm = MangaLibraryViewModel(
+            backend = FakeBackend(emptyMap()),
+            mangaRepo = mangaRepo,
+            categoryRepo = catRepo,
+            chapterRepo = chapterRepo,
+            settingsRepo = settings,
+        )
+
+        // `categoryReady` is a Lazily-shared StateFlow: it produces nothing until
+        // something collects it, so a test that only reads `.value` would observe
+        // the initial `false` forever. Collect it for the duration.
+        val collector = launch { vm.categoryReady.collect {} }
+        try {
+            // Not settled at construction: the remembered id has not been read yet,
+            // so a first frame drawn now would be the unfiltered shelf.
+            assertFalse(
+                vm.categoryReady.value,
+                "the shelf must not be drawable before the category resolves",
+            )
+
+            awaitCondition(message = "category settles onto the remembered selection") {
+                vm.categoryReady.value
+            }
+            assertEquals("reading", vm.selectedCategoryId.value)
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    @Test
+    fun libraryWithNoCategoriesIsSettledImmediately() = runBlocking {
+        // The other half of the gate: with no categories to select there is nothing
+        // to restore, and waiting would hold the screen on a skeleton forever. An
+        // empty library is a legitimate first-frame answer, not an unresolved one.
+        val catRepo = FakeCategoryRepo()
+        catRepo.categoriesList = emptyList()
+        val vm = MangaLibraryViewModel(
+            backend = FakeBackend(emptyMap()),
+            mangaRepo = mangaRepo,
+            categoryRepo = catRepo,
+            chapterRepo = chapterRepo,
+            settingsRepo = FakeSettingsRepo(mutableMapOf()),
+        )
+
+        val collector = launch { vm.categoryReady.collect {} }
+        try {
+            awaitCondition(message = "no categories means nothing to wait for") {
+                vm.categoryReady.value
+            }
+        } finally {
+            collector.cancel()
         }
     }
 }

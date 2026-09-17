@@ -369,7 +369,11 @@ fun Modifier.folioVeil(
     val atmos = FolioTheme.atmosphere
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
-    val blurred = caps.blur && backdrop != null
+    // glass.blurEnabled lets a caller hold the blur off for the frames where the
+    // registered backdrop still describes the screen we just left — see GlassSpec.
+    // Everything downstream reads this one boolean, so the blur layer and the fill
+    // tier can never disagree about whether the surface is currently glassy.
+    val blurred = caps.blur && backdrop != null && glass.blurEnabled
     // A caller that names its own alpha has already accounted for its context
     // (the nav capsule, the reader's sheets); everything else is an app panel and
     // takes the panel preference, which is the alpha itself rather than a factor

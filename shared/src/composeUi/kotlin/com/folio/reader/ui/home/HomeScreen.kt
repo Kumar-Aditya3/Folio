@@ -1,5 +1,9 @@
-﻿package com.folio.reader.ui.home
+﻿@file:OptIn(ExperimentalSharedTransitionApi::class)
 
+package com.folio.reader.ui.home
+
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -68,9 +72,12 @@ import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.components.ReadingClimate
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.heroMesh
@@ -407,6 +414,24 @@ private fun ReadingNowAnchor(
                             width = FolioTokens.coverAnchor,
                             halo = tint,
                             elevation = 16.dp,
+                            // §17: Home's anchor hands the cover to the book detail
+                            // (or the manga detail) the same way the shelves do, so
+                            // the morph is available from every surface a cover
+                            // appears on rather than only from the Library tab.
+                            //
+                            // `contentSize`: Home's anchor is `coverAnchor` (148dp)
+                            // and every destination is smaller, so this is the side
+                            // that hands a size change over. Under the API default
+                            // the cover keeps its own size inside shrinking bounds and
+                            // snaps into place at the end — `contentSize` keeps the
+                            // artwork the size of the box around it.
+                            modifier = Modifier.sharedElementOrNoop(
+                                FolioSharedKeys.bookCover(item.id),
+                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                            ),
+                            // The title beside it is paired, so the fallback must not
+                            // repeat it.
+                            suppressFallbackText = true,
                         )
                     }
                 }
@@ -427,7 +452,10 @@ private fun ReadingNowAnchor(
                             style = FolioTheme.typography.headlineMedium,
                             color = colors.onSurface,
                             maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.sharedTextOrNoop(
+                                FolioSharedKeys.bookTitle(item.id)
+                            )
                         )
                         if (item.subtitle.isNotBlank()) {
                             Text(
@@ -664,6 +692,16 @@ private fun ContinueShelf(
                             author = entry.subtitle,
                             width = FolioTokens.coverShelf,
                             small = true,
+                            // `contentSize` for the same reason the anchor above
+                            // uses it: `coverShelf` is 84dp and the detail header's
+                            // plate is `coverFeature` (112dp), so this pair crosses a
+                            // size change and the cover must resize with its box
+                            // rather than after it.
+                            modifier = Modifier.sharedElementOrNoop(
+                                FolioSharedKeys.bookCover(entry.id),
+                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                            ),
+                            suppressFallbackText = true,
                             overlay = { ProgressSeam(entry.progress) },
                         )
                     }
@@ -808,6 +846,15 @@ private fun BecauseYouFinishedShelf(
                         shape = FolioShapes.plateSmall,
                         elevation = 5.dp,
                         small = true,
+                        // This rail's tap goes to the book detail, so its plate
+                        // hands on like the shelf's does. `contentSize` because
+                        // `coverInline * 1.25f` is smaller than the detail header's
+                        // `coverFeature`, so this pair crosses a size change.
+                        modifier = Modifier.sharedElementOrNoop(
+                            FolioSharedKeys.bookCover(book.id),
+                            placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                        ),
+                        suppressFallbackText = true,
                     )
                     Spacer(Modifier.height(FolioTokens.space1))
                     Text(
@@ -816,6 +863,9 @@ private fun BecauseYouFinishedShelf(
                         color = FolioTheme.colors.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.sharedTextOrNoop(
+                            FolioSharedKeys.bookTitle(book.id)
+                        ),
                     )
                 }
             }

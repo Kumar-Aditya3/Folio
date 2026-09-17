@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +52,8 @@ import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.folioGlassEffect
 import com.folio.reader.ui.settings.readableLabel
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTokens
 
 @Composable
@@ -126,6 +131,8 @@ private fun ReaderModeChip(label: String, selected: Boolean, onClick: () -> Unit
 @Composable
 internal fun ReaderControls(
     mangaTitle: String,
+    /** §17: the manga's id, so this title pairs with the shelf tile's. Null disables the pairing. */
+    mangaId: String? = null,
     chapterName: String,
     pageCount: Int,
     currentPage: Int,
@@ -190,6 +197,14 @@ internal fun ReaderControls(
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    // §17: arrives with the cover rather than appearing once the
+                    // reader has already opened, when the shelf's tile is where the
+                    // reader came from.
+                    modifier = if (mangaId != null) {
+                        Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(mangaId))
+                    } else {
+                        Modifier
+                    },
                 )
                 Text(
                     chapterName,

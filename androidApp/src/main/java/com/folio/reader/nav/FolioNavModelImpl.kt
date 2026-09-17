@@ -60,6 +60,46 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
 
     // ── Hoisted UI state (was remembered in setContent before the nav move) ──
     var globalSettings by mutableStateOf(ReaderSettings())
+
+    /**
+     * Guards [warmGlobalSettings] so composition can call it on every frame
+     * without queueing a read per frame. Not `remember`-ed, because the model
+     * outlives the composition — the flag has to survive as long as the loaded
+     * row does.
+     */
+    private var globalSettingsWarmed = false
+
+    /**
+     * Starts the global settings read now and drops the result into
+     * [globalSettings] as soon as it lands.
+     *
+     * Every setting-dependent behaviour in the app reads [globalSettings], which
+     * starts as [ReaderSettings] — all defaults. While the read was a
+     * `LaunchedEffect` in `MainActivity` it landed one frame late, so the first
+     * frame of *every* launch ran on defaults no matter what the reader had
+     * configured. `morphIntoReader` (default `false`) is the case that surfaced
+     * it: a reader route composed on frame one published no cover key, so the
+     * morph had nothing to pair with and never ran — reported as "the morph
+     * doesn't work if the books aren't loaded", when the real dependency was this
+     * read.
+     *
+     * Idempotent, so it is safe to call from a `SideEffect`. Deliberately *not*
+     * `runBlocking`: the read is a single indexed key lookup and will normally win
+     * the race against a cover decode, and blocking the main thread in a
+     * composition to save a frame or two would trade a rare missed morph for a
+     * reliably slower launch. The upshot is the flag is set before any shelf has
+     * decoded a cover to hand over, which is the whole window that matters.
+     */
+    fun warmGlobalSettings() {
+        if (globalSettingsWarmed) return
+        globalSettingsWarmed = true
+        activity.appScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { graph.settingsRepository.getGlobalSettings() }.getOrNull()
+                ?: return@launch
+            withContext(Dispatchers.Main) { globalSettings = loaded }
+        }
+    }
+
     var libraryMode by mutableStateOf(LibraryMode.BOOKS)
     var libraryModeLoaded by mutableStateOf(false)
     var sharedViewIndex by mutableIntStateOf(0)
@@ -160,12 +200,39 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         )
     }
 
-    init {
-        // Cold-start warm-up: touching the lazy state starts the eager
-        // collection now, in parallel with the first frame of the Library.
-        // By the time the reader reaches the Home tab, the data is waiting.
-        homeState
+    /**
+     * The books shelf's unfiltered read, kept hot for the app's whole lifetime —
+     * the Library counterpart of [homeState], and for the same reason.
+     *
+     * The shelf's own flow is a cold `combine` that the *destination* starts, so
+     * before this existed the Library's first composition had nothing to seed
+     * from. [com.folio.reader.ui.library.LibraryScreen] reads this list to decide
+     * what its opening frame shows (see `libraryShelfSeed`), and against a cold
+     * read that answer was always "not measured yet" — the skeleton. The real
+     * grid then composed whenever the read landed, which on a cold start is
+     * ~280–380 ms after the tap: the *middle* of the Home→Library morph, where
+     * it cost a single 27–31 ms recomposition plus ~50–90 ms of blocked UI
+     * thread inside one frame. That is the stutter the reader reports as "slow at
+     * the very beginning when I open the app", why a few warm visits look
+     * smooth, and why relaunching brings it back.
+     *
+     * Hot from app start via [warmTabState], so the destination's opening frame
+     * already has a complete shelf: the grid composes once, on the transition's
+     * first frame, where the enter fade is still at ~0 alpha and a long frame is
+     * not visible — instead of landing mid-flight with covers already in motion.
+     *
+     * Note this must be read as a `StateFlow`, not merely collected: the seed has
+     * to be right on the *first* composition, and `collectAsState` cannot deliver
+     * a value before the frame after that. See `LibraryScreen.knownBooks`.
+     */
+    val libraryBooks: kotlinx.coroutines.flow.StateFlow<List<com.folio.reader.model.Book>> by lazy {
+        libraryVM.allBooks().stateIn(
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            SharingStarted.Eagerly,
+            emptyList()
+        )
     }
+
     val mangaLibVM by lazy {
         com.folio.reader.ui.manga.MangaLibraryViewModel(
             backend = graph.mangaBackend,
@@ -196,6 +263,39 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     }
     val mangaBrowseVM by lazy {
         com.folio.reader.ui.manga.BrowseViewModel(graph.mangaBackend, graph.mangaRepository)
+    }
+    /**
+     * Cold-start warm-up: start every tab's eager collection now, in parallel
+     * with the first frame of the Library, so by the time the reader reaches
+     * Home or Stats the data is waiting rather than just beginning.
+     *
+     * **This `init` must stay below every `by lazy` it touches.** Kotlin runs
+     * property initialisers and `init` blocks in textual order, so a `lazy`
+     * declared *after* this block still has a null delegate field when the
+     * block runs — touching it threw
+     * `NullPointerException: kotlin.Lazy.getValue() on a null object reference`
+     * from `getStatisticsVM` and killed the app on its first frame. Declaring
+     * the warm-up last makes the ordering impossible to get wrong when more
+     * tabs are added.
+     *
+     * `statisticsVM` is touched deliberately: its shared flows are eager, so
+     * building the view model is what puts Stats' year-wide queries in flight.
+     */
+    init {
+        warmTabState()
+    }
+
+    fun warmTabState() {
+        // Settings first: they are the cheapest read here and the one every other
+        // surface's behaviour depends on. See [warmGlobalSettings].
+        warmGlobalSettings()
+        homeState
+        // The Library's shelf read. Warmed for the same reason as Home's — and
+        // it is the one that *has* to be warm, because the shelf's own flow is
+        // started by the destination and therefore cannot seed its own first
+        // frame. Left cold, the grid composes mid-morph. See [libraryBooks].
+        libraryBooks
+        statisticsVM
     }
     val sourceBrowseVmCache = mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
     val searchUiState = SearchUiState()

@@ -13,11 +13,18 @@ import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
 import com.folio.reader.ui.components.currentStreak
 import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
@@ -145,7 +152,14 @@ data class StatisticsUiState(
     /** Reading minutes bucketed by start hour, 24 slots (the peak-hour band). */
     val hourTotals: List<Long> = List(24) { 0L },
     /** Today's reading minutes, derived from sessions whose local date matches today. */
-    val todayMinutes: Long = 0
+    val todayMinutes: Long = 0,
+    /**
+     * The reader's recent pace against their own trailing baseline, or null when the
+     * comparison would not be informative. A sentence, not a number — see
+     * [com.folio.reader.ui.components.readingTrendSentence] for why the bar for
+     * saying anything at all is deliberately high.
+     */
+    val trendSentence: String? = null
 )
 
 class StatisticsViewModel(
@@ -246,6 +260,29 @@ class StatisticsViewModel(
     }
 
     /**
+     * False until [state] has produced its first real emission.
+     *
+     * [state] is a `combine` of four suspense queries (a year of sessions, the
+     * in-progress list, the finished list and the whole library) plus, when
+     * exclusions are wired, two roundtrips per book to resolve tags and
+     * collections. That is not a fast first value, and `collectAsState(initial =
+     * StatisticsUiState())` publishes an *empty* state for the whole of it — so the
+     * tab paints zeroed figures and an empty heatmap, then snaps to the real
+     * numbers. The reader sees the numbers change under them.
+     *
+     * Hosts gate on this to render a skeleton of the same shape instead, so the
+     * layout is stable and only the values arrive. Mirrors
+     * `MangaLibraryViewModel.ready`, which exists for the same reason.
+     *
+     * Derived from [state] itself rather than a separate flag so it cannot get out
+     * of step with the emission it is describing.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val ready: Flow<Boolean> = state
+        .map { true }
+        .onStart { emit(false) }
+
+    /**
      * §11.2/Rule 8: the live exclusion set, for hosts that must react to it —
      * the "Some titles are excluded — review" line and the manga stats pass it
      * straight into [com.folio.reader.manga.MangaStatisticsRepository.getStatistics].
@@ -263,6 +300,49 @@ class StatisticsViewModel(
                 com.folio.reader.statistics.expandExtensionExclusions(raw, sources)
             }
         } ?: flowOf(emptySet())
+
+    /**
+     * [state], [ready] and [exclusions] as process-wide hot flows.
+     *
+     * The three above are cold, so a host that collects them from inside a
+     * composable re-runs the whole query set on every composition — a year of
+     * sessions, the in-progress and finished lists, the entire library, and a
+     * roundtrip per book to resolve exclusions. In a nav destination that means
+     * each visit to the tab paid it again from zero, and the reader watched the
+     * skeleton and then the numbers arrive on every return.
+     *
+     * `Eagerly` so the work starts when the view model is built — at app open, for
+     * a host that hoists it — rather than on first access, which is exactly the
+     * visit that would otherwise show the skeleton. The underlying queries stay
+     * live: the database pushes invalidations through the `combine`, so a hot flow
+     * still corrects itself while the tab is on screen. Sharing changes *when* the
+     * query runs, never whether it can go stale.
+     *
+     * Held here rather than in each host so Android and desktop get the same
+     * behaviour without either reimplementing it.
+     */
+    private val sharedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    val sharedState: StateFlow<StatisticsUiState> =
+        state.stateIn(sharedScope, SharingStarted.Eagerly, StatisticsUiState())
+
+    /**
+     * Derived from [sharedState], **not** from a second `stateIn` of the cold
+     * [ready].
+     *
+     * [ready] is itself `state.map { true }`, so subscribing to both would collect
+     * the cold `state` twice and run its entire query set twice per process — a
+     * duplicated load introduced the moment two flows share one source. Mapping the
+     * already-shared value keeps one subscription and one set of queries, and
+     * `sharedState.value.hasData` is the same fact [ready] was expressing.
+     */
+    val sharedReady: StateFlow<Boolean> =
+        sharedState
+            .map { it.hasData }
+            .stateIn(sharedScope, SharingStarted.Eagerly, false)
+
+    val sharedExclusions: StateFlow<Set<Pair<Scope, String>>> =
+        exclusions.stateIn(sharedScope, SharingStarted.Eagerly, emptySet())
 
     /**
      * §11.2 one-way resolution, evaluated once per emission: a book is excluded
@@ -320,6 +400,16 @@ class StatisticsViewModel(
      * Null only when neither repository was provided.
      */
     val recentQuotes: Flow<List<RecentQuote>>? = buildRecentFeed()
+
+    /**
+     * [recentQuotes] as a hot flow, for the same reason as [sharedState]: the feed
+     * walks every book in the library issuing a highlight query per book, so a cold
+     * collection from inside a composable repeated the whole fan-out on every visit
+     * to the tab. Null when no repository was wired, matching [recentQuotes].
+     */
+    val sharedRecentQuotes: StateFlow<List<RecentQuote>> =
+        (recentQuotes ?: flowOf(emptyList()))
+            .stateIn(sharedScope, SharingStarted.Eagerly, emptyList())
 
     private fun buildRecentFeed(): Flow<List<RecentQuote>>? {
         if (quoteRepository == null && highlightRepository == null) return null
@@ -526,7 +616,13 @@ class StatisticsViewModel(
             booksOpened = minutesByBook.count { it.value > 0L },
             librarySize = books.size,
             hourTotals = hourTotals.toList(),
-            todayMinutes = minutesByDay[today] ?: 0L
+            todayMinutes = minutesByDay[today] ?: 0L,
+            // Computed from the same exclusion-filtered session list as every other
+            // figure here, so the baseline can never include a title the reader has
+            // excluded from their statistics (Rule 18).
+            trendSentence = com.folio.reader.ui.components.readingTrendSentence(
+                com.folio.reader.ui.components.readingTrend(sessions)
+            )
         )
     }
 

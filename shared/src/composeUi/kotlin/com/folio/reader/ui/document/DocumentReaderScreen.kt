@@ -1,6 +1,9 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.document
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -39,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,12 +51,17 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Highlight
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.FolioStatusBarBand
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.pageFoxing
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
+import com.folio.reader.ui.library.DocumentThumbnail
 import com.folio.reader.ui.render.HtmlContentSurface
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
@@ -63,7 +73,17 @@ fun DocumentReaderScreen(
     viewModel: DocumentReaderViewModel,
     settings: ReaderSettings = ReaderSettings(),
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * §17 morph landing: the document id, so the thumbnail tapped in the library
+     * has somewhere to land. Non-null is the normal case — unlike the EPUB reader
+     * this path renders pure Compose on both platforms (the PDF surface paints its
+     * own bitmaps), so Compose controls what is on screen and there is no seam to
+     * be cautious about.
+     *
+     * Only used while the document is still loading; see [DocumentThumbnail].
+     */
+    morphDocumentId: String? = null
 ) {
     val state by viewModel.state.collectAsState()
     var resetZoomKey by remember { mutableIntStateOf(0) }
@@ -102,7 +122,35 @@ fun DocumentReaderScreen(
                 .then(pageGlassSource)
         ) {
             when (val load = state.loadState) {
-                DocumentReaderLoadState.Loading -> LoadingPlaceholder(Modifier.align(Alignment.Center))
+                DocumentReaderLoadState.Loading -> {
+                    LoadingPlaceholder(Modifier.align(Alignment.Center))
+                    // §17 morph landing, drawn over the placeholder while the
+                    // document loads. Uses the library's own DocumentThumbnail so
+                    // the plate the file was tapped on is the plate that lands —
+                    // a landing drawn any other way would be the one surface in
+                    // the morph that did not match its source. Dropped the moment
+                    // there is real content, both because the plate has served
+                    // its purpose and because a live second copy of the key would
+                    // strand the morph.
+                    val landingDocument = state.document
+                    if (morphDocumentId != null && landingDocument != null) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .sharedElementOrNoop(FolioSharedKeys.documentCover(morphDocumentId))
+                                .width(180.dp)
+                                .height(240.dp)
+                                .clip(FolioShapes.plate),
+                        ) {
+                            DocumentThumbnail(
+                                document = landingDocument,
+                                modifier = Modifier.fillMaxSize(),
+                                fallbackWithFilename = true,
+                                suppressFallbackCaption = true,
+                            )
+                        }
+                    }
+                }
                 is DocumentReaderLoadState.Error -> EmptyState(
                     Icons.Default.BrokenImage,
                     errorHeadline(load.error.kind),
@@ -169,7 +217,7 @@ fun DocumentReaderScreen(
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it }
         ) {
-            DocumentReaderBar(state, onBack, viewModel::toggleBookmark)
+            DocumentReaderBar(state, onBack, viewModel::toggleBookmark, morphDocumentId)
         }
 
         AnimatedVisibility(
@@ -284,7 +332,8 @@ private fun DocumentPageBlock(
 private fun DocumentReaderBar(
     state: DocumentReaderState,
     onBack: () -> Unit,
-    onBookmark: () -> Unit
+    onBookmark: () -> Unit,
+    morphDocumentId: String? = null
 ) {
     // Same chrome contract as the EPUB and manga readers: the inked status band
     // over the page, then a 56dp glass row with rounded feet, so the back arrow,
@@ -316,7 +365,20 @@ private fun DocumentReaderBar(
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    // §17: paired with the library tile's title, so the file's name
+                    // arrives with its plate rather than appearing once the reader
+                    // has already opened.
+                    .then(
+                        if (morphDocumentId != null) {
+                            Modifier.sharedTextOrNoop(
+                                FolioSharedKeys.documentTitle(morphDocumentId)
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
             )
             IconButton(onBookmark) {
                 Icon(

@@ -144,6 +144,7 @@ fun MangaReaderScreen(
         if (showControls && pages.isNotEmpty()) {
             ReaderControls(
                 mangaTitle = manga.title,
+                mangaId = manga.id,
                 chapterName = chapterState?.name ?: chapter.name,
                 pageCount = localCountVal,
                 currentPage = localPageVal,

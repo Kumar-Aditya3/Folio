@@ -288,6 +288,10 @@ fun LibraryRoute(
             }
         },
         viewModel = navModel.libraryVM,
+        // The shelf's seed for its opening frame, kept hot since app start. See
+        // LibraryScreen.knownBooks — without this the grid composes in the middle
+        // of the Home→Library morph.
+        knownBooks = navModel.libraryBooks,
         syncState = navModel.collectSyncState(),
         onSyncNow = { graph.syncEngine?.triggerSync(immediate = true) },
         libraryMode = navModel.libraryMode,

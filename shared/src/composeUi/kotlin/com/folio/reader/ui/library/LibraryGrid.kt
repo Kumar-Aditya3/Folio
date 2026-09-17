@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.library
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +53,7 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
@@ -193,6 +197,11 @@ private fun FeaturedShelfEntry(
             width = FolioTokens.coverFeature,
             halo = accent,
             elevation = 14.dp,
+            // The featured plate's neighbours are the eyebrow, title and author
+            // below it, all of which stay put while the plate flies — so the
+            // fallback's own copy of title/author would be a third and fourth
+            // rendering of the same words for the length of the morph.
+            suppressFallbackText = true,
             overlay = {
                 if (isSelected) {
                     Box(
@@ -230,6 +239,7 @@ private fun FeaturedShelfEntry(
                 color = FolioTheme.colors.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id)),
             )
             Text(
                 text = book.displayAuthor,
@@ -317,6 +327,9 @@ fun BookCard(
             // null width: the plate fills the grid cell and derives its height from
             // the printed trim, so a wide column never squashes the cover.
             width = null,
+            // The title and author directly below carry the paired keys, so the
+            // plate must not draw the fallback's own copies of them.
+            suppressFallbackText = true,
             overlay = {
                 if (isSelected) {
                     Box(
@@ -374,6 +387,7 @@ fun BookCard(
             style = FolioTheme.typography.labelMedium,
             color = colors.onSurface,
             modifier = Modifier.fillMaxWidth()
+                .sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id))
         )
         Text(
             text = book.displayAuthor,

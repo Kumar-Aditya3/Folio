@@ -213,9 +213,28 @@ class MainActivity : ComponentActivity() {
             }
             model.callbacks = callbacks
 
-            LaunchedEffect(Unit) {
-                runCatching { model.globalSettings = graph.settingsRepository.getGlobalSettings() }
-            }
+            // The global settings row is warmed before the first frame, from the
+            // activity's own scope, rather than one frame late.
+            //
+            // `globalSettings` starts as `ReaderSettings()` — every default — and
+            // the row is a single small key/value read. Loading it from a
+            // `LaunchedEffect` here walked straight into the classic ordering trap:
+            // the effect runs *after* the frame it is keyed to, so frame one — the
+            // frame on which the nav host resolves any route that depends on a
+            // setting — always ran on the defaults.
+            //
+            // `morphIntoReader` is the sharpest case and the one that was reported.
+            // It defaults to **false**, so a reader route composed on frame one read
+            // `morphBookId = null` and published no cover key; the destination then
+            // had nothing to pair with and the morph silently did not run. That is
+            // the report "if the books aren't loaded the morph doesn't work" — the
+            // books were never the dependency, the settings read was.
+            //
+            // `warmGlobalSettings()` starts the read on the activity scope before
+            // composition, so by the time a shelf hands a cover over the flag is
+            // already the reader's own. The `runCatching` lives in the model, so a
+            // corrupt row still cannot take launch down.
+            SideEffect { model.warmGlobalSettings() }
 
             // Success statuses auto-clear after 3 seconds; in-progress and error
             // messages persist until the next status replaces them.

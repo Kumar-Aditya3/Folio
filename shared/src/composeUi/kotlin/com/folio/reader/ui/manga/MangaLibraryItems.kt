@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -52,6 +55,7 @@ import com.folio.reader.manga.MangaEntry
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioPressable
@@ -366,7 +370,8 @@ internal fun MangaGridItem(
             overflow = TextOverflow.Ellipsis,
             style = FolioTheme.typography.labelMedium,
             color = if (fullyRead) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.onSurface,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth()
+                .sharedTextOrNoop(FolioSharedKeys.mangaTitle(manga.id)),
         )
         Text(
             text = manga.sourceName,
@@ -534,6 +539,7 @@ internal fun MangaListItem(
                         color = if (fullyRead) FolioTheme.colors.onSurfaceVariant else FolioTheme.colors.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(manga.id)),
                     )
                     Text(
                         listOf(manga.sourceName, statusLabel).filter { it.isNotBlank() }

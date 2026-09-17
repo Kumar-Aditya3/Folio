@@ -1,8 +1,13 @@
 package com.folio.reader.ui.statistics
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.manga.MangaStatistics
 import com.folio.reader.manga.MangaStatisticsRepository
+import com.folio.reader.statistics.Scope
+import kotlinx.coroutines.flow.StateFlow
 import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
@@ -63,7 +71,19 @@ import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.launch
+
+/**
+ * Duration of the skeleton → content handoff.
+ *
+ * Deliberately longer than [FolioTokens.motionFast] and shorter than
+ * [FolioTokens.motionStandard]: the skeleton has been on screen for however long
+ * the queries took, so the eye has already adapted to the layout. This is a
+ * settle, not an arrival — long enough to read as intentional, short enough that
+ * the reader never waits on it.
+ */
+private const val StatsHandoffFadeMs = 180
 
 // ---------------------------------------------------------------------------
 // Embeddable Stats Tab — no Scaffold / top bar of its own
@@ -92,16 +112,50 @@ fun StatisticsTabContent(
     initialGoalMinutes: Int = 60,
     mangaStatsRepo: MangaStatisticsRepository? = null,
     onOpenExclusions: (() -> Unit)? = null,
+    /**
+     * The page's state.
+     *
+     * Typed `StateFlow` rather than `Flow` on purpose, and it is not incidental:
+     * `collectAsState` has a separate overload for `StateFlow` that takes **no**
+     * initial value and reads `.value` synchronously, so a hot flow paints its real
+     * contents on the very first composition frame. Through the generic `Flow`
+     * overload the same flow would instead render the passed initial for one frame
+     * and then correct itself — the flash this parameter exists to remove, and one
+     * Kotlin cannot avoid because overload resolution is static on the declared type.
+     *
+     * [StatisticsViewModel.state] is a cold `combine` over a year of sessions, the
+     * book lists and a per-book exclusion pass. Collected inside a nav destination
+     * it restarted in full on every return to the tab. Defaulting to the view
+     * model's `stateIn` — which is eager and process-wide — means the work happens
+     * once at app start and every later visit is a read of an already-final value.
+     */
+    state: StateFlow<StatisticsUiState> = viewModel.sharedState,
+    /** Companion to [state]; see [StatisticsViewModel.ready]. */
+    readyFlow: StateFlow<Boolean> = viewModel.sharedReady,
+    /** Companion to [state]; see [StatisticsViewModel.exclusions]. */
+    exclusionsFlow: StateFlow<Set<Pair<Scope, String>>> = viewModel.sharedExclusions,
+    /** Companion to [state]; see [StatisticsViewModel.recentQuotes]. */
+    recentQuotesFlow: StateFlow<List<RecentQuote>> = viewModel.sharedRecentQuotes,
 ) {
-    val stats by viewModel.state.collectAsState(initial = StatisticsUiState())
-    val recentQuotes by (viewModel.recentQuotes
-        ?: kotlinx.coroutines.flow.flowOf(emptyList()))
-        .collectAsState(initial = emptyList())
+    val stats by state.collectAsState()
+    // Gate the first frames on the real emission. `state` is a combine of four
+    // suspense queries (plus a roundtrip per book when exclusions resolve tags and
+    // collections), so the initial empty state used to paint zeroed figures and the
+    // "Nothing measured yet" card, then change every value at once. The skeleton
+    // draws the same layout in wells so only the numbers arrive.
+    val ready by readyFlow.collectAsState()
+    val recentQuotes by recentQuotesFlow.collectAsState()
     // §11.2/Rule 8: the live exclusion set drives both the review line and the
     // manga statistics, which compute with it (never filter after the fact).
-    val exclusions by viewModel.exclusions.collectAsState(initial = emptySet())
+    val exclusions by exclusionsFlow.collectAsState()
 
-    // ── Manga statistics (reloaded when the exclusion set changes) ───────
+    // ── Manga statistics ─────────────────────────────────────────────────
+    // The repository runs a library count, a completed count and the reading
+    // aggregates in one pass. Keyed on the exclusion set rather than re-fetched
+    // per visit: the old `LaunchedEffect(mangaStatsRepo, exclusions)` re-ran all of
+    // it every time the tab was entered, which made re-entering Stats as expensive
+    // as opening it. A settings-driven exclusion change still reloads, because that
+    // is a real change to what the numbers mean.
     var mangaStats by remember { mutableStateOf<MangaStatistics?>(null) }
     LaunchedEffect(mangaStatsRepo, exclusions) {
         mangaStats = mangaStatsRepo?.getStatistics(exclusions)
@@ -110,6 +164,12 @@ fun StatisticsTabContent(
     var goalMinutes by remember { mutableIntStateOf(initialGoalMinutes) }
     // Sync when the host pushes a new value (e.g. after external settings change).
     LaunchedEffect(initialGoalMinutes) { goalMinutes = initialGoalMinutes }
+
+    // Rule 19: read once, use for both halves of the cross-fade. When motion is
+    // off the duration is 0ms and the two AnimatedVisibility blocks become a plain
+    // swap — same information, none of the motion.
+    val motionEnabled = rememberMotionEnabled()
+    val fadeMs = StatsHandoffFadeMs
 
     // Re-tap on the Stats nav item scrolls the tab back to its top. The tab
     // renders inside the library host's tab area, so the bus is the only way
@@ -125,6 +185,69 @@ fun StatisticsTabContent(
         }
     }
 
+    // The skeleton carries the same top inset as the list so the first real frame
+    // does not shift the page up by the height of the masthead's clearance.
+    //
+    // The handoff is cross-faded rather than cut. `ready` flips when the combine
+    // emits, and a hard swap there is the *second* half of the abruptness the
+    // reader reported: the page is correct at last, but it changes in one frame.
+    // A short fade costs nothing and lets the values settle in rather than appear.
+    //
+    // Rule 19: under reduce-motion the fade collapses to 0ms, which is a plain
+    // swap — the same information, none of the motion.
+    AnimatedVisibility(
+        visible = !ready,
+        enter = EnterTransition.None,
+        exit = fadeOut(tween(if (motionEnabled) fadeMs else 0)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = com.folio.reader.ui.theme.LocalFolioTopInset.current),
+        ) {
+            StatsSkeleton()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = ready,
+        enter = fadeIn(tween(if (motionEnabled) fadeMs else 0)),
+        exit = ExitTransition.None,
+    ) {
+        StatisticsContent(
+            stats = stats,
+            listState = listState,
+            exclusions = exclusions,
+            goalMinutes = goalMinutes,
+            onGoalChanged = { goalMinutes = it },
+            settingsRepository = settingsRepository,
+            mangaStats = mangaStats,
+            recentQuotes = recentQuotes,
+            onBookClick = onBookClick,
+            onOpenExclusions = onOpenExclusions,
+        )
+    }
+}
+
+/**
+ * The real page, split out so [StatisticsTabContent] can cross-fade it against the
+ * skeleton. The split is presentational only — every hook the page needs is passed
+ * in, so this composable holds no state of its own and mounting it later than the
+ * skeleton changes nothing about what it reads.
+ */
+@Composable
+private fun StatisticsContent(
+    stats: StatisticsUiState,
+    listState: LazyListState,
+    exclusions: Set<Pair<Scope, String>>,
+    goalMinutes: Int,
+    onGoalChanged: (Int) -> Unit,
+    settingsRepository: SettingsRepository?,
+    mangaStats: MangaStatistics?,
+    recentQuotes: List<RecentQuote>,
+    onBookClick: (String) -> Unit,
+    onOpenExclusions: (() -> Unit)?,
+) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -163,7 +286,7 @@ fun StatisticsTabContent(
             StatsOverture(
                 stats = stats,
                 goalMinutes = goalMinutes,
-                onGoalChanged = { newGoal -> goalMinutes = newGoal },
+                onGoalChanged = onGoalChanged,
                 settingsRepository = settingsRepository,
             )
             Spacer(Modifier.height(FolioTokens.spaceMovement))
