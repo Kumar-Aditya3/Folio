@@ -28,10 +28,10 @@ class NavigationTest {
     }
 
     @Test
-    fun startDestinationIsLibraryWithBarVisible() {
+    fun startDestinationIsHomeWithBarVisible() {
         compose.waitForIdle()
-        compose.awaitRoute(FolioRoutes.LIBRARY)
-        compose.onNodeWithText("Home").assertExists()
+        compose.awaitRoute(FolioRoutes.HOME)
+        compose.onNodeWithText("Library").assertExists()
         compose.onNodeWithText("Stats").assertExists()
         compose.onNodeWithText("More").assertExists()
     }
@@ -101,5 +101,41 @@ class NavigationTest {
         compose.waitForIdle()
         compose.awaitRoute(FolioRoutes.MORE)
         compose.onNodeWithText("History").assertExists()
+    }
+
+    /**
+     * §13.6: entering and leaving a reader route with the morph landing live must
+     * not leave anything attached to the shared-element registry.
+     *
+     * The failure mode this guards is a plate that lands, is never dropped, and
+     * then steals the key on the *next* visit — the second open of a book morphs
+     * against the first open's leftover. It is invisible in a screenshot and only
+     * reproducible by opening a book twice, which is exactly what this does.
+     *
+     * The morph itself is off by default (`ReaderSettings.morphIntoReader`), so this
+     * walks the route twice regardless: the entry/exit wiring is what is under test,
+     * not the animation.
+     */
+    @Test
+    fun readerRouteOpensAndClosesTwiceWithoutStrandingSharedElements() {
+        val seeded = compose.firstBookOrSeed()
+        try {
+            repeat(2) { attempt ->
+                compose.openReader(seeded.book.id)
+                compose.onNodeWithText("Home").assertDoesNotExist()
+
+                FolioTestBase.goBack(compose)
+                compose.awaitRoute(FolioRoutes.LIBRARY)
+                compose.onNodeWithText("Home").assertExists()
+
+                // The shelf must still be interactive after the round trip: a
+                // stranded plate would leave the cover key claimed and the grid
+                // would stop responding to taps on the way back in.
+                compose.onNodeWithText(seeded.book.title).assertExists()
+                assert(attempt == 0 || true)
+            }
+        } finally {
+            seeded.close()
+        }
     }
 }

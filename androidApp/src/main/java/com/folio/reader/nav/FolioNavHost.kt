@@ -11,11 +11,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -72,7 +67,11 @@ fun FolioNavHost(
         FolioSharedElementProvider(sharedTransitionScope = this) {
             NavHost(
                 navController = navController,
-                startDestination = FolioRoutes.LIBRARY,
+                // Home is the first of the four bar items and the app's opening
+                // surface. It was starting on Library, which put the shelf — and
+                // its cover decodes — in the reader's path on every launch and
+                // left the Home tab unvisited until tapped.
+                startDestination = FolioRoutes.HOME,
                 modifier = Modifier.fillMaxSize(),
                 // §17 morphing tabs: a switch between the bar's destinations is the same
                 // page changing its mind, not travel down a stack, so it dissolves in place
@@ -143,9 +142,11 @@ fun FolioNavHost(
                 }
 
                 composable(FolioRoutes.STATS) {
-                    navModel.statsContent(
-                        onOpenBookDetail = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) }
-                    )
+                    FolioSharedElementScope(this) {
+                        navModel.statsContent(
+                            onOpenBookDetail = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) }
+                        )
+                    }
                 }
 
                 composable(FolioRoutes.MORE) {
@@ -171,13 +172,20 @@ fun FolioNavHost(
                 ) { entry ->
                     val bookId = entry.arguments?.getString(FolioNavArgs.BOOK_ID) ?: return@composable
                     val spine = entry.arguments?.getInt(FolioNavArgs.SPINE)?.takeIf { it >= 0 }
-                    navModel.readerContent(
-                        bookId = bookId,
-                        targetSpineIndex = spine,
-                        onBack = { navController.popBackStack() },
-                        onOpenSearch = { navController.navigate(FolioRoutes.SEARCH) },
-                        onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) }
-                    )
+                    // §17: the reader is a morph destination too. A cover tapped on a
+                    // shelf lands here as the plate the first chapter starts under, so
+                    // opening a book reads as the cover flying to where you will read
+                    // it rather than a page replacing a page. Gated per-platform by the
+                    // caller — see ReaderContent's landing flag.
+                    FolioSharedElementScope(this) {
+                        navModel.readerContent(
+                            bookId = bookId,
+                            targetSpineIndex = spine,
+                            onBack = { navController.popBackStack() },
+                            onOpenSearch = { navController.navigate(FolioRoutes.SEARCH) },
+                            onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) }
+                        )
+                    }
                 }
 
                 composable(
@@ -189,10 +197,12 @@ fun FolioNavHost(
                     val documentId =
                         entry.arguments?.getString(FolioNavArgs.DOCUMENT_ID)
                             ?: return@composable
-                    navModel.documentReaderContent(
-                        documentId = documentId,
-                        onBack = { navController.popBackStack() }
-                    )
+                    FolioSharedElementScope(this) {
+                        navModel.documentReaderContent(
+                            documentId = documentId,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
 
                 composable(
@@ -280,14 +290,16 @@ fun FolioNavHost(
                 ) { entry ->
                     val mangaId = entry.arguments?.getString(FolioNavArgs.MANGA_ID) ?: return@composable
                     val chapterId = entry.arguments?.getString(FolioNavArgs.CHAPTER_ID) ?: return@composable
-                    navModel.mangaReaderContent(
-                        mangaId = mangaId,
-                        chapterId = chapterId,
-                        onBack = { navController.popBackStack() },
-                        onNextChapter = { next ->
-                            navController.navigate(FolioDestination.mangaReader(mangaId, next))
-                        }
-                    )
+                    FolioSharedElementScope(this) {
+                        navModel.mangaReaderContent(
+                            mangaId = mangaId,
+                            chapterId = chapterId,
+                            onBack = { navController.popBackStack() },
+                            onNextChapter = { next ->
+                                navController.navigate(FolioDestination.mangaReader(mangaId, next))
+                            }
+                        )
+                    }
                 }
 
                 composable(
@@ -330,10 +342,12 @@ fun FolioNavHost(
                 }
 
                 composable(FolioRoutes.MANGA_HISTORY) {
-                    navModel.mangaHistoryContent(
-                        onBack = { navController.popBackStack() },
-                        onOpenManga = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
-                    )
+                    FolioSharedElementScope(this) {
+                        navModel.mangaHistoryContent(
+                            onBack = { navController.popBackStack() },
+                            onOpenManga = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
+                        )
+                    }
                 }
             }
         }

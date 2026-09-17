@@ -195,21 +195,29 @@ travels. Title and author cross-fade in behind it.
 **Where.** `SharedTransitionLayout` wrapping the nav host, `sharedElement` on `BookCover` in
 `LibraryGrid`/`LibraryList` and in `BookDetailHeader`.
 
-**Scope — deliberately narrow.**
+**Scope.** Revised — see *Amendment (v1.3)* at the end of this section. The original scope was
+deliberately narrow, and the reader exclusions it set out are now correctly handled rather than
+simply forbidden:
 - library → book detail: **yes**
-- Home hero → reader: **no**. The reader lands on a WebView that paints its own surface; a
-  cover animating into it will look wrong (this is the `htmlSurfaceOccludesOverlays()` problem
-  from the other direction).
-- library → reader: **no**, same reason.
-- manga library → manga detail: yes, **after** the books path is proven.
+- Home → book detail: **yes** — Home's anchor, shelf and rail plates all carry the same keys
+- library/Home → manga detail, history → manga detail: **yes**
+- library → document reader: **yes** — the fixed-page path is pure Compose on both platforms
+- library/Home → EPUB reader: **yes, but opt-in.** The reader lands on a `WebView` that paints
+  its own surface, so the plate can only be dropped on a best-effort signal; the morph is gated
+  behind an off-by-default setting so the seam risk is the user's choice.
 
 **How.**
 - Shared key: `"cover-${book.id}"` — stable across both screens
-- Duration `FolioTokens.motionEmphasis` (320ms), `FastOutSlowInEasing` in,
-  `LinearOutSlowInEasing` out
+- Duration `FolioTokens.motionMorph` (450ms) on `FastOutSlowInEasing`, applied through
+  `folioMorphBounds`. Longer than the original `motionEmphasis` estimate: the element travels the
+  whole viewport, it has to outlast the navigation cross-fade, and the API's default is a spring,
+  which Rule 6 bans in navigation.
+- Text pairs use `sharedBounds` (`sharedTextOrNoop`), not `sharedElement` — the two copies of a
+  title are almost never the same size, and interpolating the content scales the glyphs
+- Morph destinations suppress the generated fallback's own title/author
+  (`suppressFallbackText`/`suppressFallbackCaption`), or the same words appear twice at two sizes
 - Must survive the transition being reversed mid-flight (Rule 6)
-- `SharedTransitionLayout` is `@ExperimentalSharedTransitionApi` in 1.7.6 — opt in at one call
-  site, not repo-wide
+- `SharedTransitionLayout` is `@ExperimentalSharedTransitionApi` — opt in per file
 
 **Risks, stated up front.** This is the one effect here that touches navigation structure
 (`FolioNavShell`/`FolioNavHost`), which §3 rebuilt at some cost. Land it **after** §12 Phase B,
@@ -224,7 +232,31 @@ acceptance criteria), revert this effect rather than patching around it.
   `am kill`
 - A book with no cover art (generated fallback) transitions without flicker
 - `ANIMATOR_DURATION_SCALE = 0` → plain fade
-- No shared-element attempt on any reader route
+- No morph attaches inside an `AnimatedContent` that is crossing two copies of the same key —
+  the shelf/view-mode swaps still suspend through `FolioSharedElementsSuppressed`
+
+### Amendment (v1.3) — reader routes, and what actually blocks them
+
+The original text prohibited a morph "on any reader route", citing
+`htmlSurfaceOccludesOverlays()`. That reasoning is right about **desktop** and only half right
+about **Android**, and it was over-applied to three readers that do not have the problem at all:
+
+- `htmlSurfaceOccludesOverlays()` is **true on desktop**, where the EPUB page is a JCEF
+  `SwingPanel` — a heavyweight native window Compose cannot composite above. A morph there is
+  not merely risky, it is impossible: the plate would be painted over.
+- On **Android** it is **false**. The EPUB page is a `WebView` inside an `AndroidView`, and
+  Compose *can* composite above it. What Compose cannot observe is the WebView's own paint
+  timing, so the landing plate has to be dropped on a content-state signal rather than on a
+  frame callback, and a one-frame seam is possible. Hence opt-in, not forbidden.
+- The **manga** and **document** readers were never in scope of the objection: they render pure
+  Compose (the document reader's PDF surface draws its own bitmaps). They morph unconditionally.
+
+The two rules the amendment turns on:
+1. A reader morph must be suspended the moment its plate and its content are both live —
+   `ReaderScreen` drops the landing plate as soon as `chapterHtml` arrives, because a second
+   live copy of one key in one scope is the case the registry cannot resolve.
+2. Which platform a route lands on is decided by `htmlSurfaceOccludesOverlays()`, never by the
+   route's name. A new reader inherits the gate only if it uses a native page surface.
 
 ---
 

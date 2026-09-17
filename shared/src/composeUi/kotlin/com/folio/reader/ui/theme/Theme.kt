@@ -1227,6 +1227,17 @@ object FolioTokens {
     val motionFast = 120L         // State flips: chip select, checkbox toggle
     val motionStandard = 220L     // Enter/exit, crossfade, panel slide
     val motionEmphasis = 320L     // Bottom sheet, full-screen transition
+
+    /**
+     * §13.6 cover morph: list thumbnail ↔ detail/reader plate, and the paired
+     * title/author text. The longest motion in the app, deliberately — a shared
+     * element travels across the whole viewport, and at `motionEmphasis` the eye
+     * reads a snap-and-settle rather than one continuous object moving. It also
+     * has to outlast the navigation cross-fade so the arriving screen is already
+     * composed when the plate lands, otherwise the morph is cut off mid-flight.
+     */
+    val motionMorph = 450L
+
     val chipAutoDismiss = 4000L   // End-of-chapter chip dwell before fading out
 
     /**

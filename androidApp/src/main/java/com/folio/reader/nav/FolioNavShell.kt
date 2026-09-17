@@ -61,6 +61,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioGlassPress
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.GlassSpec
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassBlurred
 import com.folio.reader.ui.components.navSweepAlpha
@@ -154,13 +155,28 @@ fun FolioNavShell(
             // frame after the old one's backdrop layer is dropped, and the effect
             // samples the stale layer in that gap — the strip behind the capsule
             // showed the previous screen ("renders a bit later than the rest").
-            // For the first frames after a route change the capsule falls back to
-            // the designed near-opaque fill, which hides the gap entirely.
             //
-            // Only routes need that. A shelf swap inside one screen dissolves *in*
+            // Both the *fill* and the *blur layer* have to stand down for that
+            // window, which is why this drives `glass.blurEnabled` on the veil
+            // rather than only the alpha below. Previously it only lowered the
+            // alpha while `folioVeil` independently recomputed
+            // `caps.blur && backdrop != null` (still true) and kept blurring the
+            // old screen underneath the opaque fill — the fill arrived on time but
+            // the material behind it was a frame stale, which is exactly the
+            // "background renders later" the reader sees.
+            //
+            // Only routes need this. A shelf swap inside one screen dissolves *in*
             // the registered source rather than swapping the node that owns it, so
             // there is never a stale layer to sample — and holding the blur off for
             // a mode switch would only add a capsule that goes opaque and clears.
+            //
+            // **Keep this window short.** It is the stale-backdrop gap, not the
+            // transition: the material only has to be off while the *old* layer is
+            // still registered. Widening it to cover the whole cross-fade (tried,
+            // to save the backdrop recording's ~5ms a frame) makes the reader watch
+            // the masthead and the capsule lose their glass and then regain it,
+            // because at these fills the blur is what makes them read as material
+            // rather than as a transparent strip. The frames are not worth it.
             var suppressBlur by remember { mutableStateOf(false) }
             LaunchedEffect(currentRoute) {
                 suppressBlur = true
@@ -253,7 +269,11 @@ fun FolioNavShell(
                         // designed capsule, so 100% is a solid pill and the floor is a
                         // whisper of one — and under a real blur the tier thins it
                         // further. See FolioSurfaceOpacity.
-                        .folioVeil(FolioShapes.pill, fillAlpha = capsuleFill)
+                        .folioVeil(
+                            FolioShapes.pill,
+                            fillAlpha = capsuleFill,
+                            glass = GlassSpec.Default.copy(blurEnabled = !suppressBlur),
+                        )
                         // §17 liquid selection: the travelling specular band, over
                         // the veil's own material and under the items.
                         .drawWithCache {

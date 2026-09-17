@@ -82,6 +82,20 @@ data class ReaderSettings(
      */
     val liquidGlassEffects: Boolean = true,
     /**
+     * §17 morph into the EPUB reader. Off by default, and app-level rather than
+     * per-book on purpose.
+     *
+     * The reader animates a tapped cover onto a landing plate while the first
+     * chapter loads, then hands the page over to the arriving content. Every other
+     * morph in the app runs between two Compose surfaces; this one lands where
+     * Android shows a `WebView` — a surface Compose can composite above but whose
+     * own paint timing it cannot observe, so the plate can only be dropped on a
+     * best-effort signal and a one-frame seam is possible. The flag exists so that
+     * risk is opt-in and a user who sees the seam can turn it off without losing
+     * the morphs that are exact (manga, documents, every shelf↔detail pair).
+     */
+    val morphIntoReader: Boolean = false,
+    /**
      * Document reader (PDF and the generated reflowable formats) default page
      * mode — the compose layer's `DocumentReaderMode` name, kept as a string
      * because this module cannot see that enum; unknown values fall back to

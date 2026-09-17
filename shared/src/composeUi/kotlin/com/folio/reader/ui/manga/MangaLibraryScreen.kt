@@ -50,6 +50,8 @@ import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioSharedElementsSuppressed
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioFadeSwap
+import com.folio.reader.ui.components.folioSizeTransformEligible
+import com.folio.reader.ui.components.folioSwapSizeTransform
 import com.folio.reader.ui.components.rememberSwapInFlight
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -79,6 +81,7 @@ fun MangaLibraryScreen(
     val visible by viewModel.visible.collectAsState()
     val library by viewModel.library.collectAsState()
     val ready by viewModel.ready.collectAsState()
+    val categoryReady by viewModel.categoryReady.collectAsState()
     val activeFilters by viewModel.activeFilters.collectAsState()
     val unread by viewModel.unreadCounts.collectAsState()
     val progress by viewModel.progress.collectAsState()
@@ -187,6 +190,20 @@ fun MangaLibraryScreen(
                     onOpenSource = { source -> onOpenSource(source, query.trim()) },
                 )
             }
+        } else if (!categoryReady && !isSelectionMode && !searchActive) {
+            // The remembered category is restored from a suspend settings read, so
+            // the shelf's first frames would otherwise render the *unfiltered*
+            // library and then snap to the category the reader was last in. That
+            // flash of the wrong shelf is invisible to the `!ready` branch below
+            // precisely when it matters — the unfiltered list is non-empty, so
+            // `visible.isEmpty()` is false and the grid draws.
+            //
+            // Selection mode and search are exempt: both are user-initiated and
+            // carry their own list semantics, and neither should be hidden behind a
+            // spinner while a category settles.
+            Box(Modifier.fillMaxSize().padding(top = topInset)) {
+                com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
+            }
         } else if (visible.isEmpty() && !isSelectionMode && !ready) {
             // First frames after the shelf (re)mounts: the flows have not landed
             // yet, and flashing the empty state here read as "another version of
@@ -249,14 +266,23 @@ fun MangaLibraryScreen(
             }
         } else {
             // Grid↔List↔Compact dissolves as one surface reconfiguring rather than a
-            // hard cut between two different lazy layouts. A slide, a scale or a
-            // SizeTransform all re-measure or re-rasterise a full-bleed shelf, which
-            // is what reads as a glitch rather than as a change of mind.
+            // hard cut between two different lazy layouts. A slide or a scale
+            // re-rasterises a full-bleed shelf, which is what reads as a glitch
+            // rather than as a change of mind. A SizeTransform is the one exception:
+            // both sides render the same visible list, so the row count is stable and
+            // the measured height only moves by what the layout itself decided —
+            // and only for a short shelf, per folioSizeTransformEligible.
             val swapMotion = rememberMotionEnabled()
             val swapInFlight = rememberSwapInFlight(viewMode)
             AnimatedContent(
                 targetState = viewMode,
-                transitionSpec = { folioFadeSwap(swapMotion) },
+                transitionSpec = {
+                    folioFadeSwap(
+                        swapMotion,
+                        sizeTransform = folioSwapSizeTransform()
+                            .takeIf { folioSizeTransformEligible(visible.size) },
+                    )
+                },
                 label = "manga view mode swap",
             ) { mode ->
                 FolioSharedElementsSuppressed(swapInFlight) {

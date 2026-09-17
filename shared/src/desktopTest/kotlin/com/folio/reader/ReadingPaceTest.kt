@@ -5,6 +5,7 @@ import com.folio.reader.model.ReadingSession
 import com.folio.reader.ui.components.finishEstimate
 import com.folio.reader.ui.components.finishHorizon
 import com.folio.reader.ui.components.readingPaceWordsPerDay
+import com.folio.reader.ui.components.readingTimeCaption
 import kotlinx.datetime.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -116,5 +117,77 @@ class ReadingPaceTest {
         val horizon = finishHorizon(0, 0.5, sessions, sessions)
         assertNotNull(horizon)
         assertTrue(horizon.endsWith("left"), "was: $horizon")
+    }
+
+    // ── readingTimeCaption — the book-detail caption policy ─────────────────
+    //
+    // These guard the consistency the detail page used to break: the shelf said
+    // "~25 days left" while the detail page answered from a hardcoded 220 wpm, and
+    // the two disagreed about the same book in front of the same reader.
+
+    @Test
+    fun `caption prefers the measured projection over the fixed rate`() {
+        val sessions = listOf(session(1, 3_500), session(2, 3_500))
+        val caption = readingTimeCaption(
+            totalWords = 50_000,
+            progress = 0.5,
+            wordsRead = 25_000,
+            bookSessions = sessions,
+        )
+        // 25k left at 1000 words/day = 25 days. The fixed rate would have said
+        // "1h 53m left at 220 wpm" — nowhere near the shelf's answer.
+        assertEquals("~25 days left", caption)
+    }
+
+    @Test
+    fun `caption agrees with the shelf for the same book`() {
+        // The whole point of the change: one book, one answer, every surface.
+        val sessions = listOf(session(1, 3_500), session(2, 3_500))
+        val shelf = finishHorizon(50_000, 0.5, sessions, sessions)
+        val detail = readingTimeCaption(50_000, 0.5, 25_000, sessions)
+        assertEquals(shelf, detail)
+    }
+
+    @Test
+    fun `caption falls back to the fixed rate when the week is too thin`() {
+        // 50 words this week is under the 100/day floor, so there is no projection
+        // to trust. The fixed-rate answer is the only honest thing left to say.
+        val thin = listOf(session(1, 50))
+        val caption = readingTimeCaption(
+            totalWords = 50_000,
+            progress = 0.5,
+            wordsRead = 25_000,
+            bookSessions = thin,
+        )
+        assertNotNull(caption)
+        assertTrue(
+            caption.contains("220 wpm"),
+            "thin history must fall back to the stated fixed rate, was: $caption"
+        )
+    }
+
+    @Test
+    fun `caption falls back to the fixed rate with no history at all`() {
+        val caption = readingTimeCaption(
+            totalWords = 50_000,
+            progress = 0.5,
+            wordsRead = 25_000,
+            bookSessions = emptyList(),
+        )
+        assertNotNull(caption)
+        assertTrue(caption.contains("220 wpm"), "was: $caption")
+    }
+
+    @Test
+    fun `caption withholds a projection when there is no word count to project from`() {
+        // No totalWords and no sessions: nothing measured, nothing to divide by.
+        // A placeholder would be worse than a blank row (§5.1).
+        assertNull(readingTimeCaption(0, 0.5, 0, emptyList()))
+    }
+
+    @Test
+    fun `caption says finished for a book with nothing left`() {
+        val sessions = listOf(session(1, 3_500))
+        assertEquals("Finished", readingTimeCaption(50_000, 1.0, 50_000, sessions))
     }
 }

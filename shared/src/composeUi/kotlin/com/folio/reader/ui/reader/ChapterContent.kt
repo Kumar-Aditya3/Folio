@@ -93,6 +93,39 @@ fun ChapterContent(
     var chapterEndReported by remember(chapter.id) { mutableStateOf(false) }
     var userCrossedEnd by remember(chapter.id) { mutableStateOf(false) }
 
+    /**
+     * Whether the loader has reported for this chapter yet.
+     *
+     * The empty state must be reachable only when a load has genuinely finished
+     * and produced nothing. Getting there took three attempts, and the two wrong
+     * ones are worth keeping on record:
+     *
+     * 1st (wrong): infer it from `isLoading` alone. `_isLoadingContent` started
+     * `false` in the view model, so the screen consumed a real `isLoading = false`
+     * with `html` still empty and `loadError` still null — indistinguishable from a
+     * genuinely empty chapter, and every EPUB open flashed "This page is empty.".
+     *
+     * 2nd (wrong): latch `sawLoading` in a `LaunchedEffect(chapter.id, isLoading)`.
+     * That looked like it worked, and an instrumented probe agreed — but the probe
+     * logged from a later pass than the one that painted. On the *first*
+     * composition `isLoading` was already `false` (the view model's `false`
+     * default), so the effect body never ran, the latch stayed false, and the
+     * first painted frame still took the empty branch. The probe re-ran after the
+     * latch had latched and reported the state the code was *about* to reach.
+     *
+     * 3rd (this): make `_isLoadingContent` honest — it starts **true** and every
+     * loader path clears it — so the first composition sees `isLoading = true` and
+     * the latch below is actually reachable. The latch then means precisely "this
+     * chapter's load has reported", which is the question the empty branch asks.
+     * Keyed on [chapter.id] so moving to the next chapter re-arms it rather than
+     * inheriting the previous chapter's arrival.
+     */
+    var sawLoading by remember(chapter.id) { mutableStateOf(false) }
+    LaunchedEffect(chapter.id, isLoading) {
+        if (isLoading) sawLoading = true
+    }
+    val contentArrived = html.isNotBlank() || sawLoading || isCoverChapter
+
     LaunchedEffect(chapter.id) {
         if (!isCoverChapter) return@LaunchedEffect
         // Restore scroll position from saved position if this is the correct chapter
@@ -293,6 +326,13 @@ fun ChapterContent(
             }
             // A blank chapter inside a window flows past as an empty section;
             // only a blank single-chapter load is a dead end with a button.
+            //
+            // Blank *before* the content has arrived is not an empty chapter, it is
+            // a chapter still on its way — see [contentArrived]. Rendering the dead
+            // end in that window is what flashed "This page is empty." on every
+            // EPUB open; the spinner is the honest state until the loader reports.
+            html.isBlank() && !windowed && !contentArrived ->
+                com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
             html.isBlank() && !windowed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,

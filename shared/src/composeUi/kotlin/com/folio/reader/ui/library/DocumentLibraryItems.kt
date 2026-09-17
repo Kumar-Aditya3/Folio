@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.library
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,11 +54,14 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Document
 import com.folio.reader.model.DocumentFormat
 import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.decodeCoverImage
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -157,10 +163,20 @@ private fun DocumentListItem(
                 modifier = Modifier.size(width = 48.dp, height = 64.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(FolioTheme.atmosphere.sunkenFill)
+                    // §17: the list row hands the plate on like the grid cell, so
+                    // both view modes morph into the reader.
+                    .sharedElementOrNoop(FolioSharedKeys.documentCover(document.id))
             )
             Spacer(Modifier.width(FolioTokens.space3))
             Column(Modifier.weight(1f)) {
-                Text(document.title, style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    document.title,
+                    style = FolioTheme.typography.titleSmall,
+                    color = FolioTheme.colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.documentTitle(document.id)),
+                )
                 Text(document.originalFilename, style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(document.primaryCaption(item.isLocalFileMissing), style = FolioTheme.typography.labelSmall, color = if (item.isLocalFileMissing) FolioTheme.colors.error else FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(document.secondaryCaption(), style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -200,11 +216,24 @@ private fun FormatBadge(format: DocumentFormat) {
 
 private val documentThumbnailCache = ConcurrentHashMap<String, ImageBitmap>()
 
+/**
+ * [suppressFallbackCaption] drops the filename under the format badge when there
+ * is no page thumbnail. Morph destinations set it: the paired title is flying in
+ * under a shared key, and the filename is the same string the title is derived
+ * from, so the plate would otherwise repeat it at a second size for the length of
+ * the morph. The [FormatBadge] stays — it is how the plate still reads as a
+ * document rather than a blank tile.
+ *
+ * Internal rather than private: the document reader composes this same plate as
+ * its morph landing, and a landing that was drawn by a different component would
+ * be the one surface in the morph that did not match its source.
+ */
 @Composable
-private fun DocumentThumbnail(
+internal fun DocumentThumbnail(
     document: Document,
     modifier: Modifier = Modifier,
-    fallbackWithFilename: Boolean = false
+    fallbackWithFilename: Boolean = false,
+    suppressFallbackCaption: Boolean = false
 ) {
     val path = document.thumbnailPath.takeIf {
         document.format == DocumentFormat.PDF && !it.isNullOrBlank()
@@ -249,7 +278,7 @@ private fun DocumentThumbnail(
                 modifier = Modifier.padding(FolioTokens.space2)
             ) {
                 FormatBadge(document.format)
-                if (fallbackWithFilename) {
+                if (fallbackWithFilename && !suppressFallbackCaption) {
                     Spacer(Modifier.height(FolioTokens.space2))
                     Text(
                         document.originalFilename,
@@ -374,6 +403,8 @@ private fun DocumentGridItem(
                 .border(1.dp, FolioTheme.atmosphere.hairline, FolioShapes.plate)
                 .clip(FolioShapes.plate)
                 .background(FolioTheme.atmosphere.sunkenFill)
+                // §17: the plate flies to the document reader's landing.
+                .sharedElementOrNoop(FolioSharedKeys.documentCover(document.id))
                 .semantics {
                     contentDescription = if (item.isLocalFileMissing) {
                         "${document.title}, ${document.format.name} document, local file missing"
@@ -385,7 +416,10 @@ private fun DocumentGridItem(
             DocumentThumbnail(
                 document = document,
                 modifier = Modifier.fillMaxSize(),
-                fallbackWithFilename = true
+                fallbackWithFilename = true,
+                // The title below is the paired one; the filename is the same
+                // string, so the plate must not draw it too.
+                suppressFallbackCaption = true,
             )
             if (document.normalizedProgress > 0.0) {
                 Box(
@@ -400,7 +434,14 @@ private fun DocumentGridItem(
             }
         }
         Spacer(Modifier.height(FolioTokens.space2))
-        Text(document.title, style = FolioTheme.typography.labelMedium, color = FolioTheme.colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(
+            document.title,
+            style = FolioTheme.typography.labelMedium,
+            color = FolioTheme.colors.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.documentTitle(document.id)),
+        )
         Text(document.primaryCaption(item.isLocalFileMissing), style = FolioTheme.typography.labelSmall, color = if (item.isLocalFileMissing) FolioTheme.colors.error else FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(document.secondaryCaption(), style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         DocumentItemMenu(

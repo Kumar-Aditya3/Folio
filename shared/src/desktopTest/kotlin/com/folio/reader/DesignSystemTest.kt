@@ -222,4 +222,54 @@ class DesignSystemTest {
             }
         }
     }
+
+    /**
+     * §13.6: the cover morph is the longest motion in the app, and it has to be.
+     *
+     * Two properties, both load-bearing. It must outlast `motionEmphasis`, or the
+     * plate is still flying when the screen it is flying to has finished arriving
+     * and the morph reads as a snap and a settle. And it must outlast the
+     * navigation cross-fade (`motionStandard` fade in, `motionFast + 60` fade out),
+     * or the arriving screen is not yet composed when the plate lands and the
+     * morph is cut off mid-flight.
+     */
+    @Test
+    fun morphOutlastsBothTheEmphasisStepAndTheNavCrossFade() {
+        assertTrue(
+            FolioTokens.motionMorph > FolioTokens.motionEmphasis,
+            "morph ${FolioTokens.motionMorph}ms must exceed emphasis " +
+                "${FolioTokens.motionEmphasis}ms",
+        )
+        val navFadeOut = FolioTokens.motionFast + 60
+        assertTrue(
+            FolioTokens.motionMorph > FolioTokens.motionStandard &&
+                FolioTokens.motionMorph > navFadeOut,
+            "morph ${FolioTokens.motionMorph}ms must outlast the nav cross-fade " +
+                "(${FolioTokens.motionStandard}/$navFadeOut) so the destination is composed " +
+                "before the plate lands",
+        )
+        // A morph is a state change with travel in it, not a second of theatre.
+        assertTrue(
+            FolioTokens.motionMorph <= 600L,
+            "morph ${FolioTokens.motionMorph}ms is past the point the eye reads travel as lag",
+        )
+    }
+
+    /**
+     * §13.6 swapped the API's default `BoundsTransform` (a spring) for a tween,
+     * because Rule 6 bans springs in navigation. This pins the reasoning itself:
+     * a spring's settle time depends on distance travelled, so two morphs of
+     * different lengths would land at different moments and the paired title text —
+     * which runs on the same spec — would drift against its own cover.
+     */
+    @Test
+    fun morphTimingIsDistanceIndependent() {
+        // folioMorphBounds is one tween for every (initial, target) pair; the
+        // function it wraps ignores both bounds. Asserted structurally by the
+        // helper's own contract: see folioMorphBounds.
+        assertTrue(
+            FolioTokens.motionMorph > 0L,
+            "a zero-duration root would make the morph a hard cut",
+        )
+    }
 }

@@ -400,6 +400,12 @@ actual fun HtmlContentSurface(
                 getSettings().allowContentAccess = false
                 getSettings().useWideViewPort = true
                 getSettings().loadWithOverviewMode = true
+                // Paper from the first frame, before any `update` runs — a WebView's
+                // own default is white, and this is the frame the reader sees first.
+                applyReaderPaper(
+                    (settings.customTheme
+                        ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)).background
+                )
                 addJavascriptInterface(progressBridge, "FolioReader")
                 webViewClient = client
                 webChromeClient = chromeClient
@@ -462,6 +468,12 @@ actual fun HtmlContentSurface(
                 }
                 val theme = settings.customTheme
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+                // Paint the view with the reader's own paper before the document
+                // loads: a WebView is white until the HTML's CSS arrives, and on a
+                // dark theme that white is the flash seen when opening a book.
+                // Applied here rather than at construction so a theme change while
+                // a chapter is up re-papers the view as well.
+                webView.applyReaderPaper(theme.background)
                 val js = baseJs + HighlightPaint.js(highlights, theme)
                 val token = loadNonce + 1
                 loadNonce = token
@@ -540,6 +552,19 @@ private fun rewriteToCanonicalUrls(html: String, href: String): String =
  */
 private class ReaderWebView(context: android.content.Context) : WebView(context) {
     override fun startActionMode(callback: android.view.ActionMode.Callback?): android.view.ActionMode? = null
+}
+
+/**
+ * The paper a [ReaderWebView] shows before its document has painted.
+ *
+ * A WebView is **white** until the loaded HTML's own CSS arrives, which on a dark
+ * reading theme is a full-screen white rectangle between the loading state and the
+ * page — the "image flashing" seen when opening an EPUB. Using the theme's own
+ * canvas colour makes that gap invisible: the window before content is the same
+ * colour as the content.
+ */
+private fun android.webkit.WebView.applyReaderPaper(paperArgb: Int) {
+    setBackgroundColor(paperArgb)
 }
 
 /**

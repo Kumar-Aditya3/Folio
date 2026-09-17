@@ -1,6 +1,7 @@
 package com.folio.reader.ui.components
 
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
@@ -57,14 +58,26 @@ fun rememberEntryState(vararg identity: Any?): State<Float> {
 /**
  * The spec for a swap that changes *what is on the page* without changing the
  * route — the Library's Books/Manga/Documents shelves and each shelf's
- * grid↔list↔compact view. A dissolve, and nothing else.
+ * grid↔list↔compact view. A dissolve, and nothing else — unless [sizeTransform]
+ * is supplied, which is the one exception the layout allows.
  *
  * The other transforms all fail on a surface this large. A slide uncovers a bare
  * band of ground plane at the leading edge; a scale re-rasterises covers and body
- * text, so the page goes soft for the whole cross; and a `SizeTransform` measures
- * the incoming lazy grid against an interpolated width, which changes its column
- * count and re-flows every row, then snaps them back when the cross ends. That
- * last one is what read as the layout "changing for a split second".
+ * text, so the page goes soft for the whole cross. A `SizeTransform` measures the
+ * incoming lazy grid against an interpolated width, which changes its column
+ * count and re-flows every row, then snaps them back when the cross ends — that
+ * last one is what read as the layout "changing for a split second", and it is
+ * why the default here clips and animates nothing.
+ *
+ * It is not forbidden outright, though. A swap between two views of *the same
+ * item count* — the Books/Manga/Documents shelves all render whatever the shelf
+ * holds — has a stable row count, so the grid never re-columns and the measured
+ * size only ever moves by the couple of rows a differ goes from a short shelf to
+ * a tall one. That is what [folioSizeTransformEligible] gates: past a handful of
+ * rows the re-column risk and the cost of measuring every interpolated frame
+ * outweigh the smoothness. `clip = false` is deliberate — clipping would crop the
+ * outgoing grid to the interpolated box and reveal the bare ground plane the
+ * slide rejection is about.
  *
  * Direction is not lost: [FolioSegmented]'s indicator already springs toward the
  * segment being selected, so the control says which way the switch went.
@@ -73,9 +86,42 @@ fun rememberEntryState(vararg identity: Any?): State<Float> {
  * composable and cannot call `rememberMotionEnabled()` themselves. Rule 19: with
  * motion off the swap is instant, not faded.
  */
-fun folioFadeSwap(motionEnabled: Boolean): ContentTransform = ContentTransform(
+fun folioFadeSwap(
+    motionEnabled: Boolean,
+    sizeTransform: SizeTransform? = null,
+): ContentTransform = ContentTransform(
     fadeIn(tween(if (motionEnabled) fadeSwapEnterMs.toInt() else 0)),
     fadeOut(tween(if (motionEnabled) fadeSwapExitMs.toInt() else 0)),
+    sizeTransform = sizeTransform.takeIf { motionEnabled },
+)
+
+/**
+ * True when a swap's two sides are small enough that a [SizeTransform] helps
+ * rather than hurts. See [folioFadeSwap] for why the threshold exists.
+ *
+ * [itemCount] is the shared item count of the two views crossing — `maxOf` the
+ * two, since it is the taller side that decides how many rows get measured.
+ * Below [sizeTransformMaxItems] the height difference a swap can produce is a
+ * few rows and interpolating it reads as the page resettling; above it, the
+ * incoming lazy grid can re-column mid-cross, which is the glitch.
+ *
+ * Pure and public so the threshold is unit-testable without a composition.
+ */
+fun folioSizeTransformEligible(itemCount: Int): Boolean =
+    itemCount in 1..sizeTransformMaxItems
+
+internal const val sizeTransformMaxItems = 8
+
+/**
+ * The spec each swap's size runs on, matching the enter fade exactly. A size that
+ * outlives its fade keeps the two views' containers animating after one of them
+ * is invisible, which reads as the page still settling when it has finished.
+ */
+internal fun folioSwapSizeTransform(): SizeTransform = SizeTransform(
+    clip = false,
+    sizeAnimationSpec = { _, _ ->
+        tween(fadeSwapEnterMs.toInt(), easing = FastOutSlowInEasing)
+    },
 )
 
 private val fadeSwapEnterMs = FolioTokens.motionFast + 60

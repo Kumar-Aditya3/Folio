@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaHistoryEntry
 import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.glassPanel
@@ -161,6 +167,11 @@ private fun HistoryRow(
             coverPath = entry.coverPath,
             modifier = Modifier
                 .size(48.dp)
+                // §17: history taps into the manga detail, which publishes the same
+                // cover key, so a row's cover flies there like a grid tile's does.
+                // The key is read from `mangaId`, not from anything display-shaped:
+                // history rows are deduped per manga and two rows can share a title.
+                .sharedElementOrNoop(FolioSharedKeys.mangaCover(entry.mangaId))
                 .clip(RoundedCornerShape(8.dp)),
         )
         Spacer(Modifier.width(FolioTokens.space2))
@@ -171,6 +182,7 @@ private fun HistoryRow(
                 color = FolioTheme.colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(entry.mangaId)),
             )
             if (entry.chapterName.isNotBlank()) {
                 Text(

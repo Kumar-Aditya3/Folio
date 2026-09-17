@@ -49,8 +49,14 @@ class MangaLibraryViewModel(
         .stateIn(scope, SharingStarted.Lazily, emptyList())
     /** True once the library flow has landed its first emission. The shelf's
      *  first frame after a mode switch renders the loading placeholder instead
-     *  of flashing the empty state ("another version of the same screen"). */
-    val ready: StateFlow<Boolean> = mangaRepo.observeLibrary()
+     *  of flashing the empty state ("another version of the same screen").
+     *
+     *  Derived from [library] rather than subscribing to `observeLibrary()` again.
+     *  Each `stateIn` on a cold source is its own subscription, so the two together
+     *  queried the library twice for the same fact — a duplicated read on every
+     *  entry to Manga. Mapping the shared value keeps one subscription, and
+     *  "the list has landed" is the same thing an emission means. */
+    val ready: StateFlow<Boolean> = library
         .map { true }
         .stateIn(scope, SharingStarted.Lazily, false)
     val unreadCounts: StateFlow<Map<String, Int>> = chapterRepo.observeUnreadCounts()
@@ -87,6 +93,30 @@ class MangaLibraryViewModel(
     val selectedIds = MutableStateFlow<Set<String>>(emptySet())
     val isSelectionMode = MutableStateFlow(false)
     val selectedCategoryId = MutableStateFlow<String?>(null)
+    /**
+     * False until the shelf's category selection has settled onto a category that
+     * actually exists.
+     *
+     * The remembered category (`KEY_LIBRARY_CATEGORY`) is restored from a *suspend*
+     * settings read, so it cannot be known at construction: the view model opens with
+     * `selectedCategoryId == null`, which means "no membership filter", which means
+     * the shelf's first frames render the **entire library**. The restore then lands
+     * a frame or two later and the shelf snaps to the remembered category — a visible
+     * flash of the wrong (unfiltered) shelf on every entry to Manga.
+     *
+     * `ready` cannot cover this: it tracks whether `library` has emitted, and that
+     * happens *before* the category settles. Hosts gate the shelf on this signal so
+     * the unfiltered list is never drawn, exactly as [ready] already prevents the
+     * empty state from flashing. It flips true when a real category is selected, and
+     * also when the category list is known to be empty (a library with no categories
+     * has nothing to restore — waiting would hang the screen forever).
+     */
+    val categoryReady: StateFlow<Boolean> = combine(selectedCategoryId, categories) { selected, list ->
+        // A selected id that resolves to a real category is settled. So is "there is
+        // no category to select" — both are stable first-frame answers.
+        selected != null || list.isEmpty()
+    }.stateIn(scope, SharingStarted.Lazily, false)
+
     /** Live membership of the selected category; a stale snapshot here is what made
      *  freshly added manga invisible until the library was re-entered. */
     private val categoryMembership: StateFlow<Set<String>?> = selectedCategoryId

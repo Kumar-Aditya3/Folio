@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.reader
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,10 +54,12 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.components.rememberLegibleAccent
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
@@ -307,7 +312,14 @@ fun AnnotationsSidebar(
                             noteDraftFor = highlight.id
                         },
                         onClick = { onJump("hl", highlight.id) },
-                        onDelete = { onRemoveHighlight(highlight.id) }
+                        onDelete = { onRemoveHighlight(highlight.id) },
+                        // §17: the passage in the note composer is the same text as
+                        // this row, so the composer's passage lifts out of the row it
+                        // was opened from. Both sides are Compose — the highlight in
+                        // the *page* is HTML inside the reader surface and cannot
+                        // publish a key, which is why this pairs with the composer
+                        // rather than with the page (see FolioSharedKeys).
+                        morphKey = FolioSharedKeys.highlightToNote(highlight.id),
                     )
                 }
             }
@@ -349,7 +361,10 @@ fun AnnotationsSidebar(
                 noteDraftFor = null
             },
             onDismiss = { draftKeptFor = noteDraftFor; noteDraftFor = null },
-            onCancel = { noteContent = ""; draftKeptFor = null; noteDraftFor = null }
+            onCancel = { noteContent = ""; draftKeptFor = null; noteDraftFor = null },
+            // Same key its row published, so the passage shown here is the one
+            // that was tapped.
+            morphKey = FolioSharedKeys.highlightToNote(highlightId),
         )
     }
 }
@@ -393,12 +408,20 @@ private fun AnnotationRow(
     note: String? = null,
     onNote: (() -> Unit)? = null,
     onClick: () -> Unit = {},
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    /**
+     * §17 shared-element key, paired with the same key on the page this row
+     * points at. Null for rows with no in-page counterpart (orphan notes), which
+     * simply do not morph. The modifier is inert wherever no shared transition
+     * scope is present, so this is safe on every platform.
+     */
+    morphKey: Any? = null,
 ) {
     val accent = rememberLegibleAccent(FolioTheme.colors.primary)
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (morphKey != null) Modifier.sharedTextOrNoop(morphKey) else Modifier)
             .clip(RoundedCornerShape(FolioTokens.radiusControl))
             .clickable(onClick = onClick)
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)

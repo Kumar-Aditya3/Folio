@@ -48,10 +48,21 @@ internal class ReaderContentLoader(
     private var windowNonce = 0L
 
     suspend fun loadChapterHtml() {
-        val bookId = currentBookId() ?: return
+        // Every early exit clears the loading flag. `_isLoadingContent` starts
+        // true (a reader is constructed in order to load something), so a path
+        // that returns without clearing it would leave the spinner up forever.
+        // There is nothing to show in these cases, so "not loading, no content"
+        // is the honest state — the empty branch handles it.
+        val bookId = currentBookId() ?: run {
+            isLoadingContentState.value = false
+            return
+        }
         val allChapters = chapters()
         val index = currentChapterIndex()
-        val chapter = allChapters.getOrNull(index) ?: return
+        val chapter = allChapters.getOrNull(index) ?: run {
+            isLoadingContentState.value = false
+            return
+        }
         if (windowMode()) {
             loadWindow(bookId, allChapters, index)
             return

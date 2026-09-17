@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.reader
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,12 +15,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
  * Glass composer for a highlight's note. A dismissed (not cancelled) dialog
  * keeps its unsaved draft — the caller owns that state via [onDismiss] vs
  * [onCancel].
+ *
+ * @param morphKey §17 shared-element key published by the annotations row this
+ *        composer was opened from, so the passage appears to lift out of that
+ *        row. Null when there is no row to pair with. The modifier is inert
+ *        wherever no shared transition scope is present (desktop, reduce-motion),
+ *        so passing it is always safe.
  */
 @Composable
 internal fun NoteComposerDialog(
@@ -26,7 +36,8 @@ internal fun NoteComposerDialog(
     onNoteChange: (String) -> Unit,
     onSave: () -> Unit,
     onDismiss: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    morphKey: Any? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -39,7 +50,10 @@ internal fun NoteComposerDialog(
                         style = FolioTheme.typography.quote.copy(fontSize = 14.sp, lineHeight = 20.sp),
                         color = FolioTheme.colors.onSurfaceVariant,
                         maxLines = 4,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (morphKey != null) {
+                            Modifier.sharedTextOrNoop(morphKey)
+                        } else Modifier,
                     )
                 }
                 OutlinedTextField(

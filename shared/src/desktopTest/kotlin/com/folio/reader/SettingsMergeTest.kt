@@ -101,6 +101,7 @@ class SettingsMergeTest {
         panelOpacity = 0.9f,
         readerChromeOpacity = 0.85f,
         liquidGlassEffects = false,
+        morphIntoReader = true,
         documentReaderMode = "CONTINUOUS"
     )
 

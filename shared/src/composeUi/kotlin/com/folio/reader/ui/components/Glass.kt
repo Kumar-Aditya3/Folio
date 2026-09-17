@@ -94,10 +94,22 @@ fun glassCapabilitiesFor(
 /**
  * Per-surface blur tuning. The radius is capped at [FolioTokens.blurRadiusMax]
  * at the effect site, so no caller can buy a 60dp mush.
+ *
+ * [blurEnabled] exists for surfaces that are *on screen while the backdrop they
+ * would sample is not yet describing them*. The floating nav capsule is the only
+ * such surface: on a destination change the incoming screen's `hazeSource`
+ * registers a frame after the outgoing one's backdrop layer is dropped, so for
+ * the first frames the capsule would blur the **previous** screen — the page
+ * visibly lagging one frame behind the chrome. Passing `false` for that window
+ * keeps the veil on its non-blur path (fill, sheen, grain, bevel — the whole
+ * material minus the effect), which is a complete surface rather than a blank
+ * one. It is not a capability toggle: [LocalGlassCapabilities] still decides
+ * whether glass exists at all.
  */
 @Immutable
 data class GlassSpec(
     val blurRadius: Dp = FolioTokens.blurRadius,
+    val blurEnabled: Boolean = true,
 ) {
     companion object {
         val Default = GlassSpec()
