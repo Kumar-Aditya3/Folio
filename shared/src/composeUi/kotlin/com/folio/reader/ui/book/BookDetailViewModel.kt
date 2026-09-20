@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -57,7 +58,13 @@ class BookDetailViewModel(
     private val _availableSeries = MutableStateFlow<List<Series>>(emptyList())
     private val _availableCollections = MutableStateFlow<List<Collection>>(emptyList())
 
-    val book: Flow<Book?> = _book.asStateFlow()
+    // A StateFlow, not a bare Flow: the screen reads it with the no-initial
+    // collectAsState overload, which paints the *current* value (a seed, if one was
+    // handed over) on the destination's very first frame. As a plain Flow the read
+    // fell back to `initial = null` and the seeded book only arrived a frame later —
+    // the cover morph had no target when the flight began, so the thumbnail zoomed
+    // out and the header text flashed in late. See seed()/BookHandoff.
+    val book: StateFlow<Book?> = _book.asStateFlow()
     val sessions: Flow<List<ReadingSession>> = _sessions.asStateFlow()
     val highlights: Flow<List<Highlight>> = _highlights.asStateFlow()
     val bookmarks: Flow<List<Bookmark>> = _bookmarks.asStateFlow()
@@ -71,6 +78,18 @@ class BookDetailViewModel(
 
     private val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var currentBookId: String? = null
+
+    /**
+     * Pre-populate the book from the tapped list item, before any DB read. Must
+     * run during composition (not a LaunchedEffect) so the header — and with it
+     * the shared cover/title the §17 morph flies to — is composed on the very
+     * first frame of the detail destination, i.e. before the enter transition
+     * starts. Seeded a frame late (from an effect) the morph target does not
+     * exist when the flight begins and the cover has nothing to land on.
+     */
+    fun seed(book: Book) {
+        if (_book.value == null) _book.value = book
+    }
 
     fun loadBook(bookId: String) {
         currentBookId = bookId

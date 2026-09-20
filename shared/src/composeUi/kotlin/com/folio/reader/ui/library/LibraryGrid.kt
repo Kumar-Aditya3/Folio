@@ -3,6 +3,7 @@
 package com.folio.reader.ui.library
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -183,7 +184,7 @@ private fun FeaturedShelfEntry(
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
-                onClick = onClick,
+                onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
                 onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true },
             )
             .folioRightClick { if (!isSelectionMode) menuOpen = true },
@@ -312,7 +313,9 @@ fun BookCard(
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
-                onClick = onClick,
+                // Hand the already-loaded book to the detail screen so its cover
+                // morph target exists on the first frame (see BookHandoff).
+                onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
                 onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
             )
             .folioRightClick { if (!isSelectionMode) menuOpen = true }
@@ -323,7 +326,15 @@ fun BookCard(
             coverPath = book.coverPath,
             title = book.title,
             author = book.displayAuthor,
-            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
+            // contentSize to match the detail header's plate: this grid cell is
+            // usually wider than the destination's coverFeature (112dp), so the
+            // morph genuinely resizes. With both ends on contentSize the artwork
+            // stays the size of the interpolating box the whole flight instead of
+            // snapping to its final size only on the last frame.
+            modifier = Modifier.sharedElementOrNoop(
+                FolioSharedKeys.bookCover(book.id),
+                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+            ),
             // null width: the plate fills the grid cell and derives its height from
             // the printed trim, so a wide column never squashes the cover.
             width = null,

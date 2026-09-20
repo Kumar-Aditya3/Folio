@@ -80,6 +80,40 @@ private fun deepen(c: Color, amount: Float): Color =
 private fun lift(c: Color, amount: Float): Color =
     lerp(c, Color.White, amount)
 
+// ── Region tinting (straight-line sRGB channel math, kept deterministic so the
+// ThemeSchemeTest-adjacent contrast checks can replicate it exactly) ─────────
+// The problem these solve: raised/panel/sunken all derive from surface±lightness,
+// so within one theme a hero, a card and a well read as the same hue at three
+// brightnesses. Tinting the raised plane toward the palette's primary and the
+// sunken plane toward its tertiary (the counter-accent) gives each region its
+// own temperature — iconic — while every tint is drawn from the theme's own
+// roles, so it still blends. matchLuma pins the tinted result back to the
+// untinted base's luminance, so text contrast on each plane is unchanged.
+private fun mixG(a: Color, b: Color, t: Float): Color = Color(
+    red = (a.red + (b.red - a.red) * t).coerceIn(0f, 1f),
+    green = (a.green + (b.green - a.green) * t).coerceIn(0f, 1f),
+    blue = (a.blue + (b.blue - a.blue) * t).coerceIn(0f, 1f),
+)
+
+private fun liftG(c: Color, amount: Float): Color = mixG(c, Color.White, amount)
+
+private fun deepenG(c: Color, amount: Float): Color = mixG(c, Color.Black, amount)
+
+private fun matchLuma(c: Color, target: Float): Color {
+    val l = luminanceOf(c)
+    if (l <= 0.0001f) return c
+    val k = target / l
+    return Color(
+        red = (c.red * k).coerceIn(0f, 1f),
+        green = (c.green * k).coerceIn(0f, 1f),
+        blue = (c.blue * k).coerceIn(0f, 1f),
+    )
+}
+
+/** Pulls [base] toward [toward] in hue, then restores base luminance. */
+private fun tintFill(base: Color, toward: Color, amount: Float): Color =
+    matchLuma(mixG(base, toward, amount), luminanceOf(base))
+
 /**
  * Derives the atmosphere for [colors]. Pure and cheap — remembered per palette
  * at the theme root, so screens read it for free.
@@ -133,15 +167,22 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         } else {
             deepen(colors.outline, 0.10f).copy(alpha = 0.28f)
         },
+        // Raised planes (the floating heroes) carry a primary-hue tint, so the
+        // showcase surface reads as the theme's signature colour — not just a
+        // brighter card. Luminance is pinned to the untinted lift, so ink keeps
+        // its contrast.
         raisedFill = if (dark) {
-            lerp(colors.surface, colors.surfaceVariant, 0.35f)
+            tintFill(mixG(colors.surface, colors.surfaceVariant, 0.35f), colors.primary, 0.12f)
         } else {
-            lift(colors.surface, 0.55f)
+            tintFill(liftG(colors.surface, 0.55f), colors.primary, 0.12f)
         },
+        // Sunken planes (charts, wells, heatmaps) lean toward the tertiary
+        // counter-accent, so a recessed region reads as a different temperature
+        // from both the resting card and the raised hero.
         sunkenFill = if (dark) {
-            deepen(colors.background, 0.35f)
+            tintFill(deepenG(colors.background, 0.35f), colors.tertiary, 0.14f)
         } else {
-            lerp(colors.surfaceVariant, colors.background, 0.25f)
+            tintFill(mixG(colors.surfaceVariant, colors.background, 0.25f), colors.tertiary, 0.14f)
         },
         // Reader controls can sit directly above a page rendered by a native
         // surface. Keep the palette's surface character, but make the veil

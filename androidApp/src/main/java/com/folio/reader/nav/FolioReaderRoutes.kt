@@ -321,39 +321,47 @@ fun BookDetailRoute(
 ) {
     val graph = navModel.graph
     val activity = navModel.activity
-    val book = remember(bookId) { mutableStateOf<Book?>(null) }
-    LaunchedEffect(bookId) { book.value = graph.bookRepository.getBook(bookId) }
-    Box(modifier = Modifier.fillMaxSize()) {
-        book.value?.let { b ->
-            BookDetailScreen(
-                viewModel = remember {
-                    BookDetailViewModel(
-                        bookRepository = graph.bookRepository,
-                        sessionRepository = graph.sessionRepository,
-                        bookmarkRepository = graph.bookmarkRepository,
-                        highlightRepository = graph.highlightRepository,
-                        noteRepository = graph.noteRepository,
-                        seriesRepository = graph.seriesRepository,
-                        collectionRepository = graph.collectionRepository,
-                        tagRepository = graph.tagRepository,
-                        autoTagger = graph.autoTaggerService,
-                    )
-                }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
-                onBackPress = onBack,
-                onStartReading = onStartReading,
-                onDeleteClick = {
-                    activity.appScope.launch(Dispatchers.IO) {
-                        runCatching { graph.bookRepository.deleteBook(b.id) }
-                        runCatching { graph.platform.fileSystem.deleteBookFiles(b.id) }
-                    }
-                    onBack()
-                },
-                onEditClick = { },
-                onShareClick = { navModel.callbacks.onShareEpub(b.id) },
-                onTagClick = { onOpenTags() },
-                onSeriesClick = { },
-                onCollectionClick = { }
-            )
+    // One loader, not two. The route used to `getBook` here and only *then*
+    // mount BookDetailScreen, which ran the ViewModel's own `getBook` — two
+    // serial DB reads gating the first frame. During that gap the detail's
+    // shared cover/title did not exist, so the cover-morph had no target: the
+    // grid thumbnail slid away with the outgoing page ("zoom out") and the
+    // header popped in once the second read landed ("text flashes in"). Mount
+    // the screen immediately and let the ViewModel be the single source; its
+    // `_book` emits after one read, well inside the 450ms morph window.
+    val viewModel = remember(bookId) {
+        BookDetailViewModel(
+            bookRepository = graph.bookRepository,
+            sessionRepository = graph.sessionRepository,
+            bookmarkRepository = graph.bookmarkRepository,
+            highlightRepository = graph.highlightRepository,
+            noteRepository = graph.noteRepository,
+            seriesRepository = graph.seriesRepository,
+            collectionRepository = graph.collectionRepository,
+            tagRepository = graph.tagRepository,
+            autoTagger = graph.autoTaggerService,
+        ).also { vm ->
+            // Seed at construction (during composition) so the shared cover/title
+            // exist on the destination's first frame and the morph has a target.
+            com.folio.reader.ui.book.BookHandoff.take(bookId)?.let(vm::seed)
         }
     }
+    LaunchedEffect(bookId) { viewModel.loadBook(bookId) }
+    BookDetailScreen(
+        viewModel = viewModel,
+        onBackPress = onBack,
+        onStartReading = onStartReading,
+        onDeleteClick = {
+            activity.appScope.launch(Dispatchers.IO) {
+                runCatching { graph.bookRepository.deleteBook(bookId) }
+                runCatching { graph.platform.fileSystem.deleteBookFiles(bookId) }
+            }
+            onBack()
+        },
+        onEditClick = { },
+        onShareClick = { navModel.callbacks.onShareEpub(bookId) },
+        onTagClick = { onOpenTags() },
+        onSeriesClick = { },
+        onCollectionClick = { }
+    )
 }

@@ -11,17 +11,25 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.folio.reader.ui.components.FolioSharedElementProvider
 import com.folio.reader.ui.components.FolioSharedElementScope
+import com.folio.reader.ui.components.FolioSharedElementsSuppressed
 import com.folio.reader.ui.theme.FolioTokens
+import kotlinx.coroutines.delay
 
 /**
  * The four bottom-bar destinations — the set the §17 tab dissolve applies to.
@@ -98,10 +106,42 @@ fun FolioNavHost(
 ) {
     val graph = navModel.graph
 
+    // §17 tab↔tab is an instant swap, not a morph. A book on the Home hero and the
+    // same book in the Library grid publish the same cover key, so a tab switch
+    // used to run a 450ms cover morph between them — and while that flight was in
+    // the air the shared-element machinery kept the *outgoing* tab composed and
+    // drawn (its masthead, its hero tint) on top of the field, so the page looked
+    // like it only finished switching once the covers landed. A tab switch is a
+    // change of page in place; suppressing the cover morph for the switch lets the
+    // outgoing tab leave on its (None) exit at once, so the background swaps the
+    // instant the tab is tapped. Pushes (shelf → detail/reader) are untouched and
+    // keep their morph.
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
+    var previousRoute by remember { mutableStateOf(currentRoute) }
+    var suppressTabMorph by remember { mutableStateOf(false) }
+    // Detected synchronously (not from an effect) so suppression is already on for
+    // the first composed frame of the incoming tab — a frame late, its covers would
+    // pair with the outgoing tab's and the morph would start before it is stopped.
+    if (currentRoute != previousRoute) {
+        if (previousRoute in topLevelRoutes && currentRoute in topLevelRoutes) {
+            suppressTabMorph = true
+        }
+        previousRoute = currentRoute
+    }
+    LaunchedEffect(currentRoute) {
+        if (suppressTabMorph) {
+            // Hold only for the flight the morph would have taken, then restore so
+            // an ordinary shelf → detail push from this tab morphs normally again.
+            delay(FolioTokens.motionMorph + 40)
+            suppressTabMorph = false
+        }
+    }
+
     SharedTransitionLayout(modifier = modifier) {
         // §17 shared elements: one transition scope spans every destination, so a
         // cover tapped on a shelf is the same object that lands on the detail page.
         FolioSharedElementProvider(sharedTransitionScope = this) {
+          FolioSharedElementsSuppressed(suppressed = suppressTabMorph) {
             NavHost(
                 navController = navController,
                 // Home is the first of the four bar items and the app's opening
@@ -123,14 +163,25 @@ fun FolioNavHost(
                 // The library default (~700ms with delays) reads as lag; these are 220/180
                 // with the slide capped at 4% of the width.
                 enterTransition = {
-                    val slide = if (isTabMorph()) EnterTransition.None else
+                    // A tab↔tab switch is an instant swap, no crossfade. The bars (top
+                    // segmented switch, mastheads) and the nav capsule are all glass —
+                    // low-alpha, sampling the page behind them — so a crossfade puts BOTH
+                    // the outgoing and incoming chrome at partial opacity at once, and the
+                    // field shows straight through: the "Books/Manga/Documents bar and the
+                    // nav bar flash transparent for a moment" report. The incoming glass
+                    // backdrop also attaches a frame late, deepening the same dip. Cutting
+                    // instead of fading removes the dip at its source, and it matches the
+                    // tab morph's existing direction — the slide was already dropped here,
+                    // and the selected segment's own spring carries the motion. Pushes and
+                    // pops keep their fade+slide below.
+                    if (isTabMorph()) EnterTransition.None
+                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
-                    fadeIn(tween(FolioTokens.motionStandard.toInt())) + slide
                 },
                 exitTransition = {
-                    val slide = if (isTabMorph()) ExitTransition.None else
+                    if (isTabMorph()) ExitTransition.None
+                    else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                         slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
-                    fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) + slide
                 },
                 popEnterTransition = {
                     val slide = if (isTabMorph()) EnterTransition.None else
@@ -422,6 +473,7 @@ fun FolioNavHost(
                     }
                 }
             }
+          }
         }
     }
 }

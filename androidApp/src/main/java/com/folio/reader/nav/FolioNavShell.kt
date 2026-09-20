@@ -177,8 +177,24 @@ fun FolioNavShell(
             // the masthead and the capsule lose their glass and then regain it,
             // because at these fills the blur is what makes them read as material
             // rather than as a transparent strip. The frames are not worth it.
+            // Tab↔tab keeps ONE stable backdrop — MainActivity provides the
+            // registry once for all four tabs — so there is never a stale layer
+            // to hide when the reader taps between Home/Library/…/More. Firing
+            // the window there only snapped the capsule from blurred 0.60 glass
+            // to a solid 0.90 pill and back for 120ms: the flash. The window is
+            // for *pushes* (detail, reader) whose new hazeSource registers a
+            // frame late; those are the non-tab-surface routes.
+            val tabRoutes = remember { folioNavBarItems.map { it.route }.toSet() }
+            fun isTabSurface(route: String) =
+                route in tabRoutes || route.startsWith("settings/")
             var suppressBlur by remember { mutableStateOf(false) }
+            var previousRoute by remember { mutableStateOf(currentRoute) }
             LaunchedEffect(currentRoute) {
+                val from = previousRoute
+                previousRoute = currentRoute
+                if (from == currentRoute || (isTabSurface(from) && isTabSurface(currentRoute))) {
+                    return@LaunchedEffect
+                }
                 suppressBlur = true
                 kotlinx.coroutines.delay(120)
                 suppressBlur = false
@@ -376,14 +392,20 @@ private fun FolioNavItem(
     // the unselected glyph is the *outlined* weight at reduced ink — selection
     // reads by weight and by saturation together, not by a tint a few percent
     // apart.
+    // Selection reads in the theme's *signature* colour, not the progress accent.
+    // accentProgress is the "progress ring" semantic — indigo/blue in most packs
+    // by convention — so the selected tab looked blue on Warm, Matcha, Sakura and
+    // the rest alike. `primary` is the one role that is each theme's identity
+    // (Warm's amber, Sakura's pink, Matcha's green…), so the capsule now wears the
+    // theme.
     val pillFill by animateColorAsState(
-        targetValue = if (selected) colors.accentProgress.copy(alpha = 0.20f) else Color.Transparent,
+        targetValue = if (selected) colors.primary.copy(alpha = 0.20f) else Color.Transparent,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
         label = "navPillFill",
     )
     val iconTint by animateColorAsState(
         targetValue = if (selected) {
-            colors.accentProgress
+            colors.primary
         } else {
             colors.onSurfaceVariant.copy(alpha = 0.78f)
         },
@@ -391,7 +413,7 @@ private fun FolioNavItem(
         label = "navIconTint",
     )
     val labelColor by animateColorAsState(
-        targetValue = colors.accentProgress,
+        targetValue = colors.primary,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
         label = "navLabelColor",
     )

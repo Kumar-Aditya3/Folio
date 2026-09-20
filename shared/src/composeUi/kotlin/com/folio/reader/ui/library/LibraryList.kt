@@ -128,7 +128,9 @@ fun BookListItem(
                 .combinedClickable(
                     interactionSource = interaction,
                     indication = null,
-                    onClick = onClick,
+                    // Hand the loaded book to the detail screen so its cover-morph
+                    // target exists on the first frame (see BookHandoff).
+                    onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
                     onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
                 )
                 .folioRightClick { if (!isSelectionMode) menuOpen = true }
@@ -286,7 +288,8 @@ fun BookCompactItem(
                     else androidx.compose.ui.graphics.Color.Transparent
                 )
                 .combinedClickable(
-                    onClick = onClick,
+                    // hand the loaded book over so the detail cover-morph has a target
+                    onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
                     onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
                 )
                 .folioRightClick { if (!isSelectionMode) menuOpen = true }

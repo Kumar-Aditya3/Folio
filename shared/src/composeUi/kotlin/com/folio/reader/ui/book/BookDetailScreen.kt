@@ -57,7 +57,11 @@ fun BookDetailScreen(
     onCollectionClick: (Collection) -> Unit = {},
     viewModel: BookDetailViewModel
 ) {
-    val book by viewModel.book.collectAsState(initial = null)
+    // No `initial`: book is a StateFlow, so this resolves to the overload that reads
+    // its current value on the first frame — the seeded book from the tapped cover,
+    // when there is one — so the header (and the shared cover/title the morph flies
+    // to) is composed before the enter transition starts.
+    val book by viewModel.book.collectAsState()
     val sessions by viewModel.sessions.collectAsState(initial = emptyList())
     val highlights by viewModel.highlights.collectAsState(initial = emptyList())
     val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())

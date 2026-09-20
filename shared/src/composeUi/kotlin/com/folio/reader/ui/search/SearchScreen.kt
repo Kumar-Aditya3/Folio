@@ -302,11 +302,19 @@ fun SearchScreen(
             searching = false
             return
         }
+        // Scope-aware debounce. The 250 ms pause protects the *lexical* path, which fans one
+        // FTS query out across every book and is genuinely expensive to fire per keystroke. The
+        // warm semantic path is not that: the index is already resident and the session already
+        // open (both warmed on screen open), so a query is one off-main embed plus a parallel
+        // scan, and a superseded one is cancelled at the next suspension. Making it wait a full
+        // quarter-second before starting is most of the "still kinda slow" the reader feels, so
+        // the warm semantic path debounces briefly and the lexical path keeps its longer guard.
+        val warmSemantic = semanticSearchRepository?.isLoaded == true &&
+            activeScope == SearchScope.CONTENT &&
+            mode != SearchMode.FULL_TEXT
+        val debounceMs = if (warmSemantic) 90L else 250L
         searchJob = coroutineScope.launch {
-            // Debounce: a search fans out across every book, so it only runs
-            // once typing pauses instead of on every keystroke. The execution
-            // itself is shared with the library rail search.
-            kotlinx.coroutines.delay(250)
+            kotlinx.coroutines.delay(debounceMs)
 
             // Everything below runs on Dispatchers.Default, not on the composition's scope.
             //
