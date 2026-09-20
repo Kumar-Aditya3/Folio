@@ -80,3 +80,18 @@
 # Native libs for crash tracing (minidump, backtrace)
 -keep class org.hildan.fordilla.** { *; }
 -dontwarn org.slf4j.**
+
+# --- ONNX Runtime (semantic search, ML_PLAN Phase 4) ──────────────────────
+# Same shape as the zstd abort above: the native layer instantiates these Java
+# classes by name, so R8 cannot see the reference and strips them. Inference then
+# aborts on the first embedding:
+#   Pending exception java.lang.ClassNotFoundException: ai.onnxruntime.TensorInfo
+#   Fatal signal 6 (SIGABRT) in tid (DefaultDispatch)
+#     at Java_ai_onnxruntime_OrtSession_run
+# It reproduces only with R8 on and only once an embedding actually runs, so a
+# debug build and the whole desktop test suite pass without it.
+-keep class ai.onnxruntime.** { *; }
+-keepclasseswithmembernames,includedescriptorclasses class ai.onnxruntime.** {
+    native <methods>;
+}
+-dontwarn ai.onnxruntime.**

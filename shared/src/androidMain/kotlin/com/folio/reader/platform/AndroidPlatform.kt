@@ -24,6 +24,9 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
         File(context.filesDir, "thumbnails").apply { mkdirs() }
     }
 
+    private val modelsDirectory: File by lazy {
+        File(context.filesDir, "models").apply { mkdirs() }
+    }
     private val fontsDirectory: File by lazy {
         File(context.filesDir, "fonts").apply { mkdirs() }
     }
@@ -68,6 +71,8 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
         File(thumbnailsDir, "$bookId.jpg").absolutePath
 
     override fun getFontsDir(): File = fontsDirectory
+
+    override fun getModelsDir(): File = modelsDirectory
 
     override fun getFontPath(fontId: String): String = File(fontsDirectory, fontId).absolutePath
 

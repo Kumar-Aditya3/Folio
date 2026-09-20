@@ -14,6 +14,7 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
     private val databaseDir: File by lazy { File(appDir, "database").apply { mkdirs() } }
     private val thumbnailsDir: File by lazy { File(appDir, "thumbnails").apply { mkdirs() } }
     private val fontsDirectory: File by lazy { File(appDir, "fonts").apply { mkdirs() } }
+    private val modelsDirectory: File by lazy { File(appDir, "models").apply { mkdirs() } }
 
     override val libraryBooksDir: File
         get() = File(libraryDir, "books").apply { mkdirs() }
@@ -52,6 +53,8 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
         File(thumbnailsDir, "$bookId.jpg").absolutePath
 
     override fun getFontsDir(): File = fontsDirectory
+
+    override fun getModelsDir(): File = modelsDirectory
 
     override fun getFontPath(fontId: String): String = File(fontsDirectory, fontId).absolutePath
 

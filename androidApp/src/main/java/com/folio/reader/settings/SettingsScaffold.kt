@@ -47,6 +47,12 @@ object FolioSettingsCategory {
 
     /** Library scanning (folder / device-wide import): its own destination under "Library tools". */
     const val LIBRARY_SCAN = "library_scan"
+
+    /** On-device semantic search: model download and library index (ML_PLAN Phase 4). */
+    const val SEMANTIC_SEARCH = "semantic_search"
+
+    /** Storage sense: on-disk usage by category, with a donut breakdown. */
+    const val STORAGE = "storage"
 }
 
 /**

@@ -51,6 +51,46 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     val bookDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpBookData() { bookDataRevision.value += 1 }
 
+    /**
+     * Bumped after every write to `chapter_chunks` / `chapter_vectors`.
+     *
+     * Deliberately separate from [bookDataRevision] rather than reusing it, for two reasons:
+     * the backfill writes every few seconds and `bookDataRevision` drives `getAllBooks()` plus
+     * the collection and series flows, so bumping it would re-query the entire library UI once
+     * per slice; and the two are genuinely independent — the semantic index changing says
+     * nothing about whether a book's metadata changed.
+     *
+     * The absence of this bump is why the "N of M chapters indexed" readout appeared frozen
+     * during a backfill. `observeProgress` collects this flow, and nothing in
+     * `JdbcChunkRepository` bumped anything, so the panel only recomputed when some *unrelated*
+     * library write happened to fire — which made a working backfill look like a stalled one and
+     * sent the investigation after the worker instead of the display.
+     */
+    val chunkDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpChunkData() { chunkDataRevision.value += 1 }
+
+    /**
+     * Bumped only when the *text* of `search_index` changes — i.e. a chapter is inserted,
+     * rewritten or deleted, which is exactly what [searchableChapterCount] counts.
+     *
+     * This exists to make [searchableChapterCount] cacheable, and it has to be its own signal
+     * because neither of the other two revisions is the right shape:
+     *
+     *  - [bookDataRevision] is far too broad. Collection and annotation edits bump it constantly,
+     *    so keying a cache on it would invalidate on writes that cannot possibly change the count.
+     *  - [chunkDataRevision] is a *chunk* signal, and chunks are downstream of the text: a backfill
+     *    writes chunks for many minutes without touching a single `search_index` row. Keying on it
+     *    would defeat the cache precisely when it matters.
+     *
+     * The count is `COUNT(*) WHERE <word count> >= MIN_CHUNK_WORDS`, and that predicate cannot use
+     * an index: SQLite must read every chapter's full `content` and scan it twice for spaces. On the
+     * 304 MB library that is ~100 MB of text per evaluation. It was previously run on **every**
+     * chunk revision, i.e. after every backfill slice, which is what made indexing hang the whole
+     * device rather than merely keep it busy.
+     */
+    val searchTextRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpSearchText() { searchTextRevision.value += 1 }
+
     val documentDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpDocumentData() { documentDataRevision.value += 1 }
 
@@ -584,6 +624,9 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             // Manga library tables live in the same database but are managed entirely by
             // the manga domain (separate category from books).
             MangaSchema.initialize(conn)
+            // Semantic search (ML_PLAN Phase 2). Additive, idempotent, no version bump —
+            // same contract as every other table above.
+            initializeSemanticSearchSchema(conn)
             // Sessions recorded before reading time was measured (rather than elapsed)
             // are nonsense and cannot be repaired; drop them once. New rows always
             // start after the cutoff, so this matches nothing after its first run.
@@ -596,6 +639,148 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         } finally {
             // Keep the single shared connection open for reuse.
         }
+    }
+
+    /**
+     * Semantic-search storage (ML_PLAN Phase 2).
+     *
+     * `content_hash` and `model_id` are on every row and are not optional: without them a
+     * vector produced by an older model, or for text that has since been re-imported, is
+     * indistinguishable from a fresh one — and a model swap then shows up as an
+     * undebuggable quality regression rather than as work to redo.
+     *
+     * Vectors are stored as raw little-endian float32 BLOBs. 384 dims x 4 B = 1536 B per
+     * chunk, so a 40 000-chunk library is ~61 MB, which keeps them inside the database's
+     * existing backup and sync coverage. Phase 0c measured `sqldroid`'s BLOB throughput on
+     * device to confirm that is fast enough before committing to it.
+     */
+    private fun initializeSemanticSearchSchema(conn: Connection) {
+        // Both tables were first created with the chunk id as the sole primary key. Chunk ids are
+        // content-derived, so the same id recurs across models — and a single-column key therefore
+        // let a second model's insert evict the first model's row, which is exactly the silent
+        // quality change `model_id` exists to prevent. Chunks and vectors are both derived data,
+        // so the repair rebuilds rather than migrates: re-indexing regenerates them.
+        repairSemanticSearchPrimaryKeys(conn)
+
+        conn.createStatementExec(
+            """
+            CREATE TABLE IF NOT EXISTS chapter_chunks (
+                id TEXT NOT NULL,
+                book_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                spine_index INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                dims INTEGER NOT NULL,
+                PRIMARY KEY (id, model_id)
+            )
+            """.trimIndent()
+        )
+        // One composite index carries every lookup the repository makes, and it replaces
+        // three that were each subtly wrong or redundant:
+        //
+        //   * `idx_chunks_chapter_model(chapter_id, model_id)` was missing `book_id`. That is a
+        //     correctness bug, not a tuning one: `chapter_id` is the EPUB manifest id, which is
+        //     book-local, so the backfill's `NOT EXISTS` probe treated every other book's `ch1`
+        //     as already indexed. Those chapters were never embedded, and once the last one was
+        //     masked the slice query returned nothing, `backfillSlice` reported `complete`, and
+        //     the worker exited in about a second — the "Resume indexing does nothing" bug.
+        //     `storeChunks` had the same defect in its pre-delete, which made indexing one book
+        //     *delete* another book's chunks and vectors for every id the two shared.
+        //   * `idx_chunks_book(book_id)` is a prefix of this index, so it is pure redundancy.
+        //   * `idx_chunks_chapter(chapter_id)` no longer backs any query.
+        //
+        // The composite is also what keeps the slice query cheap: with only single-column
+        // indexes the planner picks `idx_chunks_model` and every probe walks *every* chunk of
+        // that model, a cost that grows as the backfill proceeds — measured on a 2 656-chapter
+        // corpus, one slice's selection went from 405 ms with 2 000 chapters left to 890 ms
+        // with 40 left, and on device through sqldroid it appeared as
+        // `SQLiteConnection: operation elapsed time: 38100 ms`. With this index the same query
+        // is a covering lookup and flat (~55 ms across the whole run).
+        conn.createStatementExec(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_book_chapter_model "
+                + "ON chapter_chunks(book_id, chapter_id, model_id)"
+        )
+        // Superseded by the index above. `IF EXISTS` keeps this a no-op on a fresh database,
+        // and dropping is what makes the change take effect on an install that already has the
+        // old definitions — `CREATE INDEX IF NOT EXISTS` would silently keep them.
+        conn.createStatementExec("DROP INDEX IF EXISTS idx_chunks_chapter_model")
+        conn.createStatementExec("DROP INDEX IF EXISTS idx_chunks_book")
+        conn.createStatementExec("DROP INDEX IF EXISTS idx_chunks_chapter")
+        conn.createStatementExec(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_model ON chapter_chunks(model_id)"
+        )
+
+        // Which chunking recipe produced a model's vectors.
+        //
+        // Vectors are keyed by `model_id`, which handles *model* changes correctly — switching models
+        // leaves the other model's index untouched. It does not handle a change to the **chunk
+        // window**, because the window is not part of the model id. When the window changed from the
+        // flat 250 words to `EmbeddingModel.maxChunkWords` (173 for MiniLM, 350 for Arctic-S), the
+        // chunk boundaries moved but nothing invalidated the rows the old window had written, and
+        // `chaptersMissingVectors` will not revisit a chapter that already has chunks for the model.
+        // Search would then return both generations of chunks for the same passage.
+        //
+        // So the recipe is recorded and compared. A mismatch means the model's vectors were built by
+        // a window nobody uses any more, and the whole model index is stale — the same situation as
+        // "no vectors yet", which the backfill already handles by replaying the corpus.
+        //
+        // `INSERT OR REPLACE` keyed on the model, so re-indexing the same model with the same recipe
+        // is idempotent.
+        conn.createStatementExec(
+            """
+            CREATE TABLE IF NOT EXISTS chunk_recipes (
+                model_id TEXT NOT NULL PRIMARY KEY,
+                recipe TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+        conn.createStatementExec(
+            """
+            CREATE TABLE IF NOT EXISTS chapter_vectors (
+                chunk_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                dims INTEGER NOT NULL,
+                vector BLOB NOT NULL,
+                PRIMARY KEY (chunk_id, model_id)
+            )
+            """.trimIndent()
+        )
+        conn.createStatementExec(
+            "CREATE INDEX IF NOT EXISTS idx_vectors_model ON chapter_vectors(model_id)"
+        )
+    }
+
+    /**
+     * Rebuilds the semantic-search tables when they still carry a single-column primary key.
+     *
+     * `CREATE TABLE IF NOT EXISTS` cannot repair an existing table and SQLite cannot alter a
+     * primary key in place, so a rebuild is the only option. Safe to run on every open: it is a
+     * no-op unless the old definition is actually present.
+     */
+    private fun repairSemanticSearchPrimaryKeys(conn: Connection) {
+        dropUnlessKeyedOn(conn, "chapter_chunks", "PRIMARY KEY (id, model_id)")
+        dropUnlessKeyedOn(conn, "chapter_vectors", "PRIMARY KEY (chunk_id, model_id)")
+    }
+
+    private fun dropUnlessKeyedOn(conn: Connection, table: String, compositeKey: String) {
+        val existingSql = runCatching {
+            conn.prepareStatement(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?"
+            ).use { stmt ->
+                stmt.setString(1, table)
+                stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            }
+        }.getOrNull() ?: return
+
+        if (existingSql.contains(compositeKey)) return
+
+        println("Semantic search: rebuilding $table with a composite primary key")
+        conn.createStatementExec("DROP TABLE IF EXISTS $table")
     }
 
     private fun purgeUnmeasuredSessions(conn: Connection) {

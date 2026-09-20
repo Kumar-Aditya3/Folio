@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -23,7 +24,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioTheme
-import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -235,18 +234,6 @@ internal fun pageBlockSeekTarget(stops: List<Float>, fraction: Float): PageBlock
     return PageBlockSeek(index, local)
 }
 
-/** The chapter [fraction] falls inside, or null when it is too narrow to wash. */
-private fun currentBand(stops: List<Float>, fraction: Float): Pair<Float, Float>? {
-    if (stops.size < 2) return null
-    var index = 0
-    for (i in 0..stops.size - 2) {
-        if (stops[i] <= fraction) index = i else break
-    }
-    val start = stops[index]
-    val end = stops[index + 1]
-    return if (end - start > 0.004f) start to end else null
-}
-
 // ── the block's own palette ─────────────────────────────────────────────────
 
 @Immutable
@@ -387,99 +374,87 @@ fun PageBlock(
             .drawWithCache {
                 val w = size.width
                 val h = size.height
-                val band = min(thickness.toPx(), h)
-                val top = (h - band) * 0.5f
-                val base = top + band
+                // A slim rounded track, not a tapering slab. Its thickness is a
+                // fraction of the old block's — a reading thread laid on the page,
+                // not a wedge of paper — so it reads as a fine progress line the
+                // reader can still grab. Capped so a generous touch band does not
+                // inflate the visible rail.
+                val trackH = min(min(thickness.toPx() * 0.34f, 5.dp.toPx()), h)
+                val cy = h * 0.5f
+                val trackTop = cy - trackH * 0.5f
+                val radius = CornerRadius(trackH * 0.5f, trackH * 0.5f)
+                val f = if (shown.isFinite()) shown.coerceIn(0f, 1f) else 0f
+                // Fill runs from the reader's held edge toward the fore-edge: LTR
+                // fills from the left, RTL from the right, so "how far in" always
+                // grows in the direction the reader turns pages.
+                val fillW = (w * f).coerceIn(0f, w)
+                val handleX = (if (rtl) w - fillW else fillW).coerceIn(0f, w)
                 val hair = max(1f, 1.dp.toPx())
-                val geo = pageBlockGeometry(
-                    fraction = shown,
-                    availableThickness = band,
-                    pageCountHint = pageCountHint,
-                    rtl = rtl,
-                    minLinePitch = max(1f, PAGE_BLOCK_MIN_LINE_PITCH.dp.toPx()),
-                )
-                val leafX = geo.leaf * w
-                val readTop = base - geo.readThickness
-                val unreadTop = base - geo.unreadThickness
-                val leftTop = if (rtl) unreadTop else readTop
-                val rightTop = if (rtl) readTop else unreadTop
-                val readX0 = geo.readStart * w
-                val readX1 = geo.readEnd * w
-                val unreadX0 = geo.unreadStart * w
-                val unreadX1 = geo.unreadEnd * w
-                // The knuckle where the leaf bends over from one stack to the other
-                // — the cylinder read. Capped so it never eats a narrow block.
-                val knuckle = min(min(6.dp.toPx(), w * 0.04f), max(1.dp.toPx(), abs(leftTop - rightTop) * 0.6f))
-                    .coerceAtMost(min(leafX, w - leafX))
-                val silhouette = Path().apply {
-                    moveTo(0f, base)
-                    lineTo(0f, leftTop)
-                    lineTo(leafX - knuckle, leftTop)
-                    cubicTo(
-                        leafX - knuckle * 0.4f, leftTop,
-                        leafX + knuckle * 0.4f, rightTop,
-                        leafX + knuckle, rightTop,
-                    )
-                    lineTo(w, rightTop)
-                    lineTo(w, base)
-                    close()
+                // The handle: a round bead sitting on the thread, ringed in the
+                // page's own paper so it lifts off both the track and the page.
+                val beadR = min(h * 0.5f, 7.dp.toPx())
+                // Chapter ticks: faint hairlines crossing the track, the chapter
+                // structure kept without the notch-and-wash machinery.
+                val ticks = if (chapterStops.size < 3) emptyList() else buildList {
+                    val minGap = max(4f, 5.dp.toPx())
+                    var last = -minGap * 2f
+                    for (i in 1 until chapterStops.lastIndex) {
+                        val stop = chapterStops[i].coerceIn(0f, 1f)
+                        val x = (if (rtl) 1f - stop else stop) * w
+                        if (x - last >= minGap) { add(x); last = x }
+                    }
                 }
-                val leftBrush = Brush.verticalGradient(
-                    colors = listOf(palette.slabTop, palette.slabBase),
-                    startY = leftTop,
-                    endY = base,
+                val fillBrush = Brush.horizontalGradient(
+                    colors = listOf(leafAccent.copy(alpha = 0.85f), leafAccent),
+                    startX = if (rtl) w else 0f,
+                    endX = if (rtl) 0f else w,
                 )
-                val rightBrush = Brush.verticalGradient(
-                    colors = listOf(palette.slabTop, palette.slabBase),
-                    startY = rightTop,
-                    endY = base,
-                )
-                val gutterReach = min(w * 0.09f, 16.dp.toPx())
-                val gutterBrush = Brush.horizontalGradient(
-                    0f to Color.Transparent,
-                    0.5f to palette.gutter,
-                    1f to Color.Transparent,
-                    startX = leafX - gutterReach,
-                    endX = leafX + gutterReach,
-                )
-                val chapterBand = currentBand(chapterStops, geo.fraction)
-                val wash = if (chapterBand == null) {
-                    null
-                } else {
-                    val a = (if (rtl) 1f - chapterBand.second else chapterBand.first) * w
-                    val b = (if (rtl) 1f - chapterBand.first else chapterBand.second) * w
-                    min(a, b) to max(a, b)
-                }
-                val leafWidth = max(1.5f, 1.6.dp.toPx())
-                val leafTop = min(leftTop, rightTop) - 2.dp.toPx()
                 onDrawBehind {
-                    // One object, two stacks: each half is filled to its own
-                    // fore-edge, then the whole silhouette is stroked once, so the
-                    // step at the leaf never reads as two separate bars.
-                    clipRect(right = leafX) { drawPath(silhouette, leftBrush) }
-                    clipRect(left = leafX) { drawPath(silhouette, rightBrush) }
-                    clipPath(silhouette) {
-                        if (wash != null) {
+                    // 1) The unread track: the whole span, in a hairline of the
+                    //    page's ink so it belongs to the paper, not the chrome.
+                    drawRoundRect(
+                        color = palette.striae.copy(alpha = 0.55f),
+                        topLeft = Offset(0f, trackTop),
+                        size = Size(w, trackH),
+                        cornerRadius = radius,
+                    )
+                    // 2) The read portion, filled in the forward-motion accent,
+                    //    clipped to the rounded track so its caps stay round.
+                    if (fillW > 0f) {
+                        clipPath(Path().apply {
+                            addRoundRect(
+                                androidx.compose.ui.geometry.RoundRect(
+                                    left = 0f, top = trackTop, right = w, bottom = trackTop + trackH,
+                                    cornerRadius = radius,
+                                )
+                            )
+                        }) {
                             drawRect(
-                                color = leafAccent.copy(alpha = 0.07f),
-                                topLeft = Offset(wash.first, top),
-                                size = Size(wash.second - wash.first, band),
+                                brush = fillBrush,
+                                topLeft = Offset(if (rtl) w - fillW else 0f, trackTop),
+                                size = Size(fillW, trackH),
                             )
                         }
-                        drawRect(
-                            brush = gutterBrush,
-                            topLeft = Offset(leafX - gutterReach, top),
-                            size = Size(gutterReach * 2f, band),
-                        )
-                        drawChapterNotches(chapterStops, w, base, band, palette.striae, hair, rtl)
                     }
-                    drawLeafEdges(readX0, readX1, readTop, base, geo.readLines, palette.striae, hair)
-                    drawLeafEdges(unreadX0, unreadX1, unreadTop, base, geo.unreadLines, palette.striae, hair)
-                    drawRect(palette.rim, topLeft = Offset(readX0, readTop), size = Size(readX1 - readX0, hair))
-                    drawRect(palette.rim, topLeft = Offset(unreadX0, unreadTop), size = Size(unreadX1 - unreadX0, hair))
-                    drawPath(silhouette, palette.outline, style = Stroke(hair))
-                    // The leaf the reader is on, standing a hair proud of the block.
-                    drawRect(leafAccent, topLeft = Offset(leafX - leafWidth * 0.5f, leafTop), size = Size(leafWidth, base - leafTop))
+                    // 3) Chapter ticks, struck across the track only.
+                    for (x in ticks) {
+                        drawRect(
+                            color = palette.outline.copy(alpha = 0.5f),
+                            topLeft = Offset(x - hair * 0.5f, trackTop),
+                            size = Size(hair, trackH),
+                        )
+                    }
+                    // 4) The position handle: paper ring under an accent bead, so
+                    //    the reader's spot reads at a glance and gives the drag a
+                    //    clear target.
+                    drawCircle(color = palette.slabTop, radius = beadR + hair, center = Offset(handleX, cy))
+                    drawCircle(color = leafAccent, radius = beadR, center = Offset(handleX, cy))
+                    drawCircle(
+                        color = palette.rim,
+                        radius = beadR,
+                        center = Offset(handleX, cy),
+                        style = Stroke(hair),
+                    )
                 }
             }
     )
@@ -490,58 +465,6 @@ private fun blockFractionAt(x: Float, width: Int, rtl: Boolean): Float {
     if (width <= 0) return 0f
     val raw = (x / width).coerceIn(0f, 1f)
     return if (rtl) 1f - raw else raw
-}
-
-/** Leaf edges struck inside one stack, evenly spaced from its fore-edge down. */
-private fun DrawScope.drawLeafEdges(
-    fromX: Float,
-    toX: Float,
-    topY: Float,
-    baseY: Float,
-    lines: Int,
-    color: Color,
-    linePx: Float,
-) {
-    if (lines <= 0 || toX <= fromX) return
-    val span = baseY - topY
-    if (span <= linePx * 2f) return
-    val pitch = span / (lines + 1)
-    for (i in 1..lines) {
-        drawRect(
-            color = color,
-            topLeft = Offset(fromX, baseY - pitch * i),
-            size = Size(toX - fromX, linePx),
-        )
-    }
-}
-
-/**
- * Chapter ends, struck up from the base. Skipped where they would collide, and
- * capped: a book with four hundred spine entries must not hatch into a solid bar.
- */
-private fun DrawScope.drawChapterNotches(
-    stops: List<Float>,
-    width: Float,
-    baseY: Float,
-    thickness: Float,
-    color: Color,
-    linePx: Float,
-    rtl: Boolean,
-) {
-    if (stops.size < 3) return
-    val reach = thickness * 0.42f
-    val minGap = max(3f, 4.dp.toPx())
-    var previous = -minGap * 2f
-    var drawn = 0
-    for (i in 1 until stops.lastIndex) {
-        if (drawn >= PAGE_BLOCK_MAX_NOTCHES) return
-        val stop = stops[i].coerceIn(0f, 1f)
-        val x = (if (rtl) 1f - stop else stop) * width
-        if (x - previous < minGap) continue
-        previous = x
-        drawn++
-        drawRect(color = color, topLeft = Offset(x, baseY - reach), size = Size(linePx, reach))
-    }
 }
 
 /**

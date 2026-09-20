@@ -150,6 +150,48 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val searchRepository = JdbcSearchRepository(database)
     val searchIndexer = SearchIndexer(searchRepository)
 
+    // ── SEMANTIC SEARCH (ML_PLAN) ───────────────────────────────────────────
+    // Mirrors AppGraph on Android so the desktop build exercises the same retrieval
+    // stack, which is what makes the Phase 0b harness representative.
+    //
+    // The model is the reader's stored choice rather than a fixed constant; the holder
+    // keeps the embedder factory and every service derived from it in lockstep. See
+    // `EmbeddingModelSelection`.
+    val chunkRepository = com.folio.reader.database.JdbcChunkRepository(database)
+    val modelDownloader = com.folio.reader.ml.ModelDownloader(platform.fileSystem, platform.hasher)
+    val modelSelection = com.folio.reader.ml.EmbeddingModelSelection(
+        settingsRepository = settingsRepository,
+        searchRepository = searchRepository,
+        modelsDir = platform.fileSystem.getModelsDir(),
+        chunkRepository = chunkRepository,
+    )
+
+    val embeddingModel: com.folio.reader.ml.EmbeddingModel
+        get() = modelSelection.model.value
+
+    val embedderFactory: com.folio.reader.ml.OnnxEmbedderFactory
+        get() = modelSelection.embedderFactory
+
+    val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer
+        get() = modelSelection.indexer
+
+    val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
+        get() = modelSelection.semanticSearch
+
+    // Phase 5 #2. Wired on desktop too — auto-tagging is pure embedding + cosine, so unlike
+    // Phase 6 there is nothing Android-specific about it.
+    val autoTaggerService: com.folio.reader.ml.AutoTaggerService
+        get() = com.folio.reader.ml.AutoTaggerService(
+            tagger = modelSelection.tagger,
+            embedderFactory = modelSelection.embedderFactory,
+            tagRepository = tagRepository,
+            bookRepository = bookRepository,
+            searchRepository = searchRepository,
+        )
+    // Phase 6 (OCR + translation): absent on desktop by decision, not by omission. The actual
+    // reports `UnsupportedOnThisPlatform`, which is what hides the affordance in the UI.
+    val onDeviceTextTools = com.folio.reader.ml.onDeviceTextTools()
+
     // ---------- Manga category (local source on desktop) ----------
     val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database) { mangaId ->
         // Cascade delete also removes the manga's downloaded pages from disk.
@@ -195,7 +237,9 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         searchIndexer = searchIndexer,
         hashUtil = platform.hasher,
         // Imported books land on a real collection shelf (Main) right away.
-        collectionRepository = collectionRepository
+        collectionRepository = collectionRepository,
+        // Embeddings are written on the import path, right after the FTS5 index.
+        embeddingIndexer = embeddingIndexer
     )
     val documentImporter = DocumentImporter(
         platform,
@@ -213,6 +257,12 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 
     init {
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        // Resolve the reader's stored embedding model off the UI thread, matching Android:
+        // reading the settings row is a database round trip and desktop's window is built
+        // from this graph, so it must not block on it.
+        appScope.launch {
+            runCatching { modelSelection.start() }
+        }
         database.onEntityChanged = { type, id, op, payload ->
             appScope.launch {
                 syncQueueRepository.enqueueSync(type, id, com.folio.reader.sync.SyncOperation.fromString(op), payload)
@@ -406,7 +456,12 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 
 private sealed interface Screen {
     data object Library : Screen
-    data class Reader(val book: Book, val targetSpineIndex: Int? = null) : Screen
+    data class Reader(
+        val book: Book,
+        val targetSpineIndex: Int? = null,
+        /** Intra-chapter landing as a fraction of the chapter, or null for the top. */
+        val targetFraction: Float? = null,
+    ) : Screen
     data class DocumentReader(val documentId: String) : Screen
     data object Settings : Screen
     data object Stats : Screen
@@ -1069,11 +1124,13 @@ fun main(args: Array<String>) {
                                             appScope.launch(Dispatchers.IO) {
                                                 deps.bookRepository.getBook(hit.book.id)?.let { book ->
                                                     val target = hit.spineIndex.takeIf { it >= 0 }
+                                                    val frac = hit.startFraction.takeIf { it >= 0f }
                                                     appScope.launch(Dispatchers.Main) {
                                                         pushScreen(
                                                             Screen.Reader(
                                                                 book,
-                                                                target
+                                                                target,
+                                                                frac
                                                             )
                                                         )
                                                     }
@@ -1206,6 +1263,7 @@ fun main(args: Array<String>) {
                                     deps = deps,
                                     book = current.book,
                                     targetSpineIndex = current.targetSpineIndex,
+                                    targetFraction = current.targetFraction,
                                     initialSettings = globalSettings,
                                     onBackPress = { popScreen() },
                                     onSearchClick = { pushScreen(Screen.Search) },
@@ -1390,11 +1448,13 @@ fun main(args: Array<String>) {
                                         appScope.launch(Dispatchers.IO) {
                                             deps.bookRepository.getBook(hit.book.id)?.let { book ->
                                                 val target = hit.spineIndex.takeIf { it >= 0 }
+                                                val frac = hit.startFraction.takeIf { it >= 0f }
                                                 appScope.launch(Dispatchers.Main) {
                                                     pushScreen(
                                                         Screen.Reader(
                                                             book,
-                                                            target
+                                                            target,
+                                                            frac
                                                         )
                                                     )
                                                 }
@@ -1419,7 +1479,8 @@ fun main(args: Array<String>) {
                                                     noteRepository = deps.noteRepository,
                                                     seriesRepository = deps.seriesRepository,
                                                     collectionRepository = deps.collectionRepository,
-                                                    tagRepository = deps.tagRepository
+                                                    tagRepository = deps.tagRepository,
+                                                    autoTagger = deps.autoTaggerService,
                                                 )
                                             }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
                                             onBackPress = { popScreen() },
@@ -1472,7 +1533,16 @@ fun main(args: Array<String>) {
                                     }
                                 )
 
-                                is Screen.QuoteBrowser -> QuoteBrowserScreen(
+                                is Screen.QuoteBrowser -> {
+                                    // Hoisted out of the composable so the per-book chapter
+                                    // cache in the finder survives recomposition.
+                                    val quoteRelatedFinder = remember {
+                                        com.folio.reader.ui.quotes.QuoteRelatedFinder(
+                                            semanticSearch = deps.semanticSearchRepository,
+                                            bookRepository = deps.bookRepository,
+                                        )
+                                    }
+                                    QuoteBrowserScreen(
                                     onBack = { popScreen() },
                                     onQuoteClick = { item ->
                                         appScope.launch(Dispatchers.IO) {
@@ -1496,12 +1566,18 @@ fun main(args: Array<String>) {
                                             removeTagFromHighlight = { hl, tag -> deps.tagRepository.removeTagFromHighlight(hl, tag) },
                                             getAllBooks = { deps.bookRepository.getAllBooks() },
                                             getAllTags = { deps.tagRepository.getAllTags().first() },
+                                            // ML_PLAN Phase 5 #3 — same finder as Android, so the
+                                            // suggestions cannot differ between platforms.
+                                            findRelated = { text, limit ->
+                                                quoteRelatedFinder.related(text, limit)
+                                            },
                                             observeAllMangaNotes = { deps.mangaNoteRepository.observeAllNotes() },
                                             getManga = { deps.mangaRepository.get(it) },
                                             getMangaChapters = { deps.mangaChapterRepository.getChapters(it) }
                                         )
                                     }
-                                )
+                                    )
+                                }
 
                                 is Screen.RevisitItems -> RevisitItemsScreen(
                                     onBack = { popScreen() },
@@ -1743,6 +1819,7 @@ private fun ReaderRoute(
     deps: FolioDesktopAppDependencies,
     book: Book,
     targetSpineIndex: Int? = null,
+    targetFraction: Float? = null,
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -1899,7 +1976,8 @@ private fun ReaderRoute(
         onDismissChapterChip = { viewModel.dismissChapterChip() },
         onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
         onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
-        syncState = syncState
+        syncState = syncState,
+        initialSeekFraction = targetFraction
     )
 }
 
@@ -1920,6 +1998,7 @@ private fun SearchRoute(
         quoteRepository = deps.quoteRepository,
         onBackPress = onBackPress,
         uiState = uiState,
+        semanticSearchRepository = deps.semanticSearchRepository,
         onResultClick = { onOpenBookAt(it) }
     )
 }

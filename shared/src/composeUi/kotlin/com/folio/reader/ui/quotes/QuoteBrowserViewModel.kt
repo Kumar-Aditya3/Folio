@@ -35,6 +35,23 @@ data class QuoteDisplayItem(
     val tags: List<Tag>
 )
 
+/**
+ * Panel state for "more like this".
+ *
+ * Distinct from [RelatedLookup] because this is the *screen's* state — it has a loading and
+ * an idle case that a lookup result does not. Collapsing them is how a UI ends up showing
+ * "no similar passages" while the search is still running.
+ */
+sealed interface RelatedState {
+    data object Idle : RelatedState
+    data object Loading : RelatedState
+    data class Ready(val passages: List<RelatedPassage>) : RelatedState
+
+    /** No embedding model on disk, or no vectors stored for the library yet. */
+    data object NotIndexed : RelatedState
+    data class Failed(val message: String) : RelatedState
+}
+
 class QuoteBrowserViewModel(
     private val getAllQuotes: () -> kotlinx.coroutines.flow.Flow<List<Quote>>,
     private val getBook: suspend (String) -> Book?,
@@ -46,6 +63,12 @@ class QuoteBrowserViewModel(
     private val getAllTags: suspend () -> List<Tag>,
     private val addTagToHighlight: suspend (String, String) -> Unit = { _, _ -> },
     private val removeTagFromHighlight: suspend (String, String) -> Unit = { _, _ -> },
+    /**
+     * "More like this" retrieval (ML_PLAN Phase 5 #3). Optional: without it the affordance
+     * is simply not offered, which is how the hub behaves on a build with no model and is
+     * also how every existing test keeps working unchanged.
+     */
+    private val findRelated: (suspend (text: String, limit: Int) -> RelatedLookup)? = null,
     // Manga side (§11.5): null deps keep the hub book-only, as on desktop before wiring.
     private val observeAllMangaNotes: (() -> Flow<List<MangaNote>>)? = null,
     private val getManga: suspend (String) -> MangaEntry? = { null },
@@ -55,6 +78,20 @@ class QuoteBrowserViewModel(
 
     /** Bumped after a tag edit so open hub queries re-resolve highlight tags. */
     private val tagsRevision = MutableStateFlow(0)
+
+    /**
+     * Live state of the "more like this" panel.
+     *
+     * Held as state rather than returned from a suspend call so the screen can render the
+     * loading state, and so the lookup survives recomposition while the reader scrolls.
+     */
+    val relatedState = MutableStateFlow<RelatedState>(RelatedState.Idle)
+
+    /** The quote the panel is currently showing neighbours of; null when closed. */
+    val relatedSource = MutableStateFlow<String?>(null)
+
+    /** True when this build can do the lookup at all. */
+    val canFindRelated: Boolean get() = findRelated != null
     enum class ViewMode { GRID, LIST }
 
     data class FilterState(
@@ -150,5 +187,49 @@ class QuoteBrowserViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Nearest neighbours of a saved passage — ML_PLAN Phase 5 #3.
+     *
+     * A highlight is exactly the right item for this: it is a passage the reader already
+     * decided was worth keeping, so "find me more of whatever this is" is a question they
+     * have already implicitly asked. The lookup is by the quote's own text, so it needs no
+     * new model and no new index — only the vectors Phase 3 already wrote.
+     *
+     * Runs on [editScope], which is `Dispatchers.Default`: the plan's rule is that no ML
+     * call may run on the composition dispatcher, and an embed of a 250-word passage is
+     * exactly the kind of work that made `rememberCoverAccent` cost 10 ms per shelf.
+     */
+    fun findRelatedFor(item: QuoteDisplayItem) {
+        val lookup = findRelated ?: return
+        val text = item.quote.text.trim()
+        if (text.isEmpty()) return
+
+        relatedSource.value = item.quote.id
+        relatedState.value = RelatedState.Loading
+        editScope.launch {
+            val outcome = runCatching { lookup(text, RELATED_LIMIT) }
+            relatedState.value = outcome.fold(
+                onSuccess = { result ->
+                    when (result) {
+                        is RelatedLookup.Ready -> RelatedState.Ready(result.passages)
+                        RelatedLookup.NotIndexed -> RelatedState.NotIndexed
+                        is RelatedLookup.Failed -> RelatedState.Failed(result.message)
+                    }
+                },
+                onFailure = { RelatedState.Failed(it.message ?: "The lookup failed.") },
+            )
+        }
+    }
+
+    fun closeRelated() {
+        relatedSource.value = null
+        relatedState.value = RelatedState.Idle
+    }
+
+    companion object {
+        /** Suggestions returned by "more like this". Eight is a list, not a search result page. */
+        const val RELATED_LIMIT = 8
     }
 }

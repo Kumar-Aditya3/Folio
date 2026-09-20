@@ -24,6 +24,16 @@
          permission; FOREGROUND_SERVICE_DATA_SYNC authorizes the dataSync type on 34+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- The semantic index is hours of local CPU work, and vendor ROMs freeze a
+         backgrounded app within seconds of it leaving the screen — measured on
+         ColorOS as `OplusHansManager: freeze uid: 10452 pids: [29524]` five
+         seconds after the unfreeze that let one session run. A frozen process
+         executes nothing, so without this exemption indexing only advances while
+         the app is open. Requested through the system dialog from
+         Settings > Semantic search, never silently. Sideloaded app; Play's policy
+         on this permission does not apply, as with MANAGE_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:ignore="BatteryLife" />
 
     <application
         android:name=".FolioApplication"
@@ -32,6 +42,7 @@
         android:enableOnBackInvokedCallback="true"
         android:forceDarkAllowed="false"
         android:fullBackupContent="@xml/backup_rules"
+        android:largeHeap="true"
         android:requestLegacyExternalStorage="true"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
@@ -120,6 +131,19 @@
             android:name=".downloads.MangaDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- WorkManager's own foreground service, promoted by
+             EmbeddingBackfillWorker.setForeground so the semantic-index pass survives being
+             cached. Without a declared foregroundServiceType here, targetSdk 34 refuses the
+             promotion with MissingForegroundServiceTypeException at runtime — the worker would
+             silently stay an ordinary background job and keep being reaped, which is the
+             "it only works while I'm on the app" symptom this fixes.
+             tools:node="merge" because the service is contributed by the WorkManager library;
+             this entry only adds the type rather than replacing the library's declaration. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

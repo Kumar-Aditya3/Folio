@@ -122,6 +122,9 @@ class MainActivity : ComponentActivity() {
         graph.applyStoredMangaDownloadsLocation(appScope)
         graph.backfillAnnotationsOnce(appScope)
         graph.backfillMangaAnnotationsOnce(appScope)
+        // Rewrites chapter text indexed before entities were decoded, so snippets stop
+        // showing `&#8217;` and `it's` can actually match. One pass per install.
+        graph.repairIndexEntitiesOnce(appScope)
         // Quiet library scan when the user opted in: new ebooks/documents found
         // on the granted tree simply appear in the shelves.
         graph.scanOnStartIfEnabled(appScope)
@@ -541,6 +544,12 @@ class MainActivity : ComponentActivity() {
                             ) ?: 0
                         }.getOrDefault(0)
                     }
+                }
+                if (importedBooks.isNotEmpty()) {
+                    // Import no longer embeds inline (see FolioApplication's BookImporter wiring).
+                    // Kick the backfill worker so the just-imported books get their vectors in the
+                    // background now, rather than only on the next app launch's scheduled run.
+                    com.folio.reader.work.EmbeddingBackfillScheduler.schedule(applicationContext)
                 }
                 val successful = results.count { it.openRoute() != null }
                 val firstRoute = results.firstNotNullOfOrNull { it.openRoute() }

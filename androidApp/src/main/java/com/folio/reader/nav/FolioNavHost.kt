@@ -45,6 +45,43 @@ private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.n
         targetState.destination.route in topLevelRoutes
 
 /**
+ * Pops the reader — and anything pushed on top of it — back to [route].
+ *
+ * ### Why the reader's back cannot just pop
+ *
+ * The reader is reachable from Home *and* from the Library, so "pop the reader" is only
+ * half an answer: the destination it pops to is whichever tab was underneath when it was
+ * opened, and when that tab is Home the reader's back lands on Home. The reader's report is
+ * exactly that — *"a physical back should bring me back to library, not home"* — and it was
+ * measured press by press on the device: search → back → reader (correct), reader → back →
+ * Home (wrong).
+ *
+ * ### What this does
+ *
+ * A route-based pop down to the tab. `popBackStack(route, inclusive = false)` removes every
+ * entry above the Library *wherever it sits in the stack*, so one call covers both entry
+ * paths: when the reader came from the Library, that is the entry directly beneath it; when
+ * it came from Home, the Library is still below it, because the bottom bar navigates with
+ * `saveState`/`restoreState` and keeps every tab it has visited. No special case per path.
+ *
+ * It replaces popping exactly one destination (`popBackStack()`), which is what produced the
+ * bug: that pops to *whatever* is underneath, and from Home that is Home.
+ *
+ * Doing it here rather than in a `BackHandler` on the reader screen is deliberate. The reader
+ * is a destination; where a destination's back leads is a property of the graph, and a
+ * screen-level handler cannot see the tab beneath it — which is exactly the information the
+ * fix needs. The host's own back walk (`MainActivity.onBackWalked`) only reaches
+ * `navController.popBackStack()` after the reader's `onBack` has already run, so the two do
+ * not fight.
+ *
+ * Deliberately *not* asserted to succeed: if the Library is somehow not on the stack,
+ * popping the reader is still the right fallback, and the return value is not worth a crash.
+ */
+private fun NavHostController.popToTab(route: String) {
+    popBackStack(route, inclusive = false)
+}
+
+/**
  * Wires routes to screen composables (§3.2 FOLIO_IMPLEMENTATION_SPEC).
  *
  * Phase 1 step 1: wraps the *existing* screen composables unchanged. Routes are
@@ -117,8 +154,10 @@ fun FolioNavHost(
                     FolioSharedElementScope(this) {
                         navModel.libraryContent(
                             onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
-                            onOpenReaderAt = { bookId, spine ->
-                                navController.navigate(FolioDestination.reader(bookId, spine))
+                            onOpenReaderAt = { bookId, spine, frac ->
+                                navController.navigate(
+                                    FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
+                                )
                             },
                             onOpenDocument = { documentId ->
                                 navController.navigate(FolioDestination.documentReader(documentId))
@@ -166,12 +205,16 @@ fun FolioNavHost(
                     route = FolioRoutes.READER,
                     arguments = listOf(
                         navArgument(FolioNavArgs.BOOK_ID) { type = NavType.StringType },
-                        navArgument(FolioNavArgs.SPINE) { type = NavType.IntType; defaultValue = -1 }
+                        navArgument(FolioNavArgs.SPINE) { type = NavType.IntType; defaultValue = -1 },
+                        navArgument(FolioNavArgs.FRAC) { type = NavType.IntType; defaultValue = -1 }
                     ),
                     deepLinks = listOf(navDeepLink { uriPattern = "folio://reader/{${FolioNavArgs.BOOK_ID}}" })
                 ) { entry ->
                     val bookId = entry.arguments?.getString(FolioNavArgs.BOOK_ID) ?: return@composable
                     val spine = entry.arguments?.getInt(FolioNavArgs.SPINE)?.takeIf { it >= 0 }
+                    // Per-mille back to a fraction; -1 (the default) means "no intra-chapter target".
+                    val targetFraction = entry.arguments?.getInt(FolioNavArgs.FRAC)
+                        ?.takeIf { it in 0..1000 }?.let { it / 1000f }
                     // §17: the reader is a morph destination too. A cover tapped on a
                     // shelf lands here as the plate the first chapter starts under, so
                     // opening a book reads as the cover flying to where you will read
@@ -181,8 +224,13 @@ fun FolioNavHost(
                         navModel.readerContent(
                             bookId = bookId,
                             targetSpineIndex = spine,
-                            onBack = { navController.popBackStack() },
-                            onOpenSearch = { navController.navigate(FolioRoutes.SEARCH) },
+                            targetFraction = targetFraction,
+                            // Back from the reader lands on the **Library**, whichever tab it
+                            // was opened from — including Home. See [popToTab].
+                            onBack = { navController.popToTab(FolioRoutes.LIBRARY) },
+                            // Search from the reader goes to its own destination so search's
+                            // own back can return here instead of to the Library.
+                            onOpenSearch = { navController.navigate(FolioRoutes.SEARCH_FROM_READER) },
                             onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) }
                         )
                     }
@@ -224,8 +272,32 @@ fun FolioNavHost(
                 composable(FolioRoutes.SEARCH) {
                     navModel.searchContent(
                         onBack = { navController.popBackStack() },
-                        onOpenReader = { bookId, spine ->
-                            navController.navigate(FolioDestination.reader(bookId, spine))
+                        onOpenReader = { bookId, spine, frac ->
+                            navController.navigate(
+                                FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
+                            )
+                        }
+                    )
+                }
+
+                // Search opened from the reader chrome. Same screen, same state holder — the
+                // only difference is what its back means, and that is a property of the stack
+                // rather than of the screen. Because this destination is pushed *on top of*
+                // the reader, its back is an ordinary pop and returns to the reader; the
+                // Library's search ([FolioRoutes.SEARCH]) pops to the Library because that is
+                // what sits under it. Splitting the route is what lets both be right without
+                // a screen-level handler guessing which one it is.
+                //
+                // Opening a result pushes the reader again rather than reusing the one below,
+                // so backing out of it returns here — to the results the reader was reading —
+                // instead of dropping them.
+                composable(FolioRoutes.SEARCH_FROM_READER) {
+                    navModel.searchContent(
+                        onBack = { navController.popBackStack() },
+                        onOpenReader = { bookId, spine, frac ->
+                            navController.navigate(
+                                FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
+                            )
                         }
                     )
                 }

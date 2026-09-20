@@ -59,12 +59,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.folio.reader.ml.SearchMode
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Document
@@ -397,10 +400,54 @@ fun LibraryScreen(
     com.folio.reader.ui.components.FolioBackHandler(
         enabled = mangaMode && mangaSelActive
     ) { mangaLibraryViewModel?.clearSelection() }
+    // A back gesture with a search rail open closes the rail and returns to the shelf,
+    // rather than navigating away from the Library. Claimed here — in the screen that
+    // shows the rail — because the host's back walk evaluates `navController.popBackStack()`
+    // before its own search-close branch, so a back reaching the host pops the Library
+    // destination first. The most-recently-composed handler wins, so intercepting here
+    // keeps the gesture from ever falling through to that pop. One per mode, matching the
+    // mode whose rail is open.
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = !mangaMode && !documentMode && bookSearchActive
+    ) { onBookSearchActiveChange(false) }
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = documentMode && documentSearchActive
+    ) { onDocumentSearchActiveChange(false) }
+    com.folio.reader.ui.components.FolioBackHandler(
+        enabled = mangaMode && mangaSearchActive
+    ) { onMangaSearchActiveChange(false) }
+
+    // Warm the vector index when the book search rail opens so the first meaning/in-book query
+    // does not pay for the ~60 MB load on the keystroke, and release it when the rail closes.
+    // Mirrors the full-screen search's own preload/dispose. A no-op without a model or index.
+    LaunchedEffect(bookSearchActive, bookSearchController) {
+        val controller = bookSearchController ?: return@LaunchedEffect
+        // Warm on open, but do NOT release the index on close: the int8 index is small (~38 MB for
+        // the whole library, far less when scoped to a book) and releasing it on every close made
+        // the next search rebuild from SQLite — the "results took way longer than they should"
+        // report. Keeping it resident means only a scope change (book ↔ library) rebuilds.
+        //
+        // The embedder session IS released on close, though: it is 40-60 MB of native memory that
+        // would otherwise sit resident in the background (the multilingual model far more) — the
+        // footprint the lowmemorykiller targets. It reopens on the next query, cached for that
+        // search session. Index fast, session lean: the two have opposite lifetimes on purpose.
+        if (bookSearchActive) runCatching { controller.preload() }
+        else runCatching { controller.releaseEmbedder() }
+    }
     // The masthead collapses off whatever the shelf below it consumed, so the grid
     // dissolves into the bar the way Home's hero does instead of sliding under a
     // fixed slab of chrome.
     val headerState = com.folio.reader.ui.components.rememberFolioHeaderState()
+    // The collapse offset is a `rememberSaveable` accumulator, so returning to Library from Home
+    // restores whatever value it held — and `FolioTopBar` multiplies the rail's height/alpha by
+    // (1 - collapse), so a restored-collapsed bar comes back folded to zero height over reserved
+    // inset: the "search bar is blank space until I scroll" report. It only re-synced on the next
+    // scroll event. Expanding on (re)entry, and whenever the search rail opens, keeps the bar
+    // present. The masthead title rides the same collapse, which is why the old blanket per-mode
+    // reset was removed; keying this on entry/search-open (not every recomposition) avoids the
+    // title snapping around under a mode switch.
+    LaunchedEffect(Unit) { headerState.reset() }
+    LaunchedEffect(bookSearchActive) { if (bookSearchActive) headerState.reset() }
     // The collapse is a sticky accumulator shared by all three shelves. v1.2.11
     // reset it on every mode switch so an incoming shelf could not arrive with its
     // rail folded under the bar — but the collapse also drives the masthead title's
@@ -429,13 +476,36 @@ fun LibraryScreen(
     // the switch by exactly the one layout pass that matters: the incoming shelf is
     // measured under the *outgoing* mode's rail height and jumps when the new rail
     // reports its own. That hop was the reported "layout changes for a split second".
+    //
+    // Only the *filter* rail's height is recorded here. The search rail is measured too —
+    // the same `Box.onSizeChanged` wraps both — but its reading is deliberately dropped:
+    // see [shelfInset] for why the shelf must not move when a search field opens over it.
     val railPxByMode = remember { mutableStateMapOf<LibraryMode, Int>() }
+    // The search rail's real height, measured while a book search is open. `railPxByMode`
+    // deliberately freezes to the *filter* rail's height so the grid does not slide when the
+    // field opens over it (see [shelfInset]); but the search results list replaces the shelf and
+    // sits under this taller rail, so it needs the real height as its top inset or the masthead
+    // overlaps its first rows.
+    var searchRailPx by remember { mutableStateOf(0) }
+    // The last measured (non-search) rail height, persisted across tab switches. `railPxByMode` is
+    // a plain `remember`, so it resets to empty every time the Library destination re-composes on
+    // re-entry from Home/Stats; the shelf inset then falls back to 0 for one frame and the whole
+    // grid — masthead rail included — visibly jumps down once the rail measures itself. Seeding the
+    // fallback from a `rememberSaveable` (which survives the nav save/restore) removes that jump.
+    var lastRailPx by rememberSaveable { mutableStateOf(0) }
     val railContent: (@Composable () -> Unit)? = when (libraryMode) {
         LibraryMode.MANGA -> mangaLibraryViewModel?.let { mangaVm -> ({
             // Manga's chrome, in the same slot the other two modes use. It used to
             // be a row pinned inside the shelf, which is why entering Manga changed
             // the header's structure and the incoming grid had to be re-laid out.
-            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
+            // Same gate as the Books rail: the search field is taller than the chips row it
+            // replaces, and letting that height reach the shelf offset slides the shelf down
+            // when search opens. See [shelfInset].
+            Box(
+                Modifier.onSizeChanged {
+                    if (!mangaSearchActive) { railPxByMode[libraryMode] = it.height; lastRailPx = it.height }
+                }
+            ) {
                 MangaLibraryRail(
                     viewModel = mangaVm,
                     searchActive = mangaSearchActive,
@@ -451,7 +521,14 @@ fun LibraryScreen(
             // category chips, so no mode stacks its categories below the
             // selector. While searching, the chips give way to the field but
             // the switch stays at the head of the row.
-            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
+            // Same gate again. The document rail keeps the switch at the head of the row while
+            // searching, so its height changes less than the Book rail's — but it still
+            // changes, and the shelf must not move. See [shelfInset].
+            Box(
+                Modifier.onSizeChanged {
+                    if (!documentSearchActive) { railPxByMode[libraryMode] = it.height; lastRailPx = it.height }
+                }
+            ) {
                 if (documentSearchActive && documentLibraryViewModel != null) {
                     LibrarySearchRail(
                         switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
@@ -494,32 +571,91 @@ fun LibraryScreen(
             }
         })
         LibraryMode.BOOKS -> ({
-            Box(Modifier.onSizeChanged { railPxByMode[libraryMode] = it.height }) {
+            // Only the filter rail's height is recorded. `onSizeChanged` fires for whichever
+            // branch is composed, so gating on `!bookSearchActive` is what keeps the taller
+            // search rail out of the shelf's offset — see [shelfInset]. Without the gate the
+            // measurement is overwritten the moment search opens and the whole grid slides
+            // down by the difference.
+            Box(
+                Modifier.onSizeChanged {
+                    if (!bookSearchActive) { railPxByMode[libraryMode] = it.height; lastRailPx = it.height }
+                    else searchRailPx = it.height
+                }
+            ) {
                 val controller = bookSearchController
                 if (bookSearchActive && controller != null) {
-                    LibrarySearchRail(
-                        switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
-                        query = controller.query,
-                        onQueryChange = { q ->
-                            controller.runSearch(q, controller.scope, allBooks, railScope)
-                        },
-                        placeholder = "Search books",
-                        onClose = { onBookSearchActiveChange(false) },
-                        // The scope selector lives on the field's own search icon:
-                        // a chip row below the field folded out of sight on phones,
-                        // which is how Titles/Content/Highlights/Notes ended up
-                        // undiscoverable. The dropdown cannot scroll away.
-                        scopeOptions = SearchScope.entries.map { it.label },
-                        scopeSelected = SearchScope.entries.indexOf(controller.scope).coerceAtLeast(0),
-                        onScopeSelect = { index ->
-                            controller.runSearch(
-                                controller.query,
-                                SearchScope.entries[index],
-                                allBooks,
-                                railScope,
-                            )
-                        },
-                    )
+                    Column(Modifier.fillMaxWidth()) {
+                        LibrarySearchRail(
+                            switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                            query = controller.query,
+                            onQueryChange = { q ->
+                                controller.runSearch(q, controller.scope, allBooks, railScope)
+                            },
+                            placeholder = "Search books",
+                            onClose = { onBookSearchActiveChange(false) },
+                            // The scope selector lives on the field's own search icon:
+                            // a chip row below the field folded out of sight on phones,
+                            // which is how Titles/Content/Highlights/Notes ended up
+                            // undiscoverable. The dropdown cannot scroll away.
+                            scopeOptions = SearchScope.entries.map { it.label },
+                            scopeSelected = SearchScope.entries.indexOf(controller.scope).coerceAtLeast(0),
+                            onScopeSelect = { index ->
+                                controller.runSearch(
+                                    controller.query,
+                                    SearchScope.entries[index],
+                                    allBooks,
+                                    railScope,
+                                )
+                            },
+                        )
+                        // Retrieval mode, exactly as the reader's search screen offers it: the
+                        // same three chips, under the same two conditions — Content scope only,
+                        // and only on a build that can do semantics at all.
+                        //
+                        // Content-only is not a simplification, it is the same rule the other
+                        // surface has and for the same reason: Titles/Highlights/Notes/Bookmarks
+                        // are exact-match lookups over short strings, so an embedding adds
+                        // nothing, and showing "Meaning" over a title list would promise
+                        // something the index cannot deliver. Semantics *are* meaningful here
+                        // because this is the field that searches inside books — the library
+                        // rail is the road most readers take to content search, and until now
+                        // it led to a search that had no mode at all.
+                        if (controller.scope == SearchScope.CONTENT && controller.semanticAvailable) {
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                    horizontal = FolioTokens.gutter,
+                                    vertical = 2.dp,
+                                ),
+                            ) {
+                                items(SearchMode.entries.toList(), key = { "railmode:${it.name}" }) { m ->
+                                    com.folio.reader.ui.components.FolioChip(
+                                        selected = controller.mode == m,
+                                        onClick = {
+                                            controller.mode = m
+                                            controller.runSearch(
+                                                controller.query,
+                                                controller.scope,
+                                                allBooks,
+                                                railScope,
+                                            )
+                                        },
+                                        label = m.label,
+                                    )
+                                }
+                            }
+                            if (controller.semanticUnavailable) {
+                                Text(
+                                    text = "Semantic index not built yet — showing exact matches. " +
+                                        "Download the model in Settings, then index your library.",
+                                    modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = 2.dp),
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                 } else {
                     LibraryFilterChips(
                         filter = filter,
@@ -549,10 +685,36 @@ fun LibraryScreen(
     // the flash at the start of a switch. The fallback to any measured rail is exact
     // here: all three rails are one row of the same chips.
     val shelfDensity = LocalDensity.current
+    // ### The rail height, and why the search field's is not part of it
+    //
+    // The rail genuinely is taller while searching: on a phone the field and the
+    // Books/Manga/Documents switch stack into two rows instead of one. Feeding that taller
+    // number into the shelf's top padding slid the whole grid down by the difference the
+    // instant search was opened. Measured on the device — switch row y 269px → 407px, every
+    // cover following at +156px — the row that had been fully visible was cut off at the
+    // bottom edge and the shelf below the chrome read as **blank**. That is the report
+    // "tapping the Library search icon blanks the book grid", and it is a layout shift, not
+    // data loss: all eight books were present the whole time, just pushed under the fold.
+    // (It has been misdiagnosed once as an empty library, which is why the numbers above are
+    // recorded here rather than left as a claim.)
+    //
+    // Keeping it out is also the right behaviour on its own terms. The search field is chrome
+    // the reader opened *over* the shelf; the shelf is not a new page and has no reason to
+    // move when a field appears. Holding the non-searching height means the grid stays exactly
+    // where it was and the field overlays it — what the reader asked for: *"things should stay
+    // when search is tapped and it's empty."*
+    //
+    // Enforced at the measurement site (each rail's `onSizeChanged` writes only when its own
+    // search is inactive), so there is one place per mode that decides this and no second
+    // map to keep in sync.
     val shelfInset: @Composable (LibraryMode) -> Dp = { mode ->
         folioBarTopInset(
             with(shelfDensity) {
-                (railPxByMode[mode] ?: railPxByMode.values.firstOrNull() ?: 0).toDp()
+                // The fallback to any measured rail stays: it covers the first frame, before
+                // this mode's filter rail has reported a height. Every rail is at least one
+                // row of the same chips and the switch, so a close approximation for one frame
+                // beats a shelf that starts at the top edge and then jumps down.
+                (railPxByMode[mode] ?: railPxByMode.values.firstOrNull() ?: lastRailPx).toDp()
             }
         )
     }
@@ -1033,7 +1195,16 @@ fun LibraryScreen(
                     label = "shelf swap",
                 ) { mode ->
                     CompositionLocalProvider(LocalFolioTopInset provides shelfInset(mode)) {
-                        when (mode) {
+                        // Only ever render the shelf whose mode matches the *current* selection.
+                        // AnimatedContent keeps the outgoing mode composed and visible through the
+                        // cross-fade, while the masthead rail switches to the new mode immediately —
+                        // so without this guard the new mode's rail is painted over the previous
+                        // mode's grid (e.g. a manga shelf under the Books collection row, briefly
+                        // exposing another tab's — possibly private — collection). Blanking the
+                        // outgoing child closes that leak; the incoming shelf still fades in.
+                        if (mode != libraryMode) {
+                            Box(Modifier.fillMaxSize())
+                        } else when (mode) {
                             LibraryMode.MANGA -> shelfStateHolder.SaveableStateProvider("manga") {
                                 mangaContent?.invoke()
                             }
@@ -1065,16 +1236,52 @@ fun LibraryScreen(
                                 // covers both surfaces.
                                 val controller = bookSearchController
                                 if (bookSearchActive && controller != null && controller.scope != SearchScope.TITLES) {
-                                    BookSearchResultsList(
-                                        query = controller.query,
-                                        scope = controller.scope,
-                                        titleMatches = controller.titleMatches,
-                                        results = controller.results,
-                                        annotationResults = controller.annotationResults,
-                                        onOpenTitle = onBookDetailClick,
-                                        onOpenHit = onOpenBookHit,
-                                        modifier = Modifier.fillMaxSize(),
+                                    // This list sits under the *search* rail, which is taller than
+                                    // the filter rail `shelfInset` (the grid's inset) is frozen to.
+                                    // Override the top inset with the search rail's measured height
+                                    // so the masthead does not cover the first results.
+                                    val searchInset = folioBarTopInset(
+                                        with(shelfDensity) {
+                                            (if (searchRailPx > 0) searchRailPx
+                                            else railPxByMode[LibraryMode.BOOKS] ?: 0).toDp()
+                                        }
                                     )
+                                    CompositionLocalProvider(LocalFolioTopInset provides searchInset) {
+                                        Box(Modifier.fillMaxSize()) {
+                                            BookSearchResultsList(
+                                                query = controller.query,
+                                                scope = controller.scope,
+                                                titleMatches = controller.titleMatches,
+                                                results = controller.results,
+                                                annotationResults = controller.annotationResults,
+                                                // The rail already explains a floor-rejected result
+                                                // above the list; the list must not contradict it with
+                                                // "No matches", which says something else about the
+                                                // same empty answer.
+                                                 noStrongMatch = controller.noStrongMatch,
+                                                 searching = controller.searching,
+                                                 onOpenTitle = onBookDetailClick,
+                                                 onOpenHit = onOpenBookHit,
+                                                 modifier = Modifier.fillMaxSize(),
+                                             )
+                                            // Indeterminate line while a content/annotation search
+                                            // runs, so a slow query reads as "working", not "no
+                                            // results". Offset by `searchInset` so it sits *below*
+                                            // the floating glass masthead — pinned to TopCenter with
+                                            // no offset it rendered behind the bar and was invisible,
+                                            // which is why the indicator never appeared.
+                                            if (controller.searching) {
+                                                androidx.compose.material3.LinearProgressIndicator(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .align(Alignment.TopCenter)
+                                                        .padding(top = searchInset),
+                                                    color = FolioTheme.colors.accentProgress,
+                                                    trackColor = FolioTheme.colors.accentProgress.copy(alpha = 0.18f),
+                                                )
+                                            }
+                                        }
+                                    }
                                 } else {
                                     val queryText = if (bookSearchActive) controller?.query?.trim().orEmpty() else ""
                                     val displayed = if (queryText.isNotEmpty()) {

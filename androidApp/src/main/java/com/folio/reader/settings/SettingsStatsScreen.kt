@@ -4,10 +4,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
@@ -95,32 +99,38 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
         ExcludeOption(Scope.EXTENSION, it.pkgName, it.lang?.let { lang -> "${it.name} ($lang)" } ?: it.name)
     }
 
-    SettingsCategoryScaffold(title = "Statistics exclusions", onBack = onBack) {
-        SettingsStatRow("Excluded books", "${bookExcluded} of ${books.size} books") { dialog = ExcludeDialog.BOOKS }
-        SettingsStatRow(
-            "Excluded book tags & collections",
-            "$tagExcluded tags · $collectionExcluded collections"
-        ) { dialog = ExcludeDialog.TAGS_COLLECTIONS }
-        SettingsStatRow("Excluded book series", "$seriesExcluded of ${series.size} series") { dialog = ExcludeDialog.SERIES }
-        SettingsStatRow("Excluded book statuses", "$statusExcluded of ${BookStatus.entries.size} statuses") {
-            dialog = ExcludeDialog.STATUSES
-        }
-        SettingsStatRow(
-            "Excluded manga & manga categories",
-            "$mangaExcluded of ${manga.size} manga · $categoryExcluded categories"
-        ) { dialog = ExcludeDialog.MANGA_CATEGORIES }
-        SettingsStatRow("Excluded manga sources", "$sourceExcluded of ${sources.size} sources") { dialog = ExcludeDialog.SOURCES }
-        SettingsStatRow(
-            "Excluded extensions",
-            "$extensionExcluded of ${extensionOptions.size} extensions"
-        ) { dialog = ExcludeDialog.EXTENSIONS }
+    SettingsCategoryScaffold(title = "Exclusions", onBack = onBack) {
+        // One editorial lead instead of a trailing footnote: it sets up what every row below
+        // does before the reader taps one, rather than explaining after the fact.
         Text(
-            "Excluded titles leave the statistics and every Home suggestion — but stay in " +
-                "your library, search and the reader, and keep recording progress. Excluding a " +
-                "manga, source or extension also keeps it out of Discover (New from your sources).",
-            style = FolioTheme.typography.bodySmall,
-            color = FolioTheme.colors.onSurfaceVariant
+            "Excluded titles leave your statistics and every Home suggestion — but stay in your " +
+                "library, search and the reader, and keep recording progress. Excluding a manga, " +
+                "source or extension also keeps it out of Discover.",
+            style = FolioTheme.typography.bodyMedium,
+            color = FolioTheme.colors.onSurfaceVariant,
         )
+
+        ExclusionSection("Books", FolioTheme.colors.accentProgress) {
+            ExclusionRow("Books", "$bookExcluded of ${books.size}") { dialog = ExcludeDialog.BOOKS }
+            ExclusionRow("Tags & collections", "$tagExcluded tags · $collectionExcluded collections") {
+                dialog = ExcludeDialog.TAGS_COLLECTIONS
+            }
+            ExclusionRow("Series", "$seriesExcluded of ${series.size}") { dialog = ExcludeDialog.SERIES }
+            ExclusionRow("Statuses", "$statusExcluded of ${BookStatus.entries.size}", last = true) {
+                dialog = ExcludeDialog.STATUSES
+            }
+        }
+
+        ExclusionSection("Manga", FolioTheme.colors.accentDiscovery) {
+            ExclusionRow(
+                "Manga & categories",
+                "$mangaExcluded of ${manga.size} · $categoryExcluded categories"
+            ) { dialog = ExcludeDialog.MANGA_CATEGORIES }
+            ExclusionRow("Sources", "$sourceExcluded of ${sources.size}") { dialog = ExcludeDialog.SOURCES }
+            ExclusionRow("Extensions", "$extensionExcluded of ${extensionOptions.size}", last = true) {
+                dialog = ExcludeDialog.EXTENSIONS
+            }
+        }
     }
 
     dialog?.let { kind ->
@@ -156,26 +166,54 @@ fun SettingsStatsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     }
 }
 
-/** Live count row — "12 of 148 books excluded" — opens the multi-select. */
+/** An accent-eyebrowed group of exclusion rows, in the app's editorial section style. */
 @Composable
-private fun SettingsStatRow(title: String, count: String, onClick: () -> Unit) {
+private fun ExclusionSection(
+    title: String,
+    accent: androidx.compose.ui.graphics.Color,
+    content: @Composable () -> Unit,
+) {
+    androidx.compose.foundation.layout.Column {
+        com.folio.reader.ui.components.FolioEyebrow(title, accent = accent)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+        content()
+    }
+}
+
+/**
+ * One exclusion row: a name, its live count, a chevron, and a hairline rule beneath it — the
+ * same anatomy the More hub rows use, rather than the bare space-between line this screen had.
+ */
+@Composable
+private fun ExclusionRow(title: String, count: String, last: Boolean = false, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(title, style = FolioTheme.typography.bodyLarge, color = FolioTheme.colors.onSurface)
+        Text(
+            title,
+            style = FolioTheme.typography.titleSmall,
+            color = FolioTheme.colors.onSurface,
+            modifier = Modifier.weight(1f),
+        )
         Text(
             count,
             style = FolioTheme.typography.bodySmall,
             color = FolioTheme.colors.onSurfaceVariant,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        androidx.compose.material3.Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = FolioTheme.colors.onSurfaceVariant,
         )
     }
+    if (!last) com.folio.reader.ui.components.FolioRule()
 }
 
 @Composable

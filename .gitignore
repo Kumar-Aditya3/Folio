@@ -113,6 +113,15 @@ logcat.txt
 # Release artifacts are published out of band; the folder stays local.
 /releases/
 
+# Downloaded ML model files (ONNX + tokenizer vocab). Large binaries fetched on
+# demand, never bundled in the APK and never committed — the app downloads them
+# into the models dir at runtime. ~152 MB as of the Phase 0b comparison.
+/.models/
+
+# Local debug harnesses (A/B measurement scripts, APKs, probes, screenshots).
+# Kept locally for reference only.
+/.dbg/
+
 # Upstream Mihon checkout used only as vendoring reference; the runtime itself
 # lives under shared/src/androidMain/kotlin/{eu,mihon,tachiyomi,logcat}.
 mihon-main/

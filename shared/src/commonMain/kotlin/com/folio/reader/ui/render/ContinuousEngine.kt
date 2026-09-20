@@ -137,20 +137,31 @@ window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 // into it the eye sits. A font change reflows the text, so a scroll FRACTION
 // (or pixel offset) lands somewhere else — this anchor keeps the same words
 // under the reader's eye across the swap.
+//
+// Both halves must work in DOCUMENT space. `cy` is a document coordinate
+// (scrollTop + half a viewport), so the paragraph that holds it has to be found
+// with topOf(). Comparing it against a viewport-space rect.top instead — as this
+// did — made the effective target `2*scrollTop + vh/2`: the reader was thrown
+// forward by their own scroll offset, and past roughly the middle of a chapter
+// nothing matched at all, the fallback below picked the section's LAST
+// paragraph, and a font or theme change landed at the end of the chapter. That
+// is the "changing fonts / themes jumps to the end of the chapter" report, and
+// it fired on theme changes too, which do not even reflow — __folioRestyle runs
+// this pair unconditionally. [__folioAnchorRestore] always worked in document
+// space; only this half disagreed with it.
 window.__folioAnchorSave=function(){
   var s=scroller(),cy=(s.scrollTop||0)+vh()*0.5,sec=visibleSection();
   if(!sec)return '';
   var spine=parseInt(sec.getAttribute('data-folio-spine'),10);if(isNaN(spine))spine=-1;
   var ps=sec.querySelectorAll('p');if(!ps.length)return '';
-  var i=0,el=null;
+  var i=0,el=null,top=0,h=0;
   for(i=0;i<ps.length;i++){
-    var r=ps[i].getBoundingClientRect();
-    if(r.top<=cy&&r.bottom>=cy){el=ps[i];break;}
-    if(r.top>cy){el=ps[i];break;}
+    top=topOf(ps[i]);h=ps[i].offsetHeight;
+    if(top<=cy&&top+h>=cy){el=ps[i];break;}
+    if(top>cy){el=ps[i];break;}
   }
-  if(!el){el=ps[ps.length-1];i=ps.length-1;}
-  var fr=0,r2=el.getBoundingClientRect();
-  if(r2.height>0)fr=Math.min(1,Math.max(0,(cy-r2.top)/r2.height));
+  if(!el){el=ps[ps.length-1];i=ps.length-1;top=topOf(el);h=el.offsetHeight;}
+  var fr=h>0?Math.min(1,Math.max(0,(cy-top)/h)):0;
   return spine+':'+i+':'+fr.toFixed(4);
 };
 window.__folioAnchorRestore=function(a){

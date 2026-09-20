@@ -1313,6 +1313,45 @@ class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
         }
     }
 
+    /**
+     * One query for the whole book, in spine order.
+     *
+     * `spine_index` ordering is what makes the mean-of-chapters vector stable: the caller
+     * averages whatever comes back, and averaging is order-independent, but a stable order
+     * keeps the truncation in [com.folio.reader.ml.ZeroShotTagger] (first N chapters)
+     * deterministic instead of database-dependent.
+     *
+     * Content is read as-is — this is the same extracted plain text the semantic index was
+     * built from, so a tag vector and a chunk vector describe the same words.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT chapter_id, spine_index, title, content
+                FROM search_index
+                WHERE book_id = ?
+                ORDER BY spine_index
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(
+                                ChapterIndexEntry(
+                                    chapterId = rs.getString("chapter_id"),
+                                    spineIndex = rs.getInt("spine_index"),
+                                    title = rs.getString("title").orEmpty(),
+                                    content = rs.getString("content").orEmpty(),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
     private fun query(conn: Connection, sql: String, term: String?): List<SearchResult> {
         return conn.prepareStatement(sql).use { stmt ->
             if (term != null) {
@@ -1493,6 +1532,43 @@ class JdbcFtsSearchRepository(private val db: Database) : SearchRepository {
             }
         })
     }
+
+    /**
+     * Plain select, deliberately not a MATCH.
+     *
+     * There is no query here — the caller wants the whole book — so FTS5's index is not
+     * involved and a `MATCH ''` would raise rather than return everything. `chapter_id` is
+     * selected alongside `spine_index` because a caller that needs to join chapter text to
+     * chunk rows needs both halves of the `(book_id, chapter_id)` key; `spine_index` alone
+     * cannot identify a chapter.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT chapter_id, spine_index, title, content
+                FROM search_index
+                WHERE book_id = ?
+                ORDER BY spine_index
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(
+                                ChapterIndexEntry(
+                                    chapterId = rs.getString("chapter_id"),
+                                    spineIndex = rs.getInt("spine_index"),
+                                    title = rs.getString("title").orEmpty(),
+                                    content = rs.getString("content").orEmpty(),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
 }
 
 class JdbcSearchRepository(private val db: Database) : SearchRepository {
@@ -1535,6 +1611,17 @@ class JdbcSearchRepository(private val db: Database) : SearchRepository {
             emitAll(like.searchInBook(bookId, queryText))
         }
     }
+
+    /**
+     * Same table, same fallback as everything else here: FTS first, then the plain-table
+     * variant. The two have different schemas (FTS5 virtual table vs. an ordinary table) but
+     * both carry `content`, so one read serves both.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        tryFts(
+            block = { fts.getChapterTexts(bookId) },
+            fallback = { like.getChapterTexts(bookId) }
+        )
 }
 
 // ---------- Settings ----------

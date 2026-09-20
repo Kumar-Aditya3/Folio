@@ -26,6 +26,29 @@ android {
         versionName = "1.2.21"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // ONNX Runtime (embedding inference) and ML Kit (OCR + translate) each ship a
+        // large .so per ABI, and Android packages every ABI's copy into one APK unless
+        // told otherwise. Unfiltered, this doubled the APK: the two x86 ABIs exist only
+        // for emulators, and no shipping phone needs them. Restrict to real device ABIs.
+        // Both ONNX Runtime and ML Kit publish arm64-v8a and armeabi-v7a, so nothing is
+        // lost for physical devices. Emulator users can add x86_64 back locally.
+        ndk {
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // Split per ABI as well, so an install downloads only the slice it needs. Measured on the
+    // debug variant: arm64-v8a ~85 MB, armeabi-v7a ~70 MB, universal ~117 MB — against ~229 MB
+    // for the single unfiltered APK. requiresAbiFilters is inferred by AGP when the split names
+    // match abiFilters, so the universal APK still contains both ABIs.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
     }
 
     signingConfigs {

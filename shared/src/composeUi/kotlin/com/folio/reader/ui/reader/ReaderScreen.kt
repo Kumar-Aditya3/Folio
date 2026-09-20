@@ -42,6 +42,15 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 import kotlin.math.roundToInt
 
+/**
+ * Words per estimated page in continuous mode, which has no real page turns.
+ *
+ * ~275 words is the rough count of a mass-market paperback page, and near what a paginated
+ * e-reader shows at a default type size — so the "N pages left" estimate reads as plausible to
+ * someone used to either. It is only ever an estimate; paged mode uses the real page counters.
+ */
+private const val WORDS_PER_PAGE = 275
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
@@ -113,7 +122,15 @@ fun ReaderScreen(
      * page can only agree about when the handoff happens by luck. It is opt-in
      * behind a settings flag until that seam is measured on a device.
      */
-    morphBookId: String? = null
+    morphBookId: String? = null,
+    /**
+     * Where to land inside the opening chapter, as a fraction in [0, 1] of its text, or null for
+     * the chapter top. Set by a search deep-link so a result opens at the matched passage rather
+     * than the chapter's start; applied once, after the first chapter's content is on screen (the
+     * view model has already positioned to the target chapter), by issuing the same fraction seek
+     * the progress bar and annotation jumps use.
+     */
+    initialSeekFraction: Float? = null
 ) {
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
@@ -168,6 +185,21 @@ fun ReaderScreen(
         }
     }
 
+    // Search deep-link landing. Fires once, when the opening chapter's content is first on
+    // screen — the view model has already positioned to the target chapter via its start
+    // override, so a chapter-local fraction seek here lands the passage. Guarded by a one-shot
+    // flag so a later chapter turn does not re-trigger it, and skipped for the null default so
+    // an ordinary open still restores the saved position untouched.
+    var initialSeekApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(initialSeekFraction, chapterHtml, isLoadingContent) {
+        if (initialSeekApplied) return@LaunchedEffect
+        val fraction = initialSeekFraction ?: return@LaunchedEffect
+        if (isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
+        initialSeekApplied = true
+        seekNonce++
+        seekReq = fraction.coerceIn(0f, 1f) to seekNonce
+    }
+
     // ── The page block (diegetic progress) ──────────────────────────────────────
     // Chapter ends along the block, word-weighted so a long chapter takes the length
     // of block it is worth. The block is whole-book on purpose: one that emptied at
@@ -193,14 +225,52 @@ fun ReaderScreen(
         }
         if (found.isEmpty()) currentChapterIndex..currentChapterIndex else found.min()..found.max()
     }
+    // The band for the chapter-local fraction is the *visible* chapter, not the whole rendered
+    // span. `chapterProgress` is measured within the one section on screen (both paged and
+    // continuous report section-local), so mapping it across the multi-chapter continuous window
+    // put a "halfway through chapter 5" reading at the midpoint of the 3..7 band instead — the
+    // skewed continuous progress. In paged mode the rendered span *is* the current chapter, so this
+    // is identical there; only continuous is corrected.
     val bookFraction = pageBlockBandFraction(
         stops = chapterStops,
-        bandFirst = renderedSpan.first,
-        bandLast = renderedSpan.last,
+        bandFirst = currentChapterIndex,
+        bandLast = currentChapterIndex,
         bandFraction = position?.chapterProgress?.toFloat()
             ?: if (totalPages > 0) (currentPage.toFloat() / totalPages).coerceIn(0f, 1f) else 0f,
     )
     val showChapterLine = settings.showChapterTitle && !currentChapter?.title.isNullOrBlank()
+    // The "how much is left" readout, mode-aware. The leaf block is a shape, not a number, so
+    // this is the numeral the reader asked for — and it is what was missing in continuous mode:
+    // that layout has no page turns, so `currentPage`/`totalPages` stay 1/1 and a pages-left
+    // count is meaningless there. `chapterProgress` is reported section-local in *both* modes,
+    // so the in-chapter percentage is the honest, always-available figure for continuous reading;
+    // paged reading keeps the concrete "N pages left" it can actually count.
+    val chapterFrac = (position?.chapterProgress ?: 0.0).coerceIn(0.0, 1.0)
+    // Pages left in the current chapter, in both layouts.
+    //
+    // Paged mode counts real pages (`currentPage`/`totalPages`). Continuous mode has no page
+    // turns, so a page is *estimated* from the chapter's word count at ~[WORDS_PER_PAGE] words a
+    // page — the same figure a paginated e-reader lands near — and the reader's scroll fraction
+    // picks the current one. It is an estimate, but it is the pages readout the reader asked for
+    // rather than a bare percentage, and it stays honest: it never shows more pages left than the
+    // chapter has, and it reads "Last page" as the chapter end approaches.
+    val pagesLeftLabel: String? = run {
+        val (cur, total) = if (windowed) {
+            val words = (currentChapter?.wordCount ?: 0L).toInt()
+            val est = ((words + WORDS_PER_PAGE - 1) / WORDS_PER_PAGE).coerceAtLeast(1)
+            (((chapterFrac * est).toInt() + 1).coerceIn(1, est)) to est
+        } else {
+            currentPage to totalPages
+        }
+        if (total <= 1) null else {
+            val left = (total - cur).coerceAtLeast(0)
+            when (left) {
+                0 -> "Last page"
+                1 -> "1 page left"
+                else -> "$left pages left"
+            }
+        }
+    }
     // The block carries no numerals, so the position the "3 / 12" used to print is
     // announced instead — without this a screen reader loses the reader's place.
     val pageBlockLabel = buildString {
@@ -596,6 +666,7 @@ fun ReaderScreen(
                 stateLabel = pageBlockLabel,
                 pageCountHint = totalPages,
                 chapterStops = chapterStops,
+                pagesLeftLabel = if (settings.showProgress) pagesLeftLabel else null,
                 onSeek = seekToBookFraction
             )
         }

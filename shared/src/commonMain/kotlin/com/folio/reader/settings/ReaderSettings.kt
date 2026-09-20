@@ -93,8 +93,13 @@ data class ReaderSettings(
      * best-effort signal and a one-frame seam is possible. The flag exists so that
      * risk is opt-in and a user who sees the seam can turn it off without losing
      * the morphs that are exact (manga, documents, every shelf↔detail pair).
+     *
+     * Default on: opening a book straight into a spinner-then-pop was the "jarring"
+     * report. The morph flies the tapped cover into the page and holds it until the
+     * chapter is up, which is the smooth open. The "Smooth book opening" toggle in
+     * Reading settings still turns it off for a device that shows the one-frame seam.
      */
-    val morphIntoReader: Boolean = false,
+    val morphIntoReader: Boolean = true,
     /**
      * Document reader (PDF and the generated reflowable formats) default page
      * mode — the compose layer's `DocumentReaderMode` name, kept as a string

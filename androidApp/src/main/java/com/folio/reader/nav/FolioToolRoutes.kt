@@ -46,6 +46,15 @@ fun QuotesRoute(
     onOpenMangaDetail: (String) -> Unit
 ) {
     val graph = navModel.graph
+    // ML_PLAN Phase 5 #3: "more like this" needs the semantic index, which is optional (the
+    // model is a download). The finder itself decides whether there is anything to search —
+    // the hub only needs to know whether the capability exists at all.
+    val relatedFinder = remember {
+        com.folio.reader.ui.quotes.QuoteRelatedFinder(
+            semanticSearch = graph.semanticSearchRepository,
+            bookRepository = graph.bookRepository,
+        )
+    }
     QuoteBrowserScreen(
         onBack = onBack,
         onQuoteClick = { item -> onOpenReader(item.book.id) },
@@ -62,6 +71,7 @@ fun QuotesRoute(
                 removeTagFromHighlight = { hl, tag -> graph.tagRepository.removeTagFromHighlight(hl, tag) },
                 getAllBooks = { graph.bookRepository.getAllBooks() },
                 getAllTags = { graph.tagRepository.getAllTags().first() },
+                findRelated = { text, limit -> relatedFinder.related(text, limit) },
                 observeAllMangaNotes = { graph.mangaNoteRepository.observeAllNotes() },
                 getManga = { graph.mangaRepository.get(it) },
                 getMangaChapters = { graph.mangaChapterRepository.getChapters(it) }

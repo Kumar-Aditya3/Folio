@@ -488,5 +488,113 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
         ),
         progress = 0xFFFF2E63.toInt(), divider = 0xFFE3E8CC.toInt(),
         isDark = false
+    ),
+    // ── CLAY / COCOA (2026-09 editorial pack) ───────────────────
+    "clay" to Theme(
+        id = "clay", name = "Clay",
+        background = 0xFFF4ECDC.toInt(), surface = 0xFFEAD7C2.toInt(),
+        primaryText = 0xFF33261A.toInt(), secondaryText = 0xFF6A5636.toInt(),
+        headingText = 0xFFA83E0A.toInt(), link = 0xFFA83E0A.toInt(),
+        selection = 0xFFE0CBA8.toInt(), bookmark = 0xFF7B3F8F.toInt(),
+        highlightColors = listOf(
+            0xFFD79A3D.toInt(), 0xFF4D8FC7.toInt(), 0xFF5DAE5D.toInt(), 0xFFD65F5F.toInt(),
+            0xFF9B7BC7.toInt(), 0xFFA83E0A.toInt(), 0xFF2E7D5B.toInt(), 0xFFD67AB5.toInt()
+        ),
+        progress = 0xFFA83E0A.toInt(), divider = 0xFFDCC8AC.toInt(),
+        isDark = false
+    ),
+    "cocoa" to Theme(
+        id = "cocoa", name = "Cocoa",
+        background = 0xFF1E110A.toInt(), surface = 0xFF2C1E0E.toInt(),
+        primaryText = 0xFFF0E2D2.toInt(), secondaryText = 0xFFD0B896.toInt(),
+        headingText = 0xFFFF9E4D.toInt(), link = 0xFFFF9E4D.toInt(),
+        selection = 0xFF4A3620.toInt(), bookmark = 0xFFD9A0E0.toInt(),
+        highlightColors = listOf(
+            0xFFFF9E4D.toInt(), 0xFFFF7A9C.toInt(), 0xFF6FE0A8.toInt(), 0xFFE8C070.toInt(),
+            0xFFD9A0E0.toInt(), 0xFF7FB0E8.toInt(), 0xFFF0B060.toInt(), 0xFF9CE0C0.toInt()
+        ),
+        progress = 0xFFFF9E4D.toInt(), divider = 0xFF3C2E1A.toInt(),
+        isDark = true
+    ),
+    // ── LAGOON / ABYSS (2026-09 tidewater pack) ─────────────────
+    "lagoon" to Theme(
+        id = "lagoon", name = "Lagoon",
+        background = 0xFFECFBF7.toInt(), surface = 0xFFD6F0F2.toInt(),
+        primaryText = 0xFF082A26.toInt(), secondaryText = 0xFF3D6560.toInt(),
+        headingText = 0xFF00695C.toInt(), link = 0xFF00687F.toInt(),
+        selection = 0xFFA6EAE0.toInt(), bookmark = 0xFFB0445F.toInt(),
+        highlightColors = listOf(
+            0xFF00C2A8.toInt(), 0xFF00A9DB.toInt(), 0xFFFFC400.toInt(), 0xFFFF6B6B.toInt(),
+            0xFF9B6BFF.toInt(), 0xFF3DDC97.toInt(), 0xFF008BA8.toInt(), 0xFFFF6FD8.toInt()
+        ),
+        progress = 0xFF00695C.toInt(), divider = 0xFFC4E4DE.toInt(),
+        isDark = false
+    ),
+    "abyss" to Theme(
+        id = "abyss", name = "Abyss",
+        background = 0xFF061E18.toInt(), surface = 0xFF07242C.toInt(),
+        primaryText = 0xFFC8F5F0.toInt(), secondaryText = 0xFF8FC4C2.toInt(),
+        headingText = 0xFF3DD6C4.toInt(), link = 0xFF4DC3FF.toInt(),
+        selection = 0xFF0E3A42.toInt(), bookmark = 0xFFFF8A9E.toInt(),
+        highlightColors = listOf(
+            0xFF3DE0C8.toInt(), 0xFF4DC3FF.toInt(), 0xFFFFC24D.toInt(), 0xFFFF7A9C.toInt(),
+            0xFFB39DFF.toInt(), 0xFF00FFC2.toInt(), 0xFF7FB0E8.toInt(), 0xFFFF6FD8.toInt()
+        ),
+        progress = 0xFF3DE0C8.toInt(), divider = 0xFF0E3038.toInt(),
+        isDark = true
+    ),
+    // ── ROUGE / GARNET (2026-09 crimson editorial pack) ─────────
+    "rouge" to Theme(
+        id = "rouge", name = "Rouge",
+        background = 0xFFFFF4F1.toInt(), surface = 0xFFFCE4E8.toInt(),
+        primaryText = 0xFF3D0A0A.toInt(), secondaryText = 0xFF6E4A46.toInt(),
+        headingText = 0xFFC1121F.toInt(), link = 0xFF9A3324.toInt(),
+        selection = 0xFFFFD0CC.toInt(), bookmark = 0xFFB0125C.toInt(),
+        highlightColors = listOf(
+            0xFFD65F5F.toInt(), 0xFF4D8FC7.toInt(), 0xFF5DAE5D.toInt(), 0xFFD4A843.toInt(),
+            0xFF9B7BC7.toInt(), 0xFF009C9C.toInt(), 0xFFD67AB5.toInt(), 0xFFC1121F.toInt()
+        ),
+        progress = 0xFFC1121F.toInt(), divider = 0xFFEDCFCB.toInt(),
+        isDark = false
+    ),
+    "garnet" to Theme(
+        id = "garnet", name = "Garnet",
+        background = 0xFF1E0810.toInt(), surface = 0xFF2C0E14.toInt(),
+        primaryText = 0xFFF7DCE0.toInt(), secondaryText = 0xFFD4A0A8.toInt(),
+        headingText = 0xFFFF7A8C.toInt(), link = 0xFFE0A38C.toInt(),
+        selection = 0xFF4A1620.toInt(), bookmark = 0xFFFFB3C0.toInt(),
+        highlightColors = listOf(
+            0xFFFF7A8C.toInt(), 0xFFD4A94D.toInt(), 0xFF4DD0C0.toInt(), 0xFFB39DFF.toInt(),
+            0xFFE0A38C.toInt(), 0xFFFFB3C0.toInt(), 0xFF7FB0E8.toInt(), 0xFFF0B060.toInt()
+        ),
+        progress = 0xFFFF7A8C.toInt(), divider = 0xFF44161E.toInt(),
+        isDark = true
+    ),
+    // ── CITRINE / ONYX (2026-09 golden pack) ────────────────────
+    "citrine" to Theme(
+        id = "citrine", name = "Citrine",
+        background = 0xFFFFFBE8.toInt(), surface = 0xFFEEF0C0.toInt(),
+        primaryText = 0xFF322A08.toInt(), secondaryText = 0xFF6A5E30.toInt(),
+        headingText = 0xFF8A6D00.toInt(), link = 0xFF7B3F8F.toInt(),
+        selection = 0xFFE8E49C.toInt(), bookmark = 0xFF9A3A8F.toInt(),
+        highlightColors = listOf(
+            0xFFD4A843.toInt(), 0xFF4D8FC7.toInt(), 0xFF5DAE5D.toInt(), 0xFFD65F5F.toInt(),
+            0xFF9B7BC7.toInt(), 0xFF009C9C.toInt(), 0xFFC79A00.toInt(), 0xFFD67AB5.toInt()
+        ),
+        progress = 0xFF8A6D00.toInt(), divider = 0xFFE0DAA8.toInt(),
+        isDark = false
+    ),
+    "onyx" to Theme(
+        id = "onyx", name = "Onyx",
+        background = 0xFF16130C.toInt(), surface = 0xFF1C1E10.toInt(),
+        primaryText = 0xFFF2E8CC.toInt(), secondaryText = 0xFFC0B48C.toInt(),
+        headingText = 0xFFF0C860.toInt(), link = 0xFF9CC7E0.toInt(),
+        selection = 0xFF3A3418.toInt(), bookmark = 0xFFE0A0D8.toInt(),
+        highlightColors = listOf(
+            0xFFF0C860.toInt(), 0xFF7FB0FF.toInt(), 0xFF6FE0C0.toInt(), 0xFFE0A0D8.toInt(),
+            0xFFFFB3A0.toInt(), 0xFFD8C89A.toInt(), 0xFF9CC7E0.toInt(), 0xFFC0E070.toInt()
+        ),
+        progress = 0xFFF0C860.toInt(), divider = 0xFF33301E.toInt(),
+        isDark = true
     )
 )

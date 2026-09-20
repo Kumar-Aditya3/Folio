@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Colorize
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Icon
@@ -181,8 +183,15 @@ fun SettingsHubScreen(
                         title = "Backup & data",
                         subtitle = "Backups, annotation export, storage",
                         accent = colors.accentStreak,
-                        last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.ADVANCED) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Storage,
+                        title = "Storage",
+                        subtitle = "What's using space, by category",
+                        accent = colors.accentStreak,
+                        last = true,
+                        onClick = { onOpenSettings(FolioSettingsCategory.STORAGE) }
                     )
                 }
             }
@@ -211,8 +220,8 @@ fun SettingsHubScreen(
                     )
                     HubRow(
                         icon = Icons.Filled.Equalizer,
-                        title = "Statistics exclusions",
-                        subtitle = "Keep titles out of Stats and Home",
+                title = "Exclusions",
+                subtitle = "Keep titles out of Stats and Home",
                         accent = colors.accentAnnotation,
                         onClick = { onOpenSettings(FolioSettingsCategory.STATS) }
                     )
@@ -221,8 +230,15 @@ fun SettingsHubScreen(
                         title = "Library scanning",
                         subtitle = "Import new ebooks and documents automatically",
                         accent = colors.accentAnnotation,
-                        last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.LIBRARY_SCAN) }
+                    )
+                    HubRow(
+                        icon = Icons.AutoMirrored.Filled.ManageSearch,
+                        title = "Semantic search",
+                        subtitle = "Find passages by meaning, entirely on this device",
+                        accent = colors.accentAnnotation,
+                        last = true,
+                        onClick = { onOpenSettings(FolioSettingsCategory.SEMANTIC_SEARCH) }
                     )
                 }
             }

@@ -77,6 +77,25 @@ fun BookSearchResultsList(
     onOpenHit: (BookHit) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    /**
+     * The semantic path answered and nothing cleared the relevance floor.
+     *
+     * Suppresses this list's own "No matches for …" line, which would be the wrong sentence:
+     * the reader chose a meaning-based mode, the library may well contain the words, and the
+     * search screen already shows the explanation above the list. Two messages saying
+     * different things about one empty result is worse than one, and the more specific one
+     * wins.
+     */
+    noStrongMatch: Boolean = false,
+    /**
+     * A search is in flight (debouncing, embedding, scanning, or fanning out over books).
+     *
+     * Suppresses the "No matches for …" line while it runs. Results are empty *before* a search
+     * completes just as they are when it genuinely found nothing, and showing the empty sentence
+     * during the in-flight window flashed "No matches" under the spinner on every keystroke. The
+     * empty state is only honest once the work has finished and the results are still empty.
+     */
+    searching: Boolean = false,
 ) {
     LazyColumn(
         state = listState,
@@ -86,63 +105,90 @@ fun BookSearchResultsList(
             bottom = LocalFolioBarInset.current,
         ),
     ) {
-        if (titleMatches.isNotEmpty()) {
-            item(key = "head:titles") {
-                Text(
-                    "Titles & authors",
-                    style = FolioTheme.typography.titleSmall,
-                    color = FolioTheme.colors.secondary,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-            items(titleMatches, key = { "title:${it.id}" }) { book ->
-                ListItem(
-                    headlineContent = { Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(book.displayAuthor, maxLines = 1) },
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenTitle(book) }
-                )
+        // Sections follow the scope chips' own order — Titles, Content, Highlights, Notes,
+        // Bookmarks — so the list reads top-to-bottom in the same sequence as the row of
+        // chips above it, and the first section under the field is the scope the reader is
+        // actually in.
+        //
+        // The order is *derived* from `SearchScope.entries` rather than hardcoded as
+        // Titles → Content → annotations. The hardcoded version had two problems: an
+        // annotation scope could never sort before the content section no matter which chip
+        // was selected, and adding a scope to the enum would silently leave it out here. A
+        // lookup keyed on the enum cannot drift from the chips.
+        //
+        // Within the annotation section the entries are ordered by the scope the hit came
+        // from, for the same reason: a list mixing highlights and notes should group in the
+        // chips' order rather than in whatever order the per-book fan-out happened to append.
+        SearchScope.entries.forEach { section ->
+            when (section) {
+                SearchScope.TITLES -> if (titleMatches.isNotEmpty()) {
+                    item(key = "head:titles") {
+                        Text(
+                            "Titles & authors",
+                            style = FolioTheme.typography.titleSmall,
+                            color = FolioTheme.colors.secondary,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                    items(titleMatches, key = { "title:${it.id}" }) { book ->
+                        ListItem(
+                            headlineContent = { Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = { Text(book.displayAuthor, maxLines = 1) },
+                            modifier = Modifier.fillMaxWidth().clickable { onOpenTitle(book) }
+                        )
+                    }
+                }
+
+                SearchScope.CONTENT -> if (results.isNotEmpty()) {
+                    item(key = "head:content") {
+                        Text(
+                            "Inside books",
+                            style = FolioTheme.typography.titleSmall,
+                            color = FolioTheme.colors.secondary,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                    items(results, key = { "hit:${it.book.id}:${it.spineIndex}:${it.context.hashCode()}" }) { hit ->
+                        ListItem(
+                            headlineContent = { Text("${hit.book.title} - ${hit.chapterTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = { SnippetText(hit.context, maxLines = 2) },
+                            modifier = Modifier.fillMaxWidth().clickable { onOpenHit(hit) }
+                        )
+                    }
+                }
+
+                else -> {
+                    // Highlights / Notes / Bookmarks — the annotation scopes, each its own
+                    // section in chip order.
+                    val sectionHits = annotationResults.filter { it.scope == section }
+                    if (sectionHits.isNotEmpty()) {
+                        item(key = "head:${section.name}") {
+                            Text(
+                                "${section.label} matches",
+                                style = FolioTheme.typography.titleSmall,
+                                color = FolioTheme.colors.secondary,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                        items(
+                            sectionHits,
+                            key = { "${it.scope}:${it.book.id}:${it.title.hashCode()}:${it.snippet.hashCode()}" }
+                        ) { hit ->
+                            ListItem(
+                                headlineContent = { Text("${hit.book.title} · ${hit.title}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(hit.snippet, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenHit(BookHit(hit.book, hit.spineIndex ?: -1, hit.scope.label, hit.snippet)) }
+                            )
+                        }
+                    }
+                }
             }
         }
-        if (results.isNotEmpty()) {
-            item(key = "head:content") {
-                Text(
-                    "Inside books",
-                    style = FolioTheme.typography.titleSmall,
-                    color = FolioTheme.colors.secondary,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-            items(results, key = { "hit:${it.book.id}:${it.spineIndex}:${it.context.hashCode()}" }) { hit ->
-                ListItem(
-                    headlineContent = { Text("${hit.book.title} - ${hit.chapterTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { SnippetText(hit.context, maxLines = 2) },
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenHit(hit) }
-                )
-            }
-        }
-        if (annotationResults.isNotEmpty()) {
-            item(key = "head:annotations") {
-                Text(
-                    "${scope.label} matches",
-                    style = FolioTheme.typography.titleSmall,
-                    color = FolioTheme.colors.secondary,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-            items(
-                annotationResults,
-                key = { "${it.scope}:${it.book.id}:${it.title.hashCode()}:${it.snippet.hashCode()}" }
-            ) { hit ->
-                ListItem(
-                    headlineContent = { Text("${hit.book.title} · ${hit.title}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(hit.snippet, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenHit(BookHit(hit.book, hit.spineIndex ?: -1, hit.scope.label, hit.snippet)) }
-                )
-            }
-        }
-        if (query.isNotBlank() && titleMatches.isEmpty() && results.isEmpty() && annotationResults.isEmpty()) {
+        if (query.isNotBlank() && !noStrongMatch && !searching &&
+            titleMatches.isEmpty() && results.isEmpty() && annotationResults.isEmpty()
+        ) {
             item(key = "head:empty") {
                 Text(
                     "No matches for \"$query\" in ${scope.label}.",

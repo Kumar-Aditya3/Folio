@@ -300,16 +300,21 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     val sourceBrowseVmCache = mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
     val searchUiState = SearchUiState()
     /**
-     * The library rail's books search: query, scope and results hoisted here so
+     * The library rail's books search: query, scope, mode and results hoisted here so
      * they survive navigation, running the same shared execution as the
      * full-screen search the reader opens.
+     *
+     * Takes the semantic repository too, so the rail offers the same Exact/Meaning/Best
+     * choice the reader's search screen does — search is one capability and it should not
+     * depend on which field the reader happened to type into. See `BookSearchController`.
      */
     val bookSearchController by lazy {
         com.folio.reader.ui.search.BookSearchController(
             searchRepository = graph.searchRepository,
             highlightRepository = graph.highlightRepository,
             noteRepository = graph.noteRepository,
-            bookmarkRepository = graph.bookmarkRepository
+            bookmarkRepository = graph.bookmarkRepository,
+            semanticSearchRepository = graph.semanticSearchRepository
         )
     }
     val mangaBackupManager by lazy {
@@ -383,7 +388,7 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     @Composable
     override fun libraryContent(
         onOpenReader: (String) -> Unit,
-        onOpenReaderAt: (String, Int?) -> Unit,
+        onOpenReaderAt: (String, Int?, Float?) -> Unit,
         onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,
@@ -424,10 +429,11 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     override fun readerContent(
         bookId: String,
         targetSpineIndex: Int?,
+        targetFraction: Float?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit
-    ) = ReaderRoute(this, bookId, targetSpineIndex, onBack, onOpenSearch, onOpenSettings)
+    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, onBack, onOpenSearch, onOpenSettings)
 
     @Composable
     override fun documentReaderContent(
@@ -444,7 +450,7 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     ) = BookDetailRoute(this, bookId, onBack, onStartReading, onOpenTags)
 
     @Composable
-    override fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?) -> Unit) =
+    override fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) =
         SearchRoute(this, onBack, onOpenReader)
 
     @Composable

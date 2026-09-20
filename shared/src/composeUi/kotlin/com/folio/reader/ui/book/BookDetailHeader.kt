@@ -73,6 +73,12 @@ internal fun BookHeaderSection(
     onSeriesClick: (Series) -> Unit,
     onCollectionClick: (Collection) -> Unit,
     onAddTags: () -> Unit,
+    /**
+     * Phase 5 #2's entry point. Null when the build has no auto-tagger wired, in which case
+     * the chip is not rendered at all — an affordance that cannot do anything is worse than
+     * an absent one.
+     */
+    onSuggestTags: (() -> Unit)? = null,
     onCoverClick: () -> Unit = {},
     /**
      * This book's reading sessions, used to project a finish from the reader's own
@@ -183,7 +189,8 @@ internal fun BookHeaderSection(
                 onTagClick = onTagClick,
                 onSeriesClick = onSeriesClick,
                 onCollectionClick = onCollectionClick,
-                onAddTags = onAddTags
+                onAddTags = onAddTags,
+                onSuggestTags = onSuggestTags
             )
         }
 
@@ -249,7 +256,8 @@ private fun BookChipsRow(
     onTagClick: (Tag) -> Unit,
     onSeriesClick: (Series) -> Unit,
     onCollectionClick: (Collection) -> Unit,
-    onAddTags: () -> Unit
+    onAddTags: () -> Unit,
+    onSuggestTags: (() -> Unit)? = null,
 ) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -297,6 +305,21 @@ private fun BookChipsRow(
                 labelColor = FolioTheme.colors.onSurfaceVariant
             )
         )
+
+        // "Suggest" sits next to "+ Tag" because it is the same errand — the reader wants
+        // this book categorised and is deciding whether to do it themselves or look at a
+        // proposal first. It is only drawn when a tagger is actually wired, and its result
+        // opens a panel rather than writing anything: a suggestion is not an assignment.
+        onSuggestTags?.let { suggest ->
+            SuggestionChip(
+                onClick = suggest,
+                label = { Text("Suggest") },
+                colors = SuggestionChipDefaults.suggestionChipColors(
+                    containerColor = FolioTheme.colors.surface,
+                    labelColor = FolioTheme.colors.onSurfaceVariant
+                )
+            )
+        }
     }
 }
 

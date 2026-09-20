@@ -213,7 +213,12 @@ fun HomeScreen(
             // opens its detail screen instead of failing silently.
             val openItem: (ReadingNowItem) -> Unit = { item ->
                 when (item.kind) {
-                    HomeItemKind.BOOK -> onOpenBook(item.id)
+                    // A tapped book cover opens its detail page, never the reader
+                    // directly — the same rule the library shelf follows, so a cover
+                    // means the same thing everywhere it appears. Reading starts from
+                    // detail (tap the cover there). Opening straight into the reader
+                    // from Home was the redundant "start reading on a thumbnail".
+                    HomeItemKind.BOOK -> onOpenBookDetail(item.id)
                     HomeItemKind.MANGA -> {
                         val chapter = item.chapterId
                         if (chapter != null) onOpenMangaReader(item.id, chapter)

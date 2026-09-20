@@ -62,6 +62,13 @@ interface FolioFileSystem {
     fun getThumbnailPath(bookId: String): String
     fun getFontsDir(): File
     fun getFontPath(fontId: String): String
+
+    /**
+     * Where downloaded ML models live. Never bundled in the APK: the smallest embedding
+     * model is 22 MB against a 28 MB APK, so they are fetched on demand
+     * (`ModelDownloader`) and verified by digest before use.
+     */
+    fun getModelsDir(): File
     suspend fun copyToLibrary(sourceFile: File, bookId: String): String
     suspend fun copyToLibrary(sourceBytes: ByteArray, bookId: String): String
     suspend fun deleteBookFiles(bookId: String)
@@ -96,6 +103,41 @@ interface FolioFileSystem {
     fun dirSize(dir: File): Long =
         dir.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
 
+    /**
+     * On-disk usage grouped by what it is, for the Storage screen. Computed from the public
+     * directory accessors so it works on both platforms with no per-actual code.
+     *
+     * Two honest caveats baked into the labels:
+     * - The semantic **vector index has no file of its own** — the vectors are BLOB rows inside
+     *   `folio.db` — so it cannot be split from the database by a filesystem walk; the two share
+     *   one slice ("Database & index").
+     * - Manga downloads may be relocated to a user-picked location outside app storage, in which
+     *   case this under-counts them (it only sees [mangaDownloadsDir]).
+     *
+     * Zero-byte categories are dropped so the chart shows only what is actually present. Walks the
+     * disk, so callers must invoke it off the main thread.
+     */
+    fun storageBreakdown(): List<StorageCategory> {
+        val databaseDir = File(getDatabasePath()).parentFile
+        val thumbnailsDir = File(getThumbnailPath("_")).parentFile
+        return listOf(
+            StorageCategory("Books", dirSize(libraryBooksDir)),
+            StorageCategory("Documents", dirSize(libraryDocumentsDir)),
+            // Manga split three ways because they answer different questions: downloads are
+            // re-downloadable and safe to clear, local series are the reader's own imported files
+            // and are not, and covers are a rebuildable cache.
+            StorageCategory("Manga downloads", dirSize(mangaDownloadsDir)),
+            StorageCategory("Manga (local)", dirSize(mangaLocalDir)),
+            StorageCategory("Manga covers", dirSize(mangaCoversDir)),
+            StorageCategory("Search models", dirSize(getModelsDir())),
+            StorageCategory("Fonts", dirSize(getFontsDir())),
+            StorageCategory("Thumbnails", thumbnailsDir?.let { dirSize(it) } ?: 0L),
+            // Includes the semantic vector index: the vectors are BLOB rows inside folio.db, so a
+            // filesystem walk cannot separate them from the rest of the database.
+            StorageCategory("Database & index", databaseDir?.let { dirSize(it) } ?: 0L),
+        ).filter { it.bytes > 0L }
+    }
+
     /** "name.ext" → "name (1).ext" → "name (2).ext"… until [exists] is false. */
     fun uniqueFileName(fileName: String, exists: (String) -> Boolean): String {
         if (!exists(fileName)) return fileName
@@ -112,3 +154,6 @@ interface FolioPlatform {
     val fileSystem: FolioFileSystem
     val hasher: FileHasher
 }
+
+/** One slice of the app's on-disk usage: a human label and the bytes it occupies. */
+data class StorageCategory(val label: String, val bytes: Long)

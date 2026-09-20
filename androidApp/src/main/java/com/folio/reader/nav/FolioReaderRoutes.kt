@@ -32,6 +32,7 @@ fun ReaderRoute(
     navModel: FolioNavModelImpl,
     bookId: String,
     targetSpineIndex: Int?,
+    targetFraction: Float? = null,
     onBack: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit
@@ -50,6 +51,7 @@ fun ReaderRoute(
         graph = graph,
         book = b,
         targetSpineIndex = targetSpineIndex,
+        targetFraction = targetFraction,
         initialSettings = navModel.globalSettings,
         onBackPress = onBack,
         onSearchClick = onOpenSearch,
@@ -77,6 +79,7 @@ private fun ReaderRouteContent(
     graph: AppGraph,
     book: Book,
     targetSpineIndex: Int? = null,
+    targetFraction: Float? = null,
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -233,7 +236,8 @@ private fun ReaderRouteContent(
         // the caller from the *global* settings row rather than from `settings`,
         // which is this book's effective copy: it is a device-confidence flag, not a
         // reading preference, so it must not vary per book.
-        morphBookId = book.id.takeIf { morphIntoReader }
+        morphBookId = book.id.takeIf { morphIntoReader },
+        initialSeekFraction = targetFraction
     )
 }
 
@@ -286,7 +290,7 @@ fun DocumentReaderRoute(
 }
 
 @Composable
-fun SearchRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (String, Int?) -> Unit) {
+fun SearchRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) {
     val graph = navModel.graph
     val books by remember { graph.bookRepository.getAllBooks() }.collectAsState(initial = emptyList())
     SearchScreen(
@@ -298,9 +302,11 @@ fun SearchRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (
         quoteRepository = graph.quoteRepository,
         onBackPress = onBack,
         uiState = navModel.searchUiState,
+        semanticSearchRepository = graph.semanticSearchRepository,
         onResultClick = { hit ->
             val target = hit.spineIndex.takeIf { it >= 0 }
-            books.firstOrNull { it.id == hit.book.id }?.let { onOpenReader(it.id, target) }
+            val frac = hit.startFraction.takeIf { it >= 0f }
+            books.firstOrNull { it.id == hit.book.id }?.let { onOpenReader(it.id, target, frac) }
         }
     )
 }
@@ -329,7 +335,8 @@ fun BookDetailRoute(
                         noteRepository = graph.noteRepository,
                         seriesRepository = graph.seriesRepository,
                         collectionRepository = graph.collectionRepository,
-                        tagRepository = graph.tagRepository
+                        tagRepository = graph.tagRepository,
+                        autoTagger = graph.autoTaggerService,
                     )
                 }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
                 onBackPress = onBack,

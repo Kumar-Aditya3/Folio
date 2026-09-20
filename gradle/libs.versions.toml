@@ -31,6 +31,26 @@ skiko = "0.8.18"
 # exactly (verified in its .module). 1.3+ targets Compose 1.8; do not bump past the
 # pinned Compose version to accommodate it (FOLIO_DEPENDENCY_PLAN §14.1).
 haze = "1.2.2"
+# ONNX Runtime for on-device embedding inference. 1.20.0 is the last line verified
+# against this project's minSdk 24 / compileSdk 34 combination, and its Java API already
+# exposes addXnnpack/addNnapi, which Phase 0a needs to compare execution providers.
+onnxruntime = "1.20.0"
+# Desktop-only, test-only: the reference Rust tokenizers, used by TokenizerParityTest to
+# prove the hand-rolled WordPiece implementation has not drifted. It ships no Android
+# natives (ai.djl.android:tokenizer-native is stranded at 0.33.0), which is exactly why
+# the shipped tokenizer is hand-rolled instead.
+djlTokenizers = "0.38.0"
+# ML Kit — Phase 6 (OCR + translation). Android-only, no desktop equivalent, which is why
+# every entry point is `expect`/`actual` with a desktop no-op. Text recognition is split into
+# per-script modules on purpose: each one carries its own model, so bundling all five would
+# add tens of MB to an APK for scripts a given reader never opens. Latin is the default;
+# the others are opt-in downloads.
+mlkitTextRecognition = "16.0.1"
+mlkitTextRecognitionChinese = "16.0.1"
+mlkitTextRecognitionDevanagari = "16.0.1"
+mlkitTextRecognitionJapanese = "16.0.1"
+mlkitTextRecognitionKorean = "16.0.1"
+mlkitTranslate = "17.0.3"
 
 [libraries]
 # Kotlin
@@ -52,6 +72,20 @@ skiko-awt-runtime-windows-x64 = { module = "org.jetbrains.skiko:skiko-awt-runtim
 
 # §16 liquid glass — the blur seam (FOLIO_DEPENDENCY_PLAN §14.3: one import, one owner)
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
+
+# On-device ML: embedding inference (desktop + Android artifacts are NOT interchangeable)
+onnxruntime = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+djl-tokenizers = { module = "ai.djl.huggingface:tokenizers", version.ref = "djlTokenizers" }
+
+# On-device ML: OCR + translation (Phase 6). Android-only — see the desktop decision in
+# shared/src/desktopMain/.../ml/OnDeviceTextTools.desktop.kt.
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
+mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextRecognitionChinese" }
+mlkit-text-recognition-devanagari = { module = "com.google.mlkit:text-recognition-devanagari", version.ref = "mlkitTextRecognitionDevanagari" }
+mlkit-text-recognition-japanese = { module = "com.google.mlkit:text-recognition-japanese", version.ref = "mlkitTextRecognitionJapanese" }
+mlkit-text-recognition-korean = { module = "com.google.mlkit:text-recognition-korean", version.ref = "mlkitTextRecognitionKorean" }
+mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkitTranslate" }
 
 # Mihon manga backend (extension runtime + source engine)
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

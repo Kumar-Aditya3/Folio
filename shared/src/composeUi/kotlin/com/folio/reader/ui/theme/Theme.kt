@@ -681,6 +681,7 @@ private val BubblegumFolioColors = LightFolioColors.copy(
     outlineVariant = Color(0xFFEBC7E4),
     inverseSurface = Color(0xFF4A1033),
     inverseOnSurface = Color(0xFFFFF7FA),
+    inversePrimary = Color(0xFFFF9EC4),
     statusBar = Color(0xFF2E0A20),
     accentProgress = Color(0xFF00695C),
     accentStreak = Color(0xFF9B4807),
@@ -716,6 +717,7 @@ private val SherbetFolioColors = LightFolioColors.copy(
     outlineVariant = Color(0xFFEBCFCA),
     inverseSurface = Color(0xFF4A2C1A),
     inverseOnSurface = Color(0xFFFFFBF6),
+    inversePrimary = Color(0xFFFFB68F),
     statusBar = Color(0xFF341C0C),
     accentProgress = Color(0xFF007A5E),
     accentStreak = Color(0xFFB3300C),
@@ -949,6 +951,292 @@ private val RainbowCandyFolioColors = LightFolioColors.copy(
     accentAnnotation = Color(0xFF6A1B9A)
 )
 
+// ── CLAY / COCOA ────────────────────────────────────────────────────────────
+// A new editorial pack (2026-09): a warm-neutral daylight face (Clay) paired with
+// a deep-roast night face (Cocoa). Chromatic — background and surface separate by
+// hue as well as lightness (§15 Rule 22) — so it is not on the achromatic
+// allowlist. Terracotta/ochre/sage/plum accents give the four semantic roles real
+// separation while staying inside the earthenware mood.
+
+val ClayFolioColors = LightFolioColors.copy(
+    primary = Color(0xFFB4460F),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFD9C2),
+    onPrimaryContainer = Color(0xFF3A1400),
+    secondary = Color(0xFF6E5A44),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFF0E2CE),
+    onSecondaryContainer = Color(0xFF2A1E0E),
+    tertiary = Color(0xFF4C6B3F),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFD4E8C4),
+    onTertiaryContainer = Color(0xFF14290A),
+    background = Color(0xFFF4ECDC),
+    onBackground = Color(0xFF33261A),
+    surface = Color(0xFFEAD7C2),
+    onSurface = Color(0xFF33261A),
+    surfaceVariant = Color(0xFFE0D0B8),
+    onSurfaceVariant = Color(0xFF6A5636),
+    surfaceContainerHighest = Color(0xFFD6C4A8),
+    outline = Color(0xFFA98C68),
+    outlineVariant = Color(0xFFD6C4A8),
+    inverseSurface = Color(0xFF33261A),
+    inverseOnSurface = Color(0xFFF4ECDC),
+    inversePrimary = Color(0xFFFFB68F),
+    statusBar = Color(0xFF241A10),
+    accentProgress = Color(0xFF8F3408),
+    accentStreak = Color(0xFF6E5000),
+    accentDiscovery = Color(0xFF1E5E40),
+    accentAnnotation = Color(0xFF7B3F8F),
+)
+
+val CocoaFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFFF9E5C),
+    onPrimary = Color(0xFF3A1800),
+    primaryContainer = Color(0xFF7A3A10),
+    onPrimaryContainer = Color(0xFFFFDCC2),
+    secondary = Color(0xFFD8B48C),
+    onSecondary = Color(0xFF33220E),
+    secondaryContainer = Color(0xFF4A3620),
+    onSecondaryContainer = Color(0xFFF0E0CC),
+    tertiary = Color(0xFF9CCB7C),
+    onTertiary = Color(0xFF16290A),
+    tertiaryContainer = Color(0xFF2E4420),
+    onTertiaryContainer = Color(0xFFD6E8C4),
+    background = Color(0xFF1E110A),
+    onBackground = Color(0xFFF0E2D2),
+    surface = Color(0xFF2C1E0E),
+    onSurface = Color(0xFFF0E2D2),
+    surfaceVariant = Color(0xFF3C2E1A),
+    onSurfaceVariant = Color(0xFFD0B896),
+    surfaceContainerHighest = Color(0xFF4E3C22),
+    outline = Color(0xFF7A6242),
+    outlineVariant = Color(0xFF3C2E1A),
+    inverseSurface = Color(0xFFF0E2D2),
+    inverseOnSurface = Color(0xFF2A1A0C),
+    inversePrimary = Color(0xFFB25A18),
+    statusBar = Color(0xFF120A04),
+    accentProgress = Color(0xFFFF9E4D),
+    accentStreak = Color(0xFFFF7A9C),
+    accentDiscovery = Color(0xFF6FE0A8),
+    accentAnnotation = Color(0xFFD9A0E0),
+)
+
+// ── LAGOON / ABYSS ────────────────────────────────────────────────────────
+// A tidewater pack (2026-09): a pale-aqua daylight face (Lagoon) paired with a
+// deep bioluminescent-sea night face (Abyss). Chromatic on both sides — the
+// background rides a shallower green-teal while the surface leans cyan, so the
+// planes separate by hue as well as lightness (§15 Rule 22). Teal ink, coral
+// counter-accent: the reef against the water.
+
+val LagoonFolioColors = LightFolioColors.copy(
+    primary = Color(0xFF00695C),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFA6F0E8),
+    onPrimaryContainer = Color(0xFF00332C),
+    secondary = Color(0xFF00687F),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFB4E8F5),
+    onSecondaryContainer = Color(0xFF00323F),
+    tertiary = Color(0xFFB0445F),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFD4DE),
+    onTertiaryContainer = Color(0xFF3E0014),
+    background = Color(0xFFECFBF7),
+    onBackground = Color(0xFF082A26),
+    surface = Color(0xFFD6F0F2),
+    onSurface = Color(0xFF082A26),
+    surfaceVariant = Color(0xFFCDE8E4),
+    onSurfaceVariant = Color(0xFF3D6560),
+    surfaceContainerHighest = Color(0xFFC0DED9),
+    outline = Color(0xFF5CA69C),
+    outlineVariant = Color(0xFFC0DED9),
+    inverseSurface = Color(0xFF082A26),
+    inverseOnSurface = Color(0xFFECFBF7),
+    inversePrimary = Color(0xFF6BE0CE),
+    statusBar = Color(0xFF06201C),
+    accentProgress = Color(0xFF00594E),
+    accentStreak = Color(0xFFB3300C),
+    accentDiscovery = Color(0xFF1565C0),
+    accentAnnotation = Color(0xFF7B3F8F)
+)
+
+val AbyssFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFF3DD6C4),
+    onPrimary = Color(0xFF00332C),
+    primaryContainer = Color(0xFF005248),
+    onPrimaryContainer = Color(0xFFA8FFF2),
+    secondary = Color(0xFF4DC3FF),
+    onSecondary = Color(0xFF00293A),
+    secondaryContainer = Color(0xFF00506E),
+    onSecondaryContainer = Color(0xFFC4EEFF),
+    tertiary = Color(0xFFFF8A9E),
+    onTertiary = Color(0xFF3D0014),
+    tertiaryContainer = Color(0xFF7A2036),
+    onTertiaryContainer = Color(0xFFFFD9DF),
+    background = Color(0xFF061E18),
+    onBackground = Color(0xFFC8F5F0),
+    surface = Color(0xFF07242C),
+    onSurface = Color(0xFFC8F5F0),
+    surfaceVariant = Color(0xFF0E3038),
+    onSurfaceVariant = Color(0xFF8FC4C2),
+    surfaceContainerHighest = Color(0xFF163E44),
+    outline = Color(0xFF2E6E74),
+    outlineVariant = Color(0xFF0E3038),
+    inverseSurface = Color(0xFFC8F5F0),
+    inverseOnSurface = Color(0xFF06201C),
+    inversePrimary = Color(0xFF00897B),
+    statusBar = Color(0xFF020E12),
+    accentProgress = Color(0xFF3DE0C8),
+    accentStreak = Color(0xFFFF7A9C),
+    accentDiscovery = Color(0xFFFFC24D),
+    accentAnnotation = Color(0xFFB39DFF)
+)
+
+// ── ROUGE / GARNET ──────────────────────────────────────────────────────────
+// A crimson editorial pack (2026-09): a warm paper-white daylight face (Rouge)
+// paired with a deep-wine night face (Garnet). Chromatic — the paper carries a
+// warm-red cast while the surface warms toward rose, and Garnet's true-wine
+// base warms one step to its surface, so both faces separate by hue as well as
+// lightness (§15 Rule 22). Teal/gold/indigo counter-accents keep the four
+// semantic roles apart against the single-hero red.
+
+val RougeFolioColors = LightFolioColors.copy(
+    primary = Color(0xFFC1121F),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFD6D2),
+    onPrimaryContainer = Color(0xFF48000A),
+    secondary = Color(0xFF9A3324),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFFD8CE),
+    onSecondaryContainer = Color(0xFF3D0A00),
+    tertiary = Color(0xFF8A6D00),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFE9A8),
+    onTertiaryContainer = Color(0xFF2A2000),
+    background = Color(0xFFFFF4F1),
+    onBackground = Color(0xFF3D0A0A),
+    surface = Color(0xFFFCE4E8),
+    onSurface = Color(0xFF3D0A0A),
+    surfaceVariant = Color(0xFFF2D6D2),
+    onSurfaceVariant = Color(0xFF6E4A46),
+    surfaceContainerHighest = Color(0xFFEBC7C2),
+    outline = Color(0xFFC08A84),
+    outlineVariant = Color(0xFFEBC7C2),
+    inverseSurface = Color(0xFF3D0A0A),
+    inverseOnSurface = Color(0xFFFFF4F1),
+    inversePrimary = Color(0xFFFF9A94),
+    statusBar = Color(0xFF2A0606),
+    accentProgress = Color(0xFF0F766E),
+    accentStreak = Color(0xFFB3261E),
+    accentDiscovery = Color(0xFF1D4ED8),
+    accentAnnotation = Color(0xFF7B3F8F)
+)
+
+val GarnetFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFFF7A8C),
+    onPrimary = Color(0xFF3D0011),
+    primaryContainer = Color(0xFF7A1528),
+    onPrimaryContainer = Color(0xFFFFD9DE),
+    secondary = Color(0xFFE0A38C),
+    onSecondary = Color(0xFF3D1A0A),
+    secondaryContainer = Color(0xFF5C3020),
+    onSecondaryContainer = Color(0xFFFFDCC8),
+    tertiary = Color(0xFFD4A94D),
+    onTertiary = Color(0xFF3A2A00),
+    tertiaryContainer = Color(0xFF5C4600),
+    onTertiaryContainer = Color(0xFFFFE9A8),
+    background = Color(0xFF1E0810),
+    onBackground = Color(0xFFF7DCE0),
+    surface = Color(0xFF2C0E14),
+    onSurface = Color(0xFFF7DCE0),
+    surfaceVariant = Color(0xFF44161E),
+    onSurfaceVariant = Color(0xFFD4A0A8),
+    surfaceContainerHighest = Color(0xFF5A2028),
+    outline = Color(0xFF8A4A54),
+    outlineVariant = Color(0xFF44161E),
+    inverseSurface = Color(0xFFF7DCE0),
+    inverseOnSurface = Color(0xFF2C0E14),
+    inversePrimary = Color(0xFFB03048),
+    statusBar = Color(0xFF120409),
+    accentProgress = Color(0xFF4DD0C0),
+    accentStreak = Color(0xFFFFB3C0),
+    accentDiscovery = Color(0xFFFFC24D),
+    accentAnnotation = Color(0xFFB39DFF)
+)
+
+// ── CITRINE / ONYX ──────────────────────────────────────────────────────────
+// A golden pack (2026-09): a lemon-cream daylight face (Citrine) paired with a
+// warm gold-on-charcoal night face (Onyx). Chromatic — Citrine's warm-cream
+// ground gives way to a paler chartreuse surface, and Onyx's warm near-black
+// tilts olive at the surface, so neither face is a single hue at two
+// lightnesses (§15 Rule 22). A violet counter-hero keeps the gold from reading
+// as one note.
+
+val CitrineFolioColors = LightFolioColors.copy(
+    primary = Color(0xFF8A6D00),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFE9A0),
+    onPrimaryContainer = Color(0xFF2A2000),
+    secondary = Color(0xFF6E6300),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFF0E8A8),
+    onSecondaryContainer = Color(0xFF201E00),
+    tertiary = Color(0xFF7B3F8F),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFEED4F5),
+    onTertiaryContainer = Color(0xFF2E0038),
+    background = Color(0xFFFFFBE8),
+    onBackground = Color(0xFF322A08),
+    surface = Color(0xFFEEF0C0),
+    onSurface = Color(0xFF322A08),
+    surfaceVariant = Color(0xFFECE6B8),
+    onSurfaceVariant = Color(0xFF6A5E30),
+    surfaceContainerHighest = Color(0xFFE0DAA8),
+    outline = Color(0xFFB0A448),
+    outlineVariant = Color(0xFFE0DAA8),
+    inverseSurface = Color(0xFF322A08),
+    inverseOnSurface = Color(0xFFFFFBE8),
+    inversePrimary = Color(0xFFFFD54F),
+    statusBar = Color(0xFF221C04),
+    accentProgress = Color(0xFF1D4ED8),
+    accentStreak = Color(0xFF8F4000),
+    accentDiscovery = Color(0xFF0F766E),
+    accentAnnotation = Color(0xFF6A1B9A)
+)
+
+val OnyxFolioColors = DarkFolioColors.copy(
+    primary = Color(0xFFF0C860),
+    onPrimary = Color(0xFF2E2400),
+    primaryContainer = Color(0xFF5C4A00),
+    onPrimaryContainer = Color(0xFFFFE9A8),
+    secondary = Color(0xFFD8C89A),
+    onSecondary = Color(0xFF322A0E),
+    secondaryContainer = Color(0xFF48401E),
+    onSecondaryContainer = Color(0xFFF0E8C8),
+    tertiary = Color(0xFF9CC7E0),
+    onTertiary = Color(0xFF0A2430),
+    tertiaryContainer = Color(0xFF244452),
+    onTertiaryContainer = Color(0xFFD4E8F2),
+    background = Color(0xFF16130C),
+    onBackground = Color(0xFFF2E8CC),
+    surface = Color(0xFF1C1E10),
+    onSurface = Color(0xFFF2E8CC),
+    surfaceVariant = Color(0xFF33301E),
+    onSurfaceVariant = Color(0xFFC0B48C),
+    surfaceContainerHighest = Color(0xFF454026),
+    outline = Color(0xFF6E6544),
+    outlineVariant = Color(0xFF33301E),
+    inverseSurface = Color(0xFFF2E8CC),
+    inverseOnSurface = Color(0xFF201B10),
+    inversePrimary = Color(0xFFB09030),
+    statusBar = Color(0xFF0C0A06),
+    accentProgress = Color(0xFF6FE0C0),
+    accentStreak = Color(0xFFFFD97A),
+    accentDiscovery = Color(0xFF7FB0FF),
+    accentAnnotation = Color(0xFFE0A0D8)
+)
+
 // ── Removed with the light/dark pairing: MIDNIGHT NEON folded into Neon
 // Tokyo; its persisted id is remapped in AppPalette.byId.
 
@@ -971,6 +1259,7 @@ enum class AppPalette(
     DAWN("dawn", "Dawn", false, DawnFolioColors),
     HYPERPOP("hyperpop", "Hyperpop", false, HyperpopFolioColors),
     RAINBOW("rainbow", "Rainbow Candy", false, RainbowCandyFolioColors),
+    CLAY("clay", "Clay", false, ClayFolioColors),
     DARK("dark", "Dark", true, DarkFolioColors),
     MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
     DUSK("dusk", "Dusk", true, DuskFolioColors),
@@ -982,8 +1271,15 @@ enum class AppPalette(
     TOXIC_LIME("toxiclime", "Toxic Lime", true, ToxicLimeFolioColors),
     RETRO_SUNSET("retrosunset", "Retro Sunset", true, RetroSunsetFolioColors),
     PEACOCK("peacock", "Peacock", true, PeacockFolioColors),
+    COCOA("cocoa", "Cocoa", true, CocoaFolioColors),
     GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
     BLOSSOM("blossom", "Blossom", true, BlossomFolioColors),
+    LAGOON("lagoon", "Lagoon", false, LagoonFolioColors),
+    ABYSS("abyss", "Abyss", true, AbyssFolioColors),
+    ROUGE("rouge", "Rouge", false, RougeFolioColors),
+    GARNET("garnet", "Garnet", true, GarnetFolioColors),
+    CITRINE("citrine", "Citrine", false, CitrineFolioColors),
+    ONYX("onyx", "Onyx", true, OnyxFolioColors),
 
     /**
      * §16 Material You. The wallpaper-derived palette: on a supported device the
@@ -1055,6 +1351,10 @@ data class ThemePack(
             ThemePack("dawn", "Dawn", "Dusk", "dawn", "dusk", "dawn", "dusk"),
             ThemePack("hyperpop", "Hyperpop", "Synthwave", "hyperpop", "synthwave", "candypop", "synthwave"),
             ThemePack("rainbow", "Rainbow Candy", "Neon Tokyo", "rainbow", "neontokyo", "rainbow", "neontokyo"),
+            ThemePack("clay", "Clay", "Cocoa", "clay", "cocoa", "clay", "cocoa"),
+            ThemePack("lagoon", "Lagoon", "Abyss", "lagoon", "abyss", "lagoon", "abyss"),
+            ThemePack("rouge", "Rouge", "Garnet", "rouge", "garnet", "rouge", "garnet"),
+            ThemePack("citrine", "Citrine", "Onyx", "citrine", "onyx", "citrine", "onyx"),
         )
     }
 }

@@ -188,7 +188,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
 fun LibraryRoute(
     navModel: FolioNavModelImpl,
     onOpenReader: (String) -> Unit,
-    onOpenReaderAt: (String, Int?) -> Unit,
+    onOpenReaderAt: (String, Int?, Float?) -> Unit,
     onOpenDocument: (String) -> Unit,
     onOpenBookDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
@@ -263,7 +263,7 @@ fun LibraryRoute(
         onBookSearchActiveChange = { navModel.bookSearchActive = it },
         bookSearchController = navModel.bookSearchController,
         onOpenBookHit = { hit ->
-            onOpenReaderAt(hit.book.id, hit.spineIndex.takeIf { it >= 0 })
+            onOpenReaderAt(hit.book.id, hit.spineIndex.takeIf { it >= 0 }, hit.startFraction.takeIf { it >= 0f })
         },
         documentSearchActive = navModel.documentSearchActive,
         onDocumentSearchActiveChange = { navModel.documentSearchActive = it },
@@ -512,6 +512,12 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.LIBRARY_SCAN ->
             com.folio.reader.settings.SettingsLibraryScanScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.SEMANTIC_SEARCH ->
+            com.folio.reader.settings.SettingsSemanticSearchScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.STORAGE ->
+            com.folio.reader.settings.SettingsStorageScreen(navModel, onBack)
 
         // Unknown/legacy categories (e.g. deep links from older builds) land
         // on the hub instead of a dead end.

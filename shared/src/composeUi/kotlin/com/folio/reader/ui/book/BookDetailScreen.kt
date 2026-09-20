@@ -68,6 +68,7 @@ fun BookDetailScreen(
     val availableTags by viewModel.availableTags.collectAsState(initial = emptyList())
     val availableSeries by viewModel.availableSeries.collectAsState(initial = emptyList())
     val availableCollections by viewModel.availableCollections.collectAsState(initial = emptyList())
+    val tagSuggestions by viewModel.tagSuggestions.collectAsState(initial = TagSuggestionState.Idle)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showMetadataEditor by remember { mutableStateOf(false) }
     var showTagPicker by remember { mutableStateOf(false) }
@@ -184,12 +185,34 @@ fun BookDetailScreen(
                         onSeriesClick = onSeriesClick,
                         onCollectionClick = onCollectionClick,
                         onAddTags = { showTagPicker = true },
+                        onSuggestTags = if (viewModel.canSuggestTags) {
+                            { viewModel.suggestTags() }
+                        } else {
+                            null
+                        },
                         onCoverClick = onStartReading,
                         // Drives the finish projection from the reader's measured pace
                         // rather than a fixed wpm — same source the library rows and
                         // Home use, so the three surfaces agree about this book.
                         sessions = sessions,
                     )
+                }
+
+                // Auto-tagging proposals (ML_PLAN Phase 5 #2). Sits below the header rather
+                // than inside the chip row: every suggestion carries a score and a reason,
+                // and a chip has room for neither. It also has to be able to say "this book
+                // is not indexed yet", which is a sentence, not a chip.
+                if (tagSuggestions.isVisible) {
+                    item {
+                        Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+                            TagSuggestionPanel(
+                                state = tagSuggestions,
+                                onApply = viewModel::applySuggestion,
+                                onApplyConfident = viewModel::applyConfidentSuggestions,
+                                onDismiss = viewModel::dismissSuggestions,
+                            )
+                        }
+                    }
                 }
 
                 item {

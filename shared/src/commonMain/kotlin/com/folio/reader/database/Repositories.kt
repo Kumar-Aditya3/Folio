@@ -254,6 +254,22 @@ interface SearchRepository {
     suspend fun indexChaptersBulk(bookId: String, chapters: List<ChapterIndexEntry>) {
         for (c in chapters) indexChapter(bookId, c.chapterId, c.spineIndex, c.title, c.content)
     }
+
+    /**
+     * The plain text of every indexed chapter of one book, in spine order.
+     *
+     * This is the read half of [indexChaptersBulk], and it is a *bulk* read on purpose:
+     * the FTS5 table already holds the extracted text for every imported book, so anything
+     * that needs a whole book's prose (auto-tagging, for one) can have it without touching
+     * the EPUB again. Going through [searchInBook] instead would mean one FTS query per
+     * chapter plus a `snippet()` — a 12-token fragment, not the text — which is both the
+     * wrong data and O(chapters) queries.
+     *
+     * Chapters that were never indexed (a book imported before the index existed) are simply
+     * absent from the result, so callers can compare `size` against the chapter count to say
+     * "this book has not been indexed yet" rather than "this book has no text".
+     */
+    suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> = emptyList()
 }
 
 @Serializable

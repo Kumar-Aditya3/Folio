@@ -82,6 +82,52 @@ class AppGraph(private val app: Application) {
     val searchRepository = JdbcSearchRepository(database)
     val searchIndexer = SearchIndexer(searchRepository)
 
+    // ── SEMANTIC SEARCH (ML_PLAN) ───────────────────────────────────────────
+    // The model is downloaded on demand into the models dir and never bundled; the
+    // embedder factory returns null while it is absent, which callers treat as
+    // "semantic search unavailable" rather than an error.
+    //
+    // The model itself is no longer a fixed `val`: it is the reader's choice, stored in
+    // settings and resolved by `EmbeddingModelSelection`. That holder owns the embedder
+    // factory *and* every service derived from it, so switching models can never leave the
+    // indexer on one model and the searcher on another — a mismatch that reads as "search
+    // returns nothing" rather than as an error. See that class.
+    val chunkRepository = com.folio.reader.database.JdbcChunkRepository(database)
+    val modelDownloader = com.folio.reader.ml.ModelDownloader(platform.fileSystem, platform.hasher)
+    val modelSelection = com.folio.reader.ml.EmbeddingModelSelection(
+        settingsRepository = settingsRepository,
+        searchRepository = searchRepository,
+        modelsDir = platform.fileSystem.getModelsDir(),
+        chunkRepository = chunkRepository,
+    )
+
+    /** The model in force. Kept as a convenience so existing call sites keep reading well. */
+    val embeddingModel: com.folio.reader.ml.EmbeddingModel
+        get() = modelSelection.model.value
+
+    val embedderFactory: com.folio.reader.ml.OnnxEmbedderFactory
+        get() = modelSelection.embedderFactory
+
+    val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer
+        get() = modelSelection.indexer
+
+    val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
+        get() = modelSelection.semanticSearch
+
+    // Phase 5 #2. Built from the same embedder factory, so a build with no model downloaded
+    // gets a tagger that reports itself unavailable rather than a second download path.
+    val autoTaggerService: com.folio.reader.ml.AutoTaggerService
+        get() = com.folio.reader.ml.AutoTaggerService(
+            tagger = modelSelection.tagger,
+            embedderFactory = modelSelection.embedderFactory,
+            tagRepository = tagRepository,
+            bookRepository = bookRepository,
+            searchRepository = searchRepository,
+        )
+    // Phase 6 (OCR + translation). Android gets the real ML Kit implementation; desktop's
+    // actual is a documented no-op. See the decision in OnDeviceTextTools.kt.
+    val onDeviceTextTools = com.folio.reader.ml.onDeviceTextTools()
+
     // ---------- Manga category (Mihon-powered backend) ----------
     val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database) { mangaId ->
         // Cascade delete also removes the manga's downloaded pages from disk.
@@ -271,6 +317,49 @@ class AppGraph(private val app: Application) {
     }
 
     /**
+     * One-time repair of chapter text indexed before entities were decoded.
+     *
+     * `SearchIndexer.extractPlainText` used to strip tags and leave character references
+     * alone, so `It&#8217;s` went into FTS5 — and therefore into every snippet and every
+     * search result — as the literal nine characters `&#8217;`. Decoding at import fixes
+     * books imported from now on, but it cannot reach text that is already stored: the
+     * snippet is read straight out of the FTS5 index, so the only way to clean an existing
+     * library is to rewrite the rows.
+     *
+     * That is what this does, and the reason it is a rewrite rather than a display-time
+     * decode: the *index* holds `&#8217;` as its own token, so a search for `it's` cannot
+     * match the stored text no matter what the UI does. Fixing it in the reader would have
+     * hidden the symptom and left search still broken for exactly the words the reader was
+     * most likely to type.
+     *
+     * Reuses [SearchIndexer.extractPlainText] rather than its own decoder so the repair and
+     * the import path cannot drift — running the current extractor over text it already
+     * produced is idempotent, which is what makes a retry after a mid-way failure safe.
+     * The raw settings flag keeps it to one successful pass per install.
+     */
+    fun repairIndexEntitiesOnce(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val flag = "search_index_entities_v1"
+            if (runCatching { settingsRepository.getRaw(flag) }.getOrNull() == "1") return@launch
+            runCatching {
+                bookRepository.getAllBooks().first().forEach { book ->
+                    val entries = searchRepository.getChapterTexts(book.id)
+                    if (entries.isEmpty()) return@forEach
+                    val repaired = entries.map { entry ->
+                        entry.copy(content = SearchIndexer.extractPlainText(entry.content))
+                    }
+                    // Rewrite wholesale rather than diffing: `indexChaptersBulk` is one
+                    // transaction per book, and for text without a reference in it the
+                    // "repaired" value is byte-identical to the stored one, so an untouched
+                    // book costs a single no-op write instead of a per-chapter comparison.
+                    searchRepository.indexChaptersBulk(book.id, repaired)
+                }
+                settingsRepository.setRaw(flag, "1")
+            }.onFailure { it.printStackTrace() }
+        }
+    }
+
+    /**
      * One-time backfill of Revisit for manga annotations (§11.5): reader notes become
      * NOTE items, bookmarked chapters become BOOKMARK items. Runs on its own flag so
      * installs that already ran the book backfill still pick up the manga pass.
@@ -332,7 +421,15 @@ class AppGraph(private val app: Application) {
         searchIndexer = searchIndexer,
         hashUtil = platform.hasher,
         // Imported books land on a real collection shelf (Main) right away.
-        collectionRepository = collectionRepository
+        collectionRepository = collectionRepository,
+        // No inline embedding on Android. `indexChapters` runs the ONNX model over every chapter
+        // synchronously before `importEpub` returns, and on Arctic that is the heaviest workload in
+        // the app — it made a single import take minutes and held back the post-import shelf prompt
+        // until it finished, reading as a hang. Android already has `EmbeddingBackfillWorker`
+        // (scheduled at startup and kicked right after an import in MainActivity) whose whole job is
+        // to embed chapters missing vectors, so the index is built in the background instead. The
+        // desktop app keeps its inline indexer because it has no background worker.
+        embeddingIndexer = null
     )
     val documentImporter = DocumentImporter(
         platform,
@@ -474,6 +571,14 @@ class AppGraph(private val app: Application) {
         graphScope.launch {
             cachedGlobalSettings =
                 runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+        }
+        // Resolve the embedding model the reader chose, off-main for the same reason as the
+        // settings snapshot above: reading the settings row is a database round trip, and
+        // parking the UI thread on it during graph construction is an ANR. Until this
+        // completes the selection holds the catalog default, which is the same model a
+        // reader who never chose one gets — so the window is invisible rather than wrong.
+        graphScope.launch {
+            runCatching { modelSelection.start() }
         }
         // Keep a dataSync foreground service alive exactly while the download queue has
         // pending work, so in-flight chapters survive the app being closed/frozen. The queue
@@ -663,6 +768,23 @@ class FolioApplication : Application() {
                     runCatching { assets.open(path).use { it.readBytes() } }.getOrNull()
                 }
             }.onFailure { it.printStackTrace() }
+        }
+
+        // ── SEMANTIC INDEX BACKFILL (ML_PLAN Phase 3) ──────────────────────
+        // The settings screen promises the reader that "the automatic pass only runs while
+        // the device is charging". This is what makes that true. It was never called, so the
+        // charging-gated pass did not exist and the only way to index an existing library was
+        // the button — which meant a backfill that got interrupted simply stopped.
+        //
+        // Gated on the model being on disk: scheduling before the reader has opted into the
+        // download would just enqueue a worker whose only job is to discover there is nothing
+        // to embed with.
+        val modelFile = java.io.File(
+            graph.platform.fileSystem.getModelsDir(),
+            graph.embeddingModel.fileName,
+        )
+        if (modelFile.isFile) {
+            com.folio.reader.work.EmbeddingBackfillScheduler.schedule(this)
         }
     }
 

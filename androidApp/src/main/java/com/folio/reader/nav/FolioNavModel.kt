@@ -16,7 +16,7 @@ interface FolioNavModel {
     @Composable
     fun libraryContent(
         onOpenReader: (String) -> Unit,
-        onOpenReaderAt: (String, Int?) -> Unit,
+        onOpenReaderAt: (String, Int?, Float?) -> Unit,
         onOpenDocument: (String) -> Unit,
         onOpenBookDetail: (String) -> Unit,
         onOpenSearch: () -> Unit,
@@ -50,6 +50,12 @@ interface FolioNavModel {
     fun readerContent(
         bookId: String,
         targetSpineIndex: Int?,
+        // No default value here on purpose: a default parameter on a @Composable *interface*
+        // method makes the compiler synthesize a `readerContent$default` bridge whose ABI does
+        // not line up with the override in FolioNavModelImpl, which throws AbstractMethodError at
+        // runtime the moment the reader route composes (it still compiles cleanly). Every caller
+        // passes this explicitly, so requiring it costs nothing.
+        targetFraction: Float?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit
@@ -70,7 +76,7 @@ interface FolioNavModel {
     )
 
     @Composable
-    fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?) -> Unit)
+    fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit)
 
     @Composable
     fun settingsContent(category: String, onBack: () -> Unit)

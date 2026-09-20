@@ -236,6 +236,15 @@ internal fun LibrarySearchRail(
                 SearchCloseIcon(onClose)
             }
         } else {
+            // Narrow: field on its own row, switch below it.
+            //
+            // Both rows are padded by `folioGutter` rather than one by `gutter` and the next
+            // by whatever the close icon happened to leave. The field row used to be
+            // `padding(horizontal = gutter)` *and* carry a 36dp close icon inside it, so the
+            // icon's right edge landed past the margin — measured on the device at 42px from
+            // the screen edge against the grid's 60px — and the rail read as wider than the
+            // shelf it sits over. The fix is to make the row's own padding authoritative and
+            // let the icon live inside it.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -271,17 +280,39 @@ internal fun LibrarySearchRail(
     }
 }
 
+/**
+ * The rail's close/leave-search affordance, drawn so its **ink** lands on the row's trailing
+ * margin rather than past it.
+ *
+ * The glyph is 20dp; the touch target is 36dp because a 20dp tap area is below what a thumb
+ * hits reliably. That extra 16dp must not sit between the glyph and the screen edge, though —
+ * centring it, which is what a bare `size(36.dp)` does, left 8dp of invisible slack there, so
+ * the glyph floated inside the shelf's margin and the rail read as misaligned with the grid
+ * under it. Measured on the device: the glyph ended 42px from the screen edge against the
+ * grid's 60px.
+ *
+ * A `Box` rather than a `padding` chain, because the two paddings are asymmetric and the
+ * modifier order that gives *outer* spacing is the opposite of the one that shrinks the glyph:
+ * `size(36).padding(...)` would inset the icon's own drawing area and render a smaller glyph,
+ * which is not what is wanted here. The box is the touch target; the icon is 20dp inside it,
+ * pushed to the trailing edge by the 16dp leading inset.
+ */
 @Composable
 private fun SearchCloseIcon(onClose: () -> Unit) {
-    Icon(
-        Icons.AutoMirrored.Filled.ArrowBack,
-        contentDescription = "Close search",
-        tint = FolioTheme.colors.onSurfaceVariant,
+    Box(
         modifier = Modifier
-            .padding(start = 6.dp)
             .size(36.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClose)
-            .padding(8.dp),
-    )
+            .clickable(onClick = onClose),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Close search",
+            tint = FolioTheme.colors.onSurfaceVariant,
+            modifier = Modifier
+                .padding(start = 16.dp)
+                .size(20.dp),
+        )
+    }
 }

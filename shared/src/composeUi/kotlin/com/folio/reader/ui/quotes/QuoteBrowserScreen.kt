@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
@@ -78,6 +80,9 @@ fun QuoteBrowserScreen(
     var tagDropdownExpanded by remember { mutableStateOf(false) }
     var tagEditorFor by remember { mutableStateOf<QuoteDisplayItem?>(null) }
     val allTags = remember { mutableStateOf<List<Tag>>(emptyList()) }
+
+    val relatedSource by viewModel.relatedSource.collectAsState()
+    val relatedState by viewModel.relatedState.collectAsState()
 
     LaunchedEffect(Unit) {
         allTags.value = viewModel.allTags()
@@ -239,6 +244,9 @@ fun QuoteBrowserScreen(
             }
         }
     ) { padding ->
+        val onFindRelated: ((QuoteDisplayItem) -> Unit)? =
+            if (viewModel.canFindRelated) ({ item -> viewModel.findRelatedFor(item) }) else null
+
         if (displayItems.isEmpty() && mangaItems.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
@@ -256,13 +264,24 @@ fun QuoteBrowserScreen(
             when (viewMode) {
                 QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
                     displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                    onEditTags = { tagEditorFor = it }
+                    onEditTags = { tagEditorFor = it },
+                    onFindRelated = onFindRelated
                 )
                 QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
                     displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                    onEditTags = { tagEditorFor = it }
+                    onEditTags = { tagEditorFor = it },
+                    onFindRelated = onFindRelated
                 )
             }
+        }
+
+        // Sits above the list rather than replacing it: the reader keeps their place in the
+        // hub while reading the suggestions, which is the point of a "more like this" list.
+        if (relatedSource != null) {
+            RelatedPanel(
+                state = relatedState,
+                onClose = { viewModel.closeRelated() },
+            )
         }
     }
 
@@ -288,7 +307,8 @@ private fun QuoteGrid(
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onMangaNoteClick: (MangaQuoteItem) -> Unit,
     padding: PaddingValues,
-    onEditTags: (QuoteDisplayItem) -> Unit = {}
+    onEditTags: (QuoteDisplayItem) -> Unit = {},
+    onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 280.dp),
@@ -298,7 +318,10 @@ private fun QuoteGrid(
         modifier = Modifier.padding(padding)
     ) {
         items(items) { item ->
-            QuoteCard(item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags)
+            QuoteCard(
+                item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags,
+                onFindRelated = onFindRelated,
+            )
         }
         items(mangaItems) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
@@ -313,7 +336,8 @@ private fun QuoteList(
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onMangaNoteClick: (MangaQuoteItem) -> Unit,
     padding: PaddingValues,
-    onEditTags: (QuoteDisplayItem) -> Unit = {}
+    onEditTags: (QuoteDisplayItem) -> Unit = {},
+    onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
     LazyColumn(
         contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
@@ -321,7 +345,10 @@ private fun QuoteList(
         modifier = Modifier.padding(padding)
     ) {
         items(items) { item ->
-            QuoteListItem(item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags)
+            QuoteListItem(
+                item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags,
+                onFindRelated = onFindRelated,
+            )
         }
         items(mangaItems) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
@@ -339,7 +366,8 @@ private fun QuoteList(
 private fun QuoteCard(
     item: QuoteDisplayItem,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
-    onEditTags: (QuoteDisplayItem) -> Unit = {}
+    onEditTags: (QuoteDisplayItem) -> Unit = {},
+    onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
     val highlightColor = item.highlight?.effectiveColor
     val accent = highlightColor?.let { androidx.compose.ui.graphics.Color(it) }
@@ -413,6 +441,9 @@ private fun QuoteCard(
                         )
                     }
                     AddTagChip(onClick = { onEditTags(item) })
+                    onFindRelated?.let { find ->
+                        RelatedChip(compact = false, onClick = { find(item) })
+                    }
                 }
             }
         }
@@ -423,7 +454,8 @@ private fun QuoteCard(
 private fun QuoteListItem(
     item: QuoteDisplayItem,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
-    onEditTags: (QuoteDisplayItem) -> Unit = {}
+    onEditTags: (QuoteDisplayItem) -> Unit = {},
+    onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
     // Compact form: the same leading-rule language as the card form, no box.
     Column(
@@ -478,6 +510,9 @@ private fun QuoteListItem(
                             TagChip(tag = tag, compact = true)
                         }
                         AddTagChip(compact = true, onClick = { onEditTags(item) })
+                        onFindRelated?.let { find ->
+                            RelatedChip(compact = true, onClick = { find(item) })
+                        }
                     }
                 }
             }
@@ -521,6 +556,126 @@ private fun AddTagChip(compact: Boolean = false, onClick: () -> Unit) {
                 horizontal = if (compact) 4.dp else 8.dp,
                 vertical = if (compact) 2.dp else 4.dp
             )
+        )
+    }
+}
+
+/**
+ * "More like this" affordance — ML_PLAN Phase 5 #3.
+ *
+ * Only rendered when a lookup is actually available, so it never appears as a control that
+ * cannot do anything. Deliberately worded as a phrase rather than an icon: a bare "sparkle"
+ * glyph gives no clue that it searches *by meaning*, which is the whole feature.
+ */
+@Composable
+private fun RelatedChip(compact: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        color = FolioTheme.colors.surfaceVariant,
+        shape = RoundedCornerShape(if (compact) 4.dp else 8.dp),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = "More like this",
+            style = if (compact) FolioTheme.typography.labelSmall else FolioTheme.typography.labelMedium,
+            color = FolioTheme.colors.onSurfaceVariant,
+            modifier = Modifier.padding(
+                horizontal = if (compact) 4.dp else 8.dp,
+                vertical = if (compact) 2.dp else 4.dp
+            )
+        )
+    }
+}
+
+/**
+ * The suggestions list.
+ *
+ * Anchored to the bottom of the hub rather than pushed as a new screen: the reader keeps
+ * their place in the quote list, which is what makes comparing the source passage against
+ * its neighbours possible at all.
+ */
+@Composable
+private fun RelatedPanel(state: RelatedState, onClose: () -> Unit) {
+    Surface(
+        color = FolioTheme.colors.surfaceVariant,
+        tonalElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Passages like this one",
+                    style = FolioTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = FolioTheme.colors.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close suggestions")
+                }
+            }
+
+            when (state) {
+                RelatedState.Idle -> Unit
+                RelatedState.Loading -> Text(
+                    "Looking for passages with a similar meaning…",
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant
+                )
+
+                RelatedState.NotIndexed -> Text(
+                    "The semantic index is not built yet, so passages cannot be compared by " +
+                        "meaning. Download the model in Settings, then index your library.",
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant
+                )
+
+                is RelatedState.Failed -> Text(
+                    state.message,
+                    style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.error
+                )
+
+                is RelatedState.Ready -> if (state.passages.isEmpty()) {
+                    Text(
+                        "No other passage in your library reads like this one yet.",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(state.passages) { passage -> RelatedPassageRow(passage) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RelatedPassageRow(passage: RelatedPassage) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            text = "\u201C${passage.text}\u201D",
+            style = FolioTheme.typography.bodySmall,
+            color = FolioTheme.colors.onSurface,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = listOfNotNull(passage.bookTitle, passage.chapterTitle)
+                .filter { it.isNotBlank() }
+                .joinToString(" · "),
+            style = FolioTheme.typography.labelSmall,
+            color = FolioTheme.colors.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

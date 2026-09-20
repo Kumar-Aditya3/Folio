@@ -278,6 +278,12 @@ fun BottomPageBlock(
     stateLabel: String,
     pageCountHint: Int = 0,
     chapterStops: List<Float> = emptyList(),
+    /**
+     * A visible "N left" readout, e.g. "12 pages left" in this chapter. The leaf block is a
+     * shape, not a number, and continuous mode has no page turns to count — so the numeral was
+     * the missing "how much is left" the reader asked for. Null hides the line.
+     */
+    pagesLeftLabel: String? = null,
     onSeek: ((Float) -> Unit)? = null
 ) {
     // Same glass as the top bar, so the two ends of the reader chrome are the same
@@ -307,17 +313,40 @@ fun BottomPageBlock(
             stateLabel = stateLabel,
             onSeek = onSeek
         )
-        if (chapterTitle.isNotBlank()) {
-            Text(
-                text = chapterTitle,
-                style = FolioTheme.typography.labelMedium,
-                color = FolioTheme.colors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        if (chapterTitle.isNotBlank() || pagesLeftLabel != null) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 6.dp)
-            )
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = chapterTitle,
+                    style = FolioTheme.typography.labelMedium,
+                    color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (pagesLeftLabel != null) {
+                    // A soft accent pill rather than bare text: it reads as a distinct chip from
+                    // the chapter title beside it, and the tinted ground gives the numeral the
+                    // "forward motion" accent (Rule 14) without competing with the page's ink.
+                    Text(
+                        text = pagesLeftLabel,
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.accentProgress,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .background(
+                                FolioTheme.colors.accentProgress.copy(alpha = 0.14f),
+                                RoundedCornerShape(percent = 50),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                    )
+                }
+            }
         }
     }
 }

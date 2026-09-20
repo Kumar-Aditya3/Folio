@@ -8,6 +8,8 @@ import com.folio.reader.database.NoteRepository
 import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.SeriesRepository
 import com.folio.reader.database.TagRepository
+import com.folio.reader.ml.AutoTaggerService
+import com.folio.reader.ml.TagSuggestion
 import com.folio.reader.model.Book
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.CloudState
@@ -36,7 +38,12 @@ class BookDetailViewModel(
     private val noteRepository: NoteRepository,
     private val seriesRepository: SeriesRepository,
     private val collectionRepository: CollectionRepository,
-    private val tagRepository: TagRepository
+    private val tagRepository: TagRepository,
+    /**
+     * Phase 5 #2. Null on a build with no embedding model wired, in which case the reader
+     * never sees the suggestion affordance rather than seeing one that does nothing.
+     */
+    private val autoTagger: AutoTaggerService? = null,
 ) {
     private val _book = MutableStateFlow<Book?>(null)
     private val _sessions = MutableStateFlow<List<ReadingSession>>(emptyList())
@@ -179,5 +186,115 @@ class BookDetailViewModel(
         }
     }
 
+    // ---------- Auto-tagging (ML_PLAN Phase 5 #2) ----------
+
+    private val _tagSuggestions = MutableStateFlow<TagSuggestionState>(TagSuggestionState.Idle)
+
+    /** The suggestion panel's state. Idle means "not asked yet"; the panel is closed. */
+    val tagSuggestions: Flow<TagSuggestionState> = _tagSuggestions.asStateFlow()
+
+    /** True when there is a tagger *and* a model on disk — the button is only shown then. */
+    val canSuggestTags: Boolean get() = autoTagger != null
+
+    /**
+     * Proposes tags for this book.
+     *
+     * Runs the whole thing — chapter read, embedding, cosine — off the UI thread, which is why
+     * this is a `viewModelScope.launch` into a suspend function rather than anything inline.
+     * `FakeEmbedder`-backed tests exercise the ranking directly; this is the wiring.
+     *
+     * The result is deliberately a *proposal*. Nothing is assigned here: `applySuggestion` is
+     * the only writer, and it is only ever called from a tap. The plan says "assign above a
+     * threshold", but the tags are the reader's own vocabulary and a silent bulk write has no
+     * undo — so the threshold decides what is *offered*, and the reader decides what is kept.
+     */
+    fun suggestTags() {
+        val bookId = currentBookId ?: return
+        val tagger = autoTagger ?: return
+        viewModelScope.launch {
+            if (!tagger.isAvailable()) {
+                _tagSuggestions.value = TagSuggestionState.Unavailable(
+                    "Download the embedding model in Settings → Semantic search first."
+                )
+                return@launch
+            }
+            _tagSuggestions.value = TagSuggestionState.Loading
+            val chapters = tagger.chaptersFor(bookId)
+            val (indexed, total) = tagger.coverage(bookId)
+            if (indexed == 0) {
+                // Not "no tags matched" — there was nothing to match against. Saying the
+                // former would blame the reader's tag list for a missing index.
+                _tagSuggestions.value = TagSuggestionState.NotIndexed(total)
+                return@launch
+            }
+            val suggestions = tagger.suggestForBook(bookId, chapters)
+            _tagSuggestions.value = if (suggestions.isEmpty()) {
+                TagSuggestionState.NoMatch
+            } else {
+                TagSuggestionState.Ready(suggestions)
+            }
+        }
+    }
+
+    /** Applies one suggestion. Additive — it never removes a tag the reader set. */
+    fun applySuggestion(suggestion: TagSuggestion) {
+        val bookId = currentBookId ?: return
+        val tagger = autoTagger ?: return
+        viewModelScope.launch {
+            val applied = tagger.applyTag(bookId, suggestion.candidate.id)
+            if (applied) {
+                _tags.value = tagRepository.getTagsForBook(bookId)
+                // Drop it from the panel so it cannot be applied twice and the list visibly
+                // reflects the write.
+                _tagSuggestions.value = _tagSuggestions.value.withoutSuggestion(suggestion)
+            }
+        }
+    }
+
+    /** Applies every suggestion the tagger was reasonably sure of. */
+    fun applyConfidentSuggestions() {
+        val bookId = currentBookId ?: return
+        val tagger = autoTagger ?: return
+        val ready = _tagSuggestions.value as? TagSuggestionState.Ready ?: return
+        viewModelScope.launch {
+            tagger.applyConfident(bookId, ready.suggestions)
+            _tags.value = tagRepository.getTagsForBook(bookId)
+            _tagSuggestions.value = TagSuggestionState.Ready(
+                ready.suggestions.filterNot { it.confident }
+            )
+        }
+    }
+
+    fun dismissSuggestions() {
+        _tagSuggestions.value = TagSuggestionState.Idle
+    }
+
     private fun String.blankToNull(): String? = trim().takeIf { it.isNotEmpty() }
 }
+
+/**
+ * The suggestion panel's state.
+ *
+ * [NotIndexed] and [NoMatch] are separate cases on purpose, and the same distinction
+ * `RelatedLookup` makes: "this book has not been indexed" is a prerequisite the reader can
+ * fix, while "none of your tags matched" is an answer about their vocabulary. Collapsing them
+ * into an empty list would tell the reader their tags are wrong when the real problem is that
+ * they have not built the index.
+ */
+sealed interface TagSuggestionState {
+    data object Idle : TagSuggestionState
+    data object Loading : TagSuggestionState
+    data class Ready(val suggestions: List<TagSuggestion>) : TagSuggestionState
+    data object NoMatch : TagSuggestionState
+    data class NotIndexed(val totalChapters: Int) : TagSuggestionState
+    data class Unavailable(val reason: String) : TagSuggestionState
+
+    val isVisible: Boolean get() = this !is Idle
+}
+
+private fun TagSuggestionState.withoutSuggestion(applied: TagSuggestion): TagSuggestionState =
+    if (this is TagSuggestionState.Ready) {
+        copy(suggestions = suggestions.filterNot { it.candidate.id == applied.candidate.id })
+    } else {
+        this
+    }
