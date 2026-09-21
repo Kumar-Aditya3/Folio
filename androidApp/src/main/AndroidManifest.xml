@@ -3,6 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The "Living Paper" haptic vocabulary (FolioHaptics): page-turn ticks,
+         commit clicks, confirm/reject and celebration pulses. Normal permission,
+         auto-granted; VibrationEffect calls silently no-op without it. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"

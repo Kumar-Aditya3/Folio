@@ -29,6 +29,10 @@ internal fun BoxScope.ReaderSidePanels(
     showToc: Boolean,
     showAnnotations: Boolean,
     showReaderPanel: Boolean,
+    showEchoes: Boolean = false,
+    echoesState: EchoesState = EchoesState.Idle,
+    onCloseEchoes: () -> Unit = {},
+    onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
     chapters: List<Chapter>,
     currentChapterIndex: Int,
     onChapterChange: (Int) -> Unit,
@@ -67,7 +71,7 @@ internal fun BoxScope.ReaderSidePanels(
 
     // Global scrim for sidebar sheets: only fades in/out statically, does not slide!
     androidx.compose.animation.AnimatedVisibility(
-        visible = showToc || showAnnotations || showReaderPanel,
+        visible = showToc || showAnnotations || showReaderPanel || showEchoes,
         enter = androidx.compose.animation.fadeIn(),
         exit = androidx.compose.animation.fadeOut()
     ) {
@@ -79,6 +83,7 @@ internal fun BoxScope.ReaderSidePanels(
                     detectTapGestures(onTap = {
                         if (showToc) onToggleToc()
                         if (showAnnotations) onToggleAnnotations()
+                        if (showEchoes) onCloseEchoes()
                         onDismissReaderPanel()
                     })
                 }
@@ -123,6 +128,22 @@ internal fun BoxScope.ReaderSidePanels(
                 onSetHighlightNote = onSetHighlightNote,
                 chapterLabel = chapterLabel,
                 onJump = onJumpToAnnotation
+            )
+        }
+    }
+
+    // Echoes: cross-book resonant passages, styled as "land fragments" of the Atlas.
+    androidx.compose.animation.AnimatedVisibility(
+        visible = showEchoes,
+        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
+        enter = panelEnter,
+        exit = panelExit
+    ) {
+        Box(Modifier.folioSheetDragToDismiss(onCloseEchoes)) {
+            EchoesPanel(
+                state = echoesState,
+                onDismiss = onCloseEchoes,
+                onOpenEcho = onOpenEcho,
             )
         }
     }

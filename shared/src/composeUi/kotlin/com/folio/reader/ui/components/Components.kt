@@ -58,6 +58,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioLiquidGlass
+import com.folio.reader.ui.theme.lightDirection
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
@@ -139,10 +142,28 @@ fun FolioHeroCard(
             animate = com.folio.reader.ui.theme.rememberMotionEnabled()
         )
     } else Modifier
+    // §13.7 / M7: the AGSL liquid-glass film, layered *under* the mesh and the
+    // gradient (and so under the content). It draws only where the platform can
+    // (API 33+) and the user's liquid-glass preference is on — the same
+    // `specular` capability the veil's edge bevel rides — and is otherwise a
+    // no-op, leaving the §13.4 mesh + raised sheen as the intended fallback. The
+    // light direction is the room's own virtual sun, so the shader's specular
+    // agrees with every other material's catch.
+    val atmos = com.folio.reader.ui.theme.FolioTheme.atmosphere
+    val daylight = com.folio.reader.ui.theme.LocalFolioDaylight.current
+    val (lx, ly) = daylight.lightDirection()
+    val glassEnabled = LocalGlassCapabilities.current.specular
     Box(
         modifier = modifier
             .fillMaxWidth()
             .folioRaised(shape = shape, accent = tint)
+            .folioLiquidGlass(
+                accent = tint,
+                highlight = atmos.rimLight,
+                lightX = lx,
+                lightY = ly,
+                enabled = glassEnabled,
+            )
             .background(
                 brush = Brush.verticalGradient(
                     listOf(tint.copy(alpha = gradientAlpha), Color.Transparent)
@@ -461,13 +482,22 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    // A destructive confirm gets the sharp cautionary double; an ordinary one the
+    // single confirm click — the "it took" feel from the Living Paper vocabulary.
+    val haptics = com.folio.reader.ui.theme.rememberFolioHaptics()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(text = title, style = MaterialTheme.typography.titleLarge) },
         text = { Text(text = message) },
         confirmButton = {
             Button(
-                onClick = { onConfirm(); onDismiss() },
+                onClick = {
+                    haptics.play(
+                        if (destructive) com.folio.reader.ui.theme.FolioHaptic.Reject
+                        else com.folio.reader.ui.theme.FolioHaptic.Confirm
+                    )
+                    onConfirm(); onDismiss()
+                },
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                     containerColor = if (destructive) com.folio.reader.ui.theme.FolioTheme.colors.error
                     else com.folio.reader.ui.theme.FolioTheme.colors.primary,

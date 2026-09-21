@@ -230,7 +230,10 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     ),
     "espresso" to Theme(
         id = "espresso", name = "Espresso",
-        background = 0xFF18100A.toInt(), surface = 0xFF221810.toInt(),
+        // Deepened to 120C06: at 18100A the page sat 7 channel-steps from both
+        // Cocoa (1E110A) and Onyx (16130C). A darker, less-green coffee brown
+        // clears Cocoa (21), Onyx (17) and Lava (13) and stays under its surface.
+        background = 0xFF120C06.toInt(), surface = 0xFF221810.toInt(),
         primaryText = 0xFFF0E4D4.toInt(), secondaryText = 0xFFB0A088.toInt(),
         headingText = 0xFFFFE8C9.toInt(), link = 0xFFFFA94D.toInt(),
         selection = 0xFF55391F.toInt(), bookmark = 0xFFFF5C3A.toInt(),
@@ -546,7 +549,11 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     // ── ROUGE / GARNET (2026-09 crimson editorial pack) ─────────
     "rouge" to Theme(
         id = "rouge", name = "Rouge",
-        background = 0xFFFFF4F1.toInt(), surface = 0xFFFCE4E8.toInt(),
+        // Pulled to a clearer rose (FFECEE): at FFF4F1 the page sat only 9
+        // channel-steps from Paper and 9 from Bubblegum, both under the
+        // near-duplicate floor. FFECEE clears Paper (14), Bubblegum (12) and
+        // Citrine while keeping a clean ΔL* over its own surface.
+        background = 0xFFFFECEE.toInt(), surface = 0xFFFCE4E8.toInt(),
         primaryText = 0xFF3D0A0A.toInt(), secondaryText = 0xFF6E4A46.toInt(),
         headingText = 0xFFC1121F.toInt(), link = 0xFF9A3324.toInt(),
         selection = 0xFFFFD0CC.toInt(), bookmark = 0xFFB0125C.toInt(),
@@ -573,7 +580,10 @@ internal val ReaderThemePresets: Map<String, Theme> = mapOf(
     // ── CITRINE / ONYX (2026-09 golden pack) ────────────────────
     "citrine" to Theme(
         id = "citrine", name = "Citrine",
-        background = 0xFFFFFBE8.toInt(), surface = 0xFFEEF0C0.toInt(),
+        // Deepened to a truer pale citrine yellow (FFFBDC): at FFFBE8 the page was
+        // only 7 channel-steps from Paper's warm cream. Lowering blue to DC clears
+        // Paper (19) and Solarized Light (14) and reads more like the gemstone.
+        background = 0xFFFFFBDC.toInt(), surface = 0xFFEEF0C0.toInt(),
         primaryText = 0xFF322A08.toInt(), secondaryText = 0xFF6A5E30.toInt(),
         headingText = 0xFF8A6D00.toInt(), link = 0xFF7B3F8F.toInt(),
         selection = 0xFFE8E49C.toInt(), bookmark = 0xFF9A3A8F.toInt(),

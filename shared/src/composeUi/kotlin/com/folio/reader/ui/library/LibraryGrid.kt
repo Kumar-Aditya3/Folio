@@ -62,11 +62,13 @@ import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.LocalFolioTopInset
+import com.folio.reader.ui.theme.rememberFolioHaptics
 
 /**
  * The books shelf, rebuilt as a **shelf** rather than a grid of database rows.
@@ -177,6 +179,7 @@ private fun FeaturedShelfEntry(
     val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
     val interaction = rememberFolioInteraction()
     var menuOpen by remember { mutableStateOf(false) }
+    val pickupHaptics = rememberFolioHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -185,7 +188,10 @@ private fun FeaturedShelfEntry(
                 interactionSource = interaction,
                 indication = null,
                 onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
-                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true },
+                onLongClick = {
+                    pickupHaptics.play(FolioHaptic.PickUp)
+                    if (isSelectionMode) onLongClick() else menuOpen = true
+                },
             )
             .folioRightClick { if (!isSelectionMode) menuOpen = true },
         verticalAlignment = Alignment.CenterVertically,
@@ -305,6 +311,7 @@ fun BookCard(
     val inProgress = book.normalizedProgress > 0.0 && book.normalizedProgress < 0.99
     val colors = FolioTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
+    val pickupHaptics = rememberFolioHaptics()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -316,7 +323,10 @@ fun BookCard(
                 // Hand the already-loaded book to the detail screen so its cover
                 // morph target exists on the first frame (see BookHandoff).
                 onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
-                onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
+                onLongClick = {
+                    pickupHaptics.play(FolioHaptic.PickUp)
+                    if (isSelectionMode) onLongClick() else menuOpen = true
+                }
             )
             .folioRightClick { if (!isSelectionMode) menuOpen = true }
     ) {

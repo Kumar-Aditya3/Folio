@@ -52,6 +52,18 @@ interface ChunkRepository {
      */
     suspend fun loadVectorMetadata(modelId: String, dims: Int, bookId: String? = null): List<Pair<ChunkMeta, FloatArray>>
 
+    /**
+     * Like [loadVectorMetadata] for the whole library, but never materialises more than
+     * [maxChunks] vectors — it streams the rows and keeps a strided, per-book-stratified sample.
+     *
+     * This exists because the Atlas roll-up's whitening step allocates an n×dims *double* working
+     * matrix on top of the loaded float vectors; loading a whole large library (~35k chunks) as
+     * floats first (~64 MB) and then whitening it overran the phone heap. Sampling at the source
+     * keeps the peak bounded regardless of library size, while guaranteeing every book that has
+     * vectors contributes at least one chunk (so no book vanishes from the map).
+     */
+    suspend fun loadVectorMetadataSampled(modelId: String, dims: Int, maxChunks: Int): List<Pair<ChunkMeta, FloatArray>>
+
     /** Chunk `text` for the given ids, for filling snippets of the hits actually shown. */
     suspend fun chunkTexts(ids: Collection<String>): Map<String, String>
 
@@ -65,6 +77,14 @@ interface ChunkRepository {
     suspend fun indexedChunkIds(bookId: String, chapterId: String, modelId: String): Set<String>
 
     suspend fun chunkCount(modelId: String): Int
+
+    /**
+     * How many distinct books have at least one chunk stored for [modelId].
+     *
+     * A cheap `COUNT(DISTINCT book_id)`, used by the Atlas readiness gate to decide whether the
+     * library holds enough embedded books to be worth mapping — without loading a single vector.
+     */
+    suspend fun embeddedBookCount(modelId: String): Int
 
     /**
      * Every model id that currently has stored chunks, with its chunk count. Used by the storage

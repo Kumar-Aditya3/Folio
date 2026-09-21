@@ -419,10 +419,11 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         onOpenRevisit: () -> Unit,
         onOpenExtensions: () -> Unit,
         onOpenDownloads: () -> Unit,
-        onOpenHistory: () -> Unit
+        onOpenHistory: () -> Unit,
+        onOpenAtlas: () -> Unit
     ) = MoreRoute(
         this, onOpenSettings, onOpenTags, onOpenQuotes, onOpenRevisit,
-        onOpenExtensions, onOpenDownloads, onOpenHistory
+        onOpenExtensions, onOpenDownloads, onOpenHistory, onOpenAtlas
     )
 
     @Composable
@@ -432,8 +433,9 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         targetFraction: Float?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
-        onOpenSettings: () -> Unit
-    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, onBack, onOpenSearch, onOpenSettings)
+        onOpenSettings: () -> Unit,
+        onOpenEcho: (String, Int?, Float?) -> Unit
+    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, onBack, onOpenSearch, onOpenSettings, onOpenEcho)
 
     @Composable
     override fun documentReaderContent(
@@ -452,6 +454,13 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     @Composable
     override fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) =
         SearchRoute(this, onBack, onOpenReader)
+
+    @Composable
+    override fun atlasContent(
+        onBack: () -> Unit,
+        onOpenBook: (String) -> Unit,
+        onOpenReaderAt: (String, Int?, Float?) -> Unit
+    ) = AtlasRoute(this, onBack, onOpenBook, onOpenReaderAt)
 
     @Composable
     override fun settingsContent(category: String, onBack: () -> Unit) =

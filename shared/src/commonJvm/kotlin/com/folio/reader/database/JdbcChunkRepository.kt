@@ -284,6 +284,58 @@ class JdbcChunkRepository(private val db: Database) : ChunkRepository {
             }
         }
 
+    override suspend fun loadVectorMetadataSampled(
+        modelId: String,
+        dims: Int,
+        maxChunks: Int,
+    ): List<Pair<ChunkMeta, FloatArray>> =
+        db.withConnection { conn ->
+            val total = count(conn, "SELECT COUNT(*) FROM chapter_chunks WHERE model_id = ?", modelId)
+            // Keep every `stride`-th row plus the first row of each new book. Ordering by book_id
+            // groups the stream so the "first of each book" guarantee is one cheap comparison, and
+            // the global stride makes larger books contribute proportionally more of the sample.
+            val stride = if (maxChunks <= 0 || total <= maxChunks) 1 else (total + maxChunks - 1) / maxChunks
+            conn.prepareStatement(
+                """
+                SELECT c.id, c.book_id, c.chapter_id, c.spine_index,
+                       c.char_start, c.char_end, v.vector, v.dims
+                FROM chapter_chunks c
+                JOIN chapter_vectors v ON v.chunk_id = c.id AND v.model_id = c.model_id
+                WHERE c.model_id = ? AND v.dims = ?
+                ORDER BY c.book_id
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, modelId)
+                stmt.setInt(2, dims)
+                stmt.executeQuery().use { rs ->
+                    val out = ArrayList<Pair<ChunkMeta, FloatArray>>(minOf(total, maxChunks) + 16)
+                    var lastBook: String? = null
+                    var row = 0
+                    while (rs.next()) {
+                        val bookId = rs.getString("book_id")
+                        val newBook = bookId != lastBook
+                        lastBook = bookId
+                        val keep = stride == 1 || newBook || (row % stride == 0)
+                        row++
+                        if (!keep) continue
+                        val blob = rs.getBytes("vector") ?: continue
+                        if (blob.size != dims * FLOAT_BYTES) continue
+                        out.add(
+                            ChunkMeta(
+                                id = rs.getString("id"),
+                                bookId = bookId,
+                                chapterId = rs.getString("chapter_id"),
+                                spineIndex = rs.getInt("spine_index"),
+                                charStart = rs.getInt("char_start"),
+                                charEnd = rs.getInt("char_end"),
+                            ) to decodeVector(blob, dims)
+                        )
+                    }
+                    out
+                }
+            }
+        }
+
     override suspend fun chunkTexts(ids: Collection<String>): Map<String, String> {
         if (ids.isEmpty()) return emptyMap()
         return db.withConnection { conn ->
@@ -326,6 +378,11 @@ class JdbcChunkRepository(private val db: Database) : ChunkRepository {
 
     override suspend fun chunkCount(modelId: String): Int =
         db.withConnection { conn -> count(conn, "SELECT COUNT(*) FROM chapter_chunks WHERE model_id = ?", modelId) }
+
+    override suspend fun embeddedBookCount(modelId: String): Int =
+        db.withConnection { conn ->
+            count(conn, "SELECT COUNT(DISTINCT book_id) FROM chapter_chunks WHERE model_id = ?", modelId)
+        }
 
     override suspend fun modelChunkCounts(): Map<String, Int> =
         db.withConnection { conn ->

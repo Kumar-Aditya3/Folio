@@ -76,7 +76,8 @@ actual fun HtmlContentSurface(
     onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)?,
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
-    seekTargetRequest: Pair<String, Long>?
+    seekTargetRequest: Pair<String, Long>?,
+    onContentReady: () -> Unit
 ) {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val backgroundColor = Color(theme.background)
@@ -96,6 +97,7 @@ actual fun HtmlContentSurface(
     callbacks.onLinkClick = onLinkClick
     callbacks.onHighlightParagraph = onHighlightParagraph
     callbacks.onSelectionChanged = onSelectionChanged
+    callbacks.onContentReady = onContentReady
 
     val resolver by rememberUpdatedState(onResolveResource)
     val positionState by rememberUpdatedState(position)
@@ -381,6 +383,8 @@ private class SurfaceCallbacks {
     @Volatile var onHighlightParagraph: ((String, Int, String) -> Unit)? = null
     @Volatile var onSelectionChanged: ((String, Int, String?) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
+    /** Fired on the main frame's first onLoadEnd — the chapter's real first paint. */
+    @Volatile var onContentReady: () -> Unit = {}
 }
 
 /**
@@ -541,6 +545,11 @@ private class JcefSession private constructor(
                     lastHighlightJs?.let { browser.executeJavaScript(it, expected, 0) }
                     flushPendingSeek()
                     flushPendingSeekFraction()
+                    // The chapter document has painted: let the reader dissolve the
+                    // morph cover plate on real paint rather than on the HTML string
+                    // being ready. Only for the document we actually issued (URL
+                    // match above), so an about:blank/stale load-end never fires it.
+                    callbacks.onContentReady()
                 }
             }
 
@@ -874,7 +883,9 @@ private fun fontFaceCss(settings: ReaderSettings): String =
         val file = fontCandidates(font.fileName).firstOrNull { it.exists() } ?: return@mapNotNull null
         val format = if (font.fileName.endsWith(".otf", true)) "opentype" else "truetype"
         // Variable files declare a weight RANGE so real weights resolve from the axis.
-        val weight = if (font.fileName.contains("variable")) "300 900" else "${font.weight}"
+        // Prefer the model's own flag (set for bundled faces and computed for imports),
+        // keeping the file-name sniff as a fallback for legacy entries.
+        val weight = if (font.isVariable || font.fileName.contains("variable")) "300 900" else "${font.weight}"
         "@font-face{font-family:'${font.familyName}';src:url('${file.toFileUrl()}') format('$format');" +
                 "font-weight:$weight;font-style:normal;font-display:swap;}"
     }.joinToString("")

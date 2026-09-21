@@ -40,7 +40,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
 import com.folio.reader.manga.MangaPageRef
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlinx.coroutines.launch
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -216,8 +218,16 @@ internal fun PagedReader(
         }
     }
 
+    val pageHaptics = rememberFolioHaptics()
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }.collect { onPageChanged(it) }
+        // Skip the initial emission so opening a chapter doesn't tick; every real
+        // turn after that gets the paper-thin PageTurn feel.
+        var firstEmission = true
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            if (!firstEmission) pageHaptics.play(FolioHaptic.PageTurn)
+            firstEmission = false
+            onPageChanged(page)
+        }
     }
     // Explicit seeks (resume, slider) drive the pager; the position tracker itself
     // never scrolls, so natural page turns cannot fight back.

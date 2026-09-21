@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Highlight
@@ -40,8 +41,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.PageBlock
 import com.folio.reader.ui.components.folioVeil
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.rememberFolioHaptics
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 
@@ -65,7 +67,9 @@ internal fun ReaderTopBar(
     onBookmarkClick: () -> Unit,
     onOpenToc: () -> Unit,
     onOpenAnnotations: () -> Unit,
-    onToggleReaderPanel: () -> Unit
+    onToggleReaderPanel: () -> Unit,
+    echoesEnabled: Boolean = false,
+    onOpenEchoes: () -> Unit = {}
 ) {
     Column(Modifier.fillMaxWidth()) {
         com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
@@ -119,10 +123,12 @@ internal fun ReaderTopBar(
                     // highlight action lives here: dull until the page has a
                     // live selection.
                     val selected = pageSelection
+                    val highlightHaptics = rememberFolioHaptics()
                     IconButton(
                         enabled = selected != null,
                         onClick = {
                             if (selected != null) {
+                                highlightHaptics.play(FolioHaptic.Confirm)
                                 onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
                                 onSelectionConsumed()
                             }
@@ -134,6 +140,25 @@ internal fun ReaderTopBar(
                             tint = if (selected != null) FolioTheme.colors.onSurface
                             else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
                         )
+                    }
+                    if (echoesEnabled) {
+                        val echoesHaptics = rememberFolioHaptics()
+                        IconButton(
+                            enabled = selected != null,
+                            onClick = {
+                                if (selected != null) {
+                                    echoesHaptics.play(FolioHaptic.Confirm)
+                                    onOpenEchoes()
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = if (selected != null) "Find echoes of this passage" else "Select text to find echoes",
+                                tint = if (selected != null) FolioTheme.colors.onSurface
+                                else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                            )
+                        }
                     }
                     IconButton(onClick = onOpenToc) {
                         Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
@@ -181,7 +206,9 @@ internal fun ReaderFloatingRail(
     bookmarkColor: Color,
     onBookmarkClick: () -> Unit,
     onOpenToc: () -> Unit,
-    onOpenAnnotations: () -> Unit
+    onOpenAnnotations: () -> Unit,
+    echoesEnabled: Boolean = false,
+    onOpenEchoes: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -199,10 +226,12 @@ internal fun ReaderFloatingRail(
             // OS selection toolbar covers anything drawn near the text. Dull
             // until there is a selection, then it brightens to invite the tap.
             val selected = pageSelection
+            val highlightHaptics = rememberFolioHaptics()
             IconButton(
                 enabled = selected != null,
                 onClick = {
                     if (selected != null) {
+                        highlightHaptics.play(FolioHaptic.Confirm)
                         onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
                         onSelectionConsumed()
                     }
@@ -214,6 +243,25 @@ internal fun ReaderFloatingRail(
                     tint = if (selected != null) FolioTheme.colors.onSurface
                     else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
                 )
+            }
+            if (echoesEnabled) {
+                val echoesHaptics = rememberFolioHaptics()
+                IconButton(
+                    enabled = selected != null,
+                    onClick = {
+                        if (selected != null) {
+                            echoesHaptics.play(FolioHaptic.Confirm)
+                            onOpenEchoes()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = if (selected != null) "Find echoes of this passage" else "Select text to find echoes",
+                        tint = if (selected != null) FolioTheme.colors.onSurface
+                        else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                    )
+                }
             }
             HorizontalDivider(modifier = Modifier.width(32.dp), color = FolioTheme.colors.onSurface.copy(alpha = 0.2f))
             IconButton(onClick = onOpenToc) {

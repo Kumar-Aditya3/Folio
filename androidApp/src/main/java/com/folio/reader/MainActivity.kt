@@ -39,6 +39,8 @@ import com.folio.reader.nav.FolioNavHost
 import com.folio.reader.nav.FolioNavModelImpl
 import com.folio.reader.nav.FolioNavShell
 import com.folio.reader.ui.components.folioField
+import com.folio.reader.ui.components.folioPredictiveBackScale
+import com.folio.reader.ui.theme.folioAmbientShader
 import com.folio.reader.nav.FolioRoutes
 import com.folio.reader.nav.changeMangaDownloadsLocation
 import com.folio.reader.nav.handleAnnotationsExport
@@ -398,17 +400,38 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .folioField()
+                            // §17 living light: an animated ambient bloom film over
+                            // the static field, so a resting Home/Library page has a
+                            // slow drift of accent light. API 33+/pref/motion gated
+                            // in the actual; a no-op everywhere else.
+                            .folioAmbientShader(
+                                colorA = FolioTheme.colors.primary,
+                                colorB = FolioTheme.colors.tertiary,
+                                enabled = glassCapabilities.specular,
+                            )
                     ) {
                         FolioNavShell(
                             navController = navController,
                             showBottomBar = showBottomBar,
                             backProgress = backProgress,
                         ) {
-                            FolioNavHost(
-                                navController = navController,
-                                navModel = model,
-                                callbacks = callbacks
-                            )
+                            // §16 predictive back: a pushed screen (reader, detail —
+                            // anywhere the bar is hidden) recedes as the back gesture
+                            // grows, previewing the pop. Top-level tabs pass 0 so they
+                            // never scale; their back exits or switches mode instead.
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .folioPredictiveBackScale(
+                                        if (showBottomBar) 0f else backProgress
+                                    )
+                            ) {
+                                FolioNavHost(
+                                    navController = navController,
+                                    navModel = model,
+                                    callbacks = callbacks
+                                )
+                            }
                         }
 
                         Box(

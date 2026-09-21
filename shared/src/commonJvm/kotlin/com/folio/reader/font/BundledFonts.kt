@@ -17,6 +17,16 @@ data class BundledFont(
     val fileName: String,
     val familyName: String,
     val weight: Int = 400,
+    /**
+     * True when the file carries an OpenType `wght` axis, so the reader can render
+     * every weight from the single file. Load-bearing: the reader surfaces declare
+     * a `font-weight` RANGE for variable faces so `font-weight` resolves off the
+     * axis, and enable `font-optical-sizing`. This used to be sniffed from the file
+     * name at the @font-face site and never reached the [CustomFont] model, so
+     * imported variable faces whose names lacked "variable" fell back to a single
+     * pinned weight.
+     */
+    val isVariable: Boolean = false,
     /** Earlier bundled file names replaced by this entry; migrated out of settings. */
     val replaces: List<String> = emptyList()
 )
@@ -32,7 +42,8 @@ object BundledFonts {
         BundledFont(
             displayName = "Comfortaa",
             fileName = "comfortaa_variable.ttf",
-            familyName = "Comfortaa"
+            familyName = "Comfortaa",
+            isVariable = true
         ),
         // Standard reading faces (Google Fonts, all OFL — licenses ship next to
         // the files). Variable builds, so every reader weight renders from the
@@ -40,37 +51,44 @@ object BundledFonts {
         BundledFont(
             displayName = "Literata",
             fileName = "literata_variable.ttf",
-            familyName = "Literata"
+            familyName = "Literata",
+            isVariable = true
         ),
         BundledFont(
             displayName = "Merriweather",
             fileName = "merriweather_variable.ttf",
-            familyName = "Merriweather"
+            familyName = "Merriweather",
+            isVariable = true
         ),
         BundledFont(
             displayName = "Lora",
             fileName = "lora_variable.ttf",
-            familyName = "Lora"
+            familyName = "Lora",
+            isVariable = true
         ),
         BundledFont(
             displayName = "EB Garamond",
             fileName = "ebgaramond_variable.ttf",
-            familyName = "EB Garamond"
+            familyName = "EB Garamond",
+            isVariable = true
         ),
         BundledFont(
             displayName = "Open Sans",
             fileName = "opensans_variable.ttf",
-            familyName = "Open Sans"
+            familyName = "Open Sans",
+            isVariable = true
         ),
         BundledFont(
             displayName = "Inter",
             fileName = "inter_variable.ttf",
-            familyName = "Inter"
+            familyName = "Inter",
+            isVariable = true
         ),
         BundledFont(
             displayName = "Noto Serif",
             fileName = "notoserif_variable.ttf",
-            familyName = "Noto Serif"
+            familyName = "Noto Serif",
+            isVariable = true
         )
     )
 
@@ -127,7 +145,8 @@ object BundledFonts {
                 name = bundled.displayName,
                 fileName = bundled.fileName,
                 familyName = bundled.familyName,
-                weight = bundled.weight
+                weight = bundled.weight,
+                isVariable = bundled.isVariable
             )
         }
         // Merge, so a settings write landing between the read above and this

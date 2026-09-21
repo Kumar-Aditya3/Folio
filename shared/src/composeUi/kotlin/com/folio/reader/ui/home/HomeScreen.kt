@@ -91,10 +91,15 @@ import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.components.tint
 import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
+import com.folio.reader.ui.components.LocalGlassCapabilities
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.LocalFolioDaylight
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioLiquidGlass
+import com.folio.reader.ui.theme.lightDirection
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -133,6 +138,9 @@ fun HomeScreen(
     onOpenSourceWeb: (String) -> Unit = {},
     onOpenDiscover: (MangaDiscoverItem) -> Unit = {},
     onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> },
+    /** Atlas entry: shown only when Semantic discovery is on and the library is map-ready. */
+    onOpenAtlas: () -> Unit = {},
+    atlasReady: Boolean = false,
     topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
 ) {
     when {
@@ -242,6 +250,12 @@ fun HomeScreen(
                     LedgerStrip(state, climate, onOpenStats, onOpenExclusions)
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
                 }
+                if (atlasReady) {
+                    item {
+                        AtlasEntryCard(onOpenAtlas)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
+                }
                 // The shelf is the rest of the same ranked list — books and manga
                 // interleaved by when they were last read, not grouped by format.
                 val shelf = readingNow.drop(1)
@@ -338,6 +352,9 @@ private fun ReadingNowAnchor(
     // warm spell lifts the gradient, a dry spell lets the room go dim. The
     // collapse fade below keeps its own calibrated floor.
     val climateLight = climate?.lightFraction() ?: 0.30f
+    // §13.7: the room's virtual-sun direction, so the liquid-glass specular lands
+    // on the same edge the raised rim catches.
+    val heroLight = LocalFolioDaylight.current.lightDirection()
     val interaction = rememberFolioInteraction()
     Box(
         modifier = Modifier
@@ -363,6 +380,18 @@ private fun ReadingNowAnchor(
                 shape = FolioShapes.heroBleed,
                 accent = tint,
                 elevation = FolioTokens.elevationRaised,
+            )
+            // §13.7 / M7: the AGSL liquid-glass film on the app's flagship hero,
+            // layered under the mesh and the gradient below it (and so under the
+            // cover and type). API 33+ and the liquid-glass preference on, or it
+            // is a no-op and the mesh + raised sheen carry the surface. Lit by the
+            // room's own virtual sun so its specular agrees with the rim catch.
+            .folioLiquidGlass(
+                accent = tint,
+                highlight = FolioTheme.atmosphere.rimLight,
+                lightX = heroLight.first,
+                lightY = heroLight.second,
+                enabled = LocalGlassCapabilities.current.specular,
             )
             // §13.4's drifting mesh, finally on the surface it was designed
             // for: three large low-alpha accent gradients breathing behind
@@ -874,6 +903,55 @@ private fun BecauseYouFinishedShelf(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The Atlas entry — a full-width discovery hero that opens the library's semantic map.
+ *
+ * Built from the same material vocabulary as the reading-now anchor (raised plane + liquid glass,
+ * gated on the specular capability) so it reads as a first-class Home surface rather than a button,
+ * and carries the discovery accent (Rule 14) since it is a discovery affordance, not a progress one.
+ */
+@Composable
+private fun AtlasEntryCard(onOpenAtlas: () -> Unit) {
+    val colors = FolioTheme.colors
+    val light = LocalFolioDaylight.current.lightDirection()
+    val interaction = rememberFolioInteraction()
+    val tint = colors.accentDiscovery
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = FolioTokens.gutter)
+            .folioPressable(interaction)
+            .folioRaised(shape = FolioShapes.plate, accent = tint, elevation = FolioTokens.elevationRaised)
+            .folioLiquidGlass(
+                accent = tint,
+                highlight = FolioTheme.atmosphere.rimLight,
+                lightX = light.first,
+                lightY = light.second,
+                enabled = LocalGlassCapabilities.current.specular,
+            )
+            .clickable(interactionSource = interaction, indication = null) { onOpenAtlas() }
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Column {
+            FolioEyebrow("Discover", accent = tint)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Open the Atlas",
+                style = FolioTheme.typography.titleLarge,
+                color = colors.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "A map of your library by what it is about — drawn on this device.",
+                style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

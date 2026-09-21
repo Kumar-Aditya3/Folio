@@ -101,7 +101,14 @@ class SettingsMergeTest {
         panelOpacity = 0.9f,
         readerChromeOpacity = 0.85f,
         liquidGlassEffects = false,
-        morphIntoReader = true,
+        // morphIntoReader now defaults to true, so the non-default fixture value is
+        // false (the fixture must set every field to a non-default so the field-count
+        // guard in everyFieldIsDiffedAndApplied does not pass vacuously).
+        morphIntoReader = false,
+        // semanticDiscovery defaults to true, so the non-default fixture value is false — every
+        // field must be non-default or the field-count guard in everyFieldIsDiffedAndApplied
+        // would pass vacuously for a field this fixture forgot to set.
+        semanticDiscovery = false,
         documentReaderMode = "CONTINUOUS"
     )
 

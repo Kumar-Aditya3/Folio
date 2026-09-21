@@ -51,9 +51,11 @@ actual fun HtmlContentSurface(
     onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)?,
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
-    seekTargetRequest: Pair<String, Long>?
+    seekTargetRequest: Pair<String, Long>?,
+    onContentReady: () -> Unit
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
+    val latestContentReady by rememberUpdatedState(onContentReady)
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
     val latestSelection by rememberUpdatedState(onSelectionChanged)
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -283,6 +285,12 @@ actual fun HtmlContentSurface(
                     view.evaluateJavascript(pj.second, null)
                 }
                 pageState.markReady(view)
+                // The document has committed and the engine JS has run: this is the
+                // first frame the reader's text actually paints. Tell Compose so the
+                // morph cover plate can dissolve on real paint instead of on the
+                // HTML *string* being ready (which left a blank-paper flash). Posted
+                // to the main thread since onPageFinished can arrive off it.
+                mainHandler.post { latestContentReady() }
             }
         }
     }
@@ -445,8 +453,10 @@ actual fun HtmlContentSurface(
                 val importedFonts = settings.customFonts.joinToString("") { font ->
                     val url = "file://${webView.context.filesDir.absolutePath}/fonts/${font.fileName}"
                     // Variable files declare a weight RANGE so real weights resolve
-                    // from the axis; static files pin their single weight.
-                    val weight = if (font.fileName.contains("variable")) "300 900" else "${font.weight}"
+                    // from the axis; static files pin their single weight. Prefer the
+                    // model's own flag (set for bundled faces and computed for imports),
+                    // keeping the file-name sniff as a fallback for legacy entries.
+                    val weight = if (font.isVariable || font.fileName.contains("variable")) "300 900" else "${font.weight}"
                     "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:$weight;font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
@@ -502,6 +512,9 @@ actual fun HtmlContentSurface(
                         pendingJs = null
                         webView.evaluateJavascript(pj.second, null)
                         pageState.markReady(webView)
+                        // Same first-paint signal as onPageFinished, for the WebView
+                        // whose onPageFinished never fires (see tryInject above).
+                        mainHandler.post { latestContentReady() }
                     } else if (attempt < 10) {
                         webView.postDelayed({ tryInject(attempt + 1) }, 200)
                     } else {

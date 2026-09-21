@@ -56,10 +56,25 @@ object ReaderCss {
 
         // Spacing sliders are authored in em so their whole travel is visible at
         // any text size; a px value of 0.3 would move nothing.
+        //
+        // Optical sizing is deliberately `auto`, not a hand-rolled size→weight
+        // curve: the bundled reading faces (Literata, Fraunces, EB Garamond,
+        // Noto Serif) carry a real `opsz` axis, so `font-optical-sizing:auto`
+        // lets the face itself grade its own optical size against `font-size` —
+        // exactly the "larger text → different optical size, small text → optical
+        // compensation" relationship, sourced from the type designer rather than
+        // invented here, and a no-op on faces without the axis. `font-weight`
+        // stays the weight lever (it already resolves off the `wght` axis for the
+        // variable faces), so nothing here fights the user's chosen weight.
+        // `text-rendering:optimizeLegibility` turns on kerning and standard
+        // ligatures — the difference between a WebView dumping glyphs and a
+        // typesetting surface. All non-original only, so ORIGINAL keeps the
+        // publisher's typography untouched.
         val typography = if (original) "" else
             "font-family:$family$imp;font-size:${settings.fontSize}px$imp;" +
                     "font-weight:${settings.fontWeight}$imp;line-height:${settings.lineHeight}$imp;" +
-                    "letter-spacing:${settings.letterSpacing}em$imp;word-spacing:${settings.wordSpacing}em$imp;"
+                    "letter-spacing:${settings.letterSpacing}em$imp;word-spacing:${settings.wordSpacing}em$imp;" +
+                    "font-optical-sizing:auto$imp;text-rendering:optimizeLegibility$imp;"
         val alignCss = if (original) "" else "text-align:$align$imp;"
         // Ink on body is always forced (even in ORIGINAL) so a theme switch always
         // repaints the page; the element-level force below handles publisher rules.
@@ -107,6 +122,21 @@ object ReaderCss {
         // only; ORIGINAL keeps the publisher's plain page furniture.
         val surfaceCss = if (original) "" else
             "body pre,body blockquote{background-color:#${theme.surface.rgb()} !important;}"
+        // Modern line breaking (Chromium 132 in JCEF, Play-updated WebView on
+        // Android — both ship it). `pretty` is the paragraph-level lever: it costs
+        // the browser a short look-back over the final lines of each block to kill
+        // orphans, shortstop last lines and the worst justification rivers, which
+        // is precisely where justified body text without it reads worst. It is
+        // scoped to body prose only — never long-form headings — and is a graceful
+        // no-op on any engine that does not understand the keyword.
+        val prettyWrapCss = if (original) "" else
+            "body p,body li,body dd,body blockquote{text-wrap:pretty !important;}"
+        // `balance` evens the line lengths of short blocks so a chapter title never
+        // leaves one wet word on line two. Browsers self-limit balancing to blocks
+        // of a few lines, so applying it to every heading and caption is safe: a
+        // long block silently opts itself out. Headings/captions only.
+        val balanceWrapCss = if (original) "" else
+            "h1,h2,h3,h4,h5,h6,body figcaption,body caption{text-wrap:balance !important;}"
 
         // Paged modes cap the measure per column inside the engine, and need body
         // exactly 100vw wide for its page steps to line up.
@@ -151,6 +181,8 @@ object ReaderCss {
                 secondaryInkCss +
                 dividerCss +
                 surfaceCss +
+                prettyWrapCss +
+                balanceWrapCss +
                 "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()} !important;}" +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +

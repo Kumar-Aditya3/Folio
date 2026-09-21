@@ -389,12 +389,25 @@ class SemanticSearchRepository(
      * floor; the margin is deliberately *not* applied, because this is a browse list rather
      * than an answer and a lone good neighbour is a legitimate one.
      */
-    suspend fun moreLikeThis(text: String, excludeChunkId: String? = null, limit: Int = 8): List<SemanticHit> =
+    suspend fun moreLikeThis(
+        text: String,
+        excludeChunkId: String? = null,
+        limit: Int = 8,
+        /**
+         * Drops every hit from this book, applied inside the index scan so the returned list is
+         * still [limit] long. Echoes passes the open book here: a "resonant passage" the reader
+         * is already looking at is not a discovery. Null keeps the whole library in play.
+         */
+        excludeBookId: String? = null,
+    ): List<SemanticHit> =
         withContext(dispatcher) {
             val vector = embedOne(text, EmbedKind.PASSAGE) ?: return@withContext emptyList()
             if (!preload()) return@withContext emptyList()
             val current = index ?: return@withContext emptyList()
-            val picked = current.search(vector, limit + 1)
+            val filter: ((String) -> Boolean)? = excludeBookId?.let { excluded ->
+                { chunkId -> chunkById[chunkId]?.bookId != excluded }
+            }
+            val picked = current.search(vector, limit + 1, filter)
                 .filter { it.chunkId != excludeChunkId && it.score >= MIN_SIMILARITY }
                 .take(limit)
             val texts = runCatching { chunkRepository.chunkTexts(picked.map { it.chunkId }) }

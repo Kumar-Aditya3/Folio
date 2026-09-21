@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Bookmark
@@ -37,9 +38,11 @@ import com.folio.reader.ui.components.pageBlockChapterStops
 import com.folio.reader.ui.components.pageBlockSeekTarget
 import com.folio.reader.ui.components.pageFoxing
 import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
 
 /**
@@ -69,6 +72,16 @@ fun ReaderScreen(
     showControls: Boolean,
     showToc: Boolean,
     showAnnotations: Boolean,
+    /** Echoes side panel: selection-driven cross-book resonant passages. */
+    showEchoes: Boolean = false,
+    echoesState: EchoesState = EchoesState.Idle,
+    /** App-level Semantic-discovery flag; the Echoes action only lights when true and a selection exists. */
+    echoesEnabled: Boolean = false,
+    onOpenEchoes: (selectedText: String) -> Unit = {},
+    onCloseEchoes: () -> Unit = {},
+    /** Fired on the first text selection so the embedder/index can warm before an Echoes tap. */
+    onPrewarmEchoes: () -> Unit = {},
+    onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
     onChapterChange: (Int) -> Unit,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -135,13 +148,63 @@ fun ReaderScreen(
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
     var totalPages by remember(currentChapterIndex) { mutableStateOf(1) }
+    val pageHaptics = rememberFolioHaptics()
+    // The HTML bridge reports position on every progress tick, not only on turns,
+    // and the first report per chapter is the initial settle. Gate the page-turn
+    // tick so it fires only on a genuine page change after that first report.
+    var pageReported by remember(currentChapterIndex) { mutableStateOf(false) }
 
-    // §17 morph landing: the book id to land the tapped cover on, but only while
-    // there is nothing on the page yet. The moment a chapter, its HTML or its
-    // cover chapter arrives the plate has served its purpose and is dropped, which
-    // is also what stops the key being registered twice.
+    // §17 morph landing: the book id to land the tapped cover on. Held until the
+    // page has genuinely PAINTED, not merely until the HTML string is ready.
+    //
+    // The old gate (`isLoadingContent || chapterHtml.isBlank()`) dropped the plate
+    // the instant the loader produced non-blank HTML — but the browser surface
+    // that paints that HTML had not been handed the document yet, so the plate
+    // vanished onto a blank paper frame and the text hard-cut in a beat later.
+    // That gap was the reported flash. `contentPainted` flips on the surface's
+    // real first-paint (onPageFinished / onLoadEnd, via ChapterContent's
+    // onContentReady), so the plate now covers the blank frame and dissolves only
+    // once there is text underneath it. Keyed on the book so a later chapter turn
+    // never re-arms it.
+    var contentPainted by remember(morphBookId) { mutableStateOf(false) }
+    // The plate stays composed through its dissolve, not just until paint: it holds
+    // opaque over the loading/blank frame, then fades out once the text underneath
+    // has painted, so the reader sees the cover melt into the page instead of the
+    // page hard-cutting in. `plateGone` latches when the fade finishes, which is
+    // what finally drops the second copy of the cover key.
+    var plateGone by remember(morphBookId) { mutableStateOf(false) }
+    val morphMotion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val plateAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (contentPainted) 0f else 1f,
+        animationSpec = androidx.compose.animation.core.tween(
+            durationMillis = if (morphMotion) FolioTokens.motionStandard.toInt() else 0,
+            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+        ),
+        label = "morphPlateDissolve",
+    )
+    // Drop the plate once it has fully faded (or at once under reduce-motion), so
+    // the cover key is released rather than lingering for the whole session.
+    LaunchedEffect(contentPainted, plateAlpha, morphMotion) {
+        if (contentPainted && (plateAlpha <= 0.001f || !morphMotion)) plateGone = true
+    }
     val morphLanding = morphBookId?.takeIf {
-        isLoadingContent || chapterHtml.isBlank() || currentChapter == null
+        !plateGone && currentChapter != null
+    }
+    // The shared-element cover key is published ONLY during the fly-in — before the
+    // text paints. The moment it has painted, the plate stops being a shared element
+    // and finishes as a plain dissolving overlay.
+    //
+    // Why: the reader and the shelf both publish `book_cover:$id`. If the reader
+    // kept its copy registered through the whole dissolve (until plateGone), a quick
+    // back-to-Library pop would have the reader's plate AND the shelf cell both
+    // holding the same key live at once — the "two live copies of one key" case the
+    // registry cannot resolve (see FolioSharedElements' LocalSharedElementsSuppressed
+    // note), which stranded the home/library cover morph. Dropping the key at paint
+    // keeps the reader morph from ever overlapping the shelf's. The fly-in (450ms
+    // motionMorph) all but always finishes before the WebView's first paint, so the
+    // morph itself is unaffected.
+    val morphKey = morphBookId?.takeIf {
+        !contentPainted && currentChapter != null
     }
 
     // Desktop's embedded browser is a heavyweight native window that paints over
@@ -166,6 +229,12 @@ fun ReaderScreen(
     // Highlight whose note is being written in the glass composer.
     var noteDraftFor by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(currentChapterIndex) { pageSelection = null }
+    // Warm the Echoes embedder/index the moment the reader first selects text, so a later Echoes
+    // tap is near-instant rather than paying a cold ONNX session + index build. Idempotent in the VM.
+    val hasSelectionForEchoes = pageSelection?.third?.isNotBlank() == true
+    LaunchedEffect(hasSelectionForEchoes, echoesEnabled) {
+        if (hasSelectionForEchoes && echoesEnabled) onPrewarmEchoes()
+    }
     // Annotation jumps: (target chapter index, seek target, chapter fraction). Released
     // only once that chapter is on screen, else the seek would move the old chapter.
     var pendingJump by remember { mutableStateOf<Triple<Int, String?, Float?>?>(null) }
@@ -409,6 +478,17 @@ fun ReaderScreen(
         if (opening) {
             if (showToc) onToggleToc()
             if (showAnnotations) onToggleAnnotations()
+            if (showEchoes) onCloseEchoes()
+        }
+    }
+    // Echoes opens from the current selection; the VM runs the cross-book lookup and closes the
+    // other panels. The reader panel is local state here, so close it too.
+    val openEchoesAction: () -> Unit = {
+        val text = pageSelection?.third
+        if (!text.isNullOrBlank()) {
+            showReaderPanel = false
+            onOpenEchoes(text)
+            pageSelection = null
         }
     }
 
@@ -456,6 +536,7 @@ fun ReaderScreen(
             val reservedEnd = if (occludes) 0.dp else when {
                 showToc -> 260.dp
                 showAnnotations -> 300.dp
+                showEchoes -> 320.dp
                 showReaderPanel -> 280.dp
                 else -> 0.dp
             }
@@ -503,6 +584,10 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxSize().padding(contentInsets),
                 position = position,
                 onPageChange = { page, total ->
+                    if (pageReported && page != currentPage) {
+                        pageHaptics.play(FolioHaptic.PageTurn)
+                    }
+                    pageReported = true
                     currentPage = page
                     totalPages = total
                     onPageChange(page, total)
@@ -516,17 +601,18 @@ fun ReaderScreen(
                 onVisibleSection = onVisibleSection,
                 onExtendForward = onExtendForward,
                 onExtendBackward = onExtendBackward,
-                onWindowOpApplied = onWindowOpApplied
+                onWindowOpApplied = onWindowOpApplied,
+                onContentReady = { contentPainted = true }
             )
         } else {
             ReaderNoChapters(onBackPress = onBackPress)
         }
 
         // §17 morph landing. Composed after the page surface, so it sits *over*
-        // it: the plate arrives with the cover the reader tapped and the page
-        // fades up beneath it once the chapter is up. Held only while the chapter
-        // is loading, then dropped — leaving it composed would keep a second copy of
-        // the cover key alive for the whole reading session and strand the morph.
+        // it: the plate arrives with the cover the reader tapped, holds opaque over
+        // the blank/loading frame, then dissolves once the text beneath it has
+        // genuinely painted (contentPainted → plateAlpha). Dropped after the fade so
+        // it never keeps a second copy of the cover key alive for the session.
         if (morphLanding != null) {
             com.folio.reader.ui.components.FolioCoverPlate(
                 coverPath = coverPath,
@@ -542,7 +628,18 @@ fun ReaderScreen(
                     .padding(horizontal = FolioTokens.gutter)
                     .widthIn(max = 280.dp)
                     .fillMaxWidth()
-                    .sharedElementOrNoop(FolioSharedKeys.bookCover(morphLanding)),
+                    // Dissolve on real first-paint. graphicsLayer alpha (not a
+                    // recompose) so the fade runs on the render thread while the
+                    // shared-element bounds settle underneath it.
+                    .graphicsLayer { alpha = plateAlpha }
+                    // Shared key only during the fly-in (morphKey); once painted the
+                    // plate keeps composing (morphLanding) but drops the key, so its
+                    // copy never overlaps the shelf's during a back-to-Library pop.
+                    .then(
+                        if (morphKey != null) {
+                            Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(morphKey))
+                        } else Modifier
+                    ),
                 width = null,
                 halo = null,
                 suppressFallbackText = true,
@@ -635,7 +732,9 @@ fun ReaderScreen(
                 onBookmarkClick = onBookmarkClick,
                 onOpenToc = openToc,
                 onOpenAnnotations = openAnnotations,
-                onToggleReaderPanel = toggleReaderPanel
+                onToggleReaderPanel = toggleReaderPanel,
+                echoesEnabled = echoesEnabled,
+                onOpenEchoes = openEchoesAction
             )
         }
 
@@ -701,7 +800,9 @@ fun ReaderScreen(
                 bookmarkColor = Color(readerThemePreset.bookmark),
                 onBookmarkClick = onBookmarkClick,
                 onOpenToc = openToc,
-                onOpenAnnotations = openAnnotations
+                onOpenAnnotations = openAnnotations,
+                echoesEnabled = echoesEnabled,
+                onOpenEchoes = openEchoesAction
             )
         }
         }
@@ -714,6 +815,10 @@ fun ReaderScreen(
             showToc = showToc,
             showAnnotations = showAnnotations,
             showReaderPanel = showReaderPanel,
+            showEchoes = showEchoes,
+            echoesState = echoesState,
+            onCloseEchoes = onCloseEchoes,
+            onOpenEcho = onOpenEcho,
             chapters = chapters,
             currentChapterIndex = currentChapterIndex,
             onChapterChange = { jumpToChapter(it) },

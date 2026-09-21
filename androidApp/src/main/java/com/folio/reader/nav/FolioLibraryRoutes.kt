@@ -130,6 +130,15 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             // from app start (FolioNavModelImpl.homeState) — the skeleton used
             // to re-run on every visit because the route rebuilt the VM.
             val state by navModel.homeState.collectAsState()
+            // Atlas hero gating: the app-level flag plus a map-ready library (≥ threshold embedded
+            // books). Resolved off the main thread; the hero simply does not appear until true.
+            var atlasReady by remember { mutableStateOf(false) }
+            LaunchedEffect(navModel.globalSettings.semanticDiscovery, state.loaded) {
+                atlasReady = navModel.globalSettings.semanticDiscovery &&
+                    runCatching {
+                        graph.semanticDiscoveryRepository.atlasReadiness() is com.folio.reader.ml.AtlasReadiness.Ready
+                    }.getOrDefault(false)
+            }
             HomeScreen(
                 state = state,
                 topInset = folioBarTopInset(),
@@ -138,6 +147,8 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 onImportClick = { navModel.callbacks.onImportEpubs() },
                 onOpenStats = { navController.navigate(FolioRoutes.STATS) },
                 onOpenLibrary = { navController.navigate(FolioRoutes.LIBRARY) },
+                onOpenAtlas = { navController.navigate(FolioRoutes.ATLAS) },
+                atlasReady = atlasReady,
                 onOpenExclusions = {
                     navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
                 },
@@ -459,7 +470,8 @@ fun MoreRoute(
     onOpenRevisit: () -> Unit,
     onOpenExtensions: () -> Unit,
     onOpenDownloads: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    onOpenAtlas: () -> Unit
 ) {
     com.folio.reader.settings.SettingsHubScreen(
         onOpenSettings = onOpenSettings,
@@ -468,7 +480,8 @@ fun MoreRoute(
         onOpenRevisit = onOpenRevisit,
         onOpenExtensions = onOpenExtensions,
         onOpenDownloads = onOpenDownloads,
-        onOpenHistory = onOpenHistory
+        onOpenHistory = onOpenHistory,
+        onOpenAtlas = onOpenAtlas
     )
 }
 
@@ -529,7 +542,8 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
             onOpenRevisit = { navModel.navController?.navigate(FolioRoutes.REVISIT) },
             onOpenExtensions = { navModel.navController?.navigate(FolioRoutes.EXTENSIONS) },
             onOpenDownloads = { navModel.navController?.navigate(FolioRoutes.MANGA_DOWNLOADS) },
-            onOpenHistory = { navModel.navController?.navigate(FolioRoutes.MANGA_HISTORY) }
+            onOpenHistory = { navModel.navController?.navigate(FolioRoutes.MANGA_HISTORY) },
+            onOpenAtlas = { navModel.navController?.navigate(FolioRoutes.ATLAS) }
         )
     }
 }

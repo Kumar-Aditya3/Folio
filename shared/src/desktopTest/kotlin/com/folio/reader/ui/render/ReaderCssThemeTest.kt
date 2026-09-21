@@ -131,6 +131,37 @@ class ReaderCssThemeTest {
     }
 
     @Test
+    fun `non-original modes enable variable-font optical sizing and modern wrapping`() {
+        for (mode in listOf(FormattingMode.HYBRID, FormattingMode.NORMALIZED)) {
+            val css = sheet(ReaderSettings(themeId = "paper", formattingMode = mode))
+            assertTrue(
+                "font-optical-sizing:auto !important;" in css,
+                "$mode must enable optical sizing so variable faces grade against font-size",
+            )
+            assertTrue(
+                "text-rendering:optimizeLegibility !important;" in css,
+                "$mode must turn on kerning/ligatures",
+            )
+            assertTrue(
+                "body p,body li,body dd,body blockquote{text-wrap:pretty !important;}" in css,
+                "$mode must apply text-wrap:pretty to body prose",
+            )
+            assertTrue(
+                "text-wrap:balance !important;" in css,
+                "$mode must balance short headings/captions",
+            )
+        }
+    }
+
+    @Test
+    fun `original mode leaves modern typography to the publisher`() {
+        val css = sheet(ReaderSettings(themeId = "sepia", formattingMode = FormattingMode.ORIGINAL))
+        assertTrue("font-optical-sizing" !in css, "ORIGINAL must not force optical sizing")
+        assertTrue("text-wrap" !in css, "ORIGINAL must not force line-wrapping")
+        assertTrue("text-rendering" !in css, "ORIGINAL must not force text-rendering")
+    }
+
+    @Test
     fun `secondary ink and dividers use the theme palette`() {
         val theme = Theme.getPreset("paper")
         val css = sheet(ReaderSettings(themeId = "paper", formattingMode = FormattingMode.HYBRID))

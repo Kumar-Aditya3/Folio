@@ -294,6 +294,22 @@ fun ReaderSettingsPanel(
             }
         }
 
+            // Font weight — a first-class in-reader lever now the bundled faces
+            // are variable (BundledFonts.isVariable), so every step from Light to
+            // Bold renders from the one file instead of snapping to a pinned face.
+            QuickChoiceRow(
+                label = "Weight",
+                options = listOf(
+                    "300" to "Light",
+                    "400" to "Regular",
+                    "500" to "Medium",
+                    "700" to "Bold",
+                ),
+                selected = settings.fontWeight.toString(),
+                onSelect = { value -> value.toIntOrNull()?.let { apply(settings.copy(fontWeight = it)) } },
+                overrideDot = "fontWeight" in overriddenFields,
+            )
+
             // Theme: scrollable/draggable vertical slider of live mini previews.
             // Opens scrolled to the active theme; tap a preview to apply it.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -426,6 +442,30 @@ fun ReaderSettingsPanel(
                     value = settings.lineHeight,
                     onValueChange = { apply(settings.copy(lineHeight = it)) },
                     valueRange = 1f..3f
+                )
+            }
+
+            // Paragraph spacing — the gap between paragraphs, authored in em so
+            // it tracks text size. Pairs with line spacing above.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1)
+                    ) {
+                        Text("Paragraph spacing", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
+                        OverrideDot("paragraphSpacing" in overriddenFields)
+                    }
+                    Text("%.1f".format(settings.paragraphSpacing), style = FolioTheme.typography.labelLarge, color = accentText)
+                }
+                FolioSlider(
+                    value = settings.paragraphSpacing,
+                    onValueChange = { apply(settings.copy(paragraphSpacing = it)) },
+                    valueRange = 0f..2.5f
                 )
             }
 

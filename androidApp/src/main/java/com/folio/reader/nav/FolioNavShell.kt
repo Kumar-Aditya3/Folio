@@ -67,12 +67,14 @@ import com.folio.reader.ui.components.glassBlurred
 import com.folio.reader.ui.components.navSweepAlpha
 import com.folio.reader.ui.components.navSweepBand
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.navCapsuleFill
+import com.folio.reader.ui.theme.rememberFolioHaptics
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.surfaceOpacity
 
@@ -317,6 +319,7 @@ fun FolioNavShell(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    val navHaptics = rememberFolioHaptics()
                     folioNavBarItems.forEachIndexed { index, item ->
                         val isSelected = index == selectedIndex
 
@@ -327,8 +330,14 @@ fun FolioNavShell(
                                 if (isSelected) {
                                     // Re-tap on the selected tab scrolls its content
                                     // back to top — `launchSingleTop` makes the
-                                    // navigation itself a silent no-op otherwise.
+                                    // navigation itself a silent no-op otherwise. A
+                                    // lighter scrub tick, not the full commit click.
+                                    navHaptics.play(FolioHaptic.ScrubTick)
                                     FolioTabReselect.select(item.route)
+                                } else {
+                                    // A real tab switch commits — the Living Paper
+                                    // commit click, paired with the cover morph.
+                                    navHaptics.play(FolioHaptic.Commit)
                                 }
                                 navController.navigate(item.route) {
                                     popUpTo(navController.graph.startDestinationId) {

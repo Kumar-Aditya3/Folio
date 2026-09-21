@@ -184,8 +184,13 @@ class StatisticsViewModel(
     companion object {
         /** Days of history pulled into every calculation. */
         const val historyDays = 365
-        /** Weeks of activity drawn in the heatmap. */
-        const val heatmapWeeks = 18
+        /**
+         * Weeks of activity drawn in the heatmap — a full year, GitHub-style. The
+         * history window ([historyDays] = 365) already covers this, so widening the
+         * grid costs nothing at the query layer; the grid scrolls horizontally and
+         * lands on the most recent week.
+         */
+        const val heatmapWeeks = 52
         private val dayNames = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
         /** Maximum entries shown in the floating quotes/highlights card. */
         private const val FLOATING_FEED_CAP = 6

@@ -79,6 +79,8 @@ fun ChapterContent(
     onExtendForward: () -> Unit = {},
     onExtendBackward: () -> Unit = {},
     onWindowOpApplied: (nonce: Long) -> Unit = {},
+    /** Fired on the browser surface's first real paint; drives the morph handoff. */
+    onContentReady: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
     val readerTheme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
@@ -256,6 +258,10 @@ fun ChapterContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
+                // This branch is Compose, not the browser surface, so no page-load
+                // callback arrives — signal readiness once it composes so opening
+                // straight onto the cover chapter still dissolves the morph plate.
+                LaunchedEffect(chapter.id) { onContentReady() }
                 com.folio.reader.ui.components.BookCover(
                     coverPath = coverPath,
                     title = chapter.title,
@@ -387,7 +393,8 @@ fun ChapterContent(
                     onSelectionChanged = onSelectionChanged,
                     clearSelectionRequest = clearSelectionRequest,
                     seekRequest = seekRequest,
-                    seekTargetRequest = seekTargetRequest
+                    seekTargetRequest = seekTargetRequest,
+                    onContentReady = onContentReady
                 )
             }
         }

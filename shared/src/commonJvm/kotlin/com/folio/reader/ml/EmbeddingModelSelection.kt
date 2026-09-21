@@ -35,6 +35,12 @@ class EmbeddingModelSelection(
     private val searchRepository: SearchRepository,
     private val modelsDir: java.io.File,
     private val chunkRepository: ChunkRepository,
+    /**
+     * Shared, model-independent — the Atlas/Echoes discovery repo resolves book titles, covers
+     * and reading progress through it. Kept behind this holder like the other derived services
+     * so a model swap tears the discovery repo down with the searcher it borrows from.
+     */
+    private val bookRepository: com.folio.reader.database.BookRepository,
     threads: Int = defaultEmbedThreads(),
     useXnnpack: Boolean = true,
 ) {
@@ -60,6 +66,7 @@ class EmbeddingModelSelection(
     private var _indexer: EmbeddingIndexer? = null
     private var _semantic: SemanticSearchRepository? = null
     private var _tagger: ZeroShotTagger? = null
+    private var _discovery: SemanticDiscoveryRepository? = null
 
     val embedderFactory: OnnxEmbedderFactory get() = _embedderFactory
 
@@ -76,6 +83,17 @@ class EmbeddingModelSelection(
 
     val tagger: ZeroShotTagger
         get() = _tagger ?: ZeroShotTagger(_embedderFactory).also { _tagger = it }
+
+    /**
+     * Atlas + Echoes. Reuses [semanticSearch] rather than opening a second embedder, so it must
+     * be rebuilt whenever the searcher is (an [adopt] nulls both).
+     */
+    val discovery: SemanticDiscoveryRepository
+        get() = _discovery ?: SemanticDiscoveryRepository(
+            semanticSearch = semanticSearch,
+            chunkRepository = chunkRepository,
+            bookRepository = bookRepository,
+        ).also { _discovery = it }
 
     /**
      * Reads the stored choice and adopts it. Returns the model now in force.
@@ -116,6 +134,7 @@ class EmbeddingModelSelection(
         _indexer = null
         _semantic = null
         _tagger = null
+        _discovery = null
         return model
     }
 

@@ -99,6 +99,7 @@ class AppGraph(private val app: Application) {
         searchRepository = searchRepository,
         modelsDir = platform.fileSystem.getModelsDir(),
         chunkRepository = chunkRepository,
+        bookRepository = bookRepository,
     )
 
     /** The model in force. Kept as a convenience so existing call sites keep reading well. */
@@ -113,6 +114,10 @@ class AppGraph(private val app: Application) {
 
     val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
         get() = modelSelection.semanticSearch
+
+    /** Atlas + Echoes data owner; reuses the searcher's embedder and resident index. */
+    val semanticDiscoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository
+        get() = modelSelection.discovery
 
     // Phase 5 #2. Built from the same embedder factory, so a build with no model downloaded
     // gets a tagger that reports itself unavailable rather than a second download path.

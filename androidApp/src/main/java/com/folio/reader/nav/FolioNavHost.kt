@@ -1,7 +1,5 @@
 package com.folio.reader.nav
 
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -11,25 +9,17 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.folio.reader.ui.components.FolioSharedElementProvider
 import com.folio.reader.ui.components.FolioSharedElementScope
-import com.folio.reader.ui.components.FolioSharedElementsSuppressed
 import com.folio.reader.ui.theme.FolioTokens
-import kotlinx.coroutines.delay
 
 /**
  * The four bottom-bar destinations — the set the §17 tab dissolve applies to.
@@ -106,42 +96,21 @@ fun FolioNavHost(
 ) {
     val graph = navModel.graph
 
-    // §17 tab↔tab is an instant swap, not a morph. A book on the Home hero and the
-    // same book in the Library grid publish the same cover key, so a tab switch
-    // used to run a 450ms cover morph between them — and while that flight was in
-    // the air the shared-element machinery kept the *outgoing* tab composed and
-    // drawn (its masthead, its hero tint) on top of the field, so the page looked
-    // like it only finished switching once the covers landed. A tab switch is a
-    // change of page in place; suppressing the cover morph for the switch lets the
-    // outgoing tab leave on its (None) exit at once, so the background swaps the
-    // instant the tab is tapped. Pushes (shelf → detail/reader) are untouched and
-    // keep their morph.
-    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
-    var previousRoute by remember { mutableStateOf(currentRoute) }
-    var suppressTabMorph by remember { mutableStateOf(false) }
-    // Detected synchronously (not from an effect) so suppression is already on for
-    // the first composed frame of the incoming tab — a frame late, its covers would
-    // pair with the outgoing tab's and the morph would start before it is stopped.
-    if (currentRoute != previousRoute) {
-        if (previousRoute in topLevelRoutes && currentRoute in topLevelRoutes) {
-            suppressTabMorph = true
-        }
-        previousRoute = currentRoute
-    }
-    LaunchedEffect(currentRoute) {
-        if (suppressTabMorph) {
-            // Hold only for the flight the morph would have taken, then restore so
-            // an ordinary shelf → detail push from this tab morphs normally again.
-            delay(FolioTokens.motionMorph + 40)
-            suppressTabMorph = false
-        }
-    }
-
+    // §17 tab↔tab flies the covers. A book on the Home hero and the same book in
+    // the Library grid publish the same cover key, so switching tabs morphs the
+    // cover from where it sat to where it lands. The background must not wait for
+    // that 450ms flight, though: the incoming tab fades in fast (motionFast) so the
+    // field reads as swapped almost at once, and the outgoing tab fades out just as
+    // fast so its masthead/hero tint don't hang on top for the whole flight — it
+    // stays composed but transparent while the shared-element overlay carries the
+    // covers the rest of the way. A hard cut (None) can't coexist with the morph:
+    // the transition has to stay live for the covers to travel, so the swap is a
+    // short fade rather than an instant flip. Pushes (shelf → detail/reader) keep
+    // their fade+slide below.
     SharedTransitionLayout(modifier = modifier) {
         // §17 shared elements: one transition scope spans every destination, so a
         // cover tapped on a shelf is the same object that lands on the detail page.
         FolioSharedElementProvider(sharedTransitionScope = this) {
-          FolioSharedElementsSuppressed(suppressed = suppressTabMorph) {
             NavHost(
                 navController = navController,
                 // Home is the first of the four bar items and the app's opening
@@ -151,47 +120,38 @@ fun FolioNavHost(
                 startDestination = FolioRoutes.HOME,
                 modifier = Modifier.fillMaxSize(),
                 // §17 morphing tabs: a switch between the bar's destinations is the same
-                // page changing its mind, not travel down a stack, so it dissolves in place
-                // while a push keeps its travel — a fade plus a short horizontal slide, so
+                // page changing its mind, not travel down a stack. It fades in place (no
+                // slide, no scale — scaling a whole page re-rasterises every cover and glyph
+                // and was a reported glitch) while a push keeps its fade+slide travel, so
                 // opening a book reads as moving *into* it and back as returning.
-                //
-                // A tab↔tab switch deliberately does *not* slide or scale. Scaling a whole
-                // page re-rasterises every cover and glyph in it for the duration, so the
-                // page goes soft and then sharpens; the library's own shelf swap does the
-                // same and was the reported glitch. The bar's selected segment already
-                // springs toward the new tab, which carries the direction a slide would.
-                // The library default (~700ms with delays) reads as lag; these are 220/180
-                // with the slide capped at 4% of the width.
                 enterTransition = {
-                    // A tab↔tab switch is an instant swap, no crossfade. The bars (top
-                    // segmented switch, mastheads) and the nav capsule are all glass —
-                    // low-alpha, sampling the page behind them — so a crossfade puts BOTH
-                    // the outgoing and incoming chrome at partial opacity at once, and the
-                    // field shows straight through: the "Books/Manga/Documents bar and the
-                    // nav bar flash transparent for a moment" report. The incoming glass
-                    // backdrop also attaches a frame late, deepening the same dip. Cutting
-                    // instead of fading removes the dip at its source, and it matches the
-                    // tab morph's existing direction — the slide was already dropped here,
-                    // and the selected segment's own spring carries the motion. Pushes and
+                    // A tab↔tab switch fades — it does not slide or scale. The bars (top
+                    // segmented switch, mastheads) and the nav capsule are all glass, so this
+                    // fade is kept short (motionFast): long enough to let the cover morph stay
+                    // live and fly, short enough that the incoming background reads as swapped
+                    // almost at once instead of hanging behind a slow crossfade. Pushes and
                     // pops keep their fade+slide below.
-                    if (isTabMorph()) EnterTransition.None
+                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionFast.toInt()))
                     else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
                 },
                 exitTransition = {
-                    if (isTabMorph()) ExitTransition.None
+                    // Outgoing tab clears on the same fast fade so its masthead/hero tint
+                    // don't linger on top through the 450ms cover flight; it stays composed
+                    // but transparent while the shared-element overlay finishes the covers.
+                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionFast.toInt()))
                     else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                         slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
                 },
                 popEnterTransition = {
-                    val slide = if (isTabMorph()) EnterTransition.None else
+                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionFast.toInt()))
+                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
-                    fadeIn(tween(FolioTokens.motionStandard.toInt())) + slide
                 },
                 popExitTransition = {
-                    val slide = if (isTabMorph()) ExitTransition.None else
+                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionFast.toInt()))
+                    else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                         slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
-                    fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) + slide
                 }
             ) {
                 // ── Bottom-bar destinations ─────────────────────────────────────────
@@ -247,7 +207,8 @@ fun FolioNavHost(
                         onOpenRevisit = { navController.navigate(FolioRoutes.REVISIT) },
                         onOpenExtensions = { navController.navigate(FolioRoutes.EXTENSIONS) },
                         onOpenDownloads = { navController.navigate(FolioRoutes.MANGA_DOWNLOADS) },
-                        onOpenHistory = { navController.navigate(FolioRoutes.MANGA_HISTORY) }
+                        onOpenHistory = { navController.navigate(FolioRoutes.MANGA_HISTORY) },
+                        onOpenAtlas = { navController.navigate(FolioRoutes.ATLAS) }
                     )
                 }
 
@@ -282,7 +243,14 @@ fun FolioNavHost(
                             // Search from the reader goes to its own destination so search's
                             // own back can return here instead of to the Library.
                             onOpenSearch = { navController.navigate(FolioRoutes.SEARCH_FROM_READER) },
-                            onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) }
+                            onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) },
+                            // An echo opens another book's reader at the resonant passage. Push a
+                            // fresh reader so back returns to the book the reader was reading from.
+                            onOpenEcho = { echoBookId, echoSpine, echoFrac ->
+                                navController.navigate(
+                                    FolioDestination.reader(echoBookId, echoSpine, echoFrac?.let { (it * 1000).toInt() })
+                                )
+                            }
                         )
                     }
                 }
@@ -329,6 +297,22 @@ fun FolioNavHost(
                             )
                         }
                     )
+                }
+
+                // Atlas — full-screen semantic map. Wrapped in the shared-element scope so a book
+                // region can morph into Book Detail via the cover key, exactly like the shelves.
+                composable(FolioRoutes.ATLAS) {
+                    FolioSharedElementScope(this) {
+                        navModel.atlasContent(
+                            onBack = { navController.popBackStack() },
+                            onOpenBook = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) },
+                            onOpenReaderAt = { bookId, spine, frac ->
+                                navController.navigate(
+                                    FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
+                                )
+                            }
+                        )
+                    }
                 }
 
                 // Search opened from the reader chrome. Same screen, same state holder — the
@@ -473,7 +457,6 @@ fun FolioNavHost(
                     }
                 }
             }
-          }
         }
     }
 }

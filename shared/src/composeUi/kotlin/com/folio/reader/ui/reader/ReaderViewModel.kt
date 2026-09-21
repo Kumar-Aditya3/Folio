@@ -44,7 +44,14 @@ class ReaderViewModel(
     private val chapterContentProvider: suspend (bookId: String, chapterHref: String) -> String,
     private val syncEngine: com.folio.reader.sync.SyncEngine? = null,
     private val quoteRepository: com.folio.reader.database.QuoteRepository? = null,
-    private val revisitRepository: com.folio.reader.database.RevisitRepository? = null
+    private val revisitRepository: com.folio.reader.database.RevisitRepository? = null,
+    /**
+     * Atlas + Echoes engine. Nullable because the reader is constructed on both platforms and in
+     * tests, and Echoes is an additive surface — a null repo (or the feature flag off) simply
+     * means the action never lights and no panel opens. Reused from the app graph, so it shares
+     * the one embedder session the search stack already holds.
+     */
+    private val discoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository? = null
 ) {
     private val _book = MutableStateFlow<Book?>(null)
     private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
@@ -56,6 +63,12 @@ class ReaderViewModel(
     private val _showControls = MutableStateFlow(true)
     private val _showToc = MutableStateFlow(false)
     private val _showAnnotations = MutableStateFlow(false)
+    private val _showEchoes = MutableStateFlow(false)
+    private val _echoes = MutableStateFlow<EchoesState>(EchoesState.Idle)
+    /** Guards against a stale result landing after the reader moved on to a newer selection. */
+    private var echoRequest = 0
+    /** Warm the embedder/index once per opened book, on first selection. */
+    private var echoesWarmed = false
     private val _chapterHtml = MutableStateFlow("")
     private val _chapterChip = MutableStateFlow<String?>(null)
     /**
@@ -155,6 +168,8 @@ class ReaderViewModel(
     val showControls: Flow<Boolean> = _showControls
     val showToc: Flow<Boolean> = _showToc
     val showAnnotations: Flow<Boolean> = _showAnnotations
+    val showEchoes: Flow<Boolean> = _showEchoes
+    val echoes: Flow<EchoesState> = _echoes
     /**
      * Declared [StateFlow], not the erased `Flow`, so callers read the current
      * value synchronously and cannot be handed an `initial` that disagrees with
@@ -423,13 +438,62 @@ class ReaderViewModel(
     fun toggleToc() {
         val next = !_showToc.value
         _showToc.value = next
-        if (next) _showAnnotations.value = false
+        if (next) { _showAnnotations.value = false; _showEchoes.value = false }
     }
 
     fun toggleAnnotations() {
         val next = !_showAnnotations.value
         _showAnnotations.value = next
-        if (next) _showToc.value = false
+        if (next) { _showToc.value = false; _showEchoes.value = false }
+    }
+
+    /** Closes the Echoes panel without discarding its results, so a reopen is instant. */
+    fun closeEchoes() {
+        _showEchoes.value = false
+    }
+
+    /**
+     * Warms the embedder session and resident index in the background so the first Echoes tap is
+     * near-instant instead of paying for a cold ONNX session *and* an index build at once. Fired
+     * lazily on the reader's first text selection, so warming overlaps the beat before the reader
+     * decides to tap. Guarded to run once per opened book.
+     */
+    fun prewarmEchoes() {
+        val repo = discoveryRepository ?: return
+        if (echoesWarmed) return
+        echoesWarmed = true
+        viewModelScope.launch { runCatching { repo.warm() } }
+    }
+
+    /**
+     * Opens the Echoes side panel for [selectedText] and launches the cross-book lookup.
+     *
+     * Selection-driven and explicit — nothing embeds while the reader merely turns pages. The
+     * open closes the other panels (they are mutually exclusive), runs the query through the
+     * shared discovery engine off the main thread, and exposes Loading → Results/Empty. A blank
+     * selection or a missing engine short-circuits to Empty rather than spinning.
+     */
+    fun openEchoes(selectedText: String, excludeChunkId: String? = null) {
+        _showToc.value = false
+        _showAnnotations.value = false
+        _showEchoes.value = true
+        val repo = discoveryRepository
+        val bookId = currentBookId
+        val text = selectedText.trim()
+        if (repo == null || bookId == null || text.isBlank()) {
+            _echoes.value = EchoesState.Empty
+            return
+        }
+        val request = ++echoRequest
+        _echoes.value = EchoesState.Loading
+        viewModelScope.launch {
+            val result = runCatching {
+                repo.echoes(selectedText = text, currentBookId = bookId, excludeChunkId = excludeChunkId)
+            }.getOrDefault(emptyList())
+            // Drop a result the reader has already superseded with a newer selection.
+            if (request != echoRequest) return@launch
+            _echoes.value = if (result.isEmpty()) EchoesState.Empty else EchoesState.Results(result)
+        }
     }
 
     fun addBookmark(label: String? = null) = annotations.addBookmark(label)
@@ -469,6 +533,10 @@ class ReaderViewModel(
         val session = _session.value
         val position = _position.value
         val bookId = currentBookId
+
+        // Release the Echoes embedder's ~50 MB native session on the way out; the small resident
+        // index stays for a fast reopen. Only meaningful if Echoes was actually warmed this visit.
+        if (echoesWarmed) viewModelScope.launch { runCatching { discoveryRepository?.releaseEmbedder() } }
 
         viewModelScope.launch {
             runCatching {
@@ -554,3 +622,17 @@ data class SearchResult(
     val title: String,
     val context: String
 )
+
+/**
+ * What the Echoes panel is showing.
+ *
+ * The states are separated rather than folded into a nullable list because each is a different
+ * thing to say: [Loading] is a spinner, [Empty] is the honest "No echoes found." (a real result,
+ * not an error), and [Results] is the land-fragment cards. [Idle] is "never opened".
+ */
+sealed interface EchoesState {
+    data object Idle : EchoesState
+    data object Loading : EchoesState
+    data class Results(val hits: List<com.folio.reader.ml.EchoHit>) : EchoesState
+    data object Empty : EchoesState
+}

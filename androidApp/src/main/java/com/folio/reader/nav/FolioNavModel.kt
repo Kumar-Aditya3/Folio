@@ -43,7 +43,8 @@ interface FolioNavModel {
         onOpenRevisit: () -> Unit,
         onOpenExtensions: () -> Unit,
         onOpenDownloads: () -> Unit,
-        onOpenHistory: () -> Unit
+        onOpenHistory: () -> Unit,
+        onOpenAtlas: () -> Unit
     )
 
     @Composable
@@ -58,7 +59,9 @@ interface FolioNavModel {
         targetFraction: Float?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
-        onOpenSettings: () -> Unit
+        onOpenSettings: () -> Unit,
+        /** Echoes deep-link: open another book's reader at a resonant passage. (bookId, spine, fraction) */
+        onOpenEcho: (String, Int?, Float?) -> Unit
     )
 
     @Composable
@@ -77,6 +80,13 @@ interface FolioNavModel {
 
     @Composable
     fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit)
+
+    @Composable
+    fun atlasContent(
+        onBack: () -> Unit,
+        onOpenBook: (String) -> Unit,
+        onOpenReaderAt: (String, Int?, Float?) -> Unit
+    )
 
     @Composable
     fun settingsContent(category: String, onBack: () -> Unit)

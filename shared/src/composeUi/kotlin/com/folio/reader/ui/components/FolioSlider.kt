@@ -22,6 +22,9 @@ import androidx.compose.material3.SliderState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -30,8 +33,11 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.rememberFolioHaptics
+import kotlin.math.roundToInt
 
 /**
  * The app's one slider. Material3 still owns the gesture handling, keyboard
@@ -89,9 +95,27 @@ fun FolioSlider(
         label = "sliderHalo",
     )
 
+    // Living Paper scrub tick: a stepped slider clicks once per step crossed as
+    // it drags, so a discrete scale (font size, spacing, margins) feels notched.
+    // Continuous sliders (steps == 0) stay silent — a tick per pixel is noise.
+    val haptics = rememberFolioHaptics()
+    var lastStep by remember { mutableStateOf(Int.MIN_VALUE) }
+    val onValueChangeHaptic: (Float) -> Unit = { v ->
+        if (steps > 0) {
+            val span = valueRange.endInclusive - valueRange.start
+            val stepIndex =
+                if (span > 0f) (((v - valueRange.start) / span) * (steps + 1)).roundToInt() else 0
+            if (stepIndex != lastStep) {
+                if (lastStep != Int.MIN_VALUE) haptics.play(FolioHaptic.ScrubTick)
+                lastStep = stepIndex
+            }
+        }
+        onValueChange(v)
+    }
+
     Slider(
         value = value,
-        onValueChange = onValueChange,
+        onValueChange = onValueChangeHaptic,
         modifier = modifier,
         enabled = enabled,
         valueRange = valueRange,

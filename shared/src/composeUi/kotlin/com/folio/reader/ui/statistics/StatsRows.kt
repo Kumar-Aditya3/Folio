@@ -39,8 +39,10 @@ import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
+import com.folio.reader.ui.components.chartStagger
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -137,6 +139,11 @@ internal fun WhereYourTimeWentCard(
         FolioSectionHead(title = "Where your time went", eyebrow = "This year")
         Spacer(Modifier.height(FolioTokens.space3))
         val peak = (books.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+        // §13.5: each ranked bar grows from the leading edge on entry, in the same
+        // top-down stagger the genre well uses, so the leaderboard reads as one
+        // chart drawing itself. The "everything else" tail rides the last slot.
+        val barCount = books.size + 1
+        val barEntry = rememberEntryState(books)
         books.forEachIndexed { index, entry ->
             if (index > 0) FolioRule()
             val interaction = rememberFolioInteraction()
@@ -192,7 +199,8 @@ internal fun WhereYourTimeWentCard(
                     )
                 }
                 Spacer(Modifier.height(FolioTokens.spaceHair))
-                TimeBar(progress = entry.minutes.toFloat() / peak, peak = entry.minutes >= peak)
+                val (growth, _) = chartStagger(barEntry.value, index, barCount)
+                TimeBar(progress = entry.minutes.toFloat() / peak, peak = entry.minutes >= peak, growth = growth)
             }
         }
         if (everythingElseMinutes > 0L) {
@@ -214,7 +222,8 @@ internal fun WhereYourTimeWentCard(
                     )
                 }
                 Spacer(Modifier.height(FolioTokens.spaceHair))
-                TimeBar(progress = everythingElseMinutes.toFloat() / peak, subdued = true)
+                val (tailGrowth, _) = chartStagger(barEntry.value, books.size, barCount)
+                TimeBar(progress = everythingElseMinutes.toFloat() / peak, subdued = true, growth = tailGrowth)
             }
         }
         if (booksOpened > 0 && librarySize > 0) {
@@ -230,7 +239,7 @@ internal fun WhereYourTimeWentCard(
 
 /** One proportional bar under a ranked row — the genre-well idiom, one row tall. */
 @Composable
-private fun TimeBar(progress: Float, peak: Boolean = false, subdued: Boolean = false) {
+private fun TimeBar(progress: Float, peak: Boolean = false, subdued: Boolean = false, growth: Float = 1f) {
     val hue = when {
         peak -> FolioTheme.colors.accentStreak
         subdued -> FolioTheme.colors.onSurfaceVariant
@@ -238,7 +247,7 @@ private fun TimeBar(progress: Float, peak: Boolean = false, subdued: Boolean = f
     }
     Box(
         Modifier
-            .fillMaxWidth(progress.coerceIn(0.04f, 1f))
+            .fillMaxWidth((progress.coerceIn(0.04f, 1f) * growth).coerceAtLeast(0.0001f))
             .height(5.dp)
             .background(
                 Brush.horizontalGradient(
@@ -280,6 +289,10 @@ internal fun GenresCard(slices: List<TagSlice>) {
         Spacer(Modifier.height(FolioTokens.space3))
         val hues = FolioTheme.colors.chartSeries
         val peak = (slices.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+        // §13.5: the well's bars grow from the leading edge on entry in a gentle
+        // top-down stagger (chartStagger's growth term). rememberEntryState parks at
+        // 1f under reduce-motion, so the bars render at full width immediately.
+        val entry = rememberEntryState(slices)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -290,6 +303,7 @@ internal fun GenresCard(slices: List<TagSlice>) {
             slices.forEachIndexed { index, slice ->
                 val hue = hues[index % hues.size]
                 val isPeak = slice.minutes >= peak
+                val (growth, _) = chartStagger(entry.value, index, slices.size)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = slice.label,
@@ -306,9 +320,10 @@ internal fun GenresCard(slices: List<TagSlice>) {
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
                 }
+                val target = (slice.minutes.toFloat() / peak).coerceIn(0.04f, 1f)
                 Box(
                     Modifier
-                        .fillMaxWidth((slice.minutes.toFloat() / peak).coerceIn(0.04f, 1f))
+                        .fillMaxWidth((target * growth).coerceAtLeast(0.0001f))
                         .height(7.dp)
                         .background(
                             Brush.horizontalGradient(
@@ -544,6 +559,14 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
         // The 24-hour band: minutes per start-hour, the day's shape at a glance.
         HourBand(hourTotals = stats.hourTotals, mostReadHour = stats.mostReadHour)
         Spacer(Modifier.height(FolioTokens.space3))
+        // The same 24 buckets re-projected into a polar clock — the reader's day
+        // as a silhouette rather than a bar chart. Shares HourBand's data exactly.
+        ReadingFingerprint(
+            hourTotals = stats.hourTotals,
+            mostReadHour = stats.mostReadHour,
+            chronotype = stats.chronotype,
+        )
+        Spacer(Modifier.height(FolioTokens.space3))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -576,6 +599,10 @@ private fun HourBand(hourTotals: List<Long>, mostReadHour: String) {
     val colors = FolioTheme.colors
     val peak = hourTotals.maxOrNull() ?: 0L
     val peakIndex = hourTotals.indexOfFirst { it == peak && peak > 0L }
+    // §13.5: the band draws on once, bars rising from the base in a soft
+    // left-to-right sweep. Read in the draw phase so the 24 bars never recompose
+    // per frame; reduce-motion parks the state at 1f (rendered complete).
+    val entry = rememberEntryState(hourTotals)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -590,8 +617,12 @@ private fun HourBand(hourTotals: List<Long>, mostReadHour: String) {
             val n = 24
             val gap = 1.5.dp.toPx()
             val barWidth = (size.width - gap * (n - 1)) / n
+            val sweep = entry.value
             hourTotals.forEachIndexed { hour, minutes ->
-                val h = if (peak > 0L) (minutes.toFloat() / peak) * size.height else 0f
+                // Each bar starts a touch after the one to its left, so the band
+                // fills like a wave rather than every column snapping up at once.
+                val grow = ((sweep - hour.toFloat() / n * 0.4f) / 0.6f).coerceIn(0f, 1f)
+                val h = if (peak > 0L) (minutes.toFloat() / peak) * size.height * grow else 0f
                 if (h <= 0f) {
                     // A silent hour still shows its slot: a hairline at the base.
                     drawRect(

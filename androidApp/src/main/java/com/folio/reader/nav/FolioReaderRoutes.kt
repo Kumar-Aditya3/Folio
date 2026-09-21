@@ -35,7 +35,8 @@ fun ReaderRoute(
     targetFraction: Float? = null,
     onBack: () -> Unit,
     onOpenSearch: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenEcho: (String, Int?, Float?) -> Unit = { _, _, _ -> }
 ) {
     val graph = navModel.graph
     val book = remember(bookId) { mutableStateOf<Book?>(null) }
@@ -57,6 +58,9 @@ fun ReaderRoute(
         onSearchClick = onOpenSearch,
         onSettingsClick = onOpenSettings,
         onSettingsChanged = { navModel.globalSettings = it },
+        onOpenEcho = onOpenEcho,
+        // Echoes gates on the app-level flag; the index check happens inside ReaderRouteContent.
+        semanticDiscoveryEnabled = navModel.globalSettings.semanticDiscovery,
         // Read off the global row here — the only place in this route that still
         // holds the nav model. [globalSettings] is a Compose `mutableStateOf`, so
         // this read subscribes the whole reader route to it: whenever the settings
@@ -86,7 +90,9 @@ private fun ReaderRouteContent(
     onSettingsClick: () -> Unit,
     onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {},
     /** §17 morph landing opt-in; see [com.folio.reader.settings.ReaderSettings.morphIntoReader]. */
-    morphIntoReader: Boolean = false
+    morphIntoReader: Boolean = false,
+    onOpenEcho: (String, Int?, Float?) -> Unit = { _, _, _ -> },
+    semanticDiscoveryEnabled: Boolean = true
 ) {
     val viewModel = remember {
         ReaderViewModel(
@@ -100,7 +106,8 @@ private fun ReaderRouteContent(
             chapterContentProvider = { id, href -> graph.contentProvider.getHtml(id, href) },
             syncEngine = graph.syncEngine,
             quoteRepository = graph.quoteRepository,
-            revisitRepository = graph.revisitRepository
+            revisitRepository = graph.revisitRepository,
+            discoveryRepository = graph.semanticDiscoveryRepository
         )
     }
 
@@ -120,6 +127,14 @@ private fun ReaderRouteContent(
     val showControls by viewModel.showControls.collectAsState(initial = true)
     val showToc by viewModel.showToc.collectAsState(initial = false)
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
+    val showEchoes by viewModel.showEchoes.collectAsState(initial = false)
+    val echoesState by viewModel.echoes.collectAsState(initial = com.folio.reader.ui.reader.EchoesState.Idle)
+    // Whether there is an index to echo against. Resolved once; the action stays dark until it is
+    // true, so the reader is never offered a feature that can only answer "nothing".
+    val canEcho = remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        canEcho.value = runCatching { graph.semanticDiscoveryRepository.canEcho() }.getOrDefault(false)
+    }
     val loadError by viewModel.loadError.collectAsState(initial = null)
     val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
     // Continuous-mode chapter window.
@@ -175,6 +190,13 @@ private fun ReaderRouteContent(
         showControls = showControls,
         showToc = showToc,
         showAnnotations = showAnnotations,
+        showEchoes = showEchoes,
+        echoesState = echoesState,
+        echoesEnabled = semanticDiscoveryEnabled && canEcho.value,
+        onOpenEchoes = { selectedText -> viewModel.openEchoes(selectedText) },
+        onCloseEchoes = { viewModel.closeEchoes() },
+        onPrewarmEchoes = { viewModel.prewarmEchoes() },
+        onOpenEcho = { echoBookId, spine, frac -> viewModel.closeBook { onOpenEcho(echoBookId, spine, frac) } },
         onChapterChange = { viewModel.goToChapter(it) },
         onBackPress = { viewModel.closeBook { onBackPress() } },
         onSearchClick = { viewModel.closeBook { onSearchClick() } },

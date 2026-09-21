@@ -1,5 +1,13 @@
 package com.folio.reader.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -8,7 +16,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -157,6 +168,27 @@ fun SettingsSemanticSearchScreen(navModel: FolioNavModelImpl, onBack: () -> Unit
                 }
             },
         )
+
+        // Atlas & Echoes master switch. Off hides both discovery surfaces (the Home Atlas hero and
+        // the reader's Echoes action) without touching the index — a preference, not a teardown.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Semantic discovery (Atlas & Echoes)", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Map your library by meaning and surface resonant passages across books, entirely on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = navModel.globalSettings.semanticDiscovery,
+                onCheckedChange = { navModel.updateSettings(navModel.globalSettings.copy(semanticDiscovery = it)) },
+            )
+        }
     }
 }
 

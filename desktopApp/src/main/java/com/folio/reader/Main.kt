@@ -164,6 +164,7 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         searchRepository = searchRepository,
         modelsDir = platform.fileSystem.getModelsDir(),
         chunkRepository = chunkRepository,
+        bookRepository = bookRepository,
     )
 
     val embeddingModel: com.folio.reader.ml.EmbeddingModel
@@ -177,6 +178,10 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 
     val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
         get() = modelSelection.semanticSearch
+
+    /** Atlas + Echoes data owner; reuses the searcher's embedder and resident index. */
+    val semanticDiscoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository
+        get() = modelSelection.discovery
 
     // Phase 5 #2. Wired on desktop too — auto-tagging is pure embedding + cosine, so unlike
     // Phase 6 there is nothing Android-specific about it.

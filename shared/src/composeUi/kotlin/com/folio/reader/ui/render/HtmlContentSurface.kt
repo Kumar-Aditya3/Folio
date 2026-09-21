@@ -47,7 +47,15 @@ expect fun HtmlContentSurface(
     onSelectionChanged: ((chapterId: String, paragraphIndex: Int, selectedText: String?) -> Unit)? = null,
     clearSelectionRequest: Long? = null,
     seekRequest: Pair<Float, Long>? = null,
-    seekTargetRequest: Pair<String, Long>? = null
+    seekTargetRequest: Pair<String, Long>? = null,
+    /**
+     * Fired on the first frame the chapter's text actually paints — the WebView's
+     * onPageFinished (Android) / the main frame's onLoadEnd (desktop), not when the
+     * HTML string is merely ready. The reader uses this to dissolve the morph cover
+     * plate on real paint, closing the blank-paper gap between the two. May fire
+     * more than once (e.g. reloads); callers should treat it as idempotent.
+     */
+    onContentReady: () -> Unit = {}
 )
 
 /**
