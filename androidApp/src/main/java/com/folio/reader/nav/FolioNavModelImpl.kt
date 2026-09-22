@@ -62,6 +62,13 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     var globalSettings by mutableStateOf(ReaderSettings())
 
     /**
+     * Session-cached Atlas hero eligibility. Computed once (lazily, off Home's critical path) so
+     * the Home hero gate never re-queries the chunk table on every visit — that DB work was
+     * contending with Home's own startup queries and delaying the screen. Null = not yet resolved.
+     */
+    var atlasEligible: Boolean? = null
+
+    /**
      * Guards [warmGlobalSettings] so composition can call it on every frame
      * without queueing a read per frame. Not `remember`-ed, because the model
      * outlives the composition — the flag has to survive as long as the loaded

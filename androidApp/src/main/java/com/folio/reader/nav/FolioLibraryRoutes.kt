@@ -132,12 +132,18 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             val state by navModel.homeState.collectAsState()
             // Atlas hero gating: the app-level flag plus a map-ready library (≥ threshold embedded
             // books). Resolved off the main thread; the hero simply does not appear until true.
-            var atlasReady by remember { mutableStateOf(false) }
-            LaunchedEffect(navModel.globalSettings.semanticDiscovery, state.loaded) {
-                atlasReady = navModel.globalSettings.semanticDiscovery &&
-                    runCatching {
-                        graph.semanticDiscoveryRepository.atlasReadiness() is com.folio.reader.ml.AtlasReadiness.Ready
-                    }.getOrDefault(false)
+            var atlasReady by remember { mutableStateOf(navModel.atlasEligible == true) }
+            LaunchedEffect(navModel.globalSettings.semanticDiscovery) {
+                if (!navModel.globalSettings.semanticDiscovery) { atlasReady = false; return@LaunchedEffect }
+                // Use the session-cached answer immediately if we have it; otherwise resolve it
+                // once, AFTER a short beat so it does not contend with Home's own startup queries
+                // for the DB (that contention was what delayed the screen). Cheap COUNT(DISTINCT),
+                // off the ML dispatcher, cached in the nav model so revisits never re-query.
+                navModel.atlasEligible?.let { atlasReady = it; return@LaunchedEffect }
+                kotlinx.coroutines.delay(700)
+                val eligible = runCatching { graph.semanticDiscoveryRepository.atlasHeroEligible() }.getOrDefault(false)
+                navModel.atlasEligible = eligible
+                atlasReady = eligible
             }
             HomeScreen(
                 state = state,

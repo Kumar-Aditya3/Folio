@@ -6,9 +6,15 @@ import com.folio.reader.database.ChunkRepository
 import com.folio.reader.database.IndexProgress
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * Data owner for the two semantic-discovery features — **Echoes** (cross-book resonant
@@ -31,12 +37,18 @@ class SemanticDiscoveryRepository(
     private val bookRepository: BookRepository,
     /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [Dispatchers.Default]. */
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
+    /**
+     * Where the computed map is persisted so a cold app start does not recompute it. Null disables
+     * the disk cache (the in-memory one still applies). Supplied by the app graph.
+     */
+    private val cacheDir: File? = null,
 ) {
     val model: EmbeddingModel get() = semanticSearch.model
 
     private val atlasMutex = Mutex()
     private var cachedFingerprint: String? = null
     private var cachedAtlas: AtlasModel? = null
+    private val cacheJson = Json { ignoreUnknownKeys = true }
 
     // ---- Echoes --------------------------------------------------------------------------
 
@@ -95,7 +107,11 @@ class SemanticDiscoveryRepository(
      * Cheap by design — it reads [IndexProgress] and a `COUNT(DISTINCT book_id)`, never a vector —
      * so the Home hero can consult it on composition without paying the roll-up cost.
      */
-    suspend fun atlasReadiness(): AtlasReadiness = withContext(dispatcher) {
+    suspend fun atlasReadiness(): AtlasReadiness = withContext(Dispatchers.IO) {
+        // On IO, not the inference dispatcher: a heavy roll-up load can occupy inference, and the
+        // readiness check must never queue behind it (that made the Home hero blink out while an
+        // Atlas load ran). progress() is the expensive call here (it scans chapter text), so it is
+        // only paid on the Atlas screen itself — the Home hero uses [atlasHeroEligible] instead.
         val progress = runCatching { chunkRepository.progress(model.id) }.getOrNull()
             ?: return@withContext AtlasReadiness.Unavailable
         if (progress.totalChapters <= 0) return@withContext AtlasReadiness.Unavailable
@@ -111,6 +127,15 @@ class SemanticDiscoveryRepository(
     }
 
     /**
+     * The Home hero's gate: is the library worth mapping? Deliberately the *cheapest* possible
+     * signal — one `COUNT(DISTINCT book_id)` on IO, no `progress()` content scan, no inference
+     * dispatcher — so Home never waits on it and it cannot blink out while an Atlas load runs.
+     */
+    suspend fun atlasHeroEligible(): Boolean = withContext(Dispatchers.IO) {
+        runCatching { chunkRepository.embeddedBookCount(model.id) >= ATLAS_BOOK_THRESHOLD }.getOrDefault(false)
+    }
+
+    /**
      * The library's topic map. Computed on [Dispatchers.Default] (the roll-up is CPU-bound and
      * must not sit on the latency-sensitive inference pool), cached in memory for the session and
      * recomputed only when the index fingerprint — model id, chunk count, embedded-book count —
@@ -120,13 +145,22 @@ class SemanticDiscoveryRepository(
         val fingerprint = fingerprint()
         cachedAtlas?.let { if (fingerprint == cachedFingerprint) return it }
 
+        // Disk cache: a cold app start (empty in-memory cache) recomputes the whole roll-up
+        // otherwise. Keyed by the same fingerprint, so it is used only while the library is
+        // unchanged and silently ignored (then overwritten) once a book is added/removed/reindexed.
+        readDiskCache(fingerprint)?.let {
+            cachedAtlas = it
+            cachedFingerprint = fingerprint
+            return it
+        }
+
         // Bound the roll-up's memory *at the source*. Loading a whole large library as floats
         // (~64 MB for 35k chunks) and then whitening it (an n×dims double working matrix on top)
         // overran the phone heap and crashed. The sampled loader streams the rows and never
         // materialises more than [MAX_ROLLUP_CHUNKS], with a per-book stride so every book still
         // appears on the map — capping the peak regardless of library size while keeping the layout
         // representative. Post-load subsampling could not help: the 64 MB was already allocated.
-        val entries = withContext(dispatcher) {
+        val entries = withContext(Dispatchers.IO) {
             runCatching { chunkRepository.loadVectorMetadataSampled(model.id, model.dims, MAX_ROLLUP_CHUNKS) }
                 .getOrDefault(emptyList())
         }
@@ -137,7 +171,14 @@ class SemanticDiscoveryRepository(
             return empty
         }
 
-        val geometry = withContext(Dispatchers.Default) { AtlasRollup.compute(entries) }
+        // Cooperative cancellation: the roll-up is a multi-second CPU loop with no suspension
+        // points, so without this it would run to completion (burning battery, holding the mutex)
+        // even after the reader left the Atlas mid-load. The lambda lets the pure code bail at
+        // loop boundaries when this coroutine is cancelled.
+        val job = currentCoroutineContext()[Job]
+        val geometry = withContext(Dispatchers.Default) {
+            AtlasRollup.compute(entries, shouldCancel = { job?.isActive == false })
+        }
 
         // Index the loaded metadata so each cluster's exemplar can be turned into a reader
         // deep-link: its spine, and its position within the chapter as a fraction (the same
@@ -181,7 +222,29 @@ class SemanticDiscoveryRepository(
         val result = AtlasModel(books, geometry.edges)
         cachedAtlas = result
         cachedFingerprint = fingerprint
+        writeDiskCache(fingerprint, result)
         result
+    }
+
+    private suspend fun readDiskCache(fingerprint: String): AtlasModel? {
+        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (!file.exists()) return@runCatching null
+                val envelope = cacheJson.decodeFromString(AtlasCacheEnvelope.serializer(), file.readText())
+                if (envelope.fingerprint == fingerprint) envelope.model else null
+            }.getOrNull()
+        }
+    }
+
+    private suspend fun writeDiskCache(fingerprint: String, model: AtlasModel) {
+        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                file.parentFile?.mkdirs()
+                file.writeText(cacheJson.encodeToString(AtlasCacheEnvelope.serializer(), AtlasCacheEnvelope(fingerprint, model)))
+            }
+        }
     }
 
     /**
@@ -190,9 +253,12 @@ class SemanticDiscoveryRepository(
      * cached) and never throws — a missing model just leaves the session null. Called when the
      * reader detects a selection, so warming overlaps the moment before the reader taps Echoes.
      */
-    suspend fun warm() {
-        runCatching { semanticSearch.warm() }
-        runCatching { semanticSearch.preload() }
+    suspend fun warm() = kotlinx.coroutines.coroutineScope {
+        // Overlap the two independent one-time costs — the ONNX session init and the resident-index
+        // build — instead of paying them back to back, so the first Echoes tap resolves sooner.
+        val session = launch { runCatching { semanticSearch.warm() } }
+        val index = launch { runCatching { semanticSearch.preload() } }
+        session.join(); index.join()
     }
 
     /** Releases the embedder session (its ~50 MB native footprint); keeps the small index resident. */
@@ -226,8 +292,14 @@ class SemanticDiscoveryRepository(
          * per-book k-means (k ≤ 8) and the cross-book adjacency to stay representative.
          */
         const val MAX_ROLLUP_CHUNKS = 5000
+
+        private const val ATLAS_CACHE_FILE = "atlas_cache.json"
     }
 }
+
+/** On-disk envelope: the map plus the fingerprint it was computed for. */
+@Serializable
+private data class AtlasCacheEnvelope(val fingerprint: String, val model: AtlasModel)
 
 /**
  * A cross-book resonant passage.
@@ -250,11 +322,13 @@ data class EchoHit(
 )
 
 /** The whole library as a map: books with topic regions, joined by shared borders. */
+@Serializable
 data class AtlasModel(
     val books: List<AtlasBook>,
     val edges: List<AtlasEdge>,
 )
 
+@Serializable
 data class AtlasBook(
     val bookId: String,
     val title: String,
@@ -264,6 +338,7 @@ data class AtlasBook(
     val clusters: List<AtlasCluster>,
 )
 
+@Serializable
 data class AtlasCluster(
     val x: Float,
     val y: Float,

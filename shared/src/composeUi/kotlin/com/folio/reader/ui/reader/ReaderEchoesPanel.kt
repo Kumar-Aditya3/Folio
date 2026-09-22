@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -104,7 +104,7 @@ internal fun EchoesPanel(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.hits, key = { it.chunkId ?: (it.bookId + it.charStart) }) { hit ->
+                itemsIndexed(state.hits, key = { i, hit -> hit.chunkId ?: "${hit.bookId}:${hit.charStart}:$i" }) { _, hit ->
                     EchoFragmentCard(hit = hit, onOpenEcho = onOpenEcho)
                 }
             }

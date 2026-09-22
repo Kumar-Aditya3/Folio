@@ -1,26 +1,27 @@
 package com.folio.reader.ui.atlas
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -33,43 +34,67 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.drawText
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.folio.reader.ml.AtlasBook
 import com.folio.reader.ml.AtlasModel
 import com.folio.reader.ui.components.FolioCoverGridSkeleton
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.LocalGlassCapabilities
 import com.folio.reader.ui.components.folioField
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.folioAtlasShader
+import com.folio.reader.ui.theme.lightDirection
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.rememberShaderSupported
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.min
 import kotlin.math.sin
 
-/** Past this camera scale the map shows a book's topic constellation and taps open the reader. */
+/** Past this zoom the map surfaces each topic's own words and taps deep-link into the passage. */
 private const val DETAIL_ZOOM = 2.2f
 
+private val ATLAS_STOPWORDS = setOf(
+    "the", "and", "that", "with", "from", "this", "have", "were", "what", "when", "which", "their",
+    "there", "they", "them", "then", "than", "into", "over", "your", "you", "was", "are", "for",
+    "not", "but", "his", "her", "she", "him", "had", "has", "would", "could", "should", "about",
+    "been", "will", "upon", "said", "such", "only", "very", "more", "most", "some", "like", "just",
+)
+
+/** A few salient words from a passage — a legible topic label rather than an abstract dot. */
+private fun topWords(text: String, n: Int = 3): String =
+    text.lowercase()
+        .split(Regex("[^a-z]+"))
+        .filter { it.length >= 4 && it !in ATLAS_STOPWORDS }
+        .distinct()
+        .take(n)
+        .joinToString(" · ")
+
 /**
- * The Atlas — a full-screen cartographic map of the library by semantic topic.
+ * The Atlas — the library charted by meaning.
  *
- * A portable Compose canvas is the base (it works on desktop and pre-API-33 devices unchanged);
- * an AGSL caustic sheen is layered over it only where the device can carry it. Two-level zoom:
- * far out, books are lit regions the reader taps to open Book Detail; pinched in, a book's topics
- * spread into a constellation whose exemplar passages deep-link into the reader.
+ * A real map: each book is a lit landmass placed by the roll-up's 2D topic layout, its coastline
+ * ragged in proportion to how diffuse its topics are, joined to kindred books by faint borders,
+ * floating on a sea washed in the theme's own deep tint. It is deliberately **fit-to-screen** — no
+ * free pan/zoom and no canvas-drawn text — so the whole class of off-screen `drawText` crashes and
+ * gesture-math bugs simply cannot occur: the geometry is drawn on a [Canvas], and the labels are
+ * ordinary Compose [Text] laid over it (which clip harmlessly rather than throw). A tap on a
+ * landmass opens that book.
+ *
+ * [exemplarTexts]/[onOpenExemplar]/[onLoadExemplars] are kept in the signature so the route wiring
+ * is unchanged; this fit-to-screen map does not surface per-passage text, so they go unused here.
  */
 @Composable
 fun AtlasScreen(
@@ -81,11 +106,7 @@ fun AtlasScreen(
     onLoadExemplars: (Collection<String>) -> Unit,
     onRunBackfill: () -> Unit = {},
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .folioField()
-    ) {
+    Box(Modifier.fillMaxSize().folioField()) {
         when (state) {
             is AtlasUiState.Loading -> AtlasSkeleton()
             is AtlasUiState.Unavailable -> AtlasMessage(
@@ -115,7 +136,6 @@ fun AtlasScreen(
             )
         }
 
-        // Back button floats over everything, on the status-bar inset.
         IconButton(
             onClick = onBack,
             modifier = Modifier.statusBarsPadding().padding(4.dp).align(Alignment.TopStart),
@@ -136,17 +156,12 @@ private fun AtlasMap(
     onLoadExemplars: (Collection<String>) -> Unit,
 ) {
     val atmosphere = FolioTheme.atmosphere
-    val shaderEnabled = com.folio.reader.ui.components.LocalGlassCapabilities.current.specular &&
-        com.folio.reader.ui.theme.rememberShaderSupported()
-    val measurer = rememberTextMeasurer()
-
-    // Per-book hue from the atmosphere's accent roles (Rule 14 — the map carries the theme's own
-    // data-visual palette), cycled with a gentle rotation so neighbouring continents read apart.
-    // Pure, so no per-book composable calls in a dynamic loop.
     val pools = atmosphere.pools.ifEmpty { listOf(FolioTheme.colors.accentProgress) }
-    val accents: Map<String, Color> = remember(model, pools) {
-        model.books.mapIndexed { i, book -> book.bookId to pools[i % pools.size] }.toMap()
-    }
+    // Per-book accent (cover-derived, cached inside rememberCoverAccent). Cycled fallback so books
+    // without a cover still read apart.
+    val accents: Map<String, Color> = model.books.mapIndexed { i, b ->
+        b.bookId to rememberCoverAccent(b.coverPath, pools[i % pools.size])
+    }.toMap()
 
     // Book centroid = mass-weighted mean of its cluster positions, in layout space [-1, 1].
     val centroids: Map<String, Offset> = remember(model) {
@@ -156,125 +171,178 @@ private fun AtlasMap(
             book.bookId to if (sw > 0f) Offset(sx / sw, sy / sw) else Offset(0f, 0f)
         }
     }
-    val bookById = remember(model) { model.books.associateBy { it.bookId } }
 
+    val seaColor = atmosphere.sunkenFill
+    val edgeColor = FolioTheme.colors.onSurface
+    val labelColor = FolioTheme.colors.onSurface
+    val shadowColor = atmosphere.shadowSpot
+    val density = LocalDensity.current
+
+    // Lighting + capability gates for the visual layer.
+    val light = LocalFolioDaylight.current.lightDirection()
+    val motion = rememberMotionEnabled()
+    val shaderEnabled = LocalGlassCapabilities.current.specular && rememberShaderSupported()
+
+    // Entrance: the continents rise into place once. Skipped entirely under reduce-motion.
+    val reveal = remember { Animatable(if (motion) 0f else 1f) }
+    LaunchedEffect(model, motion) {
+        if (motion) { reveal.snapTo(0f); reveal.animateTo(1f, animationSpec = tween(durationMillis = 750)) }
+        else reveal.snapTo(1f)
+    }
+
+    // Camera. Pinch to zoom, drag to pan — safe now that labels are Compose Text (they clip) rather
+    // than canvas drawText (which threw on off-screen anchors). Both the Canvas geometry and the
+    // label offsets read the same camera, so they stay locked together.
     var scale by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
-    var canvasSize by remember { mutableStateOf(Size.Zero) }
+    val zoomedIn = scale >= DETAIL_ZOOM
 
-    fun worldRadius(size: Size) = minOf(size.width, size.height) * 0.42f
-    fun toScreen(size: Size, x: Float, y: Float): Offset {
-        val r = worldRadius(size) * scale
-        return Offset(size.width / 2f + pan.x + x * r, size.height / 2f + pan.y + y * r)
+    // Zoomed in, the map means something concrete: load each topic's exemplar passage so its own
+    // words can label it and a tap can dive into that passage in the reader.
+    LaunchedEffect(zoomedIn, model) {
+        if (zoomedIn) onLoadExemplars(model.books.flatMap { b -> b.clusters.map { it.exemplarChunkId } })
     }
 
-    // Request exemplar text for on-screen books once we're zoomed into detail.
-    LaunchedEffect(scale >= DETAIL_ZOOM, model) {
-        if (scale >= DETAIL_ZOOM) {
-            onLoadExemplars(model.books.flatMap { b -> b.clusters.map { it.exemplarChunkId } })
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wPx = with(density) { maxWidth.toPx() }
+        val hPx = with(density) { maxHeight.toPx() }
+        val padX = wPx * 0.12f
+        val padY = hPx * 0.16f
+        val minDim = min(wPx, hPx)
+        val cx = wPx / 2f
+        val cy = hPx / 2f
+        fun px(world: Offset): Offset {
+            val bx = padX + (world.x * 0.5f + 0.5f) * (wPx - 2 * padX)
+            val by = padY + (world.y * 0.5f + 0.5f) * (hPx - 2 * padY)
+            return Offset(cx + (bx - cx) * scale + pan.x, cy + (by - cy) * scale + pan.y)
         }
-    }
 
-    val labelColor = FolioTheme.colors.onSurface
-    // Hoisted out of the (non-composable) Canvas draw lambda below.
-    val fallbackAccent = FolioTheme.colors.accentProgress
-    val detailLabelStyle = TextStyle(color = labelColor, fontSize = 11.sp)
-    val titleStyle = TextStyle(color = labelColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .then(if (shaderEnabled) Modifier.folioAtlasShader(sea = atmosphere.sunkenFill, light = atmosphere.rimLight) else Modifier)
-            .pointerInput(model) {
-                detectTransformGestures { _, panChange, zoomChange, _ ->
-                    scale = (scale * zoomChange).coerceIn(0.6f, 6f)
-                    pan += panChange
-                }
-            }
-            .pointerInput(model, scale, pan, canvasSize) {
-                detectTapGestures { tap ->
-                    val size = canvasSize
-                    if (size == Size.Zero) return@detectTapGestures
-                    if (scale >= DETAIL_ZOOM) {
-                        // Deep zoom: hit-test exemplars, deep-link into the reader.
-                        var best: Pair<AtlasBook, com.folio.reader.ml.AtlasCluster>? = null
-                        var bestD = Float.MAX_VALUE
-                        model.books.forEach { b ->
-                            b.clusters.forEach { c ->
-                                val p = toScreen(size, c.x, c.y)
-                                val d = hypot(tap.x - p.x, tap.y - p.y)
-                                if (d < bestD) { bestD = d; best = b to c }
-                            }
-                        }
-                        val hit = best
-                        if (hit != null && bestD < 64f) {
-                            val c = hit.second
-                            onOpenExemplar(hit.first.bookId, c.exemplarSpineIndex.takeIf { it >= 0 }, c.exemplarFraction.takeIf { it >= 0f })
-                        }
-                    } else {
-                        // Far out: hit-test book centroids, open Book Detail.
-                        var bestId: String? = null
-                        var bestD = Float.MAX_VALUE
-                        centroids.forEach { (id, world) ->
-                            val p = toScreen(size, world.x, world.y)
-                            val d = hypot(tap.x - p.x, tap.y - p.y)
-                            if (d < bestD) { bestD = d; bestId = id }
-                        }
-                        bestId?.let { if (bestD < 96f) onOpenBook(it) }
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .folioAtlasShader(sea = seaColor, light = atmosphere.rimLight, enabled = shaderEnabled)
+                .pointerInput(model) {
+                    detectTransformGestures { _, panChange, zoomChange, _ ->
+                        scale = (scale * zoomChange).coerceIn(0.7f, 6f)
+                        pan += panChange
                     }
                 }
-            }
-            .semantics {
-                contentDescription = "Atlas map of ${model.books.size} books. Pinch to zoom into a book's topics; tap a region to open it."
-            }
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            canvasSize = size
+                .pointerInput(model, wPx, hPx, zoomedIn) {
+                    detectTapGestures { tap ->
+                        if (zoomedIn) {
+                            // Deep zoom: tap the nearest topic region → open that passage in the reader.
+                            var hitBook: String? = null
+                            var hitCluster: com.folio.reader.ml.AtlasCluster? = null
+                            var bestD = Float.MAX_VALUE
+                            model.books.forEach { b ->
+                                b.clusters.forEach { c ->
+                                    val p = px(Offset(c.x, c.y))
+                                    val d = hypot(tap.x - p.x, tap.y - p.y)
+                                    if (d < bestD) { bestD = d; hitBook = b.bookId; hitCluster = c }
+                                }
+                            }
+                            val c = hitCluster
+                            if (c != null && bestD < minDim * 0.14f * scale) {
+                                onOpenExemplar(hitBook!!, c.exemplarSpineIndex.takeIf { it >= 0 }, c.exemplarFraction.takeIf { it >= 0f })
+                            }
+                        } else {
+                            var bestId: String? = null
+                            var bestD = Float.MAX_VALUE
+                            centroids.forEach { (id, w) ->
+                                val p = px(w)
+                                val d = hypot(tap.x - p.x, tap.y - p.y)
+                                if (d < bestD) { bestD = d; bestId = id }
+                            }
+                            bestId?.let { if (bestD < minDim * 0.18f * scale) onOpenBook(it) }
+                        }
+                    }
+                }
+        ) {
+            // The sea: a soft central wash so the land floats on ocean rather than void.
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(seaColor.copy(alpha = 0.22f), seaColor.copy(alpha = 0.06f), Color.Transparent),
+                    center = Offset(wPx / 2f, hPx / 2f),
+                    radius = maxOf(wPx, hPx) * 0.7f,
+                ),
+            )
 
-            // Borders first, under the land: a faint line between books that share a coastline.
+            // Borders under the land: faint lines between books that share a coastline.
             model.edges.forEach { edge ->
                 val a = centroids[edge.bookIdA] ?: return@forEach
                 val b = centroids[edge.bookIdB] ?: return@forEach
-                val pa = toScreen(size, a.x, a.y)
-                val pb = toScreen(size, b.x, b.y)
                 val w = (edge.weight.toFloat() / 6f).coerceIn(0f, 1f)
                 drawLine(
-                    color = labelColor.copy(alpha = 0.06f + 0.14f * w),
-                    start = pa, end = pb, strokeWidth = 1f + 2f * w,
+                    color = edgeColor.copy(alpha = 0.05f + 0.16f * w),
+                    start = px(a), end = px(b), strokeWidth = 1f + 2.5f * w,
                 )
             }
 
-            // Land: each cluster is a topic region, tinted by its book, lit by reading progress,
-            // and its coastline is raggeder the more diffuse the topic (low tightness).
+            // Shadow pass first (all landmasses), offset away from the sun so the continents read
+            // as raised off the sea. Drawn under every landmass so no shadow falls on top of land.
+            val shadowShift = minDim * 0.02f * scale * reveal.value
             model.books.forEach { book ->
-                val accent = accents[book.bookId] ?: fallbackAccent
-                // Fog of war: unread regions are dim, read ones are present. Kept above a floor so
-                // an unread book is still faintly visible (Rule 19 — the map never hides data).
-                val litAlpha = 0.28f + 0.55f * book.readFraction
                 book.clusters.forEach { c ->
-                    val center = toScreen(size, c.x, c.y)
-                    val radius = (worldRadius(size) * scale) * (0.05f + 0.13f * c.mass)
-                    drawCoastline(center, radius, c.tightness, accent.copy(alpha = litAlpha))
+                    val center = px(Offset(c.x, c.y))
+                    val radius = minDim * (0.055f + 0.11f * c.mass) * scale * reveal.value
+                    if (radius > 0f) {
+                        val s = Offset(center.x - light.first * shadowShift, center.y - light.second * shadowShift)
+                        drawCoastline(s, radius * 1.04f, c.tightness, shadowColor.copy(alpha = 0.28f * reveal.value))
+                    }
                 }
             }
 
-            // Labels. Book titles far out; exemplar passages when zoomed into the constellation.
-            if (scale >= DETAIL_ZOOM) {
-                model.books.forEach { book ->
-                    book.clusters.forEach { c ->
-                        val text = exemplarTexts[c.exemplarChunkId]?.take(60) ?: return@forEach
-                        val p = toScreen(size, c.x, c.y)
-                        drawText(measurer, text, topLeft = Offset(p.x + 8f, p.y - 6f), style = detailLabelStyle)
-                    }
+            // Land: each cluster is a topic region, tinted by its book, lit by reading progress,
+            // its coastline raggeder the more diffuse the topic. Radius/alpha ride the entrance reveal.
+            model.books.forEach { book ->
+                val accent = accents[book.bookId] ?: return@forEach
+                val lit = (0.40f + 0.45f * book.readFraction) * reveal.value
+                book.clusters.forEach { c ->
+                    val center = px(Offset(c.x, c.y))
+                    val radius = minDim * (0.055f + 0.11f * c.mass) * scale * reveal.value
+                    drawCoastline(center, radius, c.tightness, accent.copy(alpha = lit))
                 }
-            } else {
-                model.books.forEach { book ->
-                    val world = centroids[book.bookId] ?: return@forEach
-                    val p = toScreen(size, world.x, world.y)
-                    if (book.title.isNotBlank()) {
-                        drawText(measurer, book.title.take(28), topLeft = Offset(p.x + 6f, p.y - 8f), style = titleStyle)
-                    }
+            }
+        }
+
+        // Labels as Compose Text (bounded, clipped — never the off-screen drawText crash).
+        // Far out: one title per book. Zoomed in: each topic region labelled with its own words,
+        // so the map reads as "this part of this book is about X" rather than an abstract blob.
+        val halfLabel = with(density) { 58.dp.toPx() }
+        if (zoomedIn) {
+            model.books.forEach { book ->
+                book.clusters.forEach { c ->
+                    val words = exemplarTexts[c.exemplarChunkId]?.let { topWords(it) }.orEmpty()
+                    if (words.isBlank()) return@forEach
+                    val p = px(Offset(c.x, c.y))
+                    Text(
+                        text = words,
+                        style = FolioTheme.typography.labelSmall,
+                        color = labelColor.copy(alpha = 0.9f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(max = 116.dp)
+                            .offset { IntOffset((p.x - halfLabel).toInt(), p.y.toInt()) },
+                    )
                 }
+            }
+        } else {
+            model.books.forEach { book ->
+                if (book.title.isBlank()) return@forEach
+                val p = px(centroids[book.bookId] ?: Offset.Zero)
+                Text(
+                    text = book.title,
+                    style = FolioTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = labelColor,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .widthIn(max = 116.dp)
+                        .offset { IntOffset((p.x - halfLabel).toInt(), p.y.toInt()) },
+                )
             }
         }
 
@@ -285,8 +353,8 @@ private fun AtlasMap(
                 color = FolioTheme.colors.onSurfaceVariant,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp)
-                    .background(FolioTheme.colors.surface.copy(alpha = 0.7f), RoundedCornerShape(percent = 50))
+                    .padding(bottom = 20.dp)
+                    .background(FolioTheme.colors.surface.copy(alpha = 0.85f), RoundedCornerShape(percent = 50))
                     .padding(horizontal = 14.dp, vertical = 6.dp),
             )
         }
@@ -296,9 +364,8 @@ private fun AtlasMap(
 /** A wobbly radial blob: a coastline whose raggedness falls as cluster tightness rises. */
 private fun DrawScope.drawCoastline(center: Offset, radius: Float, tightness: Float, color: Color) {
     if (radius <= 0f) return
-    // Tight topics (high cosine) get a smooth coast; diffuse ones get a jagged one.
-    val wobble = (1f - tightness.coerceIn(0f, 1f)) * 0.28f
-    val points = 24
+    val wobble = (1f - tightness.coerceIn(0f, 1f)) * 0.26f
+    val points = 26
     val path = Path()
     for (i in 0..points) {
         val a = (i.toFloat() / points) * (2f * Math.PI.toFloat())
@@ -311,9 +378,9 @@ private fun DrawScope.drawCoastline(center: Offset, radius: Float, tightness: Fl
     drawPath(
         path = path,
         brush = Brush.radialGradient(
-            colors = listOf(color, color.copy(alpha = color.alpha * 0.15f), Color.Transparent),
+            colors = listOf(color, color.copy(alpha = color.alpha * 0.35f), Color.Transparent),
             center = center,
-            radius = radius * 1.3f,
+            radius = radius * 1.35f,
         ),
     )
 }

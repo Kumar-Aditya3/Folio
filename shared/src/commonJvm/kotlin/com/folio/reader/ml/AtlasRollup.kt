@@ -66,14 +66,22 @@ object AtlasRollup {
      * @return the structural map: books with their topic clusters in 2D, plus book-to-book edges.
      *   Empty in, empty out.
      */
-    fun compute(entries: List<Pair<ChunkMeta, FloatArray>>): AtlasGeometry {
+    fun compute(
+        entries: List<Pair<ChunkMeta, FloatArray>>,
+        /**
+         * Polled at loop boundaries; return true to abort. The roll-up has no suspension points,
+         * so this is the only way a cancelled coroutine can stop the CPU work instead of running
+         * it to completion. Aborting throws [RollupCancelledException].
+         */
+        shouldCancel: () -> Boolean = { false },
+    ): AtlasGeometry {
         if (entries.isEmpty()) return AtlasGeometry(emptyList(), emptyList())
         val dims = entries.first().second.size
         if (dims == 0) return AtlasGeometry(emptyList(), emptyList())
 
         // 1. Whiten. One pass over the whole library so every book sits in the same whitened space.
         val raw = Array(entries.size) { entries[it].second }
-        val whitened = whiten(raw, dims, WHITEN_COMPONENTS)
+        val whitened = whiten(raw, dims, WHITEN_COMPONENTS, shouldCancel)
 
         // Group whitened rows by book, preserving each row's original index so we can name the
         // exemplar chunk and reach its vector for adjacency later.
@@ -83,6 +91,7 @@ object AtlasRollup {
         // 2. Per-book k-means on the whitened chunks.
         val books = ArrayList<BookClusters>(byBook.size)
         for ((bookId, rowIdx) in byBook) {
+            if (shouldCancel()) throw RollupCancelledException()
             val vecs = Array(rowIdx.size) { whitened[rowIdx[it]] }
             val k = clusterCountFor(vecs.size)
             val assignment = kMeans(vecs, k, dims)
@@ -114,7 +123,7 @@ object AtlasRollup {
         }
 
         // 4. Book-to-book edges from cross-cloud nearest-neighbour overlap.
-        val edges = adjacency(entries, whitened)
+        val edges = adjacency(entries, whitened, shouldCancel)
         return AtlasGeometry(books2D, edges)
     }
 
@@ -136,7 +145,12 @@ object AtlasRollup {
      * [components] principal directions, then re-normalise. Returns fresh arrays; inputs are
      * untouched.
      */
-    fun whiten(rows: Array<FloatArray>, dims: Int, components: Int): Array<FloatArray> {
+    fun whiten(
+        rows: Array<FloatArray>,
+        dims: Int,
+        components: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): Array<FloatArray> {
         val n = rows.size
         val mean = DoubleArray(dims)
         for (r in rows) for (d in 0 until dims) mean[d] += r[d]
@@ -152,6 +166,7 @@ object AtlasRollup {
         val pcs = ArrayList<DoubleArray>(components)
         val comp = min(components, dims)
         for (p in 0 until comp) {
+            if (shouldCancel()) throw RollupCancelledException()
             val v = powerIteration(centred, dims, pcs)
             if (v == null) break
             pcs.add(v)
@@ -416,6 +431,7 @@ object AtlasRollup {
     fun adjacency(
         entries: List<Pair<ChunkMeta, FloatArray>>,
         whitened: Array<FloatArray>,
+        shouldCancel: () -> Boolean = { false },
     ): List<AtlasEdge> {
         val n = entries.size
         if (n < 2) return emptyList()
@@ -434,6 +450,7 @@ object AtlasRollup {
         val bookIndex = bookIds.withIndex().associate { (i, id) -> id to i }
 
         for ((bookId, rows) in byBook) {
+            if (shouldCancel()) throw RollupCancelledException()
             val srcStride = max(1, rows.size / MAX_ADJACENCY_SAMPLES_PER_BOOK)
             var s = 0
             while (s < rows.size) {
@@ -486,6 +503,9 @@ object AtlasRollup {
     )
 }
 
+/** Thrown by [AtlasRollup.compute] when its `shouldCancel` hook asks it to stop mid-flight. */
+class RollupCancelledException : RuntimeException("Atlas roll-up cancelled")
+
 /** The structural output of [AtlasRollup.compute]: books with topic clusters, joined by edges. */
 data class AtlasGeometry(
     val books: List<AtlasBookGeometry>,
@@ -516,6 +536,7 @@ data class AtlasClusterGeometry(
 )
 
 /** An undirected book-to-book border, weighted by cross-cloud nearest-neighbour overlap. */
+@kotlinx.serialization.Serializable
 data class AtlasEdge(
     val bookIdA: String,
     val bookIdB: String,
