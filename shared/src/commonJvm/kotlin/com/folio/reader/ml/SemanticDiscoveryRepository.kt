@@ -12,6 +12,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * Data owner for the two semantic-discovery features — **Echoes** (cross-book resonant
@@ -34,15 +37,26 @@ class SemanticDiscoveryRepository(
     private val bookRepository: BookRepository,
     /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [Dispatchers.Default]. */
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
+    /**
+     * Where the computed map is persisted so a cold app start does not recompute the multi-second
+     * roll-up. Null disables the disk cache (the in-memory session cache still applies). Supplied
+     * by the app graph as the models dir, alongside the ONNX model this feature already borrows.
+     */
+    private val cacheDir: File? = null,
 ) {
     val model: EmbeddingModel get() = semanticSearch.model
 
-    // In-memory session cache only. The Atlas is deliberately *not* persisted to disk: it is a
-    // live view of the library, so a cold start recomputes it fresh rather than risk showing a
-    // stale snapshot. Within a session it is recomputed only when the fingerprint changes.
+    // In-memory session cache backed by a fingerprint-keyed disk cache. The roll-up is a
+    // multi-second, CPU-bound job that saturates the cores, so recomputing it on every cold start
+    // both wastes battery and starves anything running alongside it — notably an EPUB open, which
+    // then crawls. The [cacheDir] copy lets a cold start reuse the last map while the library is
+    // unchanged; it is keyed by [fingerprint] (model id, chunk count, embedded-book count), so any
+    // add/remove/reindex silently invalidates it and it is recomputed. Within a session the
+    // in-memory copy short-circuits even the disk read.
     private val atlasMutex = Mutex()
     private var cachedFingerprint: String? = null
     private var cachedAtlas: AtlasModel? = null
+    private val cacheJson = Json { ignoreUnknownKeys = true }
 
     // ---- Echoes --------------------------------------------------------------------------
 
@@ -132,12 +146,23 @@ class SemanticDiscoveryRepository(
     /**
      * The library's topic map. Computed on [Dispatchers.Default] (the roll-up is CPU-bound and
      * must not sit on the latency-sensitive inference pool), cached in memory for the session and
-     * recomputed only when the index fingerprint — model id, chunk count, embedded-book count —
-     * changes. A partially backfilled library maps whatever is embedded so far.
+     * persisted to [cacheDir] so a cold start reuses it. Recomputed only when the index fingerprint
+     * — model id, chunk count, embedded-book count — changes. A partially backfilled library maps
+     * whatever is embedded so far.
      */
     suspend fun atlas(): AtlasModel = atlasMutex.withLock {
         val fingerprint = fingerprint()
         cachedAtlas?.let { if (fingerprint == cachedFingerprint) return it }
+
+        // Disk cache: a cold app start has an empty in-memory cache and would otherwise recompute
+        // the whole roll-up — the multi-second CPU spike that makes an EPUB opened alongside it
+        // crawl. Keyed by the same fingerprint, so it is served only while the library is unchanged
+        // and silently recomputed (then overwritten) once a book is added, removed or reindexed.
+        readDiskCache(fingerprint)?.let {
+            cachedAtlas = it
+            cachedFingerprint = fingerprint
+            return it
+        }
 
         // Bound the roll-up's memory *at the source*. Loading a whole large library as floats
         // (~64 MB for 35k chunks) and then whitening it (an n×dims double working matrix on top)
@@ -231,7 +256,48 @@ class SemanticDiscoveryRepository(
         val result = AtlasModel(books, geometry.edges)
         cachedAtlas = result
         cachedFingerprint = fingerprint
+        writeDiskCache(fingerprint, result)
         result
+    }
+
+    /**
+     * Reads a previously computed map from [cacheDir], but only when it was computed for the same
+     * [fingerprint] as the current library — a stale envelope (the library changed since) is
+     * ignored so the caller recomputes. Best-effort: any IO or parse failure returns null.
+     */
+    private suspend fun readDiskCache(fingerprint: String): AtlasModel? {
+        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (!file.exists()) return@runCatching null
+                val envelope = cacheJson.decodeFromString(AtlasCacheEnvelope.serializer(), file.readText())
+                if (envelope.fingerprint == fingerprint) envelope.model else null
+            }.getOrNull()
+        }
+    }
+
+    /**
+     * Persists [model] under [fingerprint] to [cacheDir] for the next cold start. Written to a temp
+     * file then renamed so a kill mid-write cannot leave a half-written cache — and even if it did,
+     * [readDiskCache] swallows a parse failure and recomputes. Best-effort: a failure just means the
+     * next start recomputes.
+     */
+    private suspend fun writeDiskCache(fingerprint: String, model: AtlasModel) {
+        val dir = cacheDir ?: return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                dir.mkdirs()
+                val file = File(dir, ATLAS_CACHE_FILE)
+                val tmp = File(dir, "$ATLAS_CACHE_FILE.tmp")
+                tmp.writeText(cacheJson.encodeToString(AtlasCacheEnvelope.serializer(), AtlasCacheEnvelope(fingerprint, model)))
+                if (!tmp.renameTo(file)) {
+                    // Rename can fail if the destination exists on some filesystems; fall back to a
+                    // direct overwrite, which is still guarded by readDiskCache's runCatching.
+                    file.writeText(tmp.readText())
+                    tmp.delete()
+                }
+            }
+        }
     }
 
     /**
@@ -332,6 +398,9 @@ class SemanticDiscoveryRepository(
 
         /** Small embed batch for the lazy per-book label re-rank, bounding transient memory. */
         private const val RERANK_BATCH = 32
+
+        /** Filename of the fingerprint-keyed roll-up cache, written under [cacheDir]. */
+        private const val ATLAS_CACHE_FILE = "atlas_cache.json"
     }
 }
 
@@ -356,11 +425,17 @@ data class EchoHit(
 )
 
 /** The whole library as a map: books with topic regions, joined by shared borders. */
+@Serializable
 data class AtlasModel(
     val books: List<AtlasBook>,
     val edges: List<AtlasEdge>,
 )
 
+/** On-disk envelope: the map plus the fingerprint it was computed for. */
+@Serializable
+private data class AtlasCacheEnvelope(val fingerprint: String, val model: AtlasModel)
+
+@Serializable
 data class AtlasBook(
     val bookId: String,
     val title: String,
@@ -370,6 +445,7 @@ data class AtlasBook(
     val clusters: List<AtlasCluster>,
 )
 
+@Serializable
 data class AtlasCluster(
     val x: Float,
     val y: Float,

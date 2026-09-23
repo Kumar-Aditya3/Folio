@@ -1,6 +1,7 @@
 package com.folio.reader.ml
 
 import com.folio.reader.database.ChunkMeta
+import kotlinx.serialization.Serializable
 import java.util.concurrent.Callable
 import kotlin.math.abs
 import kotlin.math.max
@@ -616,6 +617,7 @@ data class AtlasClusterGeometry(
 }
 
 /** An undirected book-to-book border, weighted by cross-cloud nearest-neighbour overlap. */
+@Serializable
 data class AtlasEdge(
     val bookIdA: String,
     val bookIdB: String,

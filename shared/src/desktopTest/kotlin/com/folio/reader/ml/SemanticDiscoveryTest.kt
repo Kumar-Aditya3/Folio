@@ -155,4 +155,47 @@ class SemanticDiscoveryTest {
         // Cached: a second call with an unchanged index returns the same instance.
         assertTrue(discovery.atlas() === atlas, "an unchanged index must return the cached map")
     }
+
+    @Test
+    fun `atlas is served from disk on a cold start`() = runBlocking {
+        repeat(6) { i ->
+            addBook("b$i", "Book $i")
+            seed("b$i", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves and rocks")
+        }
+
+        // A repo with a cache dir writes the roll-up to disk after computing it.
+        val cacheDir = File(tempRoot, "models").apply { mkdirs() }
+        val warm = newDiscovery(cacheDir)
+        val first = warm.atlas()
+        assertTrue(first.books.isNotEmpty(), "the warm build must produce a map")
+        assertTrue(File(cacheDir, "atlas_cache.json").exists(), "the roll-up must be persisted")
+
+        // A *fresh* repo over the same DB and cache dir (a cold app start: empty in-memory cache)
+        // must reconstruct the map from disk rather than a from-scratch roll-up. It is a different
+        // instance, but round-trips to an equivalent map — proving the @Serializable envelope holds.
+        val cold = newDiscovery(cacheDir)
+        val restored = cold.atlas()
+        assertTrue(restored !== first, "a cold start starts with an empty in-memory cache")
+        assertEquals(
+            first.books.map { it.bookId }.toSet(),
+            restored.books.map { it.bookId }.toSet(),
+            "the disk-restored map must cover the same books",
+        )
+        assertEquals(
+            first.books.sumOf { it.clusters.size },
+            restored.books.sumOf { it.clusters.size },
+            "the disk-restored map must carry the same clusters",
+        )
+    }
+
+    private fun newDiscovery(cacheDir: File) = SemanticDiscoveryRepository(
+        semanticSearch = SemanticSearchRepository(
+            searchRepository = JdbcSearchRepository(database),
+            chunkRepository = chunkRepository,
+            embedderFactory = FakeFactory(FakeEmbedder.TEST_MODEL),
+        ),
+        chunkRepository = chunkRepository,
+        bookRepository = bookRepository,
+        cacheDir = cacheDir,
+    )
 }
