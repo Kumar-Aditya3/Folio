@@ -15,6 +15,13 @@ import kotlinx.serialization.json.Json
  */
 object ReaderWindowAssembler {
 
+    // Compiled once: splitDocument runs per section, per assemble/fragment, so per-call regex
+    // compilation here was avoidable work on the chapter-turn / window-extend path.
+    private val HEAD_BLOCK = Regex("(?is)<head[^>]*>(.*?)</head>")
+    private val BODY_BLOCK = Regex("(?is)<body[^>]*>(.*?)</body>")
+    private val DOCTYPE_PREFIX = Regex("(?is)^<!DOCTYPE[^>]*>")
+    private val HTML_TAGS = Regex("(?is)</?html[^>]*>")
+
     /** Full document for a window load (or a single-section continuous load). */
     fun assemble(sections: List<ReaderSection>): String {
         val heads = StringBuilder()
@@ -43,17 +50,17 @@ object ReaderWindowAssembler {
     /** Light head/body split; fragments without either pass through as body. */
     internal fun splitDocument(html: String): Pair<String, String> {
         if (html.isBlank()) return "" to ""
-        val headMatch = Regex("(?is)<head[^>]*>(.*?)</head>").find(html)
+        val headMatch = HEAD_BLOCK.find(html)
         val head = headMatch?.groupValues?.get(1)?.trim().orEmpty()
         val rest = if (headMatch != null) {
             html.replaceRange(headMatch.range, "")
         } else {
             html
         }
-        val bodyMatch = Regex("(?is)<body[^>]*>(.*?)</body>").find(rest)
+        val bodyMatch = BODY_BLOCK.find(rest)
         val body = (bodyMatch?.groupValues?.get(1) ?: rest)
-            .replace(Regex("(?is)^<!DOCTYPE[^>]*>"), "")
-            .replace(Regex("(?is)</?html[^>]*>"), "")
+            .replace(DOCTYPE_PREFIX, "")
+            .replace(HTML_TAGS, "")
             .trim()
         return head to body
     }

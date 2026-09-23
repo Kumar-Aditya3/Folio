@@ -21,6 +21,7 @@ import com.folio.reader.firebase.FsTag
 import com.folio.reader.model.*
 import com.folio.reader.settings.ReaderSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -91,6 +92,11 @@ class SyncEngine(
         loopJob?.cancel()
         loopJob = null
         debounceJob?.cancel()
+        // Cancel any other in-flight coroutines launched on the scope (enqueue*/triggerSync/
+        // syncOnAppClose). Without this a replaced engine (Settings → credential change) stayed
+        // reachable through those coroutines. cancelChildren (not scope.cancel) keeps the injected
+        // scope reusable if the same engine is ever restarted.
+        scope.coroutineContext.cancelChildren()
     }
 
     private var debounceJob: kotlinx.coroutines.Job? = null
@@ -237,9 +243,22 @@ class SyncEngine(
                 syncRepository.markError(item.id)
                 println("❌ Failed to upload ${item.entityType}/${item.entityId}: ${e.message}")
                 e.printStackTrace()
+                // A permanent per-item error (4xx other than 429, or a malformed payload) will never
+                // succeed on retry, so skip past it instead of aborting the whole batch — otherwise
+                // one poison item blocks every newer change and is then dropped silently. Transient
+                // errors (network, 5xx, 429, quota) still abort so a real outage doesn't burn every
+                // item's retry budget at once.
+                if (isPermanentPushError(e)) continue
                 throw e
             }
         }
+    }
+
+    private fun isPermanentPushError(e: Throwable): Boolean {
+        if (e is QuotaExhaustedException) return false
+        if (e is kotlinx.serialization.SerializationException) return true
+        val code = Regex("""HTTP (\d{3})""").find(e.message ?: "")?.groupValues?.get(1)?.toIntOrNull() ?: return false
+        return code in 400..499 && code != 429
     }
 
     private suspend fun pushBook(item: SyncQueueItem) {

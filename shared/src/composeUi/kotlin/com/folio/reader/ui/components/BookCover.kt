@@ -22,8 +22,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -33,24 +35,36 @@ import com.folio.reader.ui.theme.FolioTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
-/** Decoded-cover LRU-ish cache so grid scrolling doesn't re-decode files. */
-private val coverCache = ConcurrentHashMap<String, ImageBitmap>()
-private val coverCacheOrder = java.util.concurrent.ConcurrentLinkedDeque<String>()
-private const val COVER_CACHE_MAX = 120
+/** Decoded-cover cache bounded by decoded bytes (access-order LRU), not entry count. A fixed
+ *  120-entry cap could hold hundreds of MB of full-size bitmaps (covers + inline EPUB images
+ *  share this cache); byte-bounding caps the resident cost regardless of image size. */
+private const val COVER_CACHE_MAX_BYTES = 40L * 1024L * 1024L
+private val coverCache = LinkedHashMap<String, ImageBitmap>(64, 0.75f, true)
+private var coverCacheBytes = 0L
+
+private fun coverBytesOf(bitmap: ImageBitmap): Long = bitmap.width.toLong() * bitmap.height.toLong() * 4L
+
+private fun cacheGet(path: String): ImageBitmap? = synchronized(coverCache) { coverCache[path] }
 
 private fun cachePut(path: String, bitmap: ImageBitmap) {
-    if (coverCache.size >= COVER_CACHE_MAX) {
-        coverCacheOrder.pollFirst()?.let { coverCache.remove(it) }
+    synchronized(coverCache) {
+        coverCache.put(path, bitmap)?.let { coverCacheBytes -= coverBytesOf(it) }
+        coverCacheBytes += coverBytesOf(bitmap)
+        val it = coverCache.entries.iterator()
+        while (coverCacheBytes > COVER_CACHE_MAX_BYTES && coverCache.size > 1 && it.hasNext()) {
+            val e = it.next()
+            coverCacheBytes -= coverBytesOf(e.value)
+            it.remove()
+        }
     }
-    coverCache[path] = bitmap
-    coverCacheOrder.addLast(path)
 }
 
 fun clearCoverCache() {
-    coverCache.clear()
-    coverCacheOrder.clear()
+    synchronized(coverCache) {
+        coverCache.clear()
+        coverCacheBytes = 0L
+    }
 }
 
 /**
@@ -61,10 +75,10 @@ fun clearCoverCache() {
 internal suspend fun awaitCoverBitmapForAccent(path: String, timeoutMs: Long = 3_000): ImageBitmap? {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
-        coverCache[path]?.let { return it }
+        cacheGet(path)?.let { return it }
         kotlinx.coroutines.delay(100)
     }
-    return coverCache[path]
+    return cacheGet(path)
 }
 
 /**
@@ -86,7 +100,7 @@ fun EpubImage(
         val path = resolve(src)
         resolvedPath = path
         if (path != null) {
-            val cached = coverCache[path]
+            val cached = cacheGet(path)
             if (cached != null) {
                 bitmap = cached
             } else {
@@ -112,7 +126,9 @@ fun EpubImage(
             
             Image(
                 bitmap = current,
-                contentDescription = contentDescription ?: src,
+                // No alt text ⇒ decorative. Falling back to `src` read a raw cache
+                // file path/URL aloud to TalkBack, which is noise, not a description.
+                contentDescription = contentDescription,
                 contentScale = if (isSmallDecorative) ContentScale.Inside else ContentScale.Fit,
                 modifier = Modifier
                     .then(
@@ -177,7 +193,7 @@ fun BookCover(
             failed = true
             return@LaunchedEffect
         }
-        val cached = coverCache[path]
+        val cached = cacheGet(path)
         if (cached != null) {
             bitmap = cached
             return@LaunchedEffect
@@ -218,14 +234,18 @@ fun BookCover(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp))
                         .graphicsLayer { alpha = reveal.value }
                 )
             }
             failed -> FallbackCover(title, author, small, suppressText = suppressFallbackText)
-            else -> CircularProgressIndicator(
-                modifier = Modifier.size(22.dp),
-                strokeWidth = 2.dp,
-                color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.5f)
+            else -> Box(
+                // A shimmering plate, not a spinner: covers land in a cell that was
+                // already drawn its shape, so a grid fades in as one surface instead
+                // of popping in behind individual spinners.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .folioShimmer(RoundedCornerShape(8.dp))
             )
         }
     }
@@ -274,7 +294,8 @@ fun FallbackCover(
             if (suppressText) return@Column
             Text(
                 text = title.take(24),
-                style = if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium,
+                style = (if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium)
+                    .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                 color = Color.White,
                 textAlign = TextAlign.Center,
@@ -284,7 +305,8 @@ fun FallbackCover(
             if (!small && author.isNotBlank()) {
                 Text(
                     text = author.take(24),
-                    style = FolioTheme.typography.labelSmall,
+                    style = FolioTheme.typography.labelSmall
+                        .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
                     color = Color.White.copy(alpha = 0.85f),
                     textAlign = TextAlign.Center,
                     maxLines = 1,

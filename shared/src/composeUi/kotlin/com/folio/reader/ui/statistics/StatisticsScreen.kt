@@ -46,12 +46,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import com.folio.reader.ui.components.rememberEntryProgress
+import com.folio.reader.ui.components.rememberEntryState
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -281,6 +284,20 @@ private fun StatisticsContent(
             }
         }
 
+        // ── No sessions yet: lead with the explanation, not a screenful of
+        // zeroed charts. Manga is tracked separately and can still carry data of
+        // its own, so it keeps its section beneath the note. ──
+        if (!stats.hasData) {
+            item { EmptyState() }
+            if (mangaStats != null && mangaStats!!.hasData) {
+                item {
+                    Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    MangaStatsSection(mangaStats!!)
+                }
+            }
+            return@LazyColumn
+        }
+
         // ── a. Daily goal ring ────────────────────────────────────────
         item {
             StatsOverture(
@@ -353,10 +370,6 @@ private fun StatisticsContent(
                 MangaStatsSection(mangaStats!!)
                 Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
-        }
-
-        if (!stats.hasData) {
-            item { EmptyState() }
         }
     }
 }
@@ -475,58 +488,80 @@ private fun GoalDial(
 ) {
     val colors = FolioTheme.colors
     val fraction = if (goalMinutes > 0) (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f) else 0f
-    val animatedFraction by animateFloatAsState(
+    // Kept as State (not delegated) and read in the draw phase below, so the 800ms sweep animates
+    // without recomposing GoalDial every frame.
+    val animatedFraction = animateFloatAsState(
         targetValue = fraction,
         animationSpec = tween(durationMillis = 800, easing = LinearEasing),
         label = "goalRing",
     )
     // §13.5: the ring sweeps in once on entry; live goal changes keep using the
     // fraction animation above.
-    val ringEntry = rememberEntryProgress("dailyGoalRing")
+    val ringEntry = rememberEntryState("dailyGoalRing")
     val met = goalMinutes > 0 && todayMinutes >= goalMinutes
     // Rule 14: forward motion is accentProgress; a met goal is a celebration and
     // switches to accentStreak.
     val accent = if (met) colors.accentStreak else colors.accentProgress
+    // The ring's spoken form, built from the same figures the arc encodes, so a
+    // screen reader hears the goal instead of an unlabelled Canvas.
+    val goalDesc = if (goalMinutes > 0) {
+        "Daily reading goal: ${todayMinutes.toInt()} of $goalMinutes minutes today" +
+            if (met) ", goal met" else ""
+    } else {
+        "Daily reading goal: ${todayMinutes.toInt()} minutes today"
+    }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(96.dp)
             .then(if (onEdit != null) Modifier.clickable(onClick = onEdit) else Modifier)
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 7.dp.toPx()
-            val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
-            val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
-            drawArc(
-                color = accent.copy(alpha = 0.16f),
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-            )
-            drawArc(
-                brush = Brush.verticalGradient(
-                    listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
-                ),
-                startAngle = -90f,
-                sweepAngle = 360f * animatedFraction * ringEntry,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-            )
-        }
+        Spacer(
+            modifier = Modifier
+                .fillMaxSize()
+                .semantics { contentDescription = goalDesc }
+                .drawWithCache {
+                    // Arc metrics + the gradient brush are built once; only the swept angle reads
+                    // the animated fraction/entry in the draw phase.
+                    val strokeWidth = 7.dp.toPx()
+                    val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+                    val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                    val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    val trackColor = accent.copy(alpha = 0.16f)
+                    val brush = Brush.verticalGradient(
+                        listOf(accent, accent.copy(alpha = FolioTokens.gradientMinAlpha))
+                    )
+                    onDrawBehind {
+                        drawArc(
+                            color = trackColor,
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            style = stroke,
+                        )
+                        drawArc(
+                            brush = brush,
+                            startAngle = -90f,
+                            sweepAngle = 360f * animatedFraction.value * ringEntry.value,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            style = stroke,
+                        )
+                    }
+                }
+        )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "${todayMinutes.toInt()}",
-                style = FolioTheme.typography.headlineSmall,
+                style = FolioTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
                 color = accent,
             )
             Text(
                 text = "/ $goalMinutes min",
-                style = FolioTheme.typography.labelSmall,
+                style = FolioTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                 color = colors.onSurfaceVariant,
             )
         }

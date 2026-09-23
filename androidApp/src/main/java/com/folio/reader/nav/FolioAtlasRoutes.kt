@@ -29,6 +29,7 @@ fun AtlasRoute(
     val viewModel = remember { AtlasViewModel(graph.semanticDiscoveryRepository) }
     val state by viewModel.state.collectAsState()
     val exemplarTexts by viewModel.exemplarTexts.collectAsState()
+    val refinedLabels by viewModel.refinedLabels.collectAsState()
     val books by remember { graph.bookRepository.getAllBooks() }.collectAsState(initial = emptyList())
 
     LaunchedEffect(Unit) { viewModel.load() }
@@ -37,6 +38,9 @@ fun AtlasRoute(
     AtlasScreen(
         state = state,
         exemplarTexts = exemplarTexts,
+        refinedLabels = refinedLabels,
+        authorByBook = books.associate { it.id to it.displayAuthor },
+        descriptionByBook = books.mapNotNull { b -> b.description?.let { b.id to it } }.toMap(),
         onBack = onBack,
         onOpenBook = { bookId ->
             // Seed the handoff so Book Detail's shared cover exists on its first frame.
@@ -45,6 +49,7 @@ fun AtlasRoute(
         },
         onOpenExemplar = { bookId, spine, frac -> onOpenReaderAt(bookId, spine, frac) },
         onLoadExemplars = { ids -> viewModel.loadExemplars(ids) },
+        onRefineBooks = { books -> viewModel.refineVisibleBooks(books) },
         onRunBackfill = { EmbeddingBackfillScheduler.runNow(context) },
     )
 }

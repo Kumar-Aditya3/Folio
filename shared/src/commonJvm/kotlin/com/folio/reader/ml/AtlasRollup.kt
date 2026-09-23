@@ -1,6 +1,7 @@
 package com.folio.reader.ml
 
 import com.folio.reader.database.ChunkMeta
+import java.util.concurrent.Callable
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -117,6 +118,8 @@ object AtlasRollup {
                         mass = cl.mass,
                         tightness = cl.tightness,
                         exemplarChunkId = cl.exemplarChunkId,
+                        memberChunkIds = cl.memberChunkIds,
+                        rawCentroid = cl.rawCentroid,
                     )
                 },
             )
@@ -338,24 +341,43 @@ object AtlasRollup {
             val inv = if (norm > 1e-12) (1.0 / norm).toFloat() else 0f
             for (d in 0 until dims) centroid[d] *= inv
 
-            // Tightness = mean cosine to centroid; exemplar = the member nearest it.
+            // Tightness = mean cosine to centroid. Also rank members by cosine so we can keep the
+            // top-K nearest the centroid — the exemplar (nearest) drives the deep-link, and the
+            // whole K feed the c-TF-IDF label (one passage is too thin to name a theme from).
             var sumCos = 0.0
-            var bestCos = -2.0
-            var bestRow = mem.first()
+            val scored = ArrayList<Pair<Int, Double>>(mem.size)
             for (i in mem) {
                 var dot = 0.0
                 val v = vecs[i]
                 for (d in 0 until dims) dot += v[d] * centroid[d]
                 sumCos += dot
-                if (dot > bestCos) { bestCos = dot; bestRow = i }
+                scored.add(i to dot)
             }
-            val exemplarChunkId = entries[rowIdx[bestRow]].first.id
+            scored.sortByDescending { it.second }
+            val topRows = scored.take(LABEL_CHUNKS_PER_CLUSTER).map { it.first }
+            val memberChunkIds = topRows.map { entries[rowIdx[it]].first.id }
+            val exemplarChunkId = memberChunkIds.firstOrNull() ?: entries[rowIdx[mem.first()]].first.id
+
+            // Raw (un-whitened) centroid: the mean of members' *original* vectors, renormalised.
+            // This is the anchor for the lazy stage-2 label re-rank — candidate phrases embed into
+            // raw model space, so they must be compared against a raw centroid, NOT the whitened
+            // one used for layout (mixing the two spaces would silently mis-rank the labels).
+            val rawCentroid = FloatArray(dims)
+            for (i in mem) { val rv = entries[rowIdx[i]].second; for (d in 0 until dims) rawCentroid[d] += rv[d] }
+            var rn = 0.0
+            for (d in 0 until dims) rn += rawCentroid[d] * rawCentroid[d]
+            rn = sqrt(rn)
+            val rinv = if (rn > 1e-12) (1.0 / rn).toFloat() else 0f
+            for (d in 0 until dims) rawCentroid[d] *= rinv
+
             out.add(
                 ClusterSummary(
                     centroidWhitened = centroid,
                     mass = mem.size.toFloat() / n,
                     tightness = (sumCos / mem.size).toFloat().coerceIn(-1f, 1f),
                     exemplarChunkId = exemplarChunkId,
+                    memberChunkIds = memberChunkIds,
+                    rawCentroid = rawCentroid,
                 )
             )
         }
@@ -441,40 +463,86 @@ object AtlasRollup {
         val stride = max(1, n / MAX_ADJACENCY_CANDIDATES)
         val candidateRows = (0 until n step stride).toList()
 
-        // Sample rows per book, strided within each book, capped.
+        // Sample rows per book, strided within each book, capped. Flattened into parallel arrays
+        // so the (dominant) nearest-candidate scan can be sharded across cores.
         val byBook = LinkedHashMap<String, MutableList<Int>>()
         entries.forEachIndexed { i, (meta, _) -> byBook.getOrPut(meta.bookId) { mutableListOf() }.add(i) }
 
-        val pairCount = HashMap<Long, Int>()
         val bookIds = byBook.keys.toList()
         val bookIndex = bookIds.withIndex().associate { (i, id) -> id to i }
 
+        val srcRows = ArrayList<Int>()
+        val srcBookIdx = ArrayList<Int>()
         for ((bookId, rows) in byBook) {
-            if (shouldCancel()) throw RollupCancelledException()
+            val aIdx = bookIndex.getValue(bookId)
             val srcStride = max(1, rows.size / MAX_ADJACENCY_SAMPLES_PER_BOOK)
             var s = 0
             while (s < rows.size) {
-                val srcRow = rows[s]
-                val srcVec = whitened[srcRow]
-                var bestCand = -1
-                var bestDot = -2.0
-                for (candRow in candidateRows) {
-                    if (entries[candRow].first.bookId == bookId) continue
-                    var dot = 0.0
-                    val cv = whitened[candRow]
-                    for (d in 0 until dims) dot += srcVec[d] * cv[d]
-                    if (dot > bestDot) { bestDot = dot; bestCand = candRow }
-                }
-                if (bestCand >= 0) {
-                    val other = entries[bestCand].first.bookId
-                    val a = bookIndex.getValue(bookId)
-                    val b = bookIndex.getValue(other)
-                    val key = edgeKey(a, b)
-                    pairCount[key] = (pairCount[key] ?: 0) + 1
-                }
+                srcRows.add(rows[s]); srcBookIdx.add(aIdx)
                 s += srcStride
             }
         }
+
+        // For one source row, find its single nearest chunk in another book and return the packed
+        // undirected edge key, or -1L when it matched nothing. Pure over shared read-only state, so
+        // it is safe to run concurrently across disjoint source-row ranges.
+        fun edgeForSource(i: Int): Long {
+            val srcRow = srcRows[i]
+            val aIdx = srcBookIdx[i]
+            val bookId = bookIds[aIdx]
+            val srcVec = whitened[srcRow]
+            var bestCand = -1
+            var bestDot = -2.0
+            for (candRow in candidateRows) {
+                if (entries[candRow].first.bookId == bookId) continue
+                var dot = 0.0
+                val cv = whitened[candRow]
+                for (d in 0 until dims) dot += srcVec[d] * cv[d]
+                if (dot > bestDot) { bestDot = dot; bestCand = candRow }
+            }
+            if (bestCand < 0) return -1L
+            val b = bookIndex.getValue(entries[bestCand].first.bookId)
+            return edgeKey(aIdx, b)
+        }
+
+        // Tally one contiguous range of source rows into a local map; checks cancellation
+        // periodically so a cancelled roll-up stops promptly without an exception across threads.
+        fun tallyRange(from: Int, to: Int): HashMap<Long, Int> {
+            val local = HashMap<Long, Int>()
+            var i = from
+            var sinceCheck = 0
+            while (i < to) {
+                val key = edgeForSource(i)
+                if (key >= 0L) local[key] = (local[key] ?: 0) + 1
+                i++
+                if (++sinceCheck >= 32) { sinceCheck = 0; if (shouldCancel()) break }
+            }
+            return local
+        }
+
+        val total = srcRows.size
+        val workers = ScanPool.parallelism
+        val pairCount: HashMap<Long, Int>
+        if (workers <= 1 || total < 2 * workers) {
+            if (shouldCancel()) throw RollupCancelledException()
+            pairCount = tallyRange(0, total)
+        } else {
+            // Contiguous shards across the worker pool; identical result to the serial tally because
+            // each source row picks its nearest candidate independently and the counts just sum.
+            val chunk = (total + workers - 1) / workers
+            val tasks = ArrayList<Callable<HashMap<Long, Int>>>(workers)
+            var start = 0
+            while (start < total) {
+                val from = start
+                val to = minOf(start + chunk, total)
+                tasks.add(Callable { tallyRange(from, to) })
+                start = to
+            }
+            val shards = ScanPool.executor.invokeAll(tasks).map { it.get() }
+            pairCount = HashMap()
+            for (shard in shards) for ((k, v) in shard) pairCount[k] = (pairCount[k] ?: 0) + v
+        }
+        if (shouldCancel()) throw RollupCancelledException()
 
         return pairCount.entries
             .filter { it.value >= MIN_EDGE_WEIGHT }
@@ -500,7 +568,12 @@ object AtlasRollup {
         val mass: Float,
         val tightness: Float,
         val exemplarChunkId: String,
+        val memberChunkIds: List<String>,
+        val rawCentroid: FloatArray,
     )
+
+    /** How many centroid-nearest chunks each cluster keeps to feed the c-TF-IDF label. */
+    const val LABEL_CHUNKS_PER_CLUSTER = 6
 }
 
 /** Thrown by [AtlasRollup.compute] when its `shouldCancel` hook asks it to stop mid-flight. */
@@ -533,10 +606,16 @@ data class AtlasClusterGeometry(
     val mass: Float,
     val tightness: Float,
     val exemplarChunkId: String,
-)
+    /** The centroid-nearest chunk ids (exemplar first), for labelling the cluster's theme. */
+    val memberChunkIds: List<String> = emptyList(),
+    /** Raw (un-whitened) unit centroid — the anchor for the lazy stage-2 label re-rank. */
+    val rawCentroid: FloatArray = FloatArray(0),
+) {
+    // Data classes with FloatArray need identity-free equals/hashCode only if compared; the Atlas
+    // never compares geometries by value, so the defaults are fine and intentionally left as-is.
+}
 
 /** An undirected book-to-book border, weighted by cross-cloud nearest-neighbour overlap. */
-@kotlinx.serialization.Serializable
 data class AtlasEdge(
     val bookIdA: String,
     val bookIdB: String,

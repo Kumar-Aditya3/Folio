@@ -59,13 +59,21 @@ class MangaLibraryViewModel(
     val ready: StateFlow<Boolean> = library
         .map { true }
         .stateIn(scope, SharingStarted.Lazily, false)
-    val unreadCounts: StateFlow<Map<String, Int>> = chapterRepo.observeUnreadCounts()
+    // One query per data revision backs all three count maps: unread / progress / downloaded now
+    // derive from a single shared aggregates flow instead of three separate whole-table scans that
+    // each re-ran on every page-turn (mangaDataRevision) bump.
+    private val chapterAggregates = chapterRepo.observeChapterAggregates()
         .stateIn(scope, SharingStarted.Lazily, emptyMap())
-    val progress: StateFlow<Map<String, Float>> = chapterRepo.observeProgress()
+    val unreadCounts: StateFlow<Map<String, Int>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.unread } }
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    val progress: StateFlow<Map<String, Float>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.progress } }
         .stateIn(scope, SharingStarted.Lazily, emptyMap())
     val lastRead: StateFlow<Map<String, com.folio.reader.manga.MangaLastRead>> = chapterRepo.observeLastRead()
         .stateIn(scope, SharingStarted.Lazily, emptyMap())
-    val downloadedCounts: StateFlow<Map<String, Int>> = chapterRepo.observeDownloadedCounts()
+    val downloadedCounts: StateFlow<Map<String, Int>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.downloaded } }
         .stateIn(scope, SharingStarted.Lazily, emptyMap())
     val categories = categoryRepo.observeCategories()
         .stateIn(scope, SharingStarted.Lazily, emptyList())

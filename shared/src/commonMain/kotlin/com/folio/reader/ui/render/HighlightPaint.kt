@@ -121,14 +121,20 @@ object HighlightPaint {
                 "}\n" +
                 "window.__folioPaintHighlights=function(items){\n" +
                 "  unwrap();\n" +
+                // `full` (whitespace-stripped text) is stable across wraps — surroundContents only
+                // splits nodes, it never removes characters — so collect once and refresh the
+                // node/offset map only after a wrap actually mutates the DOM, instead of rebuilding
+                // the whole-document map at the top of every guard iteration and every item.
+                "  var c=collect();\n" +
                 "  for(var k=0;k<items.length;k++){\n" +
                 "    var it=items[k],needle=norm(it.t||'');\n" +
                 "    if(!needle)continue;\n" +
                 "    var pos=0,guard=0;\n" +
                 "    while(guard++<40){\n" +
-                "      var c=collect(),hit=c.full.indexOf(needle,pos);\n" +
+                "      var hit=c.full.indexOf(needle,pos);\n" +
                 "      if(hit<0||!wrap(c,hit,needle.length,it.b,it.u,it.i))break;\n" +
                 "      pos=hit+needle.length;\n" +
+                "      c=collect();\n" +
                 "    }\n" +
                 "  }\n" +
                 "  if(window.__folioRelayout)window.__folioRelayout();\n" +

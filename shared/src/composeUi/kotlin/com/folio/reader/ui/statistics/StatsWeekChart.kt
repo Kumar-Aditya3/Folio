@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -122,48 +123,50 @@ internal fun SmoothWeekCurve(
         // sweep mid-scroll.
         val entry: State<Float> = rememberEntryState(values.size)
         val peakIndex = values.indices.maxByOrNull { values[it] } ?: -1
-        Canvas(
+        Spacer(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(plotHeight)
-        ) {
-            if (values.isEmpty()) return@Canvas
-            val peak = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
-            val progress = entry.value
-            val n = values.size
-            val colWidth = size.width / n
-            val topPad = 3.dp.toPx()
-            val baseline = size.height - 1.dp.toPx()
-            val span = (baseline - topPad).coerceAtLeast(1f)
-            val points = values.mapIndexed { index, value ->
-                Offset(colWidth * (index + 0.5f), baseline - span * (value / peak))
-            }
-            val curve = Path().apply { appendMonotoneCubic(points) }
-            val area = Path().apply {
-                addPath(curve)
-                lineTo(points.last().x, baseline)
-                lineTo(points.first().x, baseline)
-                close()
-            }
-            clipRect(right = size.width * progress) {
-                drawPath(
-                    area,
-                    brush = Brush.verticalGradient(
+                .drawWithCache {
+                    // Built once per size/data change, not per animation frame: the monotone-cubic
+                    // solve, both paths and the gradient are all independent of the sweep progress,
+                    // which is read only in onDrawBehind below.
+                    if (values.isEmpty()) return@drawWithCache onDrawBehind { }
+                    val peak = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
+                    val n = values.size
+                    val colWidth = size.width / n
+                    val topPad = 3.dp.toPx()
+                    val baseline = size.height - 1.dp.toPx()
+                    val span = (baseline - topPad).coerceAtLeast(1f)
+                    val points = values.mapIndexed { index, value ->
+                        Offset(colWidth * (index + 0.5f), baseline - span * (value / peak))
+                    }
+                    val curve = Path().apply { appendMonotoneCubic(points) }
+                    val area = Path().apply {
+                        addPath(curve)
+                        lineTo(points.last().x, baseline)
+                        lineTo(points.first().x, baseline)
+                        close()
+                    }
+                    val areaBrush = Brush.verticalGradient(
                         listOf(accent.copy(alpha = 0.25f), Color.Transparent)
-                    ),
-                )
-                drawPath(
-                    curve,
-                    color = accent,
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
-                )
-            }
-            // Rule 15 peak marker: the week's max day carries a dot in
-            // accentStreak, appearing only once the sweep has reached it.
-            if (progress >= 1f && peakIndex >= 0 && values[peakIndex] > 0f) {
-                drawCircle(peakAccent, radius = 3.dp.toPx(), center = points[peakIndex])
-            }
-        }
+                    )
+                    val strokePx = 2.dp.toPx()
+                    val dotRadius = 3.dp.toPx()
+                    onDrawBehind {
+                        val progress = entry.value
+                        clipRect(right = size.width * progress) {
+                            drawPath(area, brush = areaBrush)
+                            drawPath(curve, color = accent, style = Stroke(width = strokePx, cap = StrokeCap.Round))
+                        }
+                        // Rule 15 peak marker: the week's max day carries a dot in
+                        // accentStreak, appearing only once the sweep has reached it.
+                        if (progress >= 1f && peakIndex >= 0 && values[peakIndex] > 0f) {
+                            drawCircle(peakAccent, radius = dotRadius, center = points[peakIndex])
+                        }
+                    }
+                }
+        )
         Spacer(Modifier.height(6.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             dayLabels.forEach { label ->

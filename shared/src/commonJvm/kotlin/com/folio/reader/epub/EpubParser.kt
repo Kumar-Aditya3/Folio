@@ -91,7 +91,9 @@ class EpubParser(
     private fun readZipEntry(zipFile: ZipFile, entryPath: String): ByteArray {
         val entry = zipFile.getEntry(entryPath)
             ?: throw EpubParseException("Entry not found: $entryPath")
-        return zipFile.getInputStream(entry).readBytes()
+        // Bounded read: a maliciously/ pathologically compressed entry (zip bomb) could otherwise
+        // allocate gigabytes via readBytes() and OOM the app on import. Mirrors the Office path.
+        return zipFile.getInputStream(entry).use { readBounded(it, MAX_EPUB_ENTRY_BYTES) }
     }
 
     private fun parseOpf(opfData: ByteArray, opfPath: String): Triple<EpubMetadata, List<EpubManifestItem>, List<EpubSpineItem>> {
@@ -457,12 +459,14 @@ class EpubParser(
     private fun extractText(html: String): Pair<String, Long> {
         // Simple HTML text extraction - in production use a proper HTML parser
         val text = html
-            .replace(Regex("(?s)<script.*?</script>"), "")
-            .replace(Regex("(?s)<style.*?</style>"), "")
-            .replace(Regex("<[^>]+>"), " ")
-            .replace(Regex("\\s+"), " ")
+            .replace(RE_SCRIPT, "")
+            .replace(RE_STYLE, "")
+            .replace(RE_TAG, " ")
+            .replace(RE_WS, " ")
             .trim()
-        val words = text.split(Regex("\\s+")).count { it.isNotEmpty() }.toLong()
+        // Whitespace is already collapsed to single spaces above, so word count is (spaces + 1)
+        // for non-empty text — no need to materialise a full split list of every word.
+        val words = if (text.isEmpty()) 0L else (text.count { it == ' ' } + 1).toLong()
         return text to words
     }
 
@@ -496,7 +500,7 @@ class EpubParser(
                         }
                         if (depth > 0) eventType = parser.next() else break
                     }
-                    val candidate = sb.toString().trim().replace(Regex("\\s+"), " ")
+                    val candidate = sb.toString().trim().replace(RE_WS, " ")
                     val candidateNorm = candidate.lowercase()
                     
                     // Skip if empty or exactly the book title
@@ -516,8 +520,8 @@ class EpubParser(
                 norm.contains("chapter") || 
                 norm.contains("prologue") || 
                 norm.contains("epilogue") ||
-                norm.matches(Regex(".*\\b(part|book|section)\\s+\\d+.*", RegexOption.IGNORE_CASE)) ||
-                norm.matches(Regex("\\d+[.:)].*")) // Starts with number
+                norm.matches(RE_TITLE_PART) ||
+                norm.matches(RE_TITLE_NUM) // Starts with number
             } ?: candidates.firstOrNull() // Fall back to first heading if no chapter-like title found
         } catch (_: Exception) {
             null
@@ -556,7 +560,7 @@ class EpubParser(
         val lastSlash = stripped.lastIndexOf('/')
         // Base may be a file path, a dir path, or empty (root-level OPF).
         val basePath = if (lastSlash >= 0) stripped.substring(0, lastSlash + 1) else ""
-        return (basePath + href).replace(Regex("/\\./"), "/").replace(Regex("([^/])/\\.\\./"), "$1/")
+        return (basePath + href).replace(RE_DOT_SEG, "/").replace(RE_DOTDOT_SEG, "$1/")
     }
 
     private fun bomFree(data: ByteArray): ByteArray =
@@ -613,6 +617,36 @@ class EpubParser(
 
 class EpubParseException(message: String) : Exception(message)
 
+// Hoisted so per-chapter extraction/title/href/charset work (run once per spine item, on both the
+// import path and the reader's per-chapter fast read) does not recompile these patterns each call.
+private val RE_SCRIPT = Regex("(?s)<script.*?</script>")
+private val RE_STYLE = Regex("(?s)<style.*?</style>")
+private val RE_TAG = Regex("<[^>]+>")
+private val RE_WS = Regex("\\s+")
+private val RE_TITLE_PART = Regex(".*\\b(part|book|section)\\s+\\d+.*", RegexOption.IGNORE_CASE)
+private val RE_TITLE_NUM = Regex("\\d+[.:)].*")
+private val RE_DOT_SEG = Regex("/\\./")
+private val RE_DOTDOT_SEG = Regex("([^/])/\\.\\./")
+private val RE_CHARSET_ENCODING = Regex("encoding\\s*=\\s*[\"']([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
+private val RE_CHARSET_META = Regex("<meta[^>]+charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
+
+/** Per-entry decompressed-size ceiling for EPUB parsing, guarding against zip bombs on import. */
+private const val MAX_EPUB_ENTRY_BYTES = 64L * 1024L * 1024L
+
+private fun readBounded(input: java.io.InputStream, maxBytes: Long): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val chunk = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val n = input.read(chunk)
+        if (n < 0) break
+        total += n
+        if (total > maxBytes) throw EpubParseException("EPUB entry exceeds $maxBytes bytes (possible zip bomb)")
+        out.write(chunk, 0, n)
+    }
+    return out.toByteArray()
+}
+
 /**
  * Scans the ASCII-safe prefix of a document for an XML prolog or meta-charset
  * encoding declaration. EPUB2 books commonly declare ISO-8859-1/Windows-1252;
@@ -620,10 +654,8 @@ class EpubParseException(message: String) : Exception(message)
  */
 internal fun declaredCharset(data: ByteArray): String? {
     val head = String(data, 0, minOf(data.size, 1024), Charsets.ISO_8859_1)
-    Regex("encoding\\s*=\\s*[\"']([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
-        .find(head)?.let { return it.groupValues[1] }
-    Regex("<meta[^>]+charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)
-        .find(head)?.let { return it.groupValues[1] }
+    RE_CHARSET_ENCODING.find(head)?.let { return it.groupValues[1] }
+    RE_CHARSET_META.find(head)?.let { return it.groupValues[1] }
     return null
 }
 

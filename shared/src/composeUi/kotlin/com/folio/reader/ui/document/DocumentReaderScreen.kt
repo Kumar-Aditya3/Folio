@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -158,13 +160,19 @@ fun DocumentReaderScreen(
                     Modifier.align(Alignment.Center)
                 )
                 is DocumentReaderLoadState.Ready -> when (val content = load.content) {
-                    is DocumentReaderContent.Pdf -> FixedPageContentSurface(
-                        content.path, state.document!!.id, state.currentPage, state.mode,
-                        state.rotationDegrees, resetZoomKey, Modifier.fillMaxSize(), viewModel::onPdfOpened,
-                        viewModel::setCurrentPage,
-                        onTap = { viewModel.setControlsVisible(!state.controlsVisible) },
-                        onError = viewModel::reportError
-                    )
+                    is DocumentReaderContent.Pdf -> CompositionLocalProvider(
+                        // The single-page ground follows the reader's paper, like the
+                        // foxing and page block, instead of the app surfaceVariant.
+                        LocalReaderPaper provides paper
+                    ) {
+                        FixedPageContentSurface(
+                            content.path, state.document!!.id, state.currentPage, state.mode,
+                            state.rotationDegrees, resetZoomKey, Modifier.fillMaxSize(), viewModel::onPdfOpened,
+                            viewModel::setCurrentPage,
+                            onTap = { viewModel.setControlsVisible(!state.controlsVisible) },
+                            onError = viewModel::reportError
+                        )
+                    }
                     is DocumentReaderContent.Reflowable -> HtmlContentSurface(
                         // A reflowed document is one section — same shape a chapter
                         // window uses, with no chapter identity of its own.
@@ -226,7 +234,7 @@ fun DocumentReaderScreen(
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it }
         ) {
-            Column {
+            Column(Modifier.navigationBarsPadding()) {
                 if (isPdf) {
                     DocumentReaderControls(
                         state = state,
@@ -271,7 +279,9 @@ private fun DocumentReaderControls(
     onResetZoom: () -> Unit
 ) {
     Row(
-        Modifier.fillMaxWidth().folioVeil().padding(horizontal = FolioTokens.space3),
+        Modifier.fillMaxWidth()
+            .folioVeil(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .padding(horizontal = FolioTokens.space3),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {

@@ -30,6 +30,11 @@ class AtlasViewModel(
     private val _exemplarTexts = MutableStateFlow<Map<String, String>>(emptyMap())
     val exemplarTexts: StateFlow<Map<String, String>> = _exemplarTexts.asStateFlow()
 
+    // Stage-2 refined labels, keyed by cluster exemplarChunkId, filled lazily per book on zoom-in.
+    private val _refinedLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val refinedLabels: StateFlow<Map<String, String>> = _refinedLabels.asStateFlow()
+    private val refinedBooks = HashSet<String>()
+
     fun load() {
         _state.value = AtlasUiState.Loading
         scope.launch {
@@ -53,6 +58,22 @@ class AtlasViewModel(
                         AtlasUiState.Map(model, forming = readiness.forming, fraction = readiness.fraction)
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Stage-2 label re-rank for the books currently in view, done lazily (once per book) so the
+     * embedder is only touched when the reader zooms in, never during the roll-up. Merges refined
+     * labels into [refinedLabels]; failures leave the c-TF-IDF labels in place.
+     */
+    fun refineVisibleBooks(books: List<com.folio.reader.ml.AtlasBook>) {
+        val todo = books.filter { refinedBooks.add(it.bookId) }
+        if (todo.isEmpty()) return
+        scope.launch {
+            todo.forEach { book ->
+                val refined = runCatching { discovery.refineBookLabels(book) }.getOrDefault(emptyMap())
+                if (refined.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + refined
             }
         }
     }

@@ -2,8 +2,14 @@
 
 package com.folio.reader.ui.home
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,10 +30,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -35,6 +42,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -57,6 +65,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -143,12 +153,21 @@ fun HomeScreen(
     atlasReady: Boolean = false,
     topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
 ) {
+    val motion = rememberMotionEnabled()
+    // §13.5: the geometry-matched skeleton dissolves into the loaded content
+    // rather than hard-cutting to it. Keyed on the loaded flag and motion-gated,
+    // so reduce-motion still swaps instantly.
+    Crossfade(
+        targetState = state.loaded,
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "homeLoaded",
+    ) { loaded ->
     when {
-        !state.loaded -> HomeSkeleton(Modifier.padding(top = topInset))
+        !loaded -> HomeSkeleton(Modifier.padding(top = topInset))
         !state.hasBooks && !state.hasManga ->
             Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 EmptyState(
-                    icon = Icons.Filled.MenuBook,
+                    icon = Icons.AutoMirrored.Outlined.MenuBook,
                     headline = "Your library is empty — import an EPUB to start.",
                     action = { Button(onClick = onImportClick) { Text("Import a book") } }
                 )
@@ -170,7 +189,6 @@ fun HomeScreen(
             // §13.9 hero collapse: tracked 1:1 off the scroll offset — no spring,
             // no settle — over the first 160dp; reduce-motion keeps the hero full
             // size and simply scrolling away.
-            val motion = rememberMotionEnabled()
             val density = LocalDensity.current
             val collapseRange = with(density) { 160.dp.toPx() }
             val collapse = remember(motion, collapseRange) {
@@ -289,6 +307,7 @@ fun HomeScreen(
                 item { ThisWeekWell(state, climate, onOpenStats, LocalFolioBarInset.current) }
             }
         }
+    }
     }
 }
 
@@ -438,7 +457,7 @@ private fun ReadingNowAnchor(
                             thumbnailUrl = item.thumbnailUrl,
                             coverPath = item.coverPath,
                             width = FolioTokens.coverAnchor,
-                            elevation = 16.dp,
+                            elevation = FolioTokens.elevationRaised,
                         )
                     } else {
                         FolioCoverPlate(
@@ -447,7 +466,7 @@ private fun ReadingNowAnchor(
                             author = item.subtitle,
                             width = FolioTokens.coverAnchor,
                             halo = tint,
-                            elevation = 16.dp,
+                            elevation = FolioTokens.elevationRaised,
                             // §17: Home's anchor hands the cover to the book detail
                             // (or the manga detail) the same way the shelves do, so
                             // the morph is available from every surface a cover
@@ -586,19 +605,54 @@ private fun LedgerStrip(
     onOpenExclusions: () -> Unit
 ) {
     val colors = FolioTheme.colors
+    val motion = rememberMotionEnabled()
     val met = state.goalMinutes > 0 && state.todayMinutes >= state.goalMinutes
     val goalFraction = if (state.goalMinutes > 0) {
         (state.todayMinutes.toFloat() / state.goalMinutes).coerceIn(0f, 1f)
     } else 0f
+    // The ledger settles rather than snaps: the minutes count up toward today's
+    // total, and the single goal ring fills toward the goal fraction while its
+    // colour warms to the streak accent as the goal is met — instead of swapping
+    // to a separate full ring and flipping the accent instantly. All motion-gated,
+    // so reduce-motion lands on the final value and hue at once.
+    val animatedTodayMinutes by animateIntAsState(
+        targetValue = state.todayMinutes.toInt(),
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "todayMinutes",
+    )
+    val ringProgress by animateFloatAsState(
+        targetValue = goalFraction,
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "goalRingProgress",
+    )
+    val ringColor by animateColorAsState(
+        targetValue = if (met) (climate?.tint() ?: colors.accentStreak)
+        else (climate?.tint() ?: colors.accentProgress),
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "goalRingColor",
+    )
+    val ringTrack by animateColorAsState(
+        targetValue = if (met) colors.accentStreak.copy(alpha = 0.18f)
+        else colors.accentProgress.copy(alpha = 0.14f),
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "goalRingTrack",
+    )
+    val statsInteraction = rememberFolioInteraction()
+    val exclusionsInteraction = rememberFolioInteraction()
     Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onOpenStats),
+                .folioPressable(statsInteraction, scaleTo = 0.99f)
+                .clickable(
+                    interactionSource = statsInteraction,
+                    indication = null,
+                    onClick = onOpenStats,
+                ),
             verticalAlignment = Alignment.Bottom
         ) {
             FolioFigure(
-                value = state.todayMinutes.toString(),
+                value = animatedTodayMinutes.toString(),
                 unit = "of ${state.goalMinutes} min",
                 label = "Today",
                 accent = if (met) colors.accentStreak else colors.onSurface,
@@ -613,21 +667,13 @@ private fun LedgerStrip(
                 emphasis = FigureScale.Quiet,
             )
             Spacer(Modifier.weight(1f))
-            if (met) {
+            if (met || goalFraction > 0f) {
                 ProgressRing(
-                    progress = 1f,
+                    progress = ringProgress,
                     modifier = Modifier.size(26.dp),
                     strokeWidth = 3f,
-                    color = climate?.tint() ?: colors.accentStreak,
-                    trackColor = colors.accentStreak.copy(alpha = 0.18f),
-                )
-            } else if (goalFraction > 0f) {
-                ProgressRing(
-                    progress = goalFraction,
-                    modifier = Modifier.size(26.dp),
-                    strokeWidth = 3f,
-                    color = climate?.tint() ?: colors.accentProgress,
-                    trackColor = colors.accentProgress.copy(alpha = 0.14f),
+                    color = ringColor,
+                    trackColor = ringTrack,
                 )
             }
         }
@@ -645,7 +691,12 @@ private fun LedgerStrip(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onOpenExclusions)
+                    .folioPressable(exclusionsInteraction, scaleTo = 0.99f)
+                    .clickable(
+                        interactionSource = exclusionsInteraction,
+                        indication = null,
+                        onClick = onOpenExclusions,
+                    )
                     .padding(vertical = FolioTokens.space2),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -696,7 +747,7 @@ private fun ContinueShelf(
             contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
-            items(items.size) { index ->
+            items(items.size, key = { "${items[it].kind}:${items[it].id}" }) { index ->
                 val entry = items[index]
                 val isManga = entry.kind == HomeItemKind.MANGA
                 val interaction = rememberFolioInteraction()
@@ -788,14 +839,22 @@ private fun ShelfCaption(
         val web = entry.webUrl
         if (isManga && web != null) {
             Box {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = "Open on ${entry.sourceName}",
-                    tint = FolioTheme.colors.onSurfaceVariant,
+                // >=48dp thumb target around the 18dp glyph, so the overflow is
+                // reliably tappable rather than an 18dp pinpoint.
+                Box(
                     modifier = Modifier
-                        .size(18.dp)
-                        .clickable { onMenuOpenChange(true) }
-                )
+                        .minimumInteractiveComponentSize()
+                        .clip(CircleShape)
+                        .clickable { onMenuOpenChange(true) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Open on ${entry.sourceName}",
+                        tint = FolioTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }) {
                     DropdownMenuItem(
                         text = { Text("Open on ${entry.sourceName}") },
@@ -819,7 +878,13 @@ private fun BoxScope.ProgressSeam(progress: Float) {
             .align(Alignment.BottomStart)
             .fillMaxWidth()
             .height(3.dp)
-            .background(Color.Black.copy(alpha = 0.35f))
+            // Theme-aware scrim (matches the library grid/document seams) so the
+            // seam stays visible on dark covers and dark themes, where a fixed
+            // black track vanished.
+            .background(FolioTheme.colors.onSurface.copy(alpha = 0.15f))
+            .semantics {
+                contentDescription = "${(progress * 100).toInt()}% read"
+            }
     ) {
         Box(
             Modifier
@@ -860,7 +925,7 @@ private fun BecauseYouFinishedShelf(
             contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
-            items(candidates.size) { index ->
+            items(candidates.size, key = { candidates[it].id }) { index ->
                 val book = candidates[index]
                 val interaction = rememberFolioInteraction()
                 Column(
@@ -878,7 +943,7 @@ private fun BecauseYouFinishedShelf(
                         author = book.displayAuthor,
                         width = FolioTokens.coverInline * 1.25f,
                         shape = FolioShapes.plateSmall,
-                        elevation = 5.dp,
+                        elevation = FolioTokens.elevationPanel,
                         small = true,
                         // This rail's tap goes to the book detail, so its plate
                         // hands on like the shelf's does. `contentSize` because

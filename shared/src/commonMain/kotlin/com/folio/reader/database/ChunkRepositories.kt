@@ -53,6 +53,33 @@ interface ChunkRepository {
     suspend fun loadVectorMetadata(modelId: String, dims: Int, bookId: String? = null): List<Pair<ChunkMeta, FloatArray>>
 
     /**
+     * How many vectors [loadVectorMetadata] would return for the same arguments.
+     *
+     * Lets a caller pre-size its index before streaming, so the flat store never grows by
+     * doubling. Default materialises the list; [JdbcChunkRepository] overrides with a `COUNT`.
+     */
+    suspend fun countVectors(modelId: String, dims: Int, bookId: String? = null): Int =
+        loadVectorMetadata(modelId, dims, bookId).size
+
+    /**
+     * Streams the same rows as [loadVectorMetadata], invoking [action] once per row, so the caller
+     * can fold each vector into an int8 index and drop the float array immediately.
+     *
+     * This is what keeps whole-library preload from first materialising the entire float32 set
+     * (~150 MB for a large Arctic library) before quantising it — the transient the int8 index was
+     * meant to remove but the list-returning load reintroduced. Default delegates to
+     * [loadVectorMetadata] (no streaming benefit); [JdbcChunkRepository] overrides it.
+     */
+    suspend fun forEachVectorMetadata(
+        modelId: String,
+        dims: Int,
+        bookId: String? = null,
+        action: (ChunkMeta, FloatArray) -> Unit,
+    ) {
+        loadVectorMetadata(modelId, dims, bookId).forEach { (meta, vector) -> action(meta, vector) }
+    }
+
+    /**
      * Like [loadVectorMetadata] for the whole library, but never materialises more than
      * [maxChunks] vectors — it streams the rows and keeps a strided, per-book-stratified sample.
      *

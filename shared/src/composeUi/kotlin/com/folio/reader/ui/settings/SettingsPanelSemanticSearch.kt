@@ -1,17 +1,12 @@
 package com.folio.reader.ui.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -20,8 +15,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
 /**
@@ -132,12 +130,12 @@ fun SemanticSearchSettingsPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+        FolioRule(Modifier.padding(vertical = FolioTokens.space2))
 
         // The model picker. Above the model row because it is what that row describes: the
         // name below is the *chosen* model, so choosing comes first.
         if (state.showModelPicker) {
-            Text("Model", style = MaterialTheme.typography.bodyLarge)
+            FolioEyebrow("Model", accent = FolioTheme.colors.primary)
             Text(
                 "Different models trade size for retrieval quality. Each keeps its own index, " +
                     "so switching costs one background pass over your library and loses nothing.",
@@ -158,7 +156,7 @@ fun SemanticSearchSettingsPanel(
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+            FolioRule(Modifier.padding(vertical = FolioTokens.space2))
         }
 
         Row(
@@ -193,7 +191,7 @@ fun SemanticSearchSettingsPanel(
         val downloadLabel = state.downloadLabel
         if (downloadLabel != null) {
             Spacer(Modifier.padding(FolioTokens.space1))
-            ProgressBar(state.downloadFraction ?: 0f)
+            FolioProgressBar(state.downloadFraction ?: 0f)
             Text(
                 downloadLabel,
                 style = MaterialTheme.typography.bodySmall,
@@ -209,9 +207,9 @@ fun SemanticSearchSettingsPanel(
             }
         }
 
-        HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+        FolioRule(Modifier.padding(vertical = FolioTokens.space2))
 
-        Text("Library index", style = MaterialTheme.typography.bodyLarge)
+        FolioEyebrow("Library index", accent = FolioTheme.colors.primary)
         Text(
             when {
                 !state.hasLibrary -> "No books to index yet."
@@ -240,7 +238,7 @@ fun SemanticSearchSettingsPanel(
 
         if (state.hasLibrary && state.indexedChapters > 0) {
             Spacer(Modifier.padding(FolioTokens.space1))
-            ProgressBar(state.indexFraction)
+            FolioProgressBar(state.indexFraction)
         }
 
         Spacer(Modifier.padding(FolioTokens.space1))
@@ -350,27 +348,6 @@ private fun ModelChoiceRow(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-        )
-    }
-}
-
-/** Flat determinate bar — the M3 `LinearProgressIndicator` signature differs across versions. */
-@Composable
-private fun ProgressBar(fraction: Float) {
-    val shape = RoundedCornerShape(3.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .height(6.dp)
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.primary)
         )
     }
 }

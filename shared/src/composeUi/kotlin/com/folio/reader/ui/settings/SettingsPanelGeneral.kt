@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Icon
@@ -26,9 +27,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.onVerticalWheel
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.flipThemeMode
 import kotlinx.coroutines.launch
 
@@ -49,7 +52,7 @@ fun GeneralSettingsPanel(
     val resolvedAppPaletteId = com.folio.reader.ui.theme.AppPalette.byId(settings.appThemeId).id
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         // Theme packs: one theme, two faces. The switch applies the active
         // pack's other face; tapping a card applies the face being shown.
@@ -176,7 +179,13 @@ fun GeneralSettingsPanel(
         // §13.3: hero tint sampled from the current book's cover. On by default —
         // the contrast guard keeps the hero legible even on white/black covers.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.homeCoverTint,
+                    onValueChange = { onSettingsChange(settings.copy(homeCoverTint = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -191,7 +200,7 @@ fun GeneralSettingsPanel(
             }
             Switch(
                 checked = settings.homeCoverTint,
-                onCheckedChange = { onSettingsChange(settings.copy(homeCoverTint = it)) }
+                onCheckedChange = null
             )
         }
 

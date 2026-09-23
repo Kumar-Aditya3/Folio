@@ -10,12 +10,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,14 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
-import com.folio.reader.ui.theme.FolioTheme
 
 @Composable
 fun ChapterContent(
@@ -214,36 +211,17 @@ fun ChapterContent(
             // Real error from the loader (missing file, parse failure) — not a
             // transient blank, so opening a book no longer flashes this state.
             loadError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    androidx.compose.material3.Icon(
-                        imageVector = Icons.Filled.Warning,
-                        contentDescription = "Error",
-                        tint = FolioTheme.colors.error,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Text(
-                        "Failed to load chapter",
-                        style = FolioTheme.typography.titleMedium,
-                        color = FolioTheme.colors.onSurface
-                    )
-                    Text(
-                        loadError,
-                        style = FolioTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                    onRetry?.let {
-                        androidx.compose.material3.Button(
-                            onClick = it,
-                            modifier = Modifier.padding(top = 12.dp)
-                        ) {
-                            Text("Retry")
-                        }
+                val retry = onRetry
+                com.folio.reader.ui.components.EmptyState(
+                    icon = Icons.Filled.Warning,
+                    headline = "Failed to load chapter",
+                    body = loadError,
+                    action = if (retry != null) {
+                        { androidx.compose.material3.Button(onClick = retry) { Text("Retry") } }
+                    } else {
+                        null
                     }
-                }
+                )
             }
             // Spine 0 is the cover page in most EPUBs — render the real cover
             // image instead of its (usually image-only, text-stripped) HTML.
@@ -282,7 +260,7 @@ fun ChapterContent(
                             runCatching {
                                 val renderer = com.folio.reader.ui.render.HtmlRenderer(
                                     settings = settings,
-                                    linkColor = Color(0xFF1A73E8)
+                                    linkColor = Color(readerTheme.link)
                                 )
                                 renderer.renderToBlocks(html, TextStyle(fontSize = settings.fontSize.sp))
                             }.getOrElse {
@@ -298,10 +276,13 @@ fun ChapterContent(
                                 .fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            // Resolved once for the cover, not per block (font lookup is cached but
+                            // this was still a map hit + call per text block per recomposition).
+                            val coverFontFamily = com.folio.reader.ui.components.systemFontFamily(settings.fontFamily)
                             coverBlocks.forEach { block ->
                                 when (block) {
                                     is com.folio.reader.ui.render.HtmlBlock.Text -> {
-                                        val fontFamily = com.folio.reader.ui.components.systemFontFamily(settings.fontFamily)
+                                        val fontFamily = coverFontFamily
                                         Text(
                                             // Keep paragraph styles: EPUB title pages commonly use
                                             // explicit centered headings alongside non-centered text.
@@ -340,19 +321,16 @@ fun ChapterContent(
             html.isBlank() && !windowed && !contentArrived ->
                 com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
             html.isBlank() && !windowed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        "This page is empty.",
-                        style = FolioTheme.typography.bodyMedium,
-                        color = textColor
-                    )
-                    if (hasNextChapter && onNextChapter != null) {
-                        androidx.compose.material3.Button(onClick = onNextChapter) { Text("Next page →") }
+                val next = onNextChapter
+                com.folio.reader.ui.components.EmptyState(
+                    icon = Icons.AutoMirrored.Filled.MenuBook,
+                    headline = "This page is empty.",
+                    action = if (hasNextChapter && next != null) {
+                        { androidx.compose.material3.Button(onClick = next) { Text("Next page →") } }
+                    } else {
+                        null
                     }
-                }
+                )
             }
             else -> {
                 // Browser owns all rendering — no Compose fallback (it broke scroll/pagination flow).
@@ -409,7 +387,7 @@ internal fun ReaderNoChapters(onBackPress: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         com.folio.reader.ui.components.EmptyState(
-            icon = Icons.Filled.MenuBook,
+            icon = Icons.AutoMirrored.Filled.MenuBook,
             headline = "No chapters found for this book",
             body = "The file may be corrupt or its structure could not be parsed.",
             action = {

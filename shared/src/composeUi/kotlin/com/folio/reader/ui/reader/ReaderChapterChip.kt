@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -17,8 +19,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
 
 /**
@@ -44,11 +49,25 @@ internal fun ReaderChapterChipHost(
             onDismiss()
         }
     }
+    val motion = rememberMotionEnabled()
+    val interaction = rememberFolioInteraction()
     AnimatedVisibility(
         visible = chip != null,
         modifier = modifier,
-        enter = fadeIn(tween(FolioTokens.motionStandard.toInt())),
-        exit = fadeOut(tween(FolioTokens.motionStandard.toInt())),
+        // Pair the fade with a small rise so the chip lifts into place rather than
+        // simply appearing. Gated on reduce-motion, which keeps the plain fade.
+        enter = if (motion) {
+            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                slideInVertically(tween(FolioTokens.motionStandard.toInt())) { it / 3 }
+        } else {
+            fadeIn(tween(FolioTokens.motionStandard.toInt()))
+        },
+        exit = if (motion) {
+            fadeOut(tween(FolioTokens.motionStandard.toInt())) +
+                slideOutVertically(tween(FolioTokens.motionStandard.toInt())) { it / 3 }
+        } else {
+            fadeOut(tween(FolioTokens.motionStandard.toInt()))
+        },
     ) {
         Box(Modifier.padding(bottom = if (aboveBar) FolioTokens.barHeight else FolioTokens.space3)) {
             Text(
@@ -56,8 +75,9 @@ internal fun ReaderChapterChipHost(
                 style = FolioTheme.typography.bodySmall,
                 color = FolioTheme.colors.onSurface,
                 modifier = Modifier
+                    .folioPressable(interaction)
                     .background(FolioTheme.colors.surfaceVariant, RoundedCornerShape(FolioTokens.radiusChip))
-                    .clickable(onClick = onDismiss)
+                    .clickable(interactionSource = interaction, indication = null, onClick = onDismiss)
                     .padding(horizontal = FolioTokens.space2, vertical = FolioTokens.space1)
             )
         }

@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -35,9 +36,11 @@ import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.tint
 import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
+import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberFolioHaptics
 
 /**
  * **The week well.** Extracted from HomeScreen so the weather additions here
@@ -64,6 +67,7 @@ internal fun ThisWeekWell(
     bottomInset: Dp = 0.dp
 ) {
     val colors = FolioTheme.colors
+    val haptics = rememberFolioHaptics()
     // The forecast: the week's shape projected forward, phrased in the weather's
     // dialect. Null when there is nothing honest to say (no goal, too few days,
     // a silent week) — a forecast for silence would be confident nonsense.
@@ -72,7 +76,10 @@ internal fun ThisWeekWell(
         modifier = Modifier
             .fillMaxWidth()
             .folioSunken(FolioShapes.edgeStart)
-            .clickable(onClick = onOpenStats)
+            .clickable {
+                haptics.play(FolioHaptic.Commit)
+                onOpenStats()
+            }
             .padding(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,
@@ -99,7 +106,7 @@ internal fun ThisWeekWell(
             }
             Text(
                 "${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
-                style = FolioTheme.typography.bodySmall,
+                style = FolioTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = colors.onSurfaceVariant,
                 maxLines = 1,
             )
@@ -131,37 +138,42 @@ internal fun ThisWeekWell(
 private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
     val color = FolioTheme.colors.accentProgress
     // §13.5: the line trims in once per window (keyed on dates, not minutes),
-    // drawn in the canvas phase so nothing recomposes per frame.
+    // drawn in the canvas phase so nothing recomposes per frame. The paths + gradient are built
+    // once per size/data change via drawWithCache; only the sweep clip reads the animated progress.
     val entry = rememberEntryState(week.map { it.date })
-    Canvas(modifier = modifier) {
-        if (week.size < 2) return@Canvas
-        val progress = entry.value
-        val max = week.maxOf { it.minutes }.coerceAtLeast(1L)
-        val stepX = size.width / (week.size - 1)
-        val points = week.mapIndexed { index, day ->
-            Offset(index * stepX, size.height * (1f - day.minutes.toFloat() / max))
-        }
-        val areaPath = Path().apply {
-            moveTo(0f, size.height)
-            points.forEach { lineTo(it.x, it.y) }
-            lineTo(size.width, size.height)
-            close()
-        }
-        val linePath = Path().apply {
-            points.forEachIndexed { index, point ->
-                if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+    Spacer(
+        modifier = modifier.drawWithCache {
+            if (week.size < 2) return@drawWithCache onDrawBehind { }
+            val max = week.maxOf { it.minutes }.coerceAtLeast(1L)
+            val stepX = size.width / (week.size - 1)
+            val points = week.mapIndexed { index, day ->
+                Offset(index * stepX, size.height * (1f - day.minutes.toFloat() / max))
+            }
+            val areaPath = Path().apply {
+                moveTo(0f, size.height)
+                points.forEach { lineTo(it.x, it.y) }
+                lineTo(size.width, size.height)
+                close()
+            }
+            val linePath = Path().apply {
+                points.forEachIndexed { index, point ->
+                    if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+                }
+            }
+            val areaBrush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
+            val strokePx = 2.dp.toPx()
+            val dotRadius = 3.dp.toPx()
+            onDrawBehind {
+                val progress = entry.value
+                clipRect(right = size.width * progress) {
+                    drawPath(areaPath, brush = areaBrush)
+                    drawPath(linePath, color = color, style = Stroke(width = strokePx, cap = StrokeCap.Round))
+                }
+                // The dot marks today — the last day of the trailing week.
+                if (progress >= 1f) points.last().let { drawCircle(color, radius = dotRadius, center = it) }
             }
         }
-        clipRect(right = size.width * progress) {
-            drawPath(
-                areaPath,
-                brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
-            )
-            drawPath(linePath, color = color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-        }
-        // The dot marks today — the last day of the trailing week.
-        if (progress >= 1f) points.last().let { drawCircle(color, radius = 3.dp.toPx(), center = it) }
-    }
+    )
 }
 
 internal fun formatMinutes(total: Long): String =

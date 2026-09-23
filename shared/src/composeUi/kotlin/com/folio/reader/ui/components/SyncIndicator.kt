@@ -29,31 +29,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.sync.SyncState
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
 
 private enum class SyncPillPhase { HIDDEN, SYNCING, SUCCESS, ERROR, QUOTA_LIMITED }
 
+// Kept because the top-bar SyncStatusBadge still tints its glyph with it. The
+// pill and settings card below no longer use a hand-rolled amber container: they
+// read the palette-adaptive tertiary role so quota state stays legible across all
+// 30+ themes instead of assuming a light/dark amber pair via luminance.
 val QuotaAmber = Color(0xFFE6A23C)
-private val QuotaAmberContainer = Color(0xFFFFF3E0)
-private val QuotaAmberOnContainer = Color(0xFF7A5900)
-private val QuotaAmberContainerDark = Color(0xFF3E2E10)
-private val QuotaAmberOnContainerDark = Color(0xFFFFDDB3)
-
-@Composable
-private fun quotaContainerColor(): Color {
-    val lum = FolioTheme.colors.background.red * 0.2126f +
-            FolioTheme.colors.background.green * 0.7152f +
-            FolioTheme.colors.background.blue * 0.0722f
-    return if (lum < 0.45f) QuotaAmberContainerDark else QuotaAmberContainer
-}
-
-@Composable
-private fun quotaOnContainerColor(): Color {
-    val lum = FolioTheme.colors.background.red * 0.2126f +
-            FolioTheme.colors.background.green * 0.7152f +
-            FolioTheme.colors.background.blue * 0.0722f
-    return if (lum < 0.45f) QuotaAmberOnContainerDark else QuotaAmberOnContainer
-}
 
 /**
  * Floating sync status pill. Only materialises when a sync visibly takes time —
@@ -126,11 +112,11 @@ fun SyncIndicator(
             color = when (phase) {
                 SyncPillPhase.ERROR -> MaterialTheme.colorScheme.errorContainer
                 SyncPillPhase.SUCCESS -> MaterialTheme.colorScheme.tertiaryContainer
-                SyncPillPhase.QUOTA_LIMITED -> quotaContainerColor()
+                SyncPillPhase.QUOTA_LIMITED -> FolioTheme.colors.tertiaryContainer
                 else -> MaterialTheme.colorScheme.primaryContainer
             },
             tonalElevation = 0.dp,
-            shadowElevation = 8.dp
+            shadowElevation = FolioTokens.elevationVeil
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -163,34 +149,26 @@ private fun SyncPillIcon(phase: SyncPillPhase) {
         )
 
         SyncPillPhase.QUOTA_LIMITED -> {
-            val breathe = rememberInfiniteTransition(label = "quota-breathe")
-            val alpha by breathe.animateFloat(
+            val alpha = rememberBreatheAlpha(
                 initialValue = 0.55f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2400, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "quota-alpha"
+                durationMillis = 2400,
+                easing = LinearEasing,
+                label = "quota-breathe",
             )
             Icon(
                 imageVector = Icons.Outlined.CloudQueue,
                 contentDescription = "Sync paused — quota reached",
-                tint = quotaOnContainerColor(),
+                tint = FolioTheme.colors.onTertiaryContainer,
                 modifier = Modifier.size(20.dp).graphicsLayer { this.alpha = alpha }
             )
         }
 
         SyncPillPhase.SYNCING -> {
-            val pulse = rememberInfiniteTransition(label = "sync-pulse")
-            val alpha by pulse.animateFloat(
+            val alpha = rememberBreatheAlpha(
                 initialValue = 0.35f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(700, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "sync-alpha"
+                durationMillis = 700,
+                easing = FastOutSlowInEasing,
+                label = "sync-pulse",
             )
             Icon(
                 imageVector = Icons.Filled.Refresh,
@@ -202,6 +180,33 @@ private fun SyncPillIcon(phase: SyncPillPhase) {
 
         SyncPillPhase.HIDDEN -> Unit
     }
+}
+
+/**
+ * Pulsing alpha for the sync/quota glyphs. Under reduce-motion it returns a static
+ * full-opacity value and never starts the infinite transition — the same
+ * early-return shape as [rememberShimmerPhase], so nothing subscribes and the icon
+ * simply holds still.
+ */
+@Composable
+private fun rememberBreatheAlpha(
+    initialValue: Float,
+    durationMillis: Int,
+    easing: Easing,
+    label: String,
+): Float {
+    if (!rememberMotionEnabled()) return 1f
+    val transition = rememberInfiniteTransition(label = label)
+    val alpha by transition.animateFloat(
+        initialValue = initialValue,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis, easing = easing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "$label-alpha",
+    )
+    return alpha
 }
 
 @Composable
@@ -218,7 +223,7 @@ private fun SyncPillText(phase: SyncPillPhase) {
         color = when (phase) {
             SyncPillPhase.ERROR -> MaterialTheme.colorScheme.onErrorContainer
             SyncPillPhase.SUCCESS -> MaterialTheme.colorScheme.onTertiaryContainer
-            SyncPillPhase.QUOTA_LIMITED -> quotaOnContainerColor()
+            SyncPillPhase.QUOTA_LIMITED -> FolioTheme.colors.onTertiaryContainer
             else -> MaterialTheme.colorScheme.onPrimaryContainer
         }
     )
@@ -257,7 +262,7 @@ fun SyncStatusCard(
                 com.folio.reader.ui.theme.FolioShapes.inset,
                 accent = when {
                     !isConnected -> null
-                    syncState.quotaLimited -> quotaContainerColor()
+                    syncState.quotaLimited -> FolioTheme.colors.tertiaryContainer
                     syncState.lastError != null -> FolioTheme.colors.error
                     else -> FolioTheme.colors.accentProgress
                 },
@@ -281,7 +286,7 @@ fun SyncStatusCard(
                 contentDescription = null,
                 tint = when {
                     !isConnected -> MaterialTheme.colorScheme.onSurfaceVariant
-                    syncState.quotaLimited -> quotaOnContainerColor()
+                    syncState.quotaLimited -> FolioTheme.colors.onTertiaryContainer
                     syncState.lastError != null -> FolioTheme.colors.error
                     syncState.isSyncing -> FolioTheme.colors.primary
                     else -> FolioTheme.colors.primary
@@ -305,7 +310,7 @@ fun SyncStatusCard(
                     Text(
                         text = "Google's free quota reached \u2014 sync resumes automatically.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = quotaOnContainerColor()
+                        color = FolioTheme.colors.onTertiaryContainer
                     )
                 }
                 if (syncState.lastError != null) {

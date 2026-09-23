@@ -12,9 +12,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import java.io.File
 
 /**
  * Data owner for the two semantic-discovery features — **Echoes** (cross-book resonant
@@ -37,18 +34,15 @@ class SemanticDiscoveryRepository(
     private val bookRepository: BookRepository,
     /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [Dispatchers.Default]. */
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
-    /**
-     * Where the computed map is persisted so a cold app start does not recompute it. Null disables
-     * the disk cache (the in-memory one still applies). Supplied by the app graph.
-     */
-    private val cacheDir: File? = null,
 ) {
     val model: EmbeddingModel get() = semanticSearch.model
 
+    // In-memory session cache only. The Atlas is deliberately *not* persisted to disk: it is a
+    // live view of the library, so a cold start recomputes it fresh rather than risk showing a
+    // stale snapshot. Within a session it is recomputed only when the fingerprint changes.
     private val atlasMutex = Mutex()
     private var cachedFingerprint: String? = null
     private var cachedAtlas: AtlasModel? = null
-    private val cacheJson = Json { ignoreUnknownKeys = true }
 
     // ---- Echoes --------------------------------------------------------------------------
 
@@ -145,15 +139,6 @@ class SemanticDiscoveryRepository(
         val fingerprint = fingerprint()
         cachedAtlas?.let { if (fingerprint == cachedFingerprint) return it }
 
-        // Disk cache: a cold app start (empty in-memory cache) recomputes the whole roll-up
-        // otherwise. Keyed by the same fingerprint, so it is used only while the library is
-        // unchanged and silently ignored (then overwritten) once a book is added/removed/reindexed.
-        readDiskCache(fingerprint)?.let {
-            cachedAtlas = it
-            cachedFingerprint = fingerprint
-            return it
-        }
-
         // Bound the roll-up's memory *at the source*. Loading a whole large library as floats
         // (~64 MB for 35k chunks) and then whitening it (an n×dims double working matrix on top)
         // overran the phone heap and crashed. The sampled loader streams the rows and never
@@ -195,8 +180,27 @@ class SemanticDiscoveryRepository(
             return if (length > 0) (meta.charStart.toFloat() / length).coerceIn(0f, 1f) else 0f
         }
 
-        // Decorate the geometry with per-book display data (title, cover, read progress).
+        // Theme labels via c-TF-IDF (stage 1). Load the text of each cluster's centroid-nearest
+        // chunks once (bounded — a handful per cluster), build one document per cluster, and score
+        // terms by how distinctive they are across clusters. This is what makes a region read as
+        // "leviathan · tide" instead of the first few words of one passage. Optionally re-ranked by
+        // embedding proximity (stage 2) below.
+        val clusterMembers: List<List<String>> = geometry.books.flatMap { g -> g.clusters.map { it.memberChunkIds } }
+        val neededTexts = clusterMembers.flatten().distinct()
+        val textById = withContext(dispatcher) {
+            runCatching { chunkRepository.chunkTexts(neededTexts) }.getOrDefault(emptyMap())
+        }
+        val docs = clusterMembers.map { ids -> ids.mapNotNull { textById[it] } }
+        val candidates = withContext(Dispatchers.Default) { ClusterLabeler.label(docs) }
+        // NOTE: stage-2 embedding re-rank is intentionally NOT run here. Opening the ONNX session
+        // during the roll-up — on top of the sampled vectors and the terrain bitmap already in
+        // memory — pushed native memory over the edge and the OS hard-killed the app with no Java
+        // trace. The pure c-TF-IDF labels are already distinctive; a lazy per-book re-rank can be
+        // reintroduced later (only for the book in view) if it earns its keep.
+
+        // Decorate the geometry with per-book display data (title, cover, read progress) + labels.
         val bookCache = HashMap<String, com.folio.reader.model.Book?>()
+        var flat = 0
         val books = geometry.books.map { g ->
             val book = bookCache.getOrPut(g.bookId) { runCatching { bookRepository.getBook(g.bookId) }.getOrNull() }
             AtlasBook(
@@ -206,6 +210,8 @@ class SemanticDiscoveryRepository(
                 readFraction = book?.normalizedProgress?.toFloat()?.coerceIn(0f, 1f) ?: 0f,
                 clusters = g.clusters.map { c ->
                     val meta = metaById[c.exemplarChunkId]
+                    val phrases = candidates.getOrElse(flat) { emptyList() }
+                    flat++
                     AtlasCluster(
                         x = c.x,
                         y = c.y,
@@ -215,6 +221,9 @@ class SemanticDiscoveryRepository(
                         exemplarSpineIndex = meta?.spineIndex ?: -1,
                         exemplarFraction = meta?.let { fractionOf(it) } ?: 0f,
                         exemplarText = null,
+                        label = ClusterLabeler.display(phrases),
+                        labelCandidates = phrases,
+                        rawCentroid = c.rawCentroid,
                     )
                 },
             )
@@ -222,29 +231,57 @@ class SemanticDiscoveryRepository(
         val result = AtlasModel(books, geometry.edges)
         cachedAtlas = result
         cachedFingerprint = fingerprint
-        writeDiskCache(fingerprint, result)
         result
     }
 
-    private suspend fun readDiskCache(fingerprint: String): AtlasModel? {
-        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                if (!file.exists()) return@runCatching null
-                val envelope = cacheJson.decodeFromString(AtlasCacheEnvelope.serializer(), file.readText())
-                if (envelope.fingerprint == fingerprint) envelope.model else null
-            }.getOrNull()
+    /**
+     * Stage 2 of labelling: reorder each cluster's c-TF-IDF candidate phrases by cosine proximity
+     * to the cluster's *meaning*, embedding each candidate and the cluster's exemplar passage with
+     * the same model. Distinctive-and-on-theme phrases rise; distinctive-but-off-theme ones fall.
+     *
+     * Bounded: it embeds only the (deduped) candidate phrases plus one exemplar text per cluster,
+     * in a single batch. Best-effort — any failure returns the input order unchanged.
+     */
+    /**
+     * Stage 2, done the safe way: re-rank the label candidates of **one book's** clusters by
+     * embedding proximity to each cluster's meaning, and return refreshed display labels keyed by
+     * `exemplarChunkId` (a stable per-cluster id).
+     *
+     * This is called lazily when the reader zooms into a book — never during the roll-up — so the
+     * embedder session is opened (or reused, if Echoes already warmed it) only when the memory
+     * picture is calm, and only that book's handful of short candidate phrases are embedded, in
+     * small batches. The anchor is the cluster's **raw** centroid (candidate phrases embed into raw
+     * model space; the whitened centroid used for layout is a different space and must not be used
+     * here). Best-effort: any failure returns an empty map and the c-TF-IDF labels stand.
+     */
+    suspend fun refineBookLabels(book: AtlasBook): Map<String, String> = withContext(dispatcher) {
+        val clusters = book.clusters.filter { it.labelCandidates.isNotEmpty() && it.rawCentroid.isNotEmpty() }
+        if (clusters.isEmpty()) return@withContext emptyMap()
+
+        // Dedup the (small) phrase pool for this one book, embed in small batches, and reuse.
+        val pool = clusters.flatMap { it.labelCandidates }.distinct()
+        val phraseVec = HashMap<String, FloatArray?>(pool.size)
+        pool.chunked(RERANK_BATCH).forEach { batch ->
+            val vecs = runCatching { semanticSearch.embedTexts(batch) }.getOrDefault(batch.map { null })
+            batch.forEachIndexed { i, p -> phraseVec[p] = vecs.getOrNull(i) }
+        }
+        if (phraseVec.values.all { it == null }) return@withContext emptyMap()
+
+        clusters.associate { c ->
+            val anchor = c.rawCentroid
+            val reordered = c.labelCandidates.sortedByDescending { p ->
+                phraseVec[p]?.let { cosine(it, anchor) } ?: -2.0
+            }
+            c.exemplarChunkId to ClusterLabeler.display(reordered)
         }
     }
 
-    private suspend fun writeDiskCache(fingerprint: String, model: AtlasModel) {
-        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return
-        withContext(Dispatchers.IO) {
-            runCatching {
-                file.parentFile?.mkdirs()
-                file.writeText(cacheJson.encodeToString(AtlasCacheEnvelope.serializer(), AtlasCacheEnvelope(fingerprint, model)))
-            }
-        }
+    private fun cosine(a: FloatArray, b: FloatArray): Double {
+        var dot = 0.0; var na = 0.0; var nb = 0.0
+        val n = minOf(a.size, b.size)
+        for (i in 0 until n) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+        val denom = kotlin.math.sqrt(na) * kotlin.math.sqrt(nb)
+        return if (denom > 1e-9) dot / denom else 0.0
     }
 
     /**
@@ -293,13 +330,10 @@ class SemanticDiscoveryRepository(
          */
         const val MAX_ROLLUP_CHUNKS = 5000
 
-        private const val ATLAS_CACHE_FILE = "atlas_cache.json"
+        /** Small embed batch for the lazy per-book label re-rank, bounding transient memory. */
+        private const val RERANK_BATCH = 32
     }
 }
-
-/** On-disk envelope: the map plus the fingerprint it was computed for. */
-@Serializable
-private data class AtlasCacheEnvelope(val fingerprint: String, val model: AtlasModel)
 
 /**
  * A cross-book resonant passage.
@@ -322,13 +356,11 @@ data class EchoHit(
 )
 
 /** The whole library as a map: books with topic regions, joined by shared borders. */
-@Serializable
 data class AtlasModel(
     val books: List<AtlasBook>,
     val edges: List<AtlasEdge>,
 )
 
-@Serializable
 data class AtlasBook(
     val bookId: String,
     val title: String,
@@ -338,7 +370,6 @@ data class AtlasBook(
     val clusters: List<AtlasCluster>,
 )
 
-@Serializable
 data class AtlasCluster(
     val x: Float,
     val y: Float,
@@ -351,6 +382,12 @@ data class AtlasCluster(
     val exemplarFraction: Float,
     /** Filled lazily via [SemanticDiscoveryRepository.exemplarTexts] for zoomed/visible clusters. */
     val exemplarText: String?,
+    /** The c-TF-IDF theme label, e.g. "Leviathan · Tide". Precomputed; refined lazily on zoom. */
+    val label: String = "",
+    /** The ranked candidate phrases behind [label], used by the lazy stage-2 re-rank. */
+    val labelCandidates: List<String> = emptyList(),
+    /** Raw (un-whitened) unit centroid — the anchor for the stage-2 re-rank. */
+    val rawCentroid: FloatArray = FloatArray(0),
 )
 
 /**

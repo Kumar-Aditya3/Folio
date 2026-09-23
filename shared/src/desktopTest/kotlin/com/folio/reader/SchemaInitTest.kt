@@ -76,6 +76,9 @@ class SchemaInitTest {
         val platform = DesktopPlatform(tempRoot)
         val database = Database(platform.fileSystem.getDatabasePath())
         try {
+            // Schema initializes lazily on first connection now (moved off the constructor so cold
+            // start does not block the first frame on the DDL), so touch the DB once to trigger it.
+            runBlocking { database.getAllBooks() }
             val tables = tablesOf(platform.fileSystem.getDatabasePath())
             for (expected in expectedTables) {
                 assertTrue(expected in tables, "missing table after init: $expected (have $tables)")
@@ -93,9 +96,13 @@ class SchemaInitTest {
     fun `schema init is idempotent across restarts`() {
         val platform = DesktopPlatform(tempRoot)
         val path = platform.fileSystem.getDatabasePath()
-        Database(path).close()
+        // Touch each instance so the lazy schema init actually runs before the next open.
+        val first = Database(path)
+        runBlocking { first.getAllBooks() }
+        first.close()
         val second = Database(path)
         try {
+            runBlocking { second.getAllBooks() }
             val tables = tablesOf(path)
             for (expected in expectedTables) {
                 assertTrue(expected in tables, "missing table after second init: $expected")

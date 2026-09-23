@@ -25,6 +25,20 @@ import java.util.concurrent.ConcurrentHashMap
 
 actual fun htmlSurfaceOccludesOverlays(): Boolean = false
 
+// Render-path regexes, compiled once. These run per chapter/section (and the attribute rewrite's
+// inner suffix check runs per src/href), so compiling them per call was avoidable chapter-turn work
+// (see HtmlRenderer.kt for the same convention).
+private val SRC_HREF_VALUE = Regex("""(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+private val SRC_HREF_ATTR = Regex("""((?:src|href)\s*=\s*)(["'])([^"']+)\2""", RegexOption.IGNORE_CASE)
+private val HTML_LINK_SUFFIX = Regex("""\.x?html?(#.*)?$""", RegexOption.IGNORE_CASE)
+private val CSS_URL_REF = Regex("""url\(\s*["']?([^)"']+)["']?\s*\)""", RegexOption.IGNORE_CASE)
+private val HEAD_CLOSE = Regex("(?i)</head>")
+
+// Reader WebView diagnostics. The onReceivedTitle/onConsoleMessage callbacks fire on essentially
+// every scroll frame, so their logging + string work must not run in shipped builds. The shared
+// module has no BuildConfig, so this is a compile-time flag a developer flips locally.
+private const val READER_DEBUG_LOG = false
+
 @Composable
 actual fun HtmlContentSurface(
     sections: List<ReaderSection>,
@@ -168,7 +182,7 @@ actual fun HtmlContentSurface(
                     // url(); preload those too because WebView requests are
                     // normalized and cannot call a suspend resolver.
                     if (file.extension.equals("css", true)) {
-                        Regex("""url\(\s*["']?([^)"']+)["']?\s*\)""", RegexOption.IGNORE_CASE)
+                        CSS_URL_REF
                             .findAll(file.readText())
                             .map { it.groupValues[1] }
                             .filter { !it.startsWith("data:") && !it.startsWith("#") }
@@ -279,7 +293,7 @@ actual fun HtmlContentSurface(
                 // document; its JS stays pending for the real finish or the fallback.
                 val finishedToken = url?.substringAfter("folio-load=", "")?.toIntOrNull()
                 val pj = pendingJs
-                android.util.Log.i("FolioLoad", "finished token=$finishedToken pending=${pj?.first} consumed=${pj != null && finishedToken == pj.first}")
+                if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "finished token=$finishedToken pending=${pj?.first} consumed=${pj != null && finishedToken == pj.first}")
                 if (pj != null && finishedToken == pj.first) {
                     pendingJs = null
                     view.evaluateJavascript(pj.second, null)
@@ -319,7 +333,7 @@ actual fun HtmlContentSurface(
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 super.onReceivedTitle(view, title)
                 val t = title ?: return
-                if (t.startsWith("folio-")) android.util.Log.i("FolioLoad", "title=${t.take(140)}")
+                if (READER_DEBUG_LOG && t.startsWith("folio-")) android.util.Log.i("FolioLoad", "title=${t.take(140)}")
                 when {
                     t.startsWith("folio-progress:") -> {
                         val parts = t.split(':')
@@ -384,12 +398,12 @@ actual fun HtmlContentSurface(
                     }
 
                     t.startsWith("folio-engdiag:") ->
-                        android.util.Log.i("FolioPage", "engine report: ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
+                        if (READER_DEBUG_LOG) android.util.Log.i("FolioPage", "engine report: ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
                 }
             }
 
             override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
-                android.util.Log.d("FolioPage", "${message.message()} @${message.sourceId()?.substringAfterLast('/').orEmpty()}:${message.lineNumber()}")
+                if (READER_DEBUG_LOG) android.util.Log.d("FolioPage", "${message.message()} @${message.sourceId()?.substringAfterLast('/').orEmpty()}:${message.lineNumber()}")
                 return true
             }
         }
@@ -496,7 +510,7 @@ actual fun HtmlContentSurface(
                     "file:///folio/$href?folio-load=$token"
                 }
                 webView.loadDataWithBaseURL(baseUrl, "<style>$importedFonts</style>$content", "text/html", "UTF-8", null)
-                android.util.Log.i("FolioLoad", "issued token=$token key=$contentKey")
+                if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "issued token=$token key=$contentKey")
                 // Only for a WebView whose onPageFinished never fires: re-running the
                 // bridge is not idempotent, it restores scrollTop from the saved
                 // fraction and re-registers listeners. Inject only once THIS load's
@@ -508,7 +522,7 @@ actual fun HtmlContentSurface(
                     if (pj == null || pj.first != token || webView.tag != contentKey) return
                     val committed = webView.url?.substringAfter("folio-load=", "")?.toIntOrNull()
                     if (committed == token) {
-                        android.util.Log.i("FolioLoad", "fallback inject token=$token")
+                        if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "fallback inject token=$token")
                         pendingJs = null
                         webView.evaluateJavascript(pj.second, null)
                         pageState.markReady(webView)
@@ -518,7 +532,7 @@ actual fun HtmlContentSurface(
                     } else if (attempt < 10) {
                         webView.postDelayed({ tryInject(attempt + 1) }, 200)
                     } else {
-                        android.util.Log.i("FolioLoad", "fallback gave up token=$token committed=$committed")
+                        if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "fallback gave up token=$token committed=$committed")
                     }
                 }
                 webView.postDelayed({ tryInject(0) }, 400)
@@ -535,7 +549,7 @@ private fun jsLiteral(s: String): String = ReaderWindowAssembler.jsStringLiteral
 
 /** Relative src/href attribute values of a chapter document, deduplicated. */
 private fun sourcesOf(html: String): List<String> =
-    Regex("""(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+    SRC_HREF_VALUE
         .findAll(html).map { it.groupValues[1] }
         .filter { !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") }
         .distinct().toList()
@@ -547,13 +561,13 @@ private fun sourcesOf(html: String): List<String> =
  * make them dead.
  */
 private fun rewriteToCanonicalUrls(html: String, href: String): String =
-    Regex("""((?:src|href)\s*=\s*)(["'])([^"']+)\2""", RegexOption.IGNORE_CASE).replace(html) { m ->
+    SRC_HREF_ATTR.replace(html) { m ->
         val attr = m.groupValues[1].trim().lowercase()
         val quote = m.groupValues[2]
         val src = m.groupValues[3]
         val keep = src.startsWith("#") || src.startsWith("http") || src.startsWith("data:") ||
             src.startsWith("file:") ||
-            (attr.startsWith("href") && Regex("""\.x?html?(#.*)?$""", RegexOption.IGNORE_CASE).containsMatchIn(src))
+            (attr.startsWith("href") && HTML_LINK_SUFFIX.containsMatchIn(src))
         if (keep) m.value
         else m.groupValues[1] + quote + "file:///folio/" + canonicalEpubPath(href, src) + quote
     }
@@ -705,5 +719,5 @@ private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
     val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
             readerStyleSheet(settings) + "</style>"
-    return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$html"
+    return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(HEAD_CLOSE, "$css</head>") else "$css$html"
 }

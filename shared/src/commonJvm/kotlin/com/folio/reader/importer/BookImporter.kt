@@ -69,6 +69,15 @@ class BookImporter(
                 val parsed = epubParser.parseEpub(filePath)
                 println("Import: Parsed ${parsed.chapters.size} chapters, ${parsed.totalWords} words")
 
+                // A spine that yields no chapters produces a shelf entry that cannot be opened (the
+                // reader's slow path throws "No chapters parsed"), so fail the import instead of
+                // persisting a broken, unopenable book record.
+                if (parsed.chapters.isEmpty()) {
+                    return@withContext Result.failure(
+                        com.folio.reader.epub.EpubParseException("No readable chapters found in this EPUB")
+                    )
+                }
+
                 // 5. Check for metadata duplicates (ISBN) if no hash match was found
                 if (existingByHash == null && parsed.metadata.isbn != null) {
                     val existingByIsbn = bookRepository.getBookByIsbn(parsed.metadata.isbn!!)
@@ -246,16 +255,21 @@ class SearchIndexer(
          */
         fun extractPlainText(html: String): String {
             val withoutTags = html
-                .replace(Regex("(?s)<script.*?</script>"), "")
-                .replace(Regex("(?s)<style.*?</style>"), "")
-                .replace(Regex("<[^>]+>"), " ")
+                .replace(SCRIPT_RE, "")
+                .replace(STYLE_RE, "")
+                .replace(TAG_RE, " ")
             return org.jsoup.parser.Parser.unescapeEntities(withoutTags, false)
                 // Every Unicode space separator -> U+0020, so the collapse below and the
                 // word-count predicate downstream both see the same characters.
                 .replace(UNICODE_SPACES, " ")
-                .replace(Regex("\\s+"), " ")
+                .replace(WS_RE, " ")
                 .trim()
         }
+
+        private val SCRIPT_RE = Regex("(?s)<script.*?</script>")
+        private val STYLE_RE = Regex("(?s)<style.*?</style>")
+        private val TAG_RE = Regex("<[^>]+>")
+        private val WS_RE = Regex("\\s+")
 
         /**
          * Unicode space separators that `\s` misses.

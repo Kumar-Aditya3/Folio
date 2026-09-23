@@ -109,7 +109,13 @@ class SettingsMergeTest {
         // field must be non-default or the field-count guard in everyFieldIsDiffedAndApplied
         // would pass vacuously for a field this fixture forgot to set.
         semanticDiscovery = false,
-        documentReaderMode = "CONTINUOUS"
+        documentReaderMode = "CONTINUOUS",
+        // eyeProtection defaults to false and eyeProtectionIntensity to 0.4f, so the
+        // non-default fixture values are true / 0.7f. Omitting these two made the
+        // field-count guard below fail by exactly two — which is how the missing
+        // global-only plumbing for the comfort toggle was caught.
+        eyeProtection = true,
+        eyeProtectionIntensity = 0.7f
     )
 
     @Test

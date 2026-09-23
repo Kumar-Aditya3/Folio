@@ -24,6 +24,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -142,6 +143,48 @@ class ReaderQuickSettingsNoLeakTest {
         val book = settingsRepo.getBookSettings("b1")!!
         assertNull(book.fontSize, "the edited field's override must be cleared")
         assertEquals("dusk", book.themeId, "untouched overrides survive")
+        vm.closeBook()
+    }
+
+    /**
+     * The Comfort rows (Eye protection and its warmth) are global-only: they have
+     * no per-book counterpart, so they reach the defaults row through the same
+     * global write. Measured against the per-book override vocabulary the change
+     * set came back empty, `withFieldsFrom(emptySet(), …)` returned its receiver
+     * untouched, and the switch snapped straight back — the reported "does not
+     * toggle". The same write must still not promote this book's overrides.
+     */
+    @Test
+    fun globalOnlyComfortToggleReachesTheDefaultsRow() = runBlocking {
+        val vm = makeVm()
+        openBookWithOverrides(vm)
+
+        assertFalse(vm.effective().eyeProtection, "eye protection is off by default")
+
+        vm.updateGlobalSettings(vm.effective().copy(eyeProtection = true))
+        awaitTrue("the toggle lands in the globals") { settingsRepo.getGlobalSettings().eyeProtection }
+        assertTrue(vm.effective().eyeProtection, "the panel paints the new value")
+
+        vm.updateGlobalSettings(vm.effective().copy(eyeProtectionIntensity = 0.8f))
+        awaitTrue("warmth lands in the globals") {
+            settingsRepo.getGlobalSettings().eyeProtectionIntensity == 0.8f
+        }
+
+        // The book's untouched overrides survive, and no override was invented for
+        // a field the book cannot override.
+        val global = settingsRepo.getGlobalSettings()
+        assertEquals(true, global.eyeProtection)
+        assertEquals(18f, global.fontSize, "book's fontSize override must not leak into globals")
+        assertEquals("paper", global.themeId, "book's themeId override must not leak into globals")
+        val book = settingsRepo.getBookSettings("b1")!!
+        assertEquals(24f, book.fontSize)
+        assertEquals("dusk", book.themeId)
+        assertNull(book.lineHeight)
+
+        // And back off again — a toggle that only latches one way is still broken.
+        vm.updateGlobalSettings(vm.effective().copy(eyeProtection = false))
+        awaitTrue("the toggle clears again") { !settingsRepo.getGlobalSettings().eyeProtection }
+        assertFalse(vm.effective().eyeProtection)
         vm.closeBook()
     }
 }

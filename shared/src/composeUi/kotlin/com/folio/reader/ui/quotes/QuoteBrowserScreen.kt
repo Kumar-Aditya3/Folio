@@ -24,10 +24,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -54,14 +57,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.model.Tag
+import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioCallout
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -88,6 +96,12 @@ fun QuoteBrowserScreen(
         allTags.value = viewModel.allTags()
     }
 
+    // Cancel the view model's scope when the hub leaves composition, so its shared data flows and
+    // edit coroutines don't outlive the screen.
+    androidx.compose.runtime.DisposableEffect(viewModel) {
+        onDispose { viewModel.close() }
+    }
+
     val displayItems by viewModel.filteredDisplayItems(filter)
         .collectAsState(initial = emptyList())
     val mangaItems by viewModel.mangaItems(filter)
@@ -109,17 +123,29 @@ fun QuoteBrowserScreen(
                         IconButton(onClick = { searchExpanded = !searchExpanded }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        IconButton(onClick = { viewMode = QuoteBrowserViewModel.ViewMode.GRID }) {
+                        IconButton(
+                            onClick = { viewMode = QuoteBrowserViewModel.ViewMode.GRID },
+                            // Active view mode is otherwise signalled only by tint;
+                            // expose it as a selection state so TalkBack announces it.
+                            modifier = Modifier.semantics {
+                                selected = viewMode == QuoteBrowserViewModel.ViewMode.GRID
+                            },
+                        ) {
                             Icon(
-                                Icons.Filled.List,
+                                Icons.Filled.GridView,
                                 contentDescription = "Grid view",
                                 tint = if (viewMode == QuoteBrowserViewModel.ViewMode.GRID)
                                     FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant
                             )
                         }
-                        IconButton(onClick = { viewMode = QuoteBrowserViewModel.ViewMode.LIST }) {
+                        IconButton(
+                            onClick = { viewMode = QuoteBrowserViewModel.ViewMode.LIST },
+                            modifier = Modifier.semantics {
+                                selected = viewMode == QuoteBrowserViewModel.ViewMode.LIST
+                            },
+                        ) {
                             Icon(
-                                Icons.Filled.List,
+                                Icons.AutoMirrored.Filled.List,
                                 contentDescription = "List view",
                                 tint = if (viewMode == QuoteBrowserViewModel.ViewMode.LIST)
                                     FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant
@@ -159,7 +185,7 @@ fun QuoteBrowserScreen(
                             onClick = { bookDropdownExpanded = true },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Star, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
+                                    Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = filter.bookId?.let { id -> viewModel.allBooks().find { it.id == id }?.title?.take(20) }
@@ -199,7 +225,7 @@ fun QuoteBrowserScreen(
                             onClick = { tagDropdownExpanded = true },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
+                                    Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, modifier = Modifier.width(16.dp).height(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = if (filter.tagIds.isEmpty()) "All tags"
@@ -247,41 +273,43 @@ fun QuoteBrowserScreen(
         val onFindRelated: ((QuoteDisplayItem) -> Unit)? =
             if (viewModel.canFindRelated) ({ item -> viewModel.findRelatedFor(item) }) else null
 
-        if (displayItems.isEmpty() && mangaItems.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No quotes found", style = FolioTheme.typography.headlineSmall)
-                    Text(
-                        "Create highlights in the reader to see them here",
-                        color = FolioTheme.colors.onSurfaceVariant
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (displayItems.isEmpty() && mangaItems.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    EmptyState(
+                        icon = Icons.Outlined.FormatQuote,
+                        headline = "No quotes found",
+                        body = "Create highlights in the reader to see them here"
+                    )
+                }
+            } else {
+                when (viewMode) {
+                    QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
+                        displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
+                        onEditTags = { tagEditorFor = it },
+                        onFindRelated = onFindRelated
+                    )
+                    QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
+                        displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
+                        onEditTags = { tagEditorFor = it },
+                        onFindRelated = onFindRelated
                     )
                 }
             }
-        } else {
-            when (viewMode) {
-                QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
-                    displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                    onEditTags = { tagEditorFor = it },
-                    onFindRelated = onFindRelated
-                )
-                QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
-                    displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                    onEditTags = { tagEditorFor = it },
-                    onFindRelated = onFindRelated
+
+            // Anchored to the bottom of the hub so the reader keeps their place in the
+            // quote list while comparing the source passage against its neighbours,
+            // instead of the panel overlaying the top of the list.
+            if (relatedSource != null) {
+                RelatedPanel(
+                    state = relatedState,
+                    onClose = { viewModel.closeRelated() },
+                    modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
-        }
-
-        // Sits above the list rather than replacing it: the reader keeps their place in the
-        // hub while reading the suggestions, which is the point of a "more like this" list.
-        if (relatedSource != null) {
-            RelatedPanel(
-                state = relatedState,
-                onClose = { viewModel.closeRelated() },
-            )
         }
     }
 
@@ -317,13 +345,13 @@ private fun QuoteGrid(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(padding)
     ) {
-        items(items) { item ->
+        items(items, key = { "q:${it.quote.id}" }) { item ->
             QuoteCard(
                 item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags,
                 onFindRelated = onFindRelated,
             )
         }
-        items(mangaItems) { item ->
+        items(mangaItems, key = { "m:${it.note.id}" }) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
         }
     }
@@ -344,13 +372,13 @@ private fun QuoteList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(padding)
     ) {
-        items(items) { item ->
+        items(items, key = { "q:${it.quote.id}" }) { item ->
             QuoteListItem(
                 item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags,
                 onFindRelated = onFindRelated,
             )
         }
-        items(mangaItems) { item ->
+        items(mangaItems, key = { "m:${it.note.id}" }) { item ->
             MangaQuoteCard(item = item, onClick = { onMangaNoteClick(item) })
         }
     }
@@ -526,7 +554,7 @@ private fun TagChip(tag: Tag, compact: Boolean = false) {
         ?: FolioTheme.colors.tertiaryContainer
     Surface(
         color = color.copy(alpha = 0.2f),
-        shape = RoundedCornerShape(if (compact) 4.dp else 8.dp)
+        shape = FolioShapes.chip
     ) {
         Text(
             text = tag.name,
@@ -545,7 +573,7 @@ private fun TagChip(tag: Tag, compact: Boolean = false) {
 private fun AddTagChip(compact: Boolean = false, onClick: () -> Unit) {
     Surface(
         color = FolioTheme.colors.surfaceVariant,
-        shape = RoundedCornerShape(if (compact) 4.dp else 8.dp),
+        shape = FolioShapes.chip,
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Text(
@@ -571,7 +599,7 @@ private fun AddTagChip(compact: Boolean = false, onClick: () -> Unit) {
 private fun RelatedChip(compact: Boolean = false, onClick: () -> Unit) {
     Surface(
         color = FolioTheme.colors.surfaceVariant,
-        shape = RoundedCornerShape(if (compact) 4.dp else 8.dp),
+        shape = FolioShapes.chip,
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Text(
@@ -594,63 +622,65 @@ private fun RelatedChip(compact: Boolean = false, onClick: () -> Unit) {
  * its neighbours possible at all.
  */
 @Composable
-private fun RelatedPanel(state: RelatedState, onClose: () -> Unit) {
-    Surface(
-        color = FolioTheme.colors.surfaceVariant,
-        tonalElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth()
+private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    // Glass over content, like every other over-content panel — a sheet rising
+    // from the bottom, so its top corners are rounded.
+    val panelShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .folioVeil(panelShape)
+            .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)
     ) {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Passages like this one",
-                    style = FolioTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = FolioTheme.colors.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close suggestions")
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Passages like this one",
+                style = FolioTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = FolioTheme.colors.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = "Close suggestions")
             }
+        }
 
-            when (state) {
-                RelatedState.Idle -> Unit
-                RelatedState.Loading -> Text(
-                    "Looking for passages with a similar meaning…",
+        when (state) {
+            RelatedState.Idle -> Unit
+            RelatedState.Loading -> Text(
+                "Looking for passages with a similar meaning…",
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant
+            )
+
+            RelatedState.NotIndexed -> Text(
+                "The semantic index is not built yet, so passages cannot be compared by " +
+                    "meaning. Download the model in Settings, then index your library.",
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant
+            )
+
+            is RelatedState.Failed -> Text(
+                state.message,
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.error
+            )
+
+            is RelatedState.Ready -> if (state.passages.isEmpty()) {
+                Text(
+                    "No other passage in your library reads like this one yet.",
                     style = FolioTheme.typography.bodySmall,
                     color = FolioTheme.colors.onSurfaceVariant
                 )
-
-                RelatedState.NotIndexed -> Text(
-                    "The semantic index is not built yet, so passages cannot be compared by " +
-                        "meaning. Download the model in Settings, then index your library.",
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurfaceVariant
-                )
-
-                is RelatedState.Failed -> Text(
-                    state.message,
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.error
-                )
-
-                is RelatedState.Ready -> if (state.passages.isEmpty()) {
-                    Text(
-                        "No other passage in your library reads like this one yet.",
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(state.passages) { passage -> RelatedPassageRow(passage) }
-                    }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(state.passages) { passage -> RelatedPassageRow(passage) }
                 }
             }
         }

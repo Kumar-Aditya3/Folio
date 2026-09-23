@@ -38,12 +38,20 @@ sealed class HtmlBlock {
  */
 class HtmlRenderer(
     private val settings: ReaderSettings,
-    private val linkColor: Color = Color(0xFF1A73E8),
+    // No hardcoded brand blue: the link colour is the caller's — the reader theme's
+    // own link ink (see ChapterContent) or the app primary (see rememberHtmlRenderer).
+    // Unspecified means "inherit the surrounding text colour" for the rare caller
+    // that omits it, so links are never painted a fixed off-theme blue.
+    private val linkColor: Color = Color.Unspecified,
     private val onLinkClick: ((String) -> Unit)? = null,
     private val customFontFamilies: Map<String, String> = emptyMap()
 ) {
     private data class CssRule(
-        val selector: String,
+        // Selector pre-parsed once at parse time (was re-tokenized with 2 regexes + allocations
+        // for every node × every rule in matchesSelector). "" / "*" tag means "any".
+        val wantedTag: String,
+        val wantedId: String?,
+        val wantedClasses: List<String>,
         val style: TextStyle,
         val hidden: Boolean,
         val textIndent: Float?
@@ -76,6 +84,19 @@ class HtmlRenderer(
         val ENTITY_NAMED = Regex("&([a-zA-Z0-9]+);")
         val ENTITY_STRAY_AMP = Regex("&(?!(amp|lt|gt|quot|apos);)")
 
+        /** Named entities decoded in a single pass (folded from ~30 sequential full-string
+         *  replaces). amp/lt/gt are intentionally absent — they're kept as-is for the XML parser. */
+        val NAMED_ENTITIES: Map<String, String> = mapOf(
+            "nbsp" to " ", "apos" to "'", "quot" to "\"",
+            "rsquo" to "’", "lsquo" to "‘", "ldquo" to "“", "rdquo" to "”",
+            "mdash" to "—", "ndash" to "–", "hellip" to "…", "bull" to "•",
+            "copy" to "©", "reg" to "®", "trade" to "™",
+            "eacute" to "é", "egrave" to "è", "ecirc" to "ê", "agrave" to "à", "acirc" to "â",
+            "ccedil" to "ç", "iuml" to "ï", "icirc" to "î", "ocirc" to "ô",
+            "ugrave" to "ù", "ucirc" to "û", "uuml" to "ü", "ouml" to "ö", "auml" to "ä",
+            "szlig" to "ß", "Eacute" to "É", "Agrave" to "À", "Ccedil" to "Ç",
+        )
+
         private val declarationPatterns = java.util.concurrent.ConcurrentHashMap<String, Regex>()
         fun declarationPattern(name: String): Regex =
             declarationPatterns.getOrPut(name) { Regex("(?i)(?:^|;)\\s*$name\\s*:\\s*([^;]+)") }
@@ -83,39 +104,6 @@ class HtmlRenderer(
 
     private fun decodeHtmlEntities(html: String): String {
         var clean = html
-            .replace("&nbsp;", " ")
-            .replace("&apos;", "'")
-            .replace("&quot;", "\"")
-            .replace("&rsquo;", "’")
-            .replace("&lsquo;", "‘")
-            .replace("&ldquo;", "“")
-            .replace("&rdquo;", "”")
-            .replace("&mdash;", "—")
-            .replace("&ndash;", "–")
-            .replace("&hellip;", "…")
-            .replace("&bull;", "•")
-            .replace("&copy;", "©")
-            .replace("&reg;", "®")
-            .replace("&trade;", "™")
-            .replace("&eacute;", "é")
-            .replace("&egrave;", "è")
-            .replace("&ecirc;", "ê")
-            .replace("&agrave;", "à")
-            .replace("&acirc;", "â")
-            .replace("&ccedil;", "ç")
-            .replace("&iuml;", "ï")
-            .replace("&icirc;", "î")
-            .replace("&ocirc;", "ô")
-            .replace("&ugrave;", "ù")
-            .replace("&ucirc;", "û")
-            .replace("&uuml;", "ü")
-            .replace("&ouml;", "ö")
-            .replace("&auml;", "ä")
-            .replace("&szlig;", "ß")
-            .replace("&Eacute;", "É")
-            .replace("&Agrave;", "À")
-            .replace("&Ccedil;", "Ç")
-
         // Handle numeric decimal entities (e.g. &#39; &#8217;)
         clean = clean.replace(ENTITY_DECIMAL) { mr ->
             mr.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: ""
@@ -125,10 +113,13 @@ class HtmlRenderer(
             mr.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: ""
         }
 
-        // Replace remaining non-standard HTML entities that break XmlPullParser
+        // Named entities in one pass: a known name maps to its character; amp/lt/gt/quot/apos that
+        // aren't in the map are kept verbatim for the XML parser; any other &word; becomes a space
+        // (it would otherwise break XmlPullParser). Disjoint from the numeric passes above, so
+        // running after them is equivalent to the old before-numeric order.
         clean = clean.replace(ENTITY_NAMED) { mr ->
             val entity = mr.groupValues[1]
-            when (entity) {
+            NAMED_ENTITIES[entity] ?: when (entity) {
                 "amp", "lt", "gt", "quot", "apos" -> mr.value
                 else -> " "
             }
@@ -158,6 +149,8 @@ class HtmlRenderer(
         // blocks constantly (<div><p>…), so only the OUTERMOST active block pushes
         // a ParagraphStyle — inner blocks inherit it.
         var activeParaPushes = 0
+        // baseStyle is constant for the whole render; convert once instead of per text node.
+        val baseSpanStyle = baseStyle.toSpanStyle()
 
         fun flushParagraph() {
             val text = para.toAnnotatedString()
@@ -218,7 +211,7 @@ class HtmlRenderer(
                             val classes = parser.getAttributeValue(null, "class")
                                 ?.split(WHITESPACE)?.filter { it.isNotBlank() } ?: emptyList()
                             val id = parser.getAttributeValue(null, "id")
-                            val matchingRules = cssRules.filter { matchesSelector(it.selector, name, classes, id) }
+                            val matchingRules = cssRules.filter { matchesSelector(it, name, classes, id) }
                             val selectorStyle = matchingRules.map { it.style }
                                 .reduceOrNull { acc, style -> acc.merge(style) }
                             val effectiveInlineStyle = listOfNotNull(selectorStyle, inlineStyle)
@@ -309,7 +302,7 @@ class HtmlRenderer(
                                         t.pendingSpan = null
                                     }
                                 }
-                                para.pushStyle(baseStyle.toSpanStyle())
+                                para.pushStyle(baseSpanStyle)
                                 val blockSpan = openTags.lastOrNull {
                                     it.isBlock && it.pushedPara
                                 }?.blockSpanStyle
@@ -489,13 +482,19 @@ class HtmlRenderer(
             }
         }
 
-    private fun matchesSelector(selector: String, tag: String, classes: List<String>, id: String?): Boolean {
-        val part = selector.trim().split(WHITESPACE).lastOrNull() ?: return false
+    private fun matchesSelector(rule: CssRule, tag: String, classes: List<String>, id: String?): Boolean {
+        if (rule.wantedTag.isNotBlank() && rule.wantedTag != "*" && rule.wantedTag != tag) return false
+        if (rule.wantedId != null && rule.wantedId != id) return false
+        return classes.containsAll(rule.wantedClasses)
+    }
+
+    /** Parse a selector's trailing simple-selector once (tag, id, classes). */
+    private fun parseSelector(selector: String): Triple<String, String?, List<String>> {
+        val part = selector.trim().split(WHITESPACE).lastOrNull() ?: ""
         val wantedTag = part.substringBefore('.').substringBefore('#').substringBefore('[').lowercase()
-        if (wantedTag.isNotBlank() && wantedTag != "*" && wantedTag != tag) return false
-        ID_SELECTOR.find(part)?.groupValues?.get(1)?.let { if (it != id) return false }
+        val wantedId = ID_SELECTOR.find(part)?.groupValues?.get(1)
         val wantedClasses = CLASS_SELECTOR.findAll(part).map { it.groupValues[1] }.toList()
-        return classes.containsAll(wantedClasses)
+        return Triple(wantedTag, wantedId, wantedClasses)
     }
 
     private fun parseCssRules(html: String): List<CssRule> {
@@ -509,13 +508,22 @@ class HtmlRenderer(
             val indent = TEXT_INDENT_DECLARATION
                 .find(declarations)?.let { it.groupValues[1].toFloatOrNull() }
             match.groupValues[1].split(',').asSequence()
-                .map { CssRule(it.trim(), style, hidden, indent) }
+                .map { rawSelector ->
+                    val (wantedTag, wantedId, wantedClasses) = parseSelector(rawSelector)
+                    CssRule(wantedTag, wantedId, wantedClasses, style, hidden, indent)
+                }
         }.toList()
     }
 
+    // Per-instance memo: the renderer is remembered per settings, and getTagStyle only depends on
+    // tagName + settings.fontSize + linkColor (all fixed for the instance), yet was allocating a
+    // fresh TextStyle on each of its 2-3 calls per block tag.
+    private val tagStyleCache = HashMap<String, TextStyle?>()
+
     private fun getTagStyle(tagName: String): TextStyle? {
+        if (tagStyleCache.containsKey(tagName)) return tagStyleCache[tagName]
         val fs = settings.fontSize
-        return when (tagName) {
+        val style = when (tagName) {
             "center" -> TextStyle(textAlign = TextAlign.Center)
             "h1" -> TextStyle(fontWeight = FontWeight.Bold, fontSize = (fs * 2.0f).sp, lineHeight = (fs * 1.15f).sp)
             "h2" -> TextStyle(fontWeight = FontWeight.Bold, fontSize = (fs * 1.75f).sp, lineHeight = (fs * 1.15f).sp)
@@ -538,6 +546,8 @@ class HtmlRenderer(
             "big" -> TextStyle(fontSize = (fs * 1.2f).sp)
             else -> null
         }
+        tagStyleCache[tagName] = style
+        return style
     }
 }
 

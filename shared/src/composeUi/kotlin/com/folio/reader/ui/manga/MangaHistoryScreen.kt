@@ -23,7 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,7 +79,7 @@ fun MangaHistoryScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 EmptyState(
-                    icon = Icons.Filled.History,
+                    icon = Icons.Outlined.History,
                     headline = "No reading history",
                     body = "Chapters you mark as read will appear here.",
                 )

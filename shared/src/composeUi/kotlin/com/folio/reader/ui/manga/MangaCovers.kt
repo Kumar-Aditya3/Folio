@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,14 +40,36 @@ import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedDeque
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val mangaCoverCache = ConcurrentHashMap<String, ImageBitmap>()
-private val mangaCoverOrder = ConcurrentLinkedDeque<String>()
-private const val MANGA_COVER_CACHE_MAX = 150
+private const val MANGA_COVER_CACHE_MAX_BYTES = 48L * 1024L * 1024L
+
+// Access-order LRU bounded by decoded-bitmap bytes (not entry count), guarded by its own monitor.
+// The old structure never cached local (coverPath) covers and evicted FIFO by count, so scrolling a
+// CBZ library re-read+re-decoded every local cover each pass and a count bound could hold hundreds
+// of MB of full-size bitmaps resident.
+private val mangaCoverCache = LinkedHashMap<String, ImageBitmap>(64, 0.75f, true)
+private var mangaCoverBytes = 0L
+
+private fun coverBytesOf(bmp: ImageBitmap): Long = bmp.width.toLong() * bmp.height.toLong() * 4L
+
+private fun cachedCover(key: String): ImageBitmap? = synchronized(mangaCoverCache) { mangaCoverCache[key] }
+
+private fun cacheCover(key: String, bmp: ImageBitmap) {
+    synchronized(mangaCoverCache) {
+        val prev = mangaCoverCache.put(key, bmp)
+        if (prev != null) mangaCoverBytes -= coverBytesOf(prev)
+        mangaCoverBytes += coverBytesOf(bmp)
+        val it = mangaCoverCache.entries.iterator()
+        // accessOrder=true iterates least-recently-used first, so this drops the coldest covers.
+        while (mangaCoverBytes > MANGA_COVER_CACHE_MAX_BYTES && mangaCoverCache.size > 1 && it.hasNext()) {
+            val e = it.next()
+            mangaCoverBytes -= coverBytesOf(e.value)
+            it.remove()
+        }
+    }
+}
 
 private suspend fun loadMangaCover(
     backend: MangaBackend,
@@ -58,11 +80,17 @@ private suspend fun loadMangaCover(
     coverPath?.let { path ->
         val file = java.io.File(path)
         if (file.isFile) {
-            return withContext(Dispatchers.IO) { decodeCoverImage(file.readBytes()) }
+            // Cache local covers too, keyed on path+mtime, so a scroll pass doesn't re-read and
+            // re-decode every locally-imported (CBZ) cover.
+            val key = "local:$path:${file.lastModified()}"
+            cachedCover(key)?.let { return it }
+            val bmp = withContext(Dispatchers.IO) { decodeCoverImage(file.readBytes()) } ?: return null
+            cacheCover(key, bmp)
+            return bmp
         }
     }
     val key = "$sourceId:$thumbnailUrl"
-    mangaCoverCache[key]?.let { return it }
+    cachedCover(key)?.let { return it }
     if (thumbnailUrl.isNullOrBlank()) return null
     // Disk before network: a cover seen in any previous session is a plain file
     // read, which is what keeps library thumbnails loaded across cold starts.
@@ -79,11 +107,7 @@ private suspend fun loadMangaCover(
     }
     bytes ?: return null
     val bitmap = withContext(Dispatchers.IO) { decodeCoverImage(bytes) } ?: return null
-    if (mangaCoverCache.size >= MANGA_COVER_CACHE_MAX) {
-        mangaCoverOrder.pollFirst()?.let { mangaCoverCache.remove(it) }
-    }
-    mangaCoverCache[key] = bitmap
-    mangaCoverOrder.addLast(key)
+    cacheCover(key, bitmap)
     return bitmap
 }
 
@@ -120,7 +144,7 @@ fun MangaCover(
                 else null,
             )
             failed -> Icon(
-                imageVector = Icons.Filled.MenuBook,
+                imageVector = Icons.AutoMirrored.Filled.MenuBook,
                 contentDescription = null,
                 tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(28.dp),
@@ -165,7 +189,7 @@ fun MangaCoverPlate(
     width: Dp? = FolioTokens.coverShelf,
     shape: androidx.compose.ui.graphics.Shape = FolioShapes.plate,
     halo: Color? = null,
-    elevation: Dp = 8.dp,
+    elevation: Dp = FolioTokens.elevationVeil,
     dimmed: Boolean = false,
     overlay: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null,
 ) {

@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 /** Where a model download currently is. Surfaced directly by the settings UI. */
 sealed interface ModelDownloadState {
@@ -40,10 +41,10 @@ class ModelDownloader(
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 60_000,
 ) {
-    private val states = HashMap<String, MutableStateFlow<ModelDownloadState>>()
+    private val states = ConcurrentHashMap<String, MutableStateFlow<ModelDownloadState>>()
 
     fun state(model: EmbeddingModel): StateFlow<ModelDownloadState> =
-        states.getOrPut(model.id) {
+        states.computeIfAbsent(model.id) {
             MutableStateFlow(
                 if (isInstalled(model)) ModelDownloadState.Installed(model) else ModelDownloadState.NotInstalled
             )
@@ -56,9 +57,14 @@ class ModelDownloader(
     fun vocabFile(model: EmbeddingModel): File = File(modelsDir(), model.vocabFileName)
 
     /**
-     * True when both the model and its vocabulary are present *and* the model's digest
-     * matches the catalog. Digest verification is skipped for models the catalog has no
-     * known hash for, rather than silently accepting them.
+     * True when both the model and its vocabulary are present and the model file is the exact
+     * size the catalog expects.
+     *
+     * This is deliberately a cheap `isFile` + `length()` check, not a full digest hash: it is
+     * called on every launch (and by the settings UI) and hashing a 100+ MB model on the main
+     * cold-start path would be a visible stall. The catalog digest is verified once, at download
+     * time, before the `.part` file is renamed into place (see [ensureModel]), so a file that is
+     * present at the right size has already passed its checksum.
      */
     fun isInstalled(model: EmbeddingModel): Boolean {
         val modelFile = modelFile(model)
@@ -67,19 +73,13 @@ class ModelDownloader(
         return true
     }
 
-    suspend fun verify(model: EmbeddingModel): Boolean {
-        val expected = EmbeddingModelCatalog.knownSha256[model.fileName] ?: return isInstalled(model)
-        val actual = hasher.sha256File(modelFile(model).absolutePath)
-        return actual.equals(expected, ignoreCase = true)
-    }
-
     /**
      * Downloads the model and its vocabulary if needed.
      *
      * @return the model file, or a failure if the download or digest check did not complete
      */
     suspend fun ensureModel(model: EmbeddingModel): Result<File> = withContext(Dispatchers.IO) {
-        val state = states.getOrPut(model.id) { MutableStateFlow(ModelDownloadState.NotInstalled) }
+        val state = states.computeIfAbsent(model.id) { MutableStateFlow(ModelDownloadState.NotInstalled) }
         try {
             if (isInstalled(model)) {
                 state.value = ModelDownloadState.Installed(model)
@@ -126,7 +126,7 @@ class ModelDownloader(
     suspend fun deleteModel(model: EmbeddingModel) = withContext(Dispatchers.IO) {
         modelFile(model).delete()
         vocabFile(model).delete()
-        states.getOrPut(model.id) { MutableStateFlow(ModelDownloadState.NotInstalled) }
+        states.computeIfAbsent(model.id) { MutableStateFlow(ModelDownloadState.NotInstalled) }
             .value = ModelDownloadState.NotInstalled
         Unit
     }

@@ -25,16 +25,17 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Highlight
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,8 @@ import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioSheetMorphShape
@@ -156,7 +159,9 @@ fun TOCSidebar(
     // Glass, because it sits over the page. A 26dp leading sweep so the panel
     // reads as sliding in from the edge rather than being pasted on. §16: the
     // sweep enters reading as a capsule and settles to 26dp.
-    val tocShape = rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
+    val tocShape = rememberFolioSheetMorphShape(
+        RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
+    )
     // Monochromatic palettes put `primary` within a hair of `surface`, so the
     // current-chapter marker has to pass the contrast guard rather than trust the
     // raw accent. Each theme keeps its own hue; only unreadable values move.
@@ -179,7 +184,7 @@ fun TOCSidebar(
                     style = FolioTheme.typography.titleMedium,
                     color = FolioTheme.colors.onSurface
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onDismiss) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "Close",
@@ -261,7 +266,9 @@ fun AnnotationsSidebar(
             .fillMaxHeight()
             .width(300.dp)
             .folioVeil(
-                rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)),
+                rememberFolioSheetMorphShape(
+                    RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
+                ),
                 fillAlpha = FolioTheme.readerVeilAlpha,
             )
             .padding(vertical = 16.dp)
@@ -324,12 +331,12 @@ fun AnnotationsSidebar(
                 }
             }
             if (orphanNotes.isNotEmpty()) {
-                item { SectionHeader("Notes (${orphanNotes.size})", Icons.Filled.Notes) }
+                item { SectionHeader("Notes (${orphanNotes.size})", Icons.AutoMirrored.Filled.Notes) }
                 items(orphanNotes, key = { "nt:${it.id}" }) { note ->
                     AnnotationRow(
                         title = note.content.take(80).ifBlank { "(empty)" },
                         subtitle = chapterLabel(note.spineIndex, note.chapterId),
-                        leadingIcon = Icons.Filled.Notes,
+                        leadingIcon = Icons.AutoMirrored.Filled.Notes,
                         onClick = { onJump("nt", note.id) },
                         onDelete = { onRemoveNote(note.id) }
                     )
@@ -337,11 +344,10 @@ fun AnnotationsSidebar(
             }
             if (bookmarks.isEmpty() && highlights.none { !it.isDeleted } && orphanNotes.isEmpty()) {
                 item {
-                    Text(
-                        "Nothing here yet. Bookmark spots, then select text to highlight and write a note on it.",
-                        style = FolioTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp)
+                    EmptyState(
+                        icon = Icons.AutoMirrored.Filled.Notes,
+                        headline = "Nothing here yet",
+                        body = "Bookmark spots, then select text to highlight and write a note on it.",
                     )
                 }
             }
@@ -391,11 +397,7 @@ private fun SectionHeader(text: String, icon: ImageVector? = null) {
                 tint = label
             )
         }
-        Text(
-            text = text,
-            style = FolioTheme.typography.titleSmall,
-            color = label
-        )
+        FolioEyebrow(text = text, accent = label)
     }
 }
 
@@ -449,7 +451,9 @@ private fun AnnotationRow(
         onNote?.let { action ->
             TextButton(
                 onClick = action,
-                modifier = Modifier.size(width = 56.dp, height = 32.dp),
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .size(width = 56.dp, height = 32.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
                 Text(
@@ -459,7 +463,7 @@ private fun AnnotationRow(
                 )
             }
         }
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+        IconButton(onClick = onDelete) {
             Icon(
                 Icons.Filled.Delete,
                 contentDescription = "Delete",

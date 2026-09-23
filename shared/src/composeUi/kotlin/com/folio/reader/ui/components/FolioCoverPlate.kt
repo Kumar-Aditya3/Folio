@@ -66,7 +66,7 @@ fun FolioCoverPlate(
     width: Dp? = FolioTokens.coverShelf,
     shape: Shape = FolioShapes.plate,
     halo: Color? = null,
-    elevation: Dp = 8.dp,
+    elevation: Dp = FolioTokens.elevationVeil,
     small: Boolean = false,
     suppressFallbackText: Boolean = false,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
@@ -107,11 +107,24 @@ fun FolioCoverPlate(
                     ),
                 ),
         )
-        // A hairline keeps a white cover from dissolving into a light page.
+        // A rim-lit seat instead of a flat 4-edge stroke: a light catch along the
+        // top edge falling to a soft shade at the foot, so the plate reads as a
+        // printed object lit from above (the atmosphere's light model). Dark
+        // palettes emit at the rim (light top, transparent foot); light palettes
+        // keep a faint foot shade so a white cover can't dissolve into the page.
         Box(
             Modifier
                 .matchParentSize()
-                .border(0.5.dp, Color.Black.copy(alpha = if (atmos.isDark) 0.45f else 0.16f), shape),
+                .border(
+                    0.5.dp,
+                    Brush.verticalGradient(
+                        listOf(
+                            (if (atmos.isDark) atmos.rimLight else Color.White).copy(alpha = 0.5f),
+                            if (atmos.isDark) Color.Transparent else Color.Black.copy(alpha = 0.16f),
+                        ),
+                    ),
+                    shape,
+                ),
         )
         overlay?.invoke(this)
     }

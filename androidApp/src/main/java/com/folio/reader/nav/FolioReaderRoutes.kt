@@ -1,7 +1,12 @@
 package com.folio.reader.nav
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.folio.reader.AppGraph
 import com.folio.reader.epub.repairStoredChapterTitles
 import com.folio.reader.model.Book
@@ -40,11 +46,27 @@ fun ReaderRoute(
 ) {
     val graph = navModel.graph
     val book = remember(bookId) { mutableStateOf<Book?>(null) }
-    LaunchedEffect(bookId) { book.value = graph.bookRepository.getBook(bookId) }
+    // Distinguishes "still loading" from "loaded and there is no such book" (deleted book, or a
+    // stale `folio://reader/{id}` deep link). Without it, a null result left the route spinning
+    // forever with no way back.
+    val loadFailed = remember(bookId) { mutableStateOf(false) }
+    LaunchedEffect(bookId) {
+        val loaded = runCatching { graph.bookRepository.getBook(bookId) }.getOrNull()
+        book.value = loaded
+        loadFailed.value = loaded == null
+    }
     val b = book.value
     if (b == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            androidx.compose.material3.CircularProgressIndicator()
+            if (loadFailed.value) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("This book is no longer available.")
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onBack) { Text("Go back") }
+                }
+            } else {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
         }
         return
     }
@@ -174,6 +196,14 @@ private fun ReaderRouteContent(
         onDispose { viewModel.closeBook() }
     }
 
+    // Stable resolver lambdas: the reader route recomposes on every ~0.5% scroll tick, and
+    // unremembered lambdas here were re-created each time, restarting the WebView's resource
+    // LaunchedEffect (main-thread disk reads + regex) on every tick. book.id and graph are stable.
+    val onResolveImage: suspend (String, String) -> String? =
+        remember(graph, book.id) { { href, src -> graph.contentProvider.resolveImage(book.id, href, src) } }
+    val onResolveResource: suspend (String, String) -> String? =
+        remember(graph, book.id) { { href, src -> graph.contentProvider.resolveResource(book.id, href, src) } }
+
     ReaderScreen(
         bookTitle = book.title,
         chapters = chapters,
@@ -242,8 +272,8 @@ private fun ReaderRouteContent(
         },
         onRetryChapter = { viewModel.reloadChapter() },
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
-        onResolveImage = { chapterHref, src -> graph.contentProvider.resolveImage(book.id, chapterHref, src) },
-        onResolveResource = { chapterHref, src -> graph.contentProvider.resolveResource(book.id, chapterHref, src) },
+        onResolveImage = onResolveImage,
+        onResolveResource = onResolveResource,
         syncState = syncState,
         scopeControlEnabled = true,
         overriddenFields = overridden,

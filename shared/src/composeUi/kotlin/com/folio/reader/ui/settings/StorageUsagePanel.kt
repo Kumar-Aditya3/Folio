@@ -194,16 +194,13 @@ fun StorageOtherModelsCard(
     }
 }
 
-/** Distinct, theme-aware hues for the donut. First two follow the theme; the rest are fixed. */
-private fun storagePalette(colors: com.folio.reader.ui.theme.FolioColors): List<Color> = listOf(
-    colors.primary,          // indigo
-    colors.tertiary,         // teal
-    Color(0xFFE11D48),       // rose
-    Color(0xFFF59E0B),       // amber
-    Color(0xFF8B5CF6),       // violet
-    Color(0xFF06B6D4),       // cyan
-    Color(0xFF64748B),       // slate — database/index
-)
+/**
+ * Distinct, theme-aware hues for the donut. Uses the theme's multi-series [chartSeries] palette,
+ * which already adapts to every theme and dark mode; the call site cycles it with modulo when there
+ * are more slices than series.
+ */
+private fun storagePalette(colors: com.folio.reader.ui.theme.FolioColors): List<Color> =
+    colors.chartSeries
 
 fun formatStorageBytes(bytes: Long): String = when {
     bytes >= 1_000_000_000L -> String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0)

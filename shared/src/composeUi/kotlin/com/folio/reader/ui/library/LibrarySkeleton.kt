@@ -41,7 +41,7 @@ import com.folio.reader.ui.theme.LocalFolioTopInset
  * now agree about how this app waits.
  *
  * Every measure is the real one lifted from [LibraryGrid] and [FeaturedShelfEntry]:
- * the adaptive 116dp column floor, `gutter` side margins, the `space3 + topInset`
+ * the adaptive `coverGridMin` column floor, `gutter` side margins, the `space3 + topInset`
  * head inset, `spaceBeat` between rows and `space3` between columns, the feature row
  * spanning the full line, and `coverFeature` over its own type block. A skeleton
  * that approximates is worse than a spinner — it promises a geometry and breaks it —
@@ -56,7 +56,7 @@ import com.folio.reader.ui.theme.LocalFolioTopInset
 internal fun LibrarySkeleton(modifier: Modifier = Modifier) {
     val phase = rememberShimmerPhase()
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 116.dp),
+        columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = FolioTokens.gutter,

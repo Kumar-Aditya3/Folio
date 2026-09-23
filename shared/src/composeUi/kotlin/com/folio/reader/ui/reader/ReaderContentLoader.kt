@@ -73,9 +73,10 @@ internal class ReaderContentLoader(
         loadErrorState.value = null
         try {
             chapterHtmlState.value = loadHtml(bookId, chapter)
-            if (chapterHtmlState.value.isBlank()) {
-                loadErrorState.value = "Empty chapter (href=${chapter.href}) — file may be missing or parse failed"
-            }
+            // A present-but-empty chapter (some EPUBs have placeholder spine entries) is valid
+            // content, not a failure: loadHtml throws on a genuine missing-file/parse error, which
+            // the catch below surfaces. Blank here therefore renders an empty chapter rather than
+            // a load-error card the reader cannot dismiss.
         } catch (e: Exception) {
             chapterHtmlState.value = ""
             loadErrorState.value = e.message ?: e::class.simpleName ?: "Unknown error"

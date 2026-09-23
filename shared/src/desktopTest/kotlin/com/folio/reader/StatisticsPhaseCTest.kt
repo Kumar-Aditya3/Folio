@@ -121,8 +121,17 @@ class StatisticsPhaseCTest {
         override suspend fun insertTag(tag: Tag, emitSyncEvent: Boolean) {}
         override suspend fun updateTag(tag: Tag, emitSyncEvent: Boolean) {}
         override suspend fun deleteTag(tagId: String) {}
-        override suspend fun getAllTags(): Flow<List<Tag>> = MutableStateFlow(emptyList())
+        override suspend fun getAllTags(): Flow<List<Tag>> =
+            MutableStateFlow(tagsByBook.values.flatten().distinctBy { it.id })
         override suspend fun getTagsForBook(bookId: String): List<Tag> = tagsByBook[bookId].orEmpty()
+        // Batched links the stats genre/exclusion paths now use: bookId → tag ids, inverted here.
+        override suspend fun getBookTagLinks(): Map<String, Set<String>> {
+            val out = HashMap<String, MutableSet<String>>()
+            tagsByBook.forEach { (bookId, tags) ->
+                tags.forEach { t -> out.getOrPut(t.id) { mutableSetOf() }.add(bookId) }
+            }
+            return out
+        }
         override suspend fun getTagsForHighlight(highlightId: String): List<Tag> = emptyList()
         override suspend fun getBooksForTag(tagId: String): List<Book> = emptyList()
         override suspend fun getHighlightsForTag(tagId: String): List<Highlight> = emptyList()

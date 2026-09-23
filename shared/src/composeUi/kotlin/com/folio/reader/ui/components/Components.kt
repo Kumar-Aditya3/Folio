@@ -1,6 +1,11 @@
 package com.folio.reader.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,6 +40,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -44,6 +50,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,6 +73,7 @@ import com.folio.reader.ui.theme.folioLiquidGlass
 import com.folio.reader.ui.theme.lightDirection
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 
 import androidx.compose.ui.graphics.Shape
@@ -217,19 +228,25 @@ fun FolioChip(
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
     val atmos = FolioTheme.atmosphere
     val interaction = rememberFolioInteraction()
+    // Selection cross-fades rather than switching on one frame — the same idiom
+    // the nav capsule and segmented control already use.
+    val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val colorSpec = if (motion) tween<Color>(FolioTokens.motionFast.toInt()) else snap<Color>()
+    val fillColor by animateColorAsState(
+        if (selected) colors.primary else atmos.sunkenFill.copy(alpha = 0.55f),
+        animationSpec = colorSpec, label = "chipFill",
+    )
+    val strokeColor by animateColorAsState(
+        if (selected) colors.primary else atmos.hairline,
+        animationSpec = colorSpec, label = "chipStroke",
+    )
+    val labelColor by animateColorAsState(
+        if (selected) colors.onPrimary else colors.onSurfaceVariant,
+        animationSpec = colorSpec, label = "chipLabel",
+    )
     Box(
         modifier = modifier
             .folioPressable(interaction, scaleTo = 0.94f)
-            .clip(shape)
-            .background(
-                if (selected) colors.primary else atmos.sunkenFill.copy(alpha = 0.55f),
-                shape
-            )
-            .border(
-                1.dp,
-                if (selected) colors.primary else atmos.hairline,
-                shape
-            )
             .then(
                 if (onLongClick == null) {
                     Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -242,16 +259,33 @@ fun FolioChip(
                     )
                 }
             )
-            .padding(horizontal = 15.dp, vertical = 8.dp)
+            // Keep the pill's compact visual height but reserve a >=48dp touch
+            // target, so filter/segment chips stay reliably thumb-tappable.
+            .minimumInteractiveComponentSize()
+            // Selection is spoken, not just coloured: TalkBack now announces the
+            // active tab/filter across every FolioChip site.
+            .semantics {
+                this.selected = selected
+                this.role = Role.Tab
+            },
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            fontWeight = FontWeight.Medium,
-            color = if (selected) colors.onPrimary else colors.onSurfaceVariant
-        )
+        Box(
+            modifier = Modifier
+                .clip(shape)
+                .background(fillColor, shape)
+                .border(1.dp, strokeColor, shape)
+                .padding(horizontal = 15.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Medium,
+                color = labelColor
+            )
+        }
     }
 }
 
@@ -306,15 +340,22 @@ fun FolioProgressBar(
     modifier: Modifier = Modifier,
     color: Color = FolioTheme.colors.accentProgress
 ) {
+    val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val fraction by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        label = "folioProgress",
+    )
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .progressSemantics(fraction)
             .height(3.dp)
             .background(color.copy(alpha = 0.14f), RoundedCornerShape(2.dp))
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .fillMaxWidth(fraction)
                 .height(3.dp)
                 .background(color, RoundedCornerShape(2.dp))
         )
@@ -376,7 +417,7 @@ fun DropdownMenuButton(
             modifier = Modifier
                 .width(240.dp)
                 .glassPanel(RoundedCornerShape(12.dp))
-                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+                .border(1.dp, FolioTheme.atmosphere.hairline, RoundedCornerShape(12.dp))
         ) {
             options.forEach { option ->
                 val isSelected = option == selected

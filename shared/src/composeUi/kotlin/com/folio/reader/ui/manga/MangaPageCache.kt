@@ -69,6 +69,15 @@ private fun pageCachePut(key: String, bitmap: ImageBitmap) = synchronized(pageBi
 }
 
 /**
+ * Drops every decoded page so the ~96 MB budget is not held resident while no manga is being
+ * read. Called from [MangaReaderViewModel.close]; the next reader session decodes on demand.
+ */
+internal fun clearPageBitmapCache() = synchronized(pageBitmapCache) {
+    pageBitmapCache.clear()
+    bitmapCacheBytes = 0L
+}
+
+/**
  * Aspect ratios (width/height) learned from successful decodes, keyed by page key.
  * A webtoon item whose bitmap was evicted re-reserves its exact height from this,
  * so scrolling back to a revisited page never shifts the list geometry mid-scroll.

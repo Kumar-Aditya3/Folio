@@ -22,13 +22,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Label
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -155,7 +155,7 @@ fun FeaturedMangaShelfEntry(
             modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
             width = FolioTokens.coverFeature,
             halo = accent,
-            elevation = 14.dp,
+            elevation = FolioTokens.elevationRaised,
             dimmed = fullyRead,
             overlay = {
                 if (isSelected) {
@@ -600,7 +600,7 @@ fun MangaItemMenu(
         )
         DropdownMenuItem(
             text = { Text("Categories…") },
-            leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null) },
             onClick = { onDismissRequest(); onCategories() },
         )
         DropdownMenuItem(
@@ -610,7 +610,7 @@ fun MangaItemMenu(
         )
         DropdownMenuItem(
             text = { Text("Mark all as unread") },
-            leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
             onClick = { onDismissRequest(); onMarkRead(false) },
         )
         DropdownMenuItem(

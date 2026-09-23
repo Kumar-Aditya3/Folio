@@ -143,23 +143,33 @@ class AppGraph(private val app: Application) {
     val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
     val mangaDownloadRepository = com.folio.reader.database.JdbcMangaDownloadRepository(database)
     val mangaNoteRepository = com.folio.reader.database.JdbcMangaNoteRepository(database)
-    val mangaBackend = com.folio.reader.manga.AndroidMangaBackend(
-        context = app,
-        settings = settingsRepository,
-        fileSystem = platform.fileSystem,
-    )
-    val mangaDownloadManager = com.folio.reader.manga.MangaDownloadManager(
-        backend = mangaBackend,
-        downloadsRepo = mangaDownloadRepository,
-        chapterRepo = mangaChapterRepository,
-        initialStorage = com.folio.reader.manga.FileDownloadStorage(platform.fileSystem.mangaDownloadsDir),
-    ).apply { start() }
-    val mangaUpdateRepository = com.folio.reader.database.JdbcMangaUpdateRepository(
-        db = database,
-        mangaRepository = mangaRepository,
-        chapterRepository = mangaChapterRepository,
-        backend = mangaBackend,
-    )
+    // Built lazily off the main thread (first touched by runStartupTasks on graphScope): the Mihon
+    // backend eagerly constructs two OkHttpClients + a disk cache, the extension manager and a
+    // synchronous Injekt registration, none of which the reader/library first frame needs. Keeping
+    // them `by lazy` moves that class-load + init burst off the cold-start critical path.
+    val mangaBackend by lazy {
+        com.folio.reader.manga.AndroidMangaBackend(
+            context = app,
+            settings = settingsRepository,
+            fileSystem = platform.fileSystem,
+        )
+    }
+    val mangaDownloadManager by lazy {
+        com.folio.reader.manga.MangaDownloadManager(
+            backend = mangaBackend,
+            downloadsRepo = mangaDownloadRepository,
+            chapterRepo = mangaChapterRepository,
+            initialStorage = com.folio.reader.manga.FileDownloadStorage(platform.fileSystem.mangaDownloadsDir),
+        )
+    }
+    val mangaUpdateRepository by lazy {
+        com.folio.reader.database.JdbcMangaUpdateRepository(
+            db = database,
+            mangaRepository = mangaRepository,
+            chapterRepository = mangaChapterRepository,
+            backend = mangaBackend,
+        )
+    }
 
     /**
      * Restores a user-picked manga downloads location at startup. The picker persists a
@@ -572,6 +582,12 @@ class AppGraph(private val app: Application) {
 
     private val graphScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Guards [runStartupTasks] so process-level startup runs once per process, not once per
+     * Activity relaunch. Reset naturally on process death because the whole graph is rebuilt.
+     */
+    private val startupTasksStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
     init {
         graphScope.launch {
             cachedGlobalSettings =
@@ -697,6 +713,33 @@ class AppGraph(private val app: Application) {
     fun startSync(scope: CoroutineScope) {
         val engine = syncEngine ?: return
         scope.launch { engine.start() }
+    }
+
+    /**
+     * Process-level startup work, run exactly once per process.
+     *
+     * Previously each of these was fired straight from `MainActivity.onCreate`, so every
+     * configuration change (rotation, dark-mode, font-scale, locale) re-launched a full library
+     * scan and re-hit the DB for the idempotent backfills. Gating on an [java.util.concurrent.atomic.AtomicBoolean]
+     * keyed to the process — not to `savedInstanceState` — also does the right thing after
+     * process death, where the Activity is recreated with saved state but the graph (and this
+     * flag) is fresh.
+     *
+     * The idempotent/heavy passes run on [graphScope] so an Activity relaunch cannot cancel a
+     * scan mid-flight; only sync starts on the caller's [uiScope], matching its prior behaviour
+     * (the sync engine keeps its own scope regardless).
+     */
+    fun runStartupTasks(uiScope: CoroutineScope) {
+        if (!startupTasksStarted.compareAndSet(false, true)) return
+        startSync(uiScope)
+        applyStoredMangaDownloadsLocation(graphScope)
+        backfillAnnotationsOnce(graphScope)
+        backfillMangaAnnotationsOnce(graphScope)
+        repairIndexEntitiesOnce(graphScope)
+        scanOnStartIfEnabled(graphScope)
+        // Resume interrupted manga downloads, but construct the (heavy) download manager + backend
+        // on graphScope/IO rather than eagerly on the main thread at graph construction.
+        graphScope.launch { mangaDownloadManager.start() }
     }
 
     fun shutdown() {

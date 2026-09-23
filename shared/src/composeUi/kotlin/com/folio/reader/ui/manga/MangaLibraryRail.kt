@@ -123,7 +123,7 @@ fun MangaLibraryRail(
                 if (leading != null) {
                     item { leading() }
                 }
-                items(categories) { category ->
+                items(categories, key = { it.id }) { category ->
                     FolioChip(
                         selected = selectedCategory == category.id,
                         onClick = { viewModel.selectCategory(category.id) },
@@ -233,7 +233,7 @@ fun MangaLibraryRail(
                         modifier = Modifier.heightIn(max = 320.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(categories) { category ->
+                        items(categories, key = { it.id }) { category ->
                             CollectionRow(
                                 category = category,
                                 // Main holds the library together: it can only go once

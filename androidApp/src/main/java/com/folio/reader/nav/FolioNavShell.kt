@@ -54,6 +54,10 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -67,6 +71,7 @@ import com.folio.reader.ui.components.glassBlurred
 import com.folio.reader.ui.components.navSweepAlpha
 import com.folio.reader.ui.components.navSweepBand
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -407,6 +412,13 @@ private fun FolioNavItem(
     // the rest alike. `primary` is the one role that is each theme's identity
     // (Warm's amber, Sakura's pink, Matcha's green…), so the capsule now wears the
     // theme.
+    //
+    // But on the monochromatic packs (Silver, and the pale lights where `primary`
+    // sits within a hair of `surface`) a raw-primary glyph/label washes out against
+    // the glass capsule. The fill keeps the theme's primary for identity, while the
+    // glyph and label ink pass through the contrast guard so "which tab am I on"
+    // survives every palette.
+    val legiblePrimary = rememberLegibleAccent(colors.primary)
     val pillFill by animateColorAsState(
         targetValue = if (selected) colors.primary.copy(alpha = 0.20f) else Color.Transparent,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
@@ -414,7 +426,7 @@ private fun FolioNavItem(
     )
     val iconTint by animateColorAsState(
         targetValue = if (selected) {
-            colors.primary
+            legiblePrimary
         } else {
             colors.onSurfaceVariant.copy(alpha = 0.78f)
         },
@@ -422,7 +434,7 @@ private fun FolioNavItem(
         label = "navIconTint",
     )
     val labelColor by animateColorAsState(
-        targetValue = colors.primary,
+        targetValue = legiblePrimary,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
         label = "navLabelColor",
     )
@@ -431,7 +443,13 @@ private fun FolioNavItem(
             .width(width + 2.dp) // bleed into the inter-item gap: no dead columns
             .heightIn(min = 48.dp) // 42dp pill inside a 48dp minimum hit target
             .folioPressable(interaction, scaleTo = 0.93f)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            // Announce this as a tab and whether it is the current one, so TalkBack
+            // says "selected" rather than leaving the state to tint alone.
+            .semantics {
+                this.selected = selected
+                role = Role.Tab
+            },
         contentAlignment = Alignment.Center,
     ) {
         // The visual pill stays exactly 42dp — the deliberate capsule aesthetic —
@@ -458,7 +476,10 @@ private fun FolioNavItem(
                         // resting — the weight change is legible before the tint
                         // even lands.
                         if (selected) item.icon else item.outlinedIcon,
-                        contentDescription = item.label,
+                        // When selected the label Text below is shown and read by
+                        // TalkBack, so the icon must not repeat it — null keeps the
+                        // glyph decorative and avoids the double read.
+                        contentDescription = if (selected) null else item.label,
                         tint = iconTint,
                         modifier = Modifier.size(iconSize),
                     )

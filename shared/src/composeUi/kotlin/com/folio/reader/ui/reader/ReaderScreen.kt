@@ -664,6 +664,22 @@ fun ReaderScreen(
             )
         }
 
+        // Eye-protection: a warm amber wash over the reading surface, painted
+        // below the chrome so the controls stay neutral. Global comfort setting;
+        // intensity scales the warmth. Decorative only (no pointer modifier), so
+        // like pageFoxing it never intercepts taps to the page beneath.
+        if (settings.eyeProtection) {
+            androidx.compose.foundation.layout.Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color(0xFFFF8A3D).copy(
+                            alpha = (settings.eyeProtectionIntensity * 0.35f).coerceIn(0f, 0.35f)
+                        )
+                    )
+            )
+        }
+
         // Floating sync indicator pill - manages its own visibility (hides when idle)
         if (syncState != null) {
             ReaderSyncPill(showControls = showControls, syncState = syncState)

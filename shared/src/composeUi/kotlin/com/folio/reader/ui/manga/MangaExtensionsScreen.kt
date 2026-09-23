@@ -137,7 +137,7 @@ fun ExtensionsScreen(
                     Text(
                         repoErrors[i],
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = FolioTheme.colors.error,
                     )
                 }
             }
@@ -148,7 +148,7 @@ fun ExtensionsScreen(
                     Text(
                         "Extension failed to load — ${loadErrors[i]}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = FolioTheme.colors.error,
                     )
                 }
             }

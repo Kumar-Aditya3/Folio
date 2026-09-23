@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -14,6 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.theme.FolioTokens
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -29,7 +30,7 @@ fun AdvancedSettingsPanel(
     // adds no card of its own — nesting one here produced a card inside a card.
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         Text(
             "Backup/restore and annotation export", style = MaterialTheme.typography.bodyMedium,
@@ -55,7 +56,7 @@ fun AdvancedSettingsPanel(
             )
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        FolioRule()
 
         // Annotation export
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

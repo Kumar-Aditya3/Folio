@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,6 +26,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.TextAlignment
 import com.folio.reader.settings.TextWidth
 import com.folio.reader.ui.components.DropdownMenuButton
+import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSliderRow
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
@@ -60,7 +62,7 @@ fun TextAndPageSettingsPanel(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         // Without this line the panel reads as "type for my reading", and a book
         // already open ignoring it reads as a bug rather than as the per-book
@@ -174,21 +176,27 @@ fun TextAndPageSettingsPanel(
         // Moved from General: this is a property of prose typesetting, not of the
         // app chrome, and it changes what the preview above renders.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.useEmbeddedFonts,
+                    onValueChange = { onSettingsChange(settings.copy(useEmbeddedFonts = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Use publisher fonts", style = MaterialTheme.typography.bodyLarge)
+                Text("Use publisher fonts", style = FolioTheme.typography.bodyLarge)
                 Text(
                     "Allow EPUBs to load embedded fonts",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
                 )
             }
             Switch(
                 checked = settings.useEmbeddedFonts,
-                onCheckedChange = { onSettingsChange(settings.copy(useEmbeddedFonts = it)) }
+                onCheckedChange = null
             )
         }
 
@@ -242,8 +250,8 @@ fun TextAndPageSettingsPanel(
             "Hybrid keeps explicit EPUB alignment for title pages and special paragraphs. " +
                 "Normalized uses this default everywhere. Changes here apply to every book, " +
                 "including ones you have already opened.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant
         )
 
         if (legacyFormattingCount != null && legacyFormattingCount > 0 && onReviewLegacyFormatting != null) {
@@ -265,21 +273,27 @@ fun TextAndPageSettingsPanel(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.hyphenation,
+                    onValueChange = { onSettingsChange(settings.copy(hyphenation = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Hyphenation", style = MaterialTheme.typography.bodyLarge)
+                Text("Hyphenation", style = FolioTheme.typography.bodyLarge)
                 Text(
                     "Automatically hyphenate long words",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
                 )
             }
             Switch(
                 checked = settings.hyphenation,
-                onCheckedChange = { onSettingsChange(settings.copy(hyphenation = it)) }
+                onCheckedChange = null
             )
         }
 
@@ -321,13 +335,7 @@ fun TextAndPageSettingsPanel(
 /** A quiet sub-heading so one panel can carry the three former screens' worth of controls. */
 @Composable
 private fun PanelSectionTitle(title: String) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            title,
-            style = FolioTheme.typography.titleSmall,
-            color = FolioTheme.colors.primary
-        )
-    }
+    FolioEyebrow(title, accent = FolioTheme.colors.primary)
 }
 
 /** Smallest reader text size in sp — matches the reader quick-settings range. */

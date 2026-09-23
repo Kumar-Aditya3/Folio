@@ -84,9 +84,10 @@ fun BookList(
                 com.folio.reader.ui.theme.LocalFolioBarInset.current
         )
     ) {
-        items(books) { book ->
+        items(books, key = { it.id }) { book ->
             BookListItem(
                 book = book,
+                modifier = Modifier.animateItem(),
                 isSelected = book.id in selectedBooks,
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
@@ -106,6 +107,7 @@ fun BookList(
 @Composable
 fun BookListItem(
     book: Book,
+    modifier: Modifier = Modifier,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -116,7 +118,7 @@ fun BookListItem(
     val interaction = com.folio.reader.ui.components.rememberFolioInteraction()
     val colors = FolioTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -150,7 +152,7 @@ fun BookListItem(
                 modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
                 width = com.folio.reader.ui.theme.FolioTokens.coverInline,
                 shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
-                elevation = 5.dp,
+                elevation = com.folio.reader.ui.theme.FolioTokens.elevationPanel,
                 small = true,
                 // The paired title flies in under its own key, so the plate must not
                 // also draw the fallback's copy of it.
@@ -251,9 +253,10 @@ fun BookCompactList(
                 com.folio.reader.ui.theme.LocalFolioBarInset.current
         )
     ) {
-        items(books) { book ->
+        items(books, key = { it.id }) { book ->
             BookCompactItem(
                 book = book,
+                modifier = Modifier.animateItem(),
                 isSelected = book.id in selectedBooks,
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
@@ -269,6 +272,7 @@ fun BookCompactList(
 @Composable
 fun BookCompactItem(
     book: Book,
+    modifier: Modifier = Modifier,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -276,18 +280,22 @@ fun BookCompactItem(
     onDeleteBook: (Book) -> Unit,
     finishEstimate: String? = null
 ) {
+    val interaction = com.folio.reader.ui.components.rememberFolioInteraction()
     val colors = FolioTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
-    Column {
+    Column(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
+                .folioPressable(interaction, scaleTo = 0.99f)
                 .background(
                     if (isSelected) colors.primary.copy(alpha = 0.14f)
                     else androidx.compose.ui.graphics.Color.Transparent
                 )
                 .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
                     // hand the loaded book over so the detail cover-morph has a target
                     onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
                     onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true }
@@ -311,7 +319,7 @@ fun BookCompactItem(
                 modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
                 width = 30.dp,
                 shape = com.folio.reader.ui.theme.FolioShapes.plateSmall,
-                elevation = 3.dp,
+                elevation = com.folio.reader.ui.theme.FolioTokens.elevationPanel,
                 small = true,
                 suppressFallbackText = true,
             )

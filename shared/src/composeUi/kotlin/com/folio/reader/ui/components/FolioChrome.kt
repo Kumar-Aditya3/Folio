@@ -54,6 +54,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.folio.reader.ui.theme.UiFonts
 import androidx.compose.ui.util.lerp
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -421,22 +423,36 @@ private fun FolioBarTitle(
         key(typography.fontTheme) {
             val measurer = rememberTextMeasurer()
             val slot = constraints.maxWidth
-            // The ladder shrinks the DISPLAY face rather than stepping down to the
-            // text face: dropping families made the masthead stop matching the app
-            // theme the moment a wide preset (Soft/Comfortaa) stopped fitting. The
-            // text-face tier stays only as the last resort.
-            val ladder = listOf(
-                preferred,
-                preferred.copy(fontSize = preferred.fontSize * 0.82f),
-                preferred.copy(fontSize = preferred.fontSize * 0.68f),
-                typography.titleMedium,
-            )
-            val style = if (slot <= 0) {
-                preferred
-            } else {
-                ladder.firstOrNull { candidate ->
-                    measurer.measure(text = title, style = candidate, maxLines = 1).size.width <= slot
-                } ?: ladder.last()
+            // Build the ladder and run the fit measurement only when an input that affects it
+            // changes (title, available width, preferred style, font theme) — not on every
+            // recomposition of the always-present masthead. The collapse scroll is applied via
+            // graphicsLayer below, so it never re-runs this.
+            val style = remember(title, slot, preferred, typography.fontTheme) {
+                if (slot <= 0) {
+                    preferred
+                } else {
+                    // The ladder shrinks the DISPLAY face rather than stepping down to the
+                    // text face: dropping families made the masthead stop matching the app
+                    // theme the moment a wide preset (Soft/Comfortaa) stopped fitting. The
+                    // text-face tier stays only as the last resort.
+                    val shrink1 = preferred.fontSize * 0.82f
+                    val shrink2 = preferred.fontSize * 0.68f
+                    val ladder = listOf(
+                        preferred,
+                        preferred.copy(
+                            fontSize = shrink1,
+                            fontFamily = UiFonts.display(typography.fontTheme, weight = 600, opticalSize = shrink1.value),
+                        ),
+                        preferred.copy(
+                            fontSize = shrink2,
+                            fontFamily = UiFonts.display(typography.fontTheme, weight = 600, opticalSize = shrink2.value),
+                        ),
+                        typography.titleMedium,
+                    )
+                    ladder.firstOrNull { candidate ->
+                        measurer.measure(text = title, style = candidate, maxLines = 1).size.width <= slot
+                    } ?: ladder.last()
+                }
             }
             Text(
                 text = title,
@@ -627,6 +643,9 @@ fun FolioMenuLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text.uppercase(),
         style = FolioTheme.typography.labelSmall,
+        // Uppercase small text needs tracking to read as a kicker, like every
+        // other eyebrow in the app (FolioEyebrow adds 1.4sp).
+        letterSpacing = 1.2.sp,
         color = FolioTheme.colors.onSurfaceVariant,
         modifier = modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
     )

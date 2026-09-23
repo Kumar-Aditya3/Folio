@@ -17,10 +17,26 @@ class JvmChapterContentProvider(
     private val platform: FolioPlatform,
     private val parser: EpubParser
 ) {
-    /** Access-order LRU of fully-parsed books; evicts the eldest past [MAX_CACHED_BOOKS]. */
-    private val cache = object : LinkedHashMap<String, Map<String, String>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, String>>): Boolean =
-            size > MAX_CACHED_BOOKS
+    /**
+     * Access-order LRU of fully-parsed books, bounded by decoded HTML bytes rather than a fixed
+     * book count: eight whole books could be hundreds of MB of resident HTML, so cap the total.
+     */
+    private val cache = LinkedHashMap<String, Map<String, String>>(16, 0.75f, true)
+    private var cacheBytes = 0L
+
+    private fun bookBytesOf(map: Map<String, String>): Long = map.values.sumOf { it.length.toLong() * 2 }
+
+    private fun cacheBook(bookId: String, map: Map<String, String>) {
+        synchronized(cache) {
+            cache.put(bookId, map)?.let { cacheBytes -= bookBytesOf(it) }
+            cacheBytes += bookBytesOf(map)
+            val it = cache.entries.iterator()
+            while (cacheBytes > MAX_CACHED_BYTES && cache.size > 1 && it.hasNext()) {
+                val e = it.next()
+                cacheBytes -= bookBytesOf(e.value)
+                it.remove()
+            }
+        }
     }
 
     suspend fun getHtml(bookId: String, chapterHref: String): String {
@@ -40,7 +56,7 @@ class JvmChapterContentProvider(
             }
             val map = parsed.rawHtmlByHref
             if (map.isNotEmpty()) {
-                synchronized(cache) { cache[bookId] = map }
+                cacheBook(bookId, map)
             } else if (parsed.chapters.isEmpty()) {
                 throw RuntimeException("No chapters parsed from $epubPath")
             }
@@ -80,10 +96,10 @@ class JvmChapterContentProvider(
 
     /** Inline chapter-relative stylesheets so the Compose renderer can apply EPUB CSS. */
     private fun withStylesheets(zip: ZipFile, chapterHref: String, html: String): String {
-        val links = Regex("(?is)<link\\b[^>]*rel\\s*=\\s*[\"'][^\"']*stylesheet[^\"']*[\"'][^>]*>")
+        val links = STYLESHEET_LINK
             .findAll(html)
             .mapNotNull { tag ->
-                Regex("(?i)\\bhref\\s*=\\s*[\"']([^\"']+)[\"']").find(tag.value)?.groupValues?.get(1)
+                LINK_HREF.find(tag.value)?.groupValues?.get(1)
             }
             .toList()
         if (links.isEmpty()) return html
@@ -94,7 +110,7 @@ class JvmChapterContentProvider(
                 val source = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
                 // Once inlined, CSS loses its own base URL. Rebase url() references
                 // to the chapter so the desktop resource resolver can serve them.
-                Regex("""url\(\s*(['"]?)([^)'"]+)\1\s*\)""", RegexOption.IGNORE_CASE)
+                CSS_URL
                     .replace(source) { match ->
                         val resource = match.groupValues[2]
                         if (resource.startsWith("#") || resource.startsWith("data:") ||
@@ -106,7 +122,7 @@ class JvmChapterContentProvider(
             }.getOrNull()
         }
         if (css.isEmpty()) return html
-        return html.replaceFirst(Regex("(?is)</head>"), css.joinToString("\n") { "<style>$it</style>" } + "</head>")
+        return html.replaceFirst(HEAD_CLOSE, css.joinToString("\n") { "<style>$it</style>" } + "</head>")
     }
 
     /**
@@ -129,7 +145,16 @@ class JvmChapterContentProvider(
 
                 val resolved = normalizeSrc(chapterHref, src)
                 val cacheDir = File(platform.fileSystem.getCacheDir(bookId), "resources").apply { mkdirs() }
-                val outName = resolved.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                // Hash the full resolved path (keeping the extension for content-type) so distinct
+                // entries can't collide onto one cache file the way the old character-class squash
+                // did (e.g. "img/1.png" and "img_1.png" both became "img_1.png").
+                val ext = resolved.substringAfterLast('.', "")
+                    .takeIf { it.isNotEmpty() && it.length <= 5 && it.all(Char::isLetterOrDigit) }
+                    ?.let { ".$it" } ?: ""
+                val hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(resolved.toByteArray(Charsets.UTF_8))
+                    .take(16).joinToString("") { "%02x".format(it) }
+                val outName = hash + ext
                 val outFile = File(cacheDir, outName)
                 if (outFile.exists() && outFile.length() > 0) return@runCatching outFile.absolutePath
 
@@ -173,6 +198,11 @@ class JvmChapterContentProvider(
     }
 
     private companion object {
-        const val MAX_CACHED_BOOKS = 8
+        const val MAX_CACHED_BYTES = 64L * 1024L * 1024L
+        // Hoisted so the per-chapter fast read path doesn't recompile these each open.
+        val STYLESHEET_LINK = Regex("(?is)<link\\b[^>]*rel\\s*=\\s*[\"'][^\"']*stylesheet[^\"']*[\"'][^>]*>")
+        val LINK_HREF = Regex("(?i)\\bhref\\s*=\\s*[\"']([^\"']+)[\"']")
+        val CSS_URL = Regex("""url\(\s*(['"]?)([^)'"]+)\1\s*\)""", RegexOption.IGNORE_CASE)
+        val HEAD_CLOSE = Regex("(?is)</head>")
     }
 }

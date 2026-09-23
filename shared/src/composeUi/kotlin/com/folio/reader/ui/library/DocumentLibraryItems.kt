@@ -27,9 +27,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,7 +69,6 @@ import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.LocalFolioTopInset
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -101,7 +100,7 @@ fun DocumentGrid(
     }
     LazyVerticalGrid(
         state = gridScroll,
-        columns = GridCells.Adaptive(minSize = 140.dp),
+        columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = entry },
         contentPadding = PaddingValues(
             start = FolioTokens.gutter,
@@ -214,7 +213,26 @@ private fun FormatBadge(format: DocumentFormat) {
     )
 }
 
-private val documentThumbnailCache = ConcurrentHashMap<String, ImageBitmap>()
+// PDF page thumbnails, bounded by decoded bytes (access-order LRU) rather than growing without
+// limit — every distinct PDF opened otherwise pinned its full-size thumbnail forever.
+private const val DOC_THUMB_CACHE_MAX_BYTES = 24L * 1024L * 1024L
+private val documentThumbnailCache = LinkedHashMap<String, ImageBitmap>(32, 0.75f, true)
+private var documentThumbnailBytes = 0L
+private fun docThumbBytesOf(bitmap: ImageBitmap): Long = bitmap.width.toLong() * bitmap.height.toLong() * 4L
+private fun documentThumbnailGet(path: String): ImageBitmap? =
+    synchronized(documentThumbnailCache) { documentThumbnailCache[path] }
+private fun documentThumbnailPut(path: String, bitmap: ImageBitmap) {
+    synchronized(documentThumbnailCache) {
+        documentThumbnailCache.put(path, bitmap)?.let { documentThumbnailBytes -= docThumbBytesOf(it) }
+        documentThumbnailBytes += docThumbBytesOf(bitmap)
+        val itr = documentThumbnailCache.entries.iterator()
+        while (documentThumbnailBytes > DOC_THUMB_CACHE_MAX_BYTES && documentThumbnailCache.size > 1 && itr.hasNext()) {
+            val e = itr.next()
+            documentThumbnailBytes -= docThumbBytesOf(e.value)
+            itr.remove()
+        }
+    }
+}
 
 /**
  * [suppressFallbackCaption] drops the filename under the format badge when there
@@ -239,7 +257,7 @@ internal fun DocumentThumbnail(
         document.format == DocumentFormat.PDF && !it.isNullOrBlank()
     }
     var bitmap by remember(path) {
-        mutableStateOf(path?.let(documentThumbnailCache::get))
+        mutableStateOf(path?.let { documentThumbnailGet(it) })
     }
 
     LaunchedEffect(path) {
@@ -249,7 +267,7 @@ internal fun DocumentThumbnail(
                 val file = File(path)
                 if (file.isFile && file.length() > 0) {
                     decodeCoverImage(file.readBytes())?.also {
-                        documentThumbnailCache[path] = it
+                        documentThumbnailPut(path, it)
                     }
                 } else {
                     null
@@ -315,7 +333,7 @@ private fun DocumentItemMenu(
         )
         DropdownMenuItem(
             text = { Text("Categories") },
-            leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = { onDismissRequest(); onCategories() }
         )
         DropdownMenuItem(

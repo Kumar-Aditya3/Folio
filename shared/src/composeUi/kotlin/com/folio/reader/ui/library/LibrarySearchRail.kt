@@ -27,6 +27,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +99,9 @@ internal fun FolioSearchField(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .clickable { scopeMenuOpen = true }
+                                // Reserve a >=48dp thumb target around the ~18dp
+                                // icon+chevron, which was far below a reliable tap.
+                                .minimumInteractiveComponentSize()
                                 .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -167,15 +171,22 @@ internal fun FolioSearchField(
                     inner()
                 }
                 if (query.isNotEmpty()) {
-                    Icon(
-                        Icons.Filled.Close,
-                        contentDescription = "Clear search",
-                        tint = colors.onSurfaceVariant,
+                    // >=48dp thumb target around the 20dp glyph; a bare 20dp
+                    // clickable was well under a reliable tap.
+                    Box(
                         modifier = Modifier
-                            .size(20.dp)
                             .clip(CircleShape)
-                            .clickable { onQueryChange("") },
-                    )
+                            .clickable { onQueryChange("") }
+                            .minimumInteractiveComponentSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Clear search",
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
         },

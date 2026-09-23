@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -21,9 +21,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.importer.LibraryScanScope
+import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.theme.FolioTokens
 
 /**
@@ -88,7 +90,7 @@ fun LibraryScanSettingsPanel(
         )
 
         if (state.scope == LibraryScanScope.FOLDER) {
-            HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+            FolioRule(Modifier.padding(vertical = FolioTokens.space2))
             ScanLocationRow(
                 label = "Folder to scan",
                 location = state.folderDescription,
@@ -97,7 +99,7 @@ fun LibraryScanSettingsPanel(
             )
         }
         if (state.scope == LibraryScanScope.DEVICE) {
-            HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+            FolioRule(Modifier.padding(vertical = FolioTokens.space2))
             // The device scope is only as wide as the access the user grants:
             // Android asks for storage access (a permission flow), desktop scans
             // the user's common folders (no grant needed there, so no picker).
@@ -119,9 +121,16 @@ fun LibraryScanSettingsPanel(
             )
         }
 
-        HorizontalDivider(Modifier.padding(vertical = FolioTokens.space2))
+        FolioRule(Modifier.padding(vertical = FolioTokens.space2))
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = state.scanOnStart,
+                    enabled = state.scope != LibraryScanScope.OFF,
+                    onValueChange = onScanOnStartChange,
+                    role = Role.Switch
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
@@ -137,7 +146,7 @@ fun LibraryScanSettingsPanel(
             }
             Switch(
                 checked = state.scanOnStart,
-                onCheckedChange = onScanOnStartChange,
+                onCheckedChange = null,
                 enabled = state.scope != LibraryScanScope.OFF,
             )
         }

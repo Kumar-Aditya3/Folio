@@ -20,7 +20,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,6 +55,7 @@ import com.folio.reader.ui.theme.FontTheme
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.toFolioColors
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -101,7 +101,13 @@ class MainActivity : ComponentActivity() {
         // Only a real exit may close the graph: a configuration-change relaunch
         // destroys the activity too, and shutdown() stops sync and drops the
         // database connection under the surviving view models.
-        if (isFinishing) (application as? FolioApplication)?.graph?.shutdown()
+        if (isFinishing) {
+            // Cancel this activity's scope so its in-flight coroutines don't outlive it. Guarded
+            // by isFinishing for the same reason as shutdown(): a config-change relaunch must keep
+            // any work the user started (e.g. an import) alive on the next instance.
+            appScope.cancel()
+            (application as? FolioApplication)?.graph?.shutdown()
+        }
     }
 
     /**
@@ -120,16 +126,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val graph = (application as FolioApplication).graph
-        graph.startSync(appScope)
-        graph.applyStoredMangaDownloadsLocation(appScope)
-        graph.backfillAnnotationsOnce(appScope)
-        graph.backfillMangaAnnotationsOnce(appScope)
-        // Rewrites chapter text indexed before entities were decoded, so snippets stop
-        // showing `&#8217;` and `it's` can actually match. One pass per install.
-        graph.repairIndexEntitiesOnce(appScope)
-        // Quiet library scan when the user opted in: new ebooks/documents found
-        // on the granted tree simply appear in the shelves.
-        graph.scanOnStartIfEnabled(appScope)
+        // Once per process, not once per Activity: a rotation / theme / font-scale relaunch must
+        // not re-run a full library scan or re-hit the DB for the idempotent backfills. The guard
+        // lives on the graph, so process-death restore (fresh graph) still runs them.
+        graph.runStartupTasks(appScope)
 
         setContent {
             val navController = rememberNavController()

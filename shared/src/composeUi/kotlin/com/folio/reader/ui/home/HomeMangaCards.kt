@@ -59,7 +59,7 @@ internal fun MangaPlate(
     coverPath: String?,
     width: Dp,
     modifier: Modifier = Modifier,
-    elevation: Dp = 8.dp,
+    elevation: Dp = FolioTokens.elevationVeil,
     overlay: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null,
 ) {
     val atmos = FolioTheme.atmosphere
@@ -110,10 +110,14 @@ internal fun NewChaptersCard(
         Spacer(Modifier.height(FolioTokens.space2))
         badges.forEachIndexed { index, badge ->
             if (index > 0) FolioRule()
+            val interaction = rememberFolioInteraction()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenMangaDetail(badge.mangaId) }
+                    .folioPressable(interaction)
+                    .clickable(interactionSource = interaction, indication = null) {
+                        onOpenMangaDetail(badge.mangaId)
+                    }
                     .padding(vertical = FolioTokens.space2),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -123,7 +127,7 @@ internal fun NewChaptersCard(
                     thumbnailUrl = badge.thumbnailUrl,
                     coverPath = badge.coverPath,
                     width = 38.dp,
-                    elevation = 4.dp,
+                    elevation = FolioTokens.elevationPanel,
                 )
                 Spacer(Modifier.width(FolioTokens.space3))
                 Text(
@@ -174,7 +178,7 @@ internal fun DiscoverCard(
             contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
         ) {
-            items(items.size) { index ->
+            items(items.size, key = { "${items[it].sourceId}:${items[it].url}" }) { index ->
                 val item = items[index]
                 val interaction = rememberFolioInteraction()
                 Column(
@@ -191,7 +195,7 @@ internal fun DiscoverCard(
                         thumbnailUrl = item.thumbnailUrl,
                         coverPath = null,
                         width = FolioTokens.coverInline * 1.35f,
-                        elevation = 5.dp,
+                        elevation = FolioTokens.elevationPanel,
                     )
                     Spacer(Modifier.height(FolioTokens.space1))
                     Text(

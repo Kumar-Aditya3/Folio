@@ -21,6 +21,8 @@ import com.folio.reader.settings.BookReaderSettings
 import com.folio.reader.settings.ReaderSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -80,43 +82,43 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
 
     override suspend fun updateNormalizedProgress(bookId: String, progress: Double) {
         db.updateNormalizedProgress(bookId, progress)
-        db.bumpBookData()
+        // Progress-only signal, NOT bookDataRevision: this fires ~every 1.2s while reading, and
+        // bumping bookData re-ran getAllBooks() + the whole Statistics pipeline each tick. Lists
+        // re-read fresh on resubscription; the Continue-reading shelf also merges progressRevision.
+        db.bumpProgress()
     }
 
     // The observe flows re-query on bookDataRevision, mirroring the manga and
     // document repositories: every write to the book tables emits a fresh list
     // so screens update in place instead of waiting for a remount.
+    // distinctUntilChanged stops a revision bump that did not change the queried
+    // subset (e.g. markOpened on book-open) from re-emitting an equal list and
+    // re-running the Home/Statistics combines + recomposition downstream.
 
-    override fun getAllBooks(): Flow<List<Book>> = db.bookDataRevision.map { db.getAllBooks() }
+    override fun getAllBooks(): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getAllBooks() }.distinctUntilChanged()
 
     override fun getBooksByStatus(status: BookStatus): Flow<List<Book>> =
-        db.bookDataRevision.map { db.getAllBooks().filter { it.status == status } }
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(status)) }.distinctUntilChanged()
 
     override fun getBooksBySeries(seriesId: String): Flow<List<Book>> =
-        db.bookDataRevision.map { db.getAllBooks().filter { it.seriesId == seriesId } }
+        db.bookDataRevision.map { db.getBooksInSeriesId(seriesId) }.distinctUntilChanged()
 
-    override fun getBooksByCollection(collectionId: String): Flow<List<Book>> = db.bookDataRevision.map {
-        val ids = db.withConnection { conn ->
-            conn.prepareStatement("SELECT book_id FROM book_collections WHERE collection_id = ?").use { stmt ->
-                stmt.setString(1, collectionId)
-                stmt.executeQuery().use { rs ->
-                    val out = mutableListOf<String>()
-                    while (rs.next()) out.add(rs.getString(1))
-                    out
-                }
-            }
-        }.toSet()
-        db.getAllBooks().filter { it.id in ids }
-    }
+    override fun getBooksByCollection(collectionId: String): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksInCollectionId(collectionId) }.distinctUntilChanged()
 
     override fun getCurrentlyReading(): Flow<List<Book>> =
-        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED } }
+        // Merges progressRevision so the Continue-reading shelf's progress bars stay live; other
+        // book flows stay on bookDataRevision only and re-read fresh on resubscription.
+        combine(db.bookDataRevision, db.progressRevision) { _, _ -> }
+            .map { db.getBooksByStatuses(listOf(BookStatus.READING, BookStatus.PAUSED)) }
+            .distinctUntilChanged()
 
     override fun getFinishedBooks(): Flow<List<Book>> =
-        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.FINISHED } }
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(BookStatus.FINISHED)) }.distinctUntilChanged()
 
     override fun getUnreadBooks(): Flow<List<Book>> =
-        db.bookDataRevision.map { db.getAllBooks().filter { it.status == BookStatus.UNREAD } }
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(BookStatus.UNREAD)) }.distinctUntilChanged()
 
     override fun searchBooks(query: String): Flow<List<Book>> = db.bookDataRevision.map {
         val q = query.trim()
@@ -126,7 +128,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
                 it.displayAuthor.contains(q, ignoreCase = true) ||
                 (it.subtitle?.contains(q, ignoreCase = true) ?: false)
         }
-    }
+    }.distinctUntilChanged()
 
     override suspend fun insertChapters(bookId: String, chapters: List<Chapter>) {
         // Use withTransaction for atomic DELETE + batch INSERT
@@ -214,8 +216,11 @@ class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
         normalizedProgress = rs.getDouble("normalized_progress").coerceIn(0.0, 1.0)
     )
 
-    private fun decodeLocator(value: String): DocumentLocator =
-        repoJson.decodeFromString(DocumentLocator.serializer(), value)
+    // A malformed/legacy locator_json (schema drift, partial write, cross-version restore) must not
+    // throw out of a row map and kill the whole positions/bookmarks query on every revision, the
+    // way every sibling decode in this codebase already guards. Bad rows are skipped instead.
+    private fun decodeLocator(value: String): DocumentLocator? =
+        runCatching { repoJson.decodeFromString(DocumentLocator.serializer(), value) }.getOrNull()
 
     private fun locatorKind(locator: DocumentLocator) = when (locator) {
         is DocumentLocator.FixedPage -> "FIXED_PAGE"
@@ -371,12 +376,15 @@ class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
             conn.prepareStatement("SELECT * FROM document_positions WHERE document_id = ?").use { stmt ->
                 stmt.setString(1, documentId)
                 stmt.executeQuery().use { rs ->
-                    if (!rs.next()) null else DocumentPosition(
-                        documentId = rs.getString("document_id"),
-                        locator = decodeLocator(rs.getString("locator_json")),
-                        normalizedProgress = rs.getDouble("normalized_progress"),
-                        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
-                    )
+                    if (!rs.next()) null else {
+                        val locator = decodeLocator(rs.getString("locator_json"))
+                        if (locator == null) null else DocumentPosition(
+                            documentId = rs.getString("document_id"),
+                            locator = locator,
+                            normalizedProgress = rs.getDouble("normalized_progress"),
+                            updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+                        )
+                    }
                 }
             }
         }
@@ -403,14 +411,17 @@ class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
         db.bumpDocumentData()
     }
 
-    private fun mapBookmark(rs: ResultSet) = DocumentBookmark(
-        id = rs.getString("id"),
-        documentId = rs.getString("document_id"),
-        locator = decodeLocator(rs.getString("locator_json")),
-        label = rs.getString("label"),
-        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
-        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
-    )
+    private fun mapBookmark(rs: ResultSet): DocumentBookmark? {
+        val locator = decodeLocator(rs.getString("locator_json")) ?: return null
+        return DocumentBookmark(
+            id = rs.getString("id"),
+            documentId = rs.getString("document_id"),
+            locator = locator,
+            label = rs.getString("label"),
+            createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+            updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+        )
+    }
 
     override suspend fun getBookmark(bookmarkId: String): DocumentBookmark? = db.withConnection { conn ->
         conn.prepareStatement("SELECT * FROM document_bookmarks WHERE id = ?").use { stmt ->
@@ -423,7 +434,7 @@ class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
         db.withConnection { conn ->
             conn.prepareStatement("SELECT * FROM document_bookmarks WHERE document_id = ? ORDER BY created_at").use { stmt ->
                 stmt.setString(1, documentId)
-                stmt.executeQuery().use { rs -> buildList { while (rs.next()) add(mapBookmark(rs)) } }
+                stmt.executeQuery().use { rs -> buildList { while (rs.next()) mapBookmark(rs)?.let { add(it) } } }
             }
         }
     }
@@ -526,6 +537,7 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
             }
         }
         if (emitSyncEvent) db.onEntityChanged?.invoke("session", session.id, "UPSERT", repoJson.encodeToString(ReadingSession.serializer(), session))
+        db.bumpSessionData()
     }
 
     override suspend fun updateSession(session: ReadingSession, emitSyncEvent: Boolean) = insertSession(session, emitSyncEvent)
@@ -586,8 +598,10 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
         }
     }
 
-    override fun observeSessionsSince(from: Instant): Flow<List<ReadingSession>> = flow {
-        emit(
+    override fun observeSessionsSince(from: Instant): Flow<List<ReadingSession>> =
+        // Revision-driven (was a one-shot emit): re-queries when a session is written so Statistics
+        // refreshes on reader close without relying on the old per-tick progress bookData bump.
+        db.sessionDataRevision.map {
             db.withConnection { conn ->
                 conn.prepareStatement(
                     "SELECT * FROM reading_sessions WHERE started_at >= ? ORDER BY started_at"
@@ -600,8 +614,7 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
                     }
                 }
             }
-        )
-    }
+        }
 
     override suspend fun getSessionsForBook(bookId: String): Flow<List<ReadingSession>> = flow {
         emit(
@@ -1029,6 +1042,20 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
         }
     }
 
+    override suspend fun getBookCollectionLinks(): Map<String, Set<String>> {
+        return db.withConnection { conn ->
+            val out = HashMap<String, MutableSet<String>>()
+            conn.prepareStatement("SELECT book_id, collection_id FROM book_collections").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        out.getOrPut(rs.getString(1)) { mutableSetOf() }.add(rs.getString(2))
+                    }
+                }
+            }
+            out
+        }
+    }
+
     override suspend fun addBookToCollection(bookId: String, collectionId: String) {
         db.withConnection { conn ->
             conn.prepareStatement(
@@ -1283,6 +1310,8 @@ class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
                 stmt.executeUpdate()
             }
         }
+        // The searchable-chapter count caches on searchTextRevision; the text just changed.
+        db.bumpSearchText()
     }
 
     override suspend fun indexChaptersBulk(bookId: String, chapters: List<com.folio.reader.database.ChapterIndexEntry>) {
@@ -1303,6 +1332,7 @@ class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
                 stmt.executeBatch()
             }
         }
+        db.bumpSearchText()
     }
 
     override suspend fun deleteIndexForBook(bookId: String) {
@@ -1311,6 +1341,7 @@ class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
                 stmt.setString(1, bookId); stmt.executeUpdate()
             }
         }
+        db.bumpSearchText()
     }
 
     /**
@@ -1381,8 +1412,15 @@ class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
     }
 
     override fun search(queryText: String): Flow<List<SearchResult>> = flow {
+        // A blank query would leave the two LIKE placeholders unbound (query() only binds a non-null
+        // term) and throw SQLException on this fallback path, so short-circuit to empty.
+        val q = queryText.trim()
+        if (q.isEmpty()) {
+            emit(emptyList())
+            return@flow
+        }
         emit(db.withConnection { conn ->
-            query(conn, "SELECT * FROM search_index WHERE content LIKE ? OR title LIKE ?", queryText.ifBlank { null })
+            query(conn, "SELECT * FROM search_index WHERE content LIKE ? OR title LIKE ?", q)
         })
     }
 
@@ -1431,6 +1469,7 @@ class JdbcFtsSearchRepository(private val db: Database) : SearchRepository {
                 stmt.executeUpdate()
             }
         }
+        db.bumpSearchText()
     }
 
     override suspend fun indexChaptersBulk(bookId: String, chapters: List<com.folio.reader.database.ChapterIndexEntry>) {
@@ -1451,6 +1490,7 @@ class JdbcFtsSearchRepository(private val db: Database) : SearchRepository {
                 stmt.executeBatch()
             }
         }
+        db.bumpSearchText()
     }
 
     override suspend fun deleteIndexForBook(bookId: String) {
@@ -1459,11 +1499,14 @@ class JdbcFtsSearchRepository(private val db: Database) : SearchRepository {
                 stmt.setString(1, bookId); stmt.executeUpdate()
             }
         }
+        db.bumpSearchText()
     }
+
+    private val ftsWhitespace = Regex("\\s+")
 
     private fun tokenizeForFts(query: String): String {
         return query.trim()
-            .split(Regex("\\s+"))
+            .split(ftsWhitespace)
             .filter { it.isNotBlank() }
             .joinToString(" ") { "${it.trim()}*" }
     }

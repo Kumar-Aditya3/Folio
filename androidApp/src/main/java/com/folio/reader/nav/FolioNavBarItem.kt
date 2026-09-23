@@ -1,10 +1,11 @@
 package com.folio.reader.nav
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -38,8 +39,8 @@ val folioNavBarItems = listOf(
     ),
     FolioNavBarItem(
         route = FolioRoutes.LIBRARY,
-        icon = Icons.Filled.MenuBook,
-        outlinedIcon = Icons.Outlined.MenuBook,
+        icon = Icons.AutoMirrored.Filled.MenuBook,
+        outlinedIcon = Icons.AutoMirrored.Outlined.MenuBook,
         label = "Library"
     ),
     FolioNavBarItem(

@@ -101,7 +101,14 @@ import java.io.File
 private val SETTINGS_CREDENTIAL_FIELDS =
     setOf("firebaseApiKey", "firebaseProjectId", "syncAccountEmail", "syncAccountPassword")
 
-private fun loadEnvFile(): Map<String, String> {
+// Read once and memoized: .env does not change within a run, but loadEnvFile() was called on
+// every Settings-screen recomposition (via isSyncConfigured/storageConfigured), re-reading the
+// file from disk each time.
+private val envFileCache: Map<String, String> by lazy { readEnvFile() }
+
+private fun loadEnvFile(): Map<String, String> = envFileCache
+
+private fun readEnvFile(): Map<String, String> {
     val envFile = java.io.File(".env")
     if (!envFile.exists()) return emptyMap()
     return envFile.readLines()
@@ -318,6 +325,19 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     private var cachedSyncEngine: SyncEngine? = null
 
     /**
+     * Composition-safe snapshot of the global settings, used by [firebaseCreds] so the Settings
+     * screen's isSyncConfigured/storageConfigured checks don't do a blocking DB read + JSON decode
+     * on every recomposition. Primed at startup and refreshed by [restartSync]; the sync *engine*
+     * itself still reads settings directly (createSyncEngine) so its credentials are always fresh.
+     */
+    @Volatile
+    private var cachedGlobalSettings: com.folio.reader.settings.ReaderSettings? = null
+
+    suspend fun refreshSettingsSnapshot() {
+        cachedGlobalSettings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+    }
+
+    /**
      * Compose-observable mirror of [cachedSyncEngine]. Updated every time the
      * cache is written so `remember(syncEngineState.value)` recomputes and the
      * UI picks up a rebuilt engine without an app restart.
@@ -346,7 +366,8 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 
     private fun firebaseCreds(): Pair<String, String>? {
         // User-entered API key (Settings > Advanced) takes priority over env fallback.
-        val global = runBlocking { runCatching { settingsRepository.getGlobalSettings() }.getOrNull() }
+        // Reads the primed snapshot instead of a per-recomposition runBlocking DB read.
+        val global = cachedGlobalSettings
         val env = loadEnvFile()
         val projectId = global?.firebaseProjectId?.takeIf { it.isNotBlank() }
             ?: env["projectId"]
@@ -444,6 +465,8 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         val old = syncEngine
         cachedSyncEngine = null // next access rebuilds from current credentials
         syncEngineState.value = null
+        // Refresh the display snapshot so isSyncConfigured reflects the just-saved credentials.
+        appScope.launch { refreshSettingsSnapshot() }
         old?.stop()
         startSync(appScope)
         // syncEngine getter (called inside startSync -> syncEngine?.let) already
@@ -564,17 +587,6 @@ fun main(args: Array<String>) {
     }
 
     val deps = FolioDesktopAppDependencies()
-    // Extract bundled fonts (Calluna, Comfortaa) and register them in settings
-    // before any screen reads them.
-    runCatching {
-        runBlocking {
-            com.folio.reader.font.BundledFonts.ensureInstalled(deps.platform, deps.settingsRepository) { path ->
-                runCatching {
-                    com.folio.reader.font.BundledFonts::class.java.getResourceAsStream("/$path")?.use { it.readBytes() }
-                }.getOrNull()
-            }
-        }
-    }.onFailure { it.printStackTrace() }
     // Same directory holds the interface faces (Fraunces/Manrope); installed before
     // the first frame so no screen opens in the system font.
     com.folio.reader.ui.theme.UiFonts.install(deps.platform.fileSystem.getFontsDir())
@@ -583,6 +595,21 @@ fun main(args: Array<String>) {
     com.folio.reader.ui.manga.MangaCoverDiskCache.directory =
         deps.platform.fileSystem.mangaCoversDir
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Extract bundled reader fonts (Calluna, Comfortaa) off the main thread. This was a blocking
+    // 13-file write + two settings round-trips before the first window paint; the reader
+    // recomposes when the faces land, matching what Android already does (FolioApplication).
+    appScope.launch(Dispatchers.IO) {
+        runCatching {
+            com.folio.reader.font.BundledFonts.ensureInstalled(deps.platform, deps.settingsRepository) { path ->
+                runCatching {
+                    com.folio.reader.font.BundledFonts::class.java.getResourceAsStream("/$path")?.use { it.readBytes() }
+                }.getOrNull()
+            }
+        }.onFailure { it.printStackTrace() }
+    }
+    // Prime the settings snapshot used by the Settings screen's sync-config checks, off the main
+    // thread, so those checks never do a blocking DB read during composition.
+    appScope.launch { deps.refreshSettingsSnapshot() }
 
     application {
         // Navigation back stack: forward navigation pushes a screen onto the
@@ -1941,6 +1968,14 @@ private fun ReaderRoute(
         },
         onSettingsChange = { updated ->
             viewModel.updateSettings(updated)
+            onSettingsChanged(viewModel.global())
+        },
+        // Global-only rows in the panel (Eye protection) have no per-book
+        // counterpart, so they must reach the defaults row. Without this the
+        // panel fell back to `onSettingsChange`, whose per-book snapshot has no
+        // such field — the write was dropped and the toggle would not stick.
+        onWriteGlobal = { updated ->
+            viewModel.updateGlobalSettings(updated)
             onSettingsChanged(viewModel.global())
         },
         onToggleControls = { viewModel.toggleControls() },

@@ -4,15 +4,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.FolioSliderRow
+import com.folio.reader.ui.theme.FolioTokens
 import kotlin.math.roundToInt
 
 @Composable
@@ -22,11 +25,17 @@ fun ReadingSettingsPanel(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         // Show chapter title toggle
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showChapterTitle,
+                    onValueChange = { onSettingsChange(settings.copy(showChapterTitle = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -40,14 +49,20 @@ fun ReadingSettingsPanel(
             }
             Switch(
                 checked = settings.showChapterTitle,
-                onCheckedChange = { onSettingsChange(settings.copy(showChapterTitle = it)) }
+                onCheckedChange = null
             )
         }
 
         // Show progress toggle — now the page block: position drawn as the block of
         // pages at the foot of the reader, and the band that takes the drag to jump.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showProgress,
+                    onValueChange = { onSettingsChange(settings.copy(showProgress = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -61,13 +76,19 @@ fun ReadingSettingsPanel(
             }
             Switch(
                 checked = settings.showProgress,
-                onCheckedChange = { onSettingsChange(settings.copy(showProgress = it)) }
+                onCheckedChange = null
             )
         }
 
         // Show clock toggle
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showClock,
+                    onValueChange = { onSettingsChange(settings.copy(showClock = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -81,14 +102,20 @@ fun ReadingSettingsPanel(
             }
             Switch(
                 checked = settings.showClock,
-                onCheckedChange = { onSettingsChange(settings.copy(showClock = it)) }
+                onCheckedChange = null
             )
         }
 
         // §17 morph into the EPUB reader. Off by default — see the field's own
         // comment for why this one morph is opt-in when every other is not.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.morphIntoReader,
+                    onValueChange = { onSettingsChange(settings.copy(morphIntoReader = it)) },
+                    role = Role.Switch
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -103,7 +130,7 @@ fun ReadingSettingsPanel(
             }
             Switch(
                 checked = settings.morphIntoReader,
-                onCheckedChange = { onSettingsChange(settings.copy(morphIntoReader = it)) }
+                onCheckedChange = null
             )
         }
 

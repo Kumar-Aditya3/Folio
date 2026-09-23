@@ -181,6 +181,13 @@ interface CollectionRepository {
     fun getAllCollections(): Flow<List<Collection>>
     suspend fun getCollectionByName(name: String): Collection?
     suspend fun getCollectionsForBook(bookId: String): List<Collection>
+
+    /**
+     * Every book-collection membership in one pass, as bookId → collection ids. Home and Stats
+     * use this to resolve scope rules without a query per book; the default matches an empty repo.
+     */
+    suspend fun getBookCollectionLinks(): Map<String, Set<String>> = emptyMap()
+
     suspend fun addBookToCollection(bookId: String, collectionId: String)
     suspend fun removeBookFromCollection(bookId: String, collectionId: String)
 

@@ -26,11 +26,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LibraryAddCheck
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -477,7 +479,11 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        imageVector = if (selected && !ascending) Icons.Filled.Sort else Icons.Filled.Sort,
+                        imageVector = when {
+                            selected && ascending -> Icons.Filled.ArrowUpward
+                            selected -> Icons.Filled.ArrowDownward
+                            else -> Icons.AutoMirrored.Filled.Sort
+                        },
                         contentDescription = null,
                         tint = if (selected) colors.primary else colors.onSurfaceVariant,
                         modifier = Modifier.size(16.dp),

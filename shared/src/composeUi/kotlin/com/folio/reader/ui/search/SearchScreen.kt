@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,7 +36,9 @@ import com.folio.reader.database.SearchRepository
 import com.folio.reader.ml.SearchMode
 import com.folio.reader.ml.SemanticSearchRepository
 import com.folio.reader.model.Book
+import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.topBarFill
@@ -455,7 +458,7 @@ fun SearchScreen(
                 )
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = FolioTokens.gutter, end = FolioTokens.gutter, top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBackPress) {
@@ -474,7 +477,7 @@ fun SearchScreen(
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = FolioTokens.gutter, vertical = 8.dp)
             ) {
                 items(SearchScope.entries, key = { "scope:${it.name}" }) { s ->
                     com.folio.reader.ui.components.FolioChip(
@@ -495,7 +498,7 @@ fun SearchScreen(
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = FolioTokens.gutter, vertical = 6.dp)
             ) {
                 items(SearchMode.entries.toList(), key = { "mode:${it.name}" }) { m ->
                     com.folio.reader.ui.components.FolioChip(
@@ -512,7 +515,7 @@ fun SearchScreen(
                 Text(
                     text = "Semantic index not built yet — showing exact matches. " +
                         "Download the model in Settings, then index your library.",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = 4.dp),
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -526,7 +529,7 @@ fun SearchScreen(
                     text = "No strong matches. Nothing in your library is close enough in " +
                         "meaning to this query — try a shorter phrase, or switch to Exact " +
                         "to search for the words themselves.",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = 4.dp),
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -538,7 +541,7 @@ fun SearchScreen(
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = FolioTokens.gutter, vertical = 6.dp)
             ) {
                 item {
                     com.folio.reader.ui.components.FolioChip(
@@ -570,18 +573,32 @@ fun SearchScreen(
 
         // The result list itself is the shared one the library rail search
         // renders; only the header above it belongs to this screen.
-        BookSearchResultsList(
-            query = query,
-            scope = scope,
-            titleMatches = titleMatches,
-            results = results,
-            annotationResults = annotationResults,
-            onOpenTitle = { book -> onResultClick(BookHit(book, -1, "", "")) },
-            onOpenHit = onResultClick,
-            modifier = Modifier.fillMaxSize(),
-            listState = listState,
-            noStrongMatch = noStrongMatch,
-            searching = searching,
-        )
+        if (query.isBlank()) {
+            // A blank query is the screen's resting state, not an error — so it
+            // gets a designed invitation rather than the blank page it showed
+            // before. States what the field actually reaches (titles, text and
+            // annotations) so the reader knows the search is not just titles.
+            EmptyState(
+                icon = Icons.Outlined.Search,
+                headline = "Search your library",
+                body = "Find a book by title or author, search inside the text, " +
+                    "or jump to your highlights, notes and bookmarks.",
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            BookSearchResultsList(
+                query = query,
+                scope = scope,
+                titleMatches = titleMatches,
+                results = results,
+                annotationResults = annotationResults,
+                onOpenTitle = { book -> onResultClick(BookHit(book, -1, "", "")) },
+                onOpenHit = onResultClick,
+                modifier = Modifier.fillMaxSize(),
+                listState = listState,
+                noStrongMatch = noStrongMatch,
+                searching = searching,
+            )
+        }
     }
 }

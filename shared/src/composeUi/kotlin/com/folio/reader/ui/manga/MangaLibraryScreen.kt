@@ -25,8 +25,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -238,7 +238,7 @@ fun MangaLibraryScreen(
                     // filter and give it a one-tap escape.
                     val filtered = activeFilters.any { it != MangaLibFilter.DOWNLOADED }
                     com.folio.reader.ui.components.EmptyState(
-                        icon = Icons.Filled.MenuBook,
+                        icon = Icons.AutoMirrored.Filled.MenuBook,
                         headline = when {
                             filtered -> "No manga match your filters"
                             libraryEmpty -> "Your manga library is empty"

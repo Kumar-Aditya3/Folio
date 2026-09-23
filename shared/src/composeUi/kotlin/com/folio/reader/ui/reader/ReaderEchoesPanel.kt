@@ -1,6 +1,7 @@
 package com.folio.reader.ui.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +34,9 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.ml.EchoHit
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 
 /**
@@ -52,7 +55,9 @@ internal fun EchoesPanel(
     onDismiss: () -> Unit,
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit,
 ) {
-    val panelShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+    val panelShape = rememberFolioSheetMorphShape(
+        RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
+    )
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -74,7 +79,7 @@ internal fun EchoesPanel(
                     color = FolioTheme.colors.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onDismiss) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Close echoes",
@@ -120,15 +125,19 @@ private fun EchoFragmentCard(
 ) {
     val accent = rememberCoverAccent(hit.coverPath, FolioTheme.colors.accentDiscovery)
     // Resonance → presence. The floor is MIN_SIMILARITY (0.35); map the useful band to a gentle
-    // fill so a stronger echo reads as a warmer, more solid fragment.
+    // fill so a stronger echo reads as a warmer, more solid fragment. The band is widened so a
+    // strong echo is clearly more present than a faint one, and edged with a resonance-tied
+    // accent hairline that firms up the fragment's coast.
     val resonance = ((hit.score - 0.35f) / 0.35f).coerceIn(0f, 1f)
-    val fillAlpha = 0.10f + resonance * 0.14f
-    val shape = RoundedCornerShape(14.dp)
+    val fillAlpha = 0.08f + resonance * 0.24f
+    val hairlineAlpha = 0.22f + resonance * 0.30f
+    val shape = RoundedCornerShape(FolioTokens.radiusControl)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(accent.copy(alpha = fillAlpha), shape)
+            .border(1.dp, accent.copy(alpha = hairlineAlpha), shape)
             .clickable {
                 onOpenEcho(hit.bookId, hit.spineIndex.takeIf { it >= 0 }, hit.chapterFraction.takeIf { it >= 0f })
             }

@@ -1,7 +1,9 @@
 package com.folio.reader.ui.library
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +24,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -32,8 +38,6 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Label
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -739,7 +743,7 @@ fun LibraryScreen(
                             Icon(Icons.Filled.Share, contentDescription = "Share files")
                         }
                         IconButton(onClick = { documentLibraryViewModel?.requestBulkCategories() }) {
-                            Icon(Icons.Filled.Label, contentDescription = "Set categories")
+                            Icon(Icons.AutoMirrored.Filled.Label, contentDescription = "Set categories")
                         }
                     },
                     rail = railContent
@@ -760,13 +764,13 @@ fun LibraryScreen(
                     },
                     actions = {
                         IconButton(onClick = { mangaLibraryViewModel?.requestBulkCategories() }) {
-                            Icon(Icons.Filled.Label, contentDescription = "Set categories")
+                            Icon(Icons.AutoMirrored.Filled.Label, contentDescription = "Set categories")
                         }
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(true) }) {
                             Icon(Icons.Filled.CheckCircle, contentDescription = "Mark read")
                         }
                         IconButton(onClick = { mangaLibraryViewModel?.markSelectedRead(false) }) {
-                            Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Mark unread")
                         }
                         IconButton(onClick = {
                             onRemoveSelectedManga?.invoke(mangaSelIds)
@@ -793,7 +797,7 @@ fun LibraryScreen(
                         // exists on a shelf — the same Label action the manga and
                         // document selection bars lead with.
                         IconButton(onClick = { viewModel.requestBulkCollections() }) {
-                            Icon(Icons.Filled.Label, contentDescription = "Add to collections")
+                            Icon(Icons.AutoMirrored.Filled.Label, contentDescription = "Add to collections")
                         }
                         IconButton(onClick = {
                             onShareBooks(selectedBooks)
@@ -1767,12 +1771,12 @@ private fun DocumentLibraryContent(
         when {
             state.isLoading || state.isImporting -> com.folio.reader.ui.components.LoadingPlaceholder(Modifier.fillMaxSize())
             state.errorMessage != null -> com.folio.reader.ui.components.EmptyState(
-                icon = Icons.Filled.MenuBook,
+                icon = Icons.Outlined.ErrorOutline,
                 headline = "Couldn't load documents",
                 body = state.errorMessage
             )
             state.items.isEmpty() -> com.folio.reader.ui.components.EmptyState(
-                icon = Icons.Filled.MenuBook,
+                icon = Icons.AutoMirrored.Outlined.MenuBook,
                 headline = if (state.query.isBlank()) "No documents in category" else "No matching documents",
                 body = if (state.query.isBlank()) "Import a document or choose another category" else "Try a different title, filename, author, description, or format",
                 action = if (state.query.isBlank()) ({
@@ -1821,90 +1825,101 @@ private fun LibraryContent(
         // The filter chips ride the masthead's rail (LibraryScreen's `railContent`)
         // where they fold away with it as the shelf scrolls, so the shelf itself
         // starts straight at the content.
-        if (books == null) {
-            // The shelf is measured, not spun for. See LibrarySkeleton: a lone
-            // spinner on an empty page is what the tab cross-fade carries in, and
-            // the page then appears all at once when the read lands.
-            LibrarySkeleton(modifier = Modifier.fillMaxSize())
-        } else if (books.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                com.folio.reader.ui.components.EmptyState(
-                    icon = Icons.Filled.MenuBook,
-                    headline = if (libraryEmpty) "No books in library" else "No books in this collection",
-                    body = if (libraryEmpty) {
-                        "Import your first EPUB to get started"
-                    } else {
-                        "Move books here or choose another collection"
-                    },
-                    action = if (libraryEmpty) {
-                        {
-                            Button(onClick = onImportClick) {
-                                Text("Import EPUB")
+        // Skeleton→content is a motion-gated Crossfade keyed on the load state
+        // (books == null) alone, so the aligned skeleton dissolves into the shelf
+        // once the read lands — and only then, since keying on the list itself
+        // would re-cross the whole grid on every sort or filter.
+        val motion = rememberMotionEnabled()
+        Crossfade(
+            targetState = books == null,
+            animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+            label = "library skeleton",
+        ) { loading ->
+            if (loading) {
+                // The shelf is measured, not spun for. See LibrarySkeleton: a lone
+                // spinner on an empty page is what the tab cross-fade carries in, and
+                // the page then appears all at once when the read lands.
+                LibrarySkeleton(modifier = Modifier.fillMaxSize())
+            } else if (books == null || books.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    com.folio.reader.ui.components.EmptyState(
+                        icon = Icons.AutoMirrored.Outlined.MenuBook,
+                        headline = if (libraryEmpty) "No books in library" else "No books in this collection",
+                        body = if (libraryEmpty) {
+                            "Import your first EPUB to get started"
+                        } else {
+                            "Move books here or choose another collection"
+                        },
+                        action = if (libraryEmpty) {
+                            {
+                                Button(onClick = onImportClick) {
+                                    Text("Import EPUB")
+                                }
                             }
-                        }
-                    } else null
-                )
-            }
-        } else {
-            // Grid↔List↔Compact dissolves as one surface reconfiguring rather than a
-            // hard cut between two different lazy layouts. The cover morph is
-            // suspended for the length of the cross: while it runs, the outgoing
-            // grid and the incoming list are composed together and each holds this
-            // book's cover key, and two live copies of one key in one scope is the
-            // case the shared-transition registry cannot resolve.
-            //
-            // A SizeTransform is safe here in a way it is not for the shelf swap: both
-            // sides render the identical book list, so the row count cannot change
-            // and the incoming layout never re-columns. Only a short shelf qualifies —
-            // see folioSizeTransformEligible.
-            val swapMotion = rememberMotionEnabled()
-            val swapInFlight = rememberSwapInFlight(viewMode)
-            AnimatedContent(
-                targetState = viewMode,
-                transitionSpec = {
-                    folioFadeSwap(
-                        swapMotion,
-                        sizeTransform = folioSwapSizeTransform()
-                            .takeIf { folioSizeTransformEligible(books.size) },
+                        } else null
                     )
-                },
-                label = "view mode swap",
-            ) { mode ->
-                FolioSharedElementsSuppressed(swapInFlight) {
-                    when (mode) {
-                        LibraryViewModel.ViewMode.GRID -> BookGrid(
-                            books = books,
-                            onBookClick = onBookClick,
-                            onBookLongClick = onBookLongClick,
-                            onDeleteBook = onDeleteBook,
-                            selectedBooks = selectedBooks,
-                            isSelectionMode = isSelectionMode,
-                            finishEstimates = finishEstimates,
-                            preserveFeaturedDuringSelection = preserveFeaturedDuringSelection,
+                }
+            } else {
+                // Grid↔List↔Compact dissolves as one surface reconfiguring rather than a
+                // hard cut between two different lazy layouts. The cover morph is
+                // suspended for the length of the cross: while it runs, the outgoing
+                // grid and the incoming list are composed together and each holds this
+                // book's cover key, and two live copies of one key in one scope is the
+                // case the shared-transition registry cannot resolve.
+                //
+                // A SizeTransform is safe here in a way it is not for the shelf swap: both
+                // sides render the identical book list, so the row count cannot change
+                // and the incoming layout never re-columns. Only a short shelf qualifies —
+                // see folioSizeTransformEligible.
+                val swapMotion = rememberMotionEnabled()
+                val swapInFlight = rememberSwapInFlight(viewMode)
+                AnimatedContent(
+                    targetState = viewMode,
+                    transitionSpec = {
+                        folioFadeSwap(
+                            swapMotion,
+                            sizeTransform = folioSwapSizeTransform()
+                                .takeIf { folioSizeTransformEligible(books.size) },
                         )
+                    },
+                    label = "view mode swap",
+                ) { mode ->
+                    FolioSharedElementsSuppressed(swapInFlight) {
+                        when (mode) {
+                            LibraryViewModel.ViewMode.GRID -> BookGrid(
+                                books = books,
+                                onBookClick = onBookClick,
+                                onBookLongClick = onBookLongClick,
+                                onDeleteBook = onDeleteBook,
+                                selectedBooks = selectedBooks,
+                                isSelectionMode = isSelectionMode,
+                                finishEstimates = finishEstimates,
+                                preserveFeaturedDuringSelection = preserveFeaturedDuringSelection,
+                            )
 
-                        LibraryViewModel.ViewMode.LIST -> BookList(
-                            books,
-                            onBookClick,
-                            onBookLongClick,
-                            onDeleteBook,
-                            selectedBooks,
-                            isSelectionMode,
-                            finishEstimates
-                        )
+                            LibraryViewModel.ViewMode.LIST -> BookList(
+                                books,
+                                onBookClick,
+                                onBookLongClick,
+                                onDeleteBook,
+                                selectedBooks,
+                                isSelectionMode,
+                                finishEstimates
+                            )
 
-                        LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
-                            books,
-                            onBookClick,
-                            onBookLongClick,
-                            onDeleteBook,
-                            selectedBooks,
-                            isSelectionMode,
-                            finishEstimates
-                        )
+                            LibraryViewModel.ViewMode.COMPACT -> BookCompactList(
+                                books,
+                                onBookClick,
+                                onBookLongClick,
+                                onDeleteBook,
+                                selectedBooks,
+                                isSelectionMode,
+                                finishEstimates
+                            )
+                        }
                     }
                 }
             }

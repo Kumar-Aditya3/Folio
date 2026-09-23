@@ -21,11 +21,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Highlight
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,8 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,7 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
@@ -63,7 +61,10 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.RevisitItem
 import com.folio.reader.model.RevisitType
+import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.CoroutineScope
@@ -158,19 +159,27 @@ private data class TypeBadge(
     val color: Color
 )
 
-private fun RevisitType.toBadge(): TypeBadge = when (this) {
-    RevisitType.HIGHLIGHT -> TypeBadge(
-        this, "Highlight", Icons.Filled.Highlight, Color(0xFFFFC107)
-    )
-    RevisitType.BOOKMARK -> TypeBadge(
-        this, "Bookmark", Icons.Filled.Bookmark, Color(0xFF2196F3)
-    )
-    RevisitType.NOTE -> TypeBadge(
-        this, "Note", Icons.Filled.Notes, Color(0xFF4CAF50)
-    )
-    RevisitType.CHAPTER -> TypeBadge(
-        this, "Chapter", Icons.Filled.MenuBook, Color(0xFF9C27B0)
-    )
+// Each revisit type maps to one of the four palette-adaptive accent roles rather
+// than a hardcoded hue. The accents are guaranteed legible on the surface, so the
+// badge tint + icon read on any theme; the label is passed through
+// rememberLegibleAccent so it stays readable on the low-alpha chip.
+@Composable
+private fun RevisitType.toBadge(): TypeBadge {
+    val colors = FolioTheme.colors
+    return when (this) {
+        RevisitType.HIGHLIGHT -> TypeBadge(
+            this, "Highlight", Icons.Filled.Highlight, colors.accentStreak
+        )
+        RevisitType.BOOKMARK -> TypeBadge(
+            this, "Bookmark", Icons.Filled.Bookmark, colors.accentProgress
+        )
+        RevisitType.NOTE -> TypeBadge(
+            this, "Note", Icons.AutoMirrored.Filled.Notes, colors.accentAnnotation
+        )
+        RevisitType.CHAPTER -> TypeBadge(
+            this, "Chapter", Icons.AutoMirrored.Filled.MenuBook, colors.accentDiscovery
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -181,66 +190,49 @@ fun RevisitItemsScreen(
     viewModel: RevisitItemsViewModel
 ) {
     var filterType by remember { mutableStateOf<RevisitType?>(null) }
-    val items by viewModel.unresolvedItems(filterType).collectAsState(initial = emptyList())
+    // Build the flow once per filter, not per recomposition: collectAsState keys on the flow
+    // instance, so an unremembered new instance would tear down and re-run the full per-item
+    // resolution (getBook/getChapters/getHighlight/getBookmark/getNote…) on every recomposition.
+    val itemsFlow = remember(filterType) { viewModel.unresolvedItems(filterType) }
+    val items by itemsFlow.collectAsState(initial = emptyList())
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                com.folio.reader.ui.components.FolioStatusBarBand()
-                TopAppBar(
-                    windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-                    title = {
-                        Column {
-                            Text("Revisit", fontWeight = FontWeight.Bold)
-                            if (items.isNotEmpty()) {
-                                Text(
-                                    "${items.size} item${if (items.size > 1) "s" else ""}",
-                                    style = FolioTheme.typography.labelSmall,
-                                    color = FolioTheme.colors.onSurfaceVariant
-                                )
-                            }
+            FolioTopBar(
+                title = "Revisit",
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                rail = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RevisitType.values().forEach { type ->
+                            val badge = type.toBadge()
+                            val selected = filterType == type
+                            FilterChip(
+                                selected = selected,
+                                onClick = { filterType = if (selected) null else type },
+                                label = { Text(badge.label) },
+                                leadingIcon = {
+                                    Icon(
+                                        badge.icon,
+                                        contentDescription = null,
+                                        tint = badge.color,
+                                        modifier = Modifier.width(18.dp).height(18.dp)
+                                    )
+                                }
+                            )
                         }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        // No fill: the same at-rest rule FolioTopBar follows. An opaque
-                        // surface here made the bar a grey lid over the page.
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent,
-                        titleContentColor = FolioTheme.colors.onSurface
-                    )
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    RevisitType.values().forEach { type ->
-                        val badge = type.toBadge()
-                        val selected = filterType == type
-                        FilterChip(
-                            selected = selected,
-                            onClick = { filterType = if (selected) null else type },
-                            label = { Text(badge.label) },
-                            leadingIcon = {
-                                Icon(
-                                    badge.icon,
-                                    contentDescription = null,
-                                    tint = badge.color,
-                                    modifier = Modifier.width(18.dp).height(18.dp)
-                                )
-                            }
-                        )
                     }
                 }
-            }
+            )
         }
     ) { padding ->
         if (items.isEmpty()) {
@@ -248,20 +240,11 @@ fun RevisitItemsScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Filled.Check,
-                        contentDescription = null,
-                        tint = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.width(64.dp).height(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("All caught up!", style = FolioTheme.typography.headlineSmall)
-                    Text(
-                        "No items to revisit right now",
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
-                }
+                EmptyState(
+                    icon = Icons.Filled.Check,
+                    headline = "All caught up!",
+                    body = "No items to revisit right now"
+                )
             }
         } else {
             LazyColumn(
@@ -318,7 +301,7 @@ private fun RevisitCard(
                         Text(
                             text = badge.label,
                             style = FolioTheme.typography.labelSmall,
-                            color = badge.color
+                            color = rememberLegibleAccent(badge.color)
                         )
                     }
                 }
@@ -327,7 +310,7 @@ private fun RevisitCard(
 
                 OutlinedButton(
                     onClick = onResolve,
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.minimumInteractiveComponentSize()
                 ) {
                     Icon(
                         Icons.Filled.Check,
@@ -360,7 +343,7 @@ private fun RevisitCard(
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(
-                            Icons.Filled.Notes,
+                            Icons.AutoMirrored.Filled.Notes,
                             contentDescription = null,
                             tint = FolioTheme.colors.accentAnnotation,
                             modifier = Modifier.width(17.dp).height(17.dp)

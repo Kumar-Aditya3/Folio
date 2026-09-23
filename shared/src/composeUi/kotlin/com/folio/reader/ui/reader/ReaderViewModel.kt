@@ -16,8 +16,8 @@ import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.settings.BookReaderSettings
 import com.folio.reader.settings.ReaderSettings
-import com.folio.reader.settings.changedFields
 import com.folio.reader.settings.clearing
+import com.folio.reader.settings.diffFields
 import com.folio.reader.settings.normalized
 import com.folio.reader.settings.overriddenFields
 import com.folio.reader.settings.withFieldsFrom
@@ -217,30 +217,37 @@ class ReaderViewModel(
 
             val startIndex = positionStore.restorePosition(bookId, deviceId, chapters, startChapterOverride, loadedBook)
 
-            // Load or create session; the engagement clock starts from zero every open.
-            sessionTracker.openSession(bookId, deviceId, chapters, startIndex, _position.value)
-            recentSessions = runCatching { sessionRepository.getSessionsForBook(bookId).first() }
-                .getOrNull() ?: emptyList()
-
-            // Mark opened
-            loadedBook?.let { runCatching { bookRepository.markOpened(it.id) } }
-
-            // Annotations
-            annotations.startCollecting(bookId)
-
             // This book's own settings. A book that doesn't have any yet gets the
             // current global defaults snapshotted onto it, so from then on it owns
             // its settings and later changes to the defaults don't leak in — except
             // the Main Settings → Formatting fields (alignment, formatting mode,
             // hyphenation), which no in-reader control can change and therefore
             // always follow the global defaults (see ReaderSettings.toBookSettings).
+            // These feed the layout the loader uses, so resolve them before the load;
+            // persisting a fresh snapshot is a write and not needed for first paint.
             val stored = runCatching { settingsRepository.getBookSettings(bookId) }.getOrNull()
-            if (stored != null) {
+            val snapshotToPersist = if (stored != null) {
                 _bookSettings.value = stored
+                null
             } else {
                 val snapshot = _settings.value.toBookSettings()
                 _bookSettings.value = snapshot
-                runCatching { settingsRepository.saveBookSettings(bookId, snapshot) }
+                snapshot
+            }
+
+            // First paint needs only settings + chapters + position. The session bookkeeping, the
+            // recent-sessions read (end-of-chapter pace chip), the markOpened write, the snapshot
+            // persist and annotation collection are not on that path, so run them alongside the
+            // load instead of gating the chapter behind ~4 serialized DB round-trips.
+            launch {
+                sessionTracker.openSession(bookId, deviceId, chapters, startIndex, _position.value)
+                recentSessions = runCatching { sessionRepository.getSessionsForBook(bookId).first() }
+                    .getOrNull() ?: emptyList()
+                loadedBook?.let { runCatching { bookRepository.markOpened(it.id) } }
+                if (snapshotToPersist != null) {
+                    runCatching { settingsRepository.saveBookSettings(bookId, snapshotToPersist) }
+                }
+                annotations.startCollecting(bookId)
             }
 
             // Content of the initial chapter
@@ -576,24 +583,40 @@ class ReaderViewModel(
     }
 
     /**
-     * "All books" write: stores the new global defaults and drops this book's
+     * Global write: stores the new global defaults and drops this book's
      * override for the fields being changed, so it follows the new defaults.
+     * Carries both the panel's "All books" scope and the global-only comfort
+     * rows (Eye protection), which have no per-book counterpart.
      *
      * The panel paints effective (book-merged) values, so "the fields being
      * changed" is measured against those — diffing against the globals instead
      * would promote this book's untouched overrides into the defaults every
      * other book follows (the "All books" leak). The write itself is
      * field-scoped, so no other global field can be clobbered either.
+     *
+     * The diff is serializer-driven ([diffFields]), not the per-book override
+     * vocabulary ([changedFields]). The panel also carries controls that live
+     * only in the global row — Eye protection and its warmth — and
+     * `changedFields` does not list those, so a write confined to one of them
+     * produced an EMPTY change set: `withFieldsFrom(emptySet(), …)` returns its
+     * receiver untouched, the merge below was a no-op too, and the switch
+     * snapped straight back. That is the eye-comfort toggle that "did not
+     * toggle". A hand-listed vocabulary cannot be the diff for a row it does
+     * not fully describe.
      */
     fun updateGlobalSettings(newSettings: ReaderSettings) {
-        val changed = effective().changedFields(newSettings)
+        val changed = effective().diffFields(newSettings)
+        if (changed.isEmpty()) return
         _settings.value = _settings.value.withFieldsFrom(changed, newSettings)
         viewModelScope.launch {
             runCatching { settingsRepository.mergeGlobalSettings { it.withFieldsFrom(changed, newSettings) } }
         }
+        // Only a field this book can override has an override to drop. A
+        // global-only name in `changed` (Eye protection) leaves the snapshot
+        // identical, and an identical snapshot is not worth a write.
         val snapshot = _bookSettings.value ?: return
-        if (changed.isEmpty()) return
         val cleared = snapshot.clearing(changed)
+        if (cleared == snapshot) return
         _bookSettings.value = cleared
         currentBookId?.let { id ->
             viewModelScope.launch { runCatching { settingsRepository.saveBookSettings(id, cleared) } }

@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -91,7 +93,11 @@ class DocumentLibraryViewModel(
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private val documents: Flow<Result<List<Document>>> = combine(query, reload) { value, _ -> value }
+    // Debounce + de-dup the query so typing does not fire a SQL LIKE per keystroke; a blank query
+    // (clearing search) still resolves immediately so the full library isn't delayed.
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private val documents: Flow<Result<List<Document>>> =
+        combine(query.debounce { if (it.isBlank()) 0L else 180L }.distinctUntilChanged(), reload) { value, _ -> value }
         .flatMapLatest { value ->
             if (value.isBlank()) repository.observeDocuments()
             else repository.searchDocuments(value.trim())

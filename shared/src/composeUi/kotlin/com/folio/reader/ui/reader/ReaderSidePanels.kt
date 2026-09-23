@@ -5,11 +5,11 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.Chapter
@@ -17,6 +17,8 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.folioSheetDragToDismiss
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.atmosphere
 
 /**
  * Scrim plus the three end-edge slide-in panels (TOC, annotations, quick
@@ -78,7 +80,9 @@ internal fun BoxScope.ReaderSidePanels(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.35f))
+                // The palette's own ambient shadow, not pure black, so the scrim
+                // reads as depth on light themes instead of a hole.
+                .background(FolioTheme.atmosphere.shadowAmbient.copy(alpha = 0.35f))
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = {
                         if (showToc) onToggleToc()
@@ -135,7 +139,7 @@ internal fun BoxScope.ReaderSidePanels(
     // Echoes: cross-book resonant passages, styled as "land fragments" of the Atlas.
     androidx.compose.animation.AnimatedVisibility(
         visible = showEchoes,
-        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
+        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding().navigationBarsPadding(),
         enter = panelEnter,
         exit = panelExit
     ) {

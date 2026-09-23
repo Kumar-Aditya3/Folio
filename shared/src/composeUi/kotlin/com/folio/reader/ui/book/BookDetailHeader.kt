@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
@@ -105,7 +106,7 @@ internal fun BookHeaderSection(
                 author = book.displayAuthor,
                 width = FolioTokens.coverFeature,
                 halo = accent,
-                elevation = 16.dp,
+                elevation = FolioTokens.elevationRaised,
                 // The title and author beside this plate carry the paired keys and
                 // fly in with it, so the fallback must not draw its own copies —
                 // they would sit at a fourth size in the same row.
@@ -179,7 +180,7 @@ internal fun BookHeaderSection(
             }
         }
 
-        BookMetadataGrid(book = book)
+        BookMetadataGrid(book = book, accent = accent)
 
         Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
             BookChipsRow(
@@ -203,11 +204,11 @@ internal fun BookHeaderSection(
 }
 
 @Composable
-private fun BookMetadataGrid(book: Book) {
+private fun BookMetadataGrid(book: Book, accent: Color) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioSunken(FolioShapes.edgeStart)
+            .folioSunken(FolioShapes.edgeStart, accent = accent)
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
     ) {
         MetadataRow("Publisher", book.publisher ?: "—")

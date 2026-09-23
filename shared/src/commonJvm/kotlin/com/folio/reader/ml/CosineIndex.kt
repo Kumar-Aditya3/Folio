@@ -171,12 +171,21 @@ class QuantizedCosineIndex(
     private val startCapacity = initialCapacity.coerceAtLeast(1)
     private var ids: Array<String?> = arrayOfNulls(startCapacity)
     private var data = ByteArray(startCapacity * dims)
+    // Interned book key per slot, parallel to [ids]. Lets the Echoes exclusion skip a whole book
+    // with an int compare in the hot scan instead of a per-slot chunkId→ChunkMeta HashMap lookup.
+    // NO_BOOK_KEY for slots added without one.
+    private var bookKeys = IntArray(startCapacity) { NO_BOOK_KEY }
     private var count = 0
     private val idToSlot = HashMap<String, Int>()
 
     override val size: Int get() = count
 
-    override fun add(chunkId: String, vector: FloatArray) {
+    override fun add(chunkId: String, vector: FloatArray) = addInternal(chunkId, vector, NO_BOOK_KEY)
+
+    /** As [add], but tags the slot with an interned [bookKey] for the fast Echoes exclusion. */
+    fun add(chunkId: String, vector: FloatArray, bookKey: Int) = addInternal(chunkId, vector, bookKey)
+
+    private fun addInternal(chunkId: String, vector: FloatArray, bookKey: Int) {
         require(vector.size == dims) { "expected $dims dims, got ${vector.size}" }
         val existing = idToSlot[chunkId]
         val slot = if (existing != null) existing else {
@@ -187,6 +196,7 @@ class QuantizedCosineIndex(
             count++
             s
         }
+        bookKeys[slot] = bookKey
         quantizeInto(vector, data, slot * dims)
     }
 
@@ -199,6 +209,20 @@ class QuantizedCosineIndex(
         query: FloatArray,
         limit: Int,
         filter: ((chunkId: String) -> Boolean)?,
+    ): List<VectorHit> = searchInternal(query, limit, filter, NO_BOOK_KEY)
+
+    /**
+     * As [search] but drops every slot whose interned book key equals [excludeBookKey], tested with
+     * an int compare in the scan — the fast path for Echoes' "not the book I'm reading" filter.
+     */
+    fun searchExcludingBook(query: FloatArray, limit: Int, excludeBookKey: Int): List<VectorHit> =
+        searchInternal(query, limit, null, excludeBookKey)
+
+    private fun searchInternal(
+        query: FloatArray,
+        limit: Int,
+        filter: ((chunkId: String) -> Boolean)?,
+        excludeBookKey: Int,
     ): List<VectorHit> {
         require(query.size == dims) { "expected $dims dims, got ${query.size}" }
         if (count == 0 || limit <= 0) return emptyList()
@@ -208,7 +232,7 @@ class QuantizedCosineIndex(
         // Small scans stay single-threaded: the fork/merge overhead is not worth it for an
         // in-book search or a small library.
         if (count < ScanPool.PARALLEL_THRESHOLD || ScanPool.parallelism <= 1) {
-            return scanRange(0, count, q, limit, filter)
+            return scanRange(0, count, q, limit, filter, excludeBookKey)
         }
 
         // Split the slot range into `parallelism` contiguous shards, scan each on its own core,
@@ -222,7 +246,7 @@ class QuantizedCosineIndex(
         while (start < count) {
             val from = start
             val to = minOf(start + chunk, count)
-            tasks.add(Callable { scanRange(from, to, q, limit, filter) })
+            tasks.add(Callable { scanRange(from, to, q, limit, filter, excludeBookKey) })
             start = to
         }
         val shards = ScanPool.executor.invokeAll(tasks).map { it.get() }
@@ -243,11 +267,14 @@ class QuantizedCosineIndex(
         q: FloatArray,
         limit: Int,
         filter: ((chunkId: String) -> Boolean)?,
+        excludeBookKey: Int,
     ): List<VectorHit> {
         val heap = java.util.PriorityQueue<VectorHit>(limit + 1, compareBy { it.score })
         val dims = dims
         for (slot in from until to) {
             val id = ids[slot] ?: continue
+            // Int compare first: skips an excluded book without touching the filter/HashMap.
+            if (excludeBookKey != NO_BOOK_KEY && bookKeys[slot] == excludeBookKey) continue
             if (filter != null && !filter(id)) continue
             val offset = slot * dims
             var dot = 0.0
@@ -266,6 +293,7 @@ class QuantizedCosineIndex(
     override fun clear() {
         ids = arrayOfNulls(startCapacity)
         data = ByteArray(startCapacity * dims)
+        bookKeys = IntArray(startCapacity) { NO_BOOK_KEY }
         count = 0
         idToSlot.clear()
     }
@@ -276,12 +304,19 @@ class QuantizedCosineIndex(
         while (newCapacity < required) newCapacity *= 2
         ids = ids.copyOf(newCapacity)
         data = data.copyOf(newCapacity * dims)
+        val oldSize = bookKeys.size
+        bookKeys = bookKeys.copyOf(newCapacity)
+        // copyOf pads with 0, which is a valid book key; reset the grown tail to the sentinel.
+        for (i in oldSize until newCapacity) bookKeys[i] = NO_BOOK_KEY
     }
 
     private companion object {
         /** Full-scale int8: a unit component maps to +/-127. */
         const val SCALE = 127.0
         const val INV_SCALE = 1.0 / SCALE
+
+        /** Slot has no interned book key (never excluded by [searchExcludingBook]). */
+        const val NO_BOOK_KEY = -1
 
         fun quantizeInto(vector: FloatArray, out: ByteArray, offset: Int) {
             for (d in vector.indices) {

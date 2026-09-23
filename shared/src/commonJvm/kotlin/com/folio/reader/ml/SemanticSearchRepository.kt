@@ -79,8 +79,11 @@ class SemanticSearchRepository(
     val model: EmbeddingModel get() = embedderFactory.model
 
     private val loadMutex = Mutex()
-    private var index: VectorIndex? = null
-    private var chunkById: Map<String, ChunkMeta> = emptyMap()
+    @Volatile private var index: VectorIndex? = null
+    @Volatile private var chunkById: Map<String, ChunkMeta> = emptyMap()
+    // Interned book key per bookId, matching the keys stamped onto index slots at preload, so the
+    // Echoes exclusion can skip a whole book with an int compare instead of a per-slot map lookup.
+    @Volatile private var bookKeyByBookId: Map<String, Int> = emptyMap()
 
     /**
      * A cached embedder session, reused across queries.
@@ -111,12 +114,41 @@ class SemanticSearchRepository(
      * semantic hits" and fall back to lexical search.
      */
     private suspend fun embedOne(text: String, kind: EmbedKind): FloatArray? = embedderMutex.withLock {
+        // Cache the last query embedding: toggling Exact→Meaning→Best re-issues the same query
+        // string, and re-embedding is a ~15-40 ms ONNX pass. Hand back a copy because the index
+        // search normalizes the vector in place.
+        lastQueryEmbed?.let { (t, k, v) -> if (t == text && k == kind) return@withLock v.copyOf() }
         val embedder = cachedEmbedder ?: embedderFactory.create()?.also { cachedEmbedder = it } ?: return null
-        runCatching { embedder.embed(listOf(text), kind).firstOrNull() }.getOrElse {
+        val vec = runCatching { embedder.embed(listOf(text), kind).firstOrNull() }.getOrElse {
             // A session that threw may be in a bad state; drop it so the next call rebuilds.
             runCatching { embedder.close() }
             cachedEmbedder = null
             null
+        }
+        if (vec != null) lastQueryEmbed = Triple(text, kind, vec.copyOf())
+        vec
+    }
+
+    /** Last query embedding, memoized under [embedderMutex]; see [embedOne]. */
+    private var lastQueryEmbed: Triple<String, EmbedKind, FloatArray>? = null
+
+    /**
+     * Embeds a batch of short texts with the cached session (reused if warm), for callers that
+     * need raw vectors outside of search — e.g. the Atlas label re-rank, which embeds a cluster's
+     * candidate phrases and keeps the ones nearest the cluster's meaning. Returns null entries for
+     * anything that failed, and an all-null list if the model is unavailable. Uses [EmbedKind.QUERY]
+     * because the inputs are short phrases, like a query, not passages.
+     */
+    suspend fun embedTexts(texts: List<String>): List<FloatArray?> = withContext(dispatcher) {
+        if (texts.isEmpty()) return@withContext emptyList()
+        embedderMutex.withLock {
+            val embedder = cachedEmbedder ?: embedderFactory.create()?.also { cachedEmbedder = it }
+                ?: return@withLock texts.map { null }
+            runCatching { embedder.embed(texts, EmbedKind.QUERY) }.getOrElse {
+                runCatching { embedder.close() }
+                cachedEmbedder = null
+                texts.map { null }
+            }
         }
     }
 
@@ -150,6 +182,9 @@ class SemanticSearchRepository(
     suspend fun releaseEmbedder() = embedderMutex.withLock {
         cachedEmbedder?.let { runCatching { it.close() } }
         cachedEmbedder = null
+        // Drop the memoized query vector too: a model swap would otherwise reuse an embedding
+        // produced by the previous model for an identical query string.
+        lastQueryEmbed = null
     }
 
     /**
@@ -158,7 +193,7 @@ class SemanticSearchRepository(
      * right scope" from "have a different one and must rebuild": in-book search loads one book,
      * cross-book search loads everything, and switching between them must not reuse the wrong index.
      */
-    private var loadedScope: String? = NO_SCOPE
+    @Volatile private var loadedScope: String? = NO_SCOPE
 
     /**
      * Highest `charEnd` seen for each chapter, keyed by [chapterKey]. Stands in for the chapter's
@@ -166,7 +201,7 @@ class SemanticSearchRepository(
      * read: the last chunk of a chapter ends at (or just before) the chapter's end, so its
      * `charEnd` is the length to within one chunk — accurate enough to seek by.
      */
-    private var chapterMaxCharEnd: Map<String, Int> = emptyMap()
+    @Volatile private var chapterMaxCharEnd: Map<String, Int> = emptyMap()
 
     /** How many chunks are currently loaded; 0 means [preload] has not run or found nothing. */
     val loadedChunks: Int get() = index?.size ?: 0
@@ -210,32 +245,55 @@ class SemanticSearchRepository(
             // a stale row, must read as "nothing loaded" here; the search path already treats a
             // false return as "index not ready" and answers from the lexical side.
             runCatching {
-                val entries = chunkRepository.loadVectorMetadata(model.id, model.dims, bookId)
-                if (entries.isEmpty()) {
+                // Pre-size to the row count and stream vectors straight into the int8 index, folding
+                // each into the store and dropping the float array immediately. The list-returning
+                // load materialised the whole float32 set first (~150 MB for a large Arctic library),
+                // reintroducing exactly the transient the quantised index exists to avoid.
+                val total = chunkRepository.countVectors(model.id, model.dims, bookId)
+                if (total == 0) {
                     // Release any prior scope so a book with no vectors does not keep answering
                     // from the previously-loaded book's index.
                     index?.clear()
                     index = null
                     chunkById = emptyMap()
+                    bookKeyByBookId = emptyMap()
                     chapterMaxCharEnd = emptyMap()
                     loadedScope = NO_SCOPE
                     return@runCatching false
                 }
-                // Size to the exact row count: the flat store otherwise grows by doubling, and the
-                // transient over-allocation on a bulk load is exactly what overran the heap.
-                val built = QuantizedCosineIndex(model.dims, initialCapacity = entries.size)
-                built.addAll(entries.map { it.first.id to it.second })
+                val built = QuantizedCosineIndex(model.dims, initialCapacity = total)
+                val metaById = HashMap<String, ChunkMeta>((total * 4) / 3 + 1)
+                val maxCharEnd = HashMap<String, Int>()
+                val bookKeys = HashMap<String, Int>()
+                var loaded = 0
+                chunkRepository.forEachVectorMetadata(model.id, model.dims, bookId) { meta, vector ->
+                    built.add(meta.id, vector, bookKeys.getOrPut(meta.bookId) { bookKeys.size })
+                    metaById[meta.id] = meta
+                    val key = chapterKey(meta.bookId, meta.chapterId)
+                    val prev = maxCharEnd[key]
+                    if (prev == null || meta.charEnd > prev) maxCharEnd[key] = meta.charEnd
+                    loaded++
+                }
+                if (loaded == 0) {
+                    index?.clear()
+                    index = null
+                    chunkById = emptyMap()
+                    bookKeyByBookId = emptyMap()
+                    chapterMaxCharEnd = emptyMap()
+                    loadedScope = NO_SCOPE
+                    return@runCatching false
+                }
                 index = built
-                chunkById = entries.associate { it.first.id to it.first }
-                chapterMaxCharEnd = entries
-                    .groupingBy { chapterKey(it.first.bookId, it.first.chapterId) }
-                    .fold(0) { acc, entry -> maxOf(acc, entry.first.charEnd) }
+                chunkById = metaById
+                bookKeyByBookId = bookKeys
+                chapterMaxCharEnd = maxCharEnd
                 loadedScope = bookId
                 true
             }.getOrElse {
                 // Leave the index unset so a later call can retry rather than caching the failure.
                 index = null
                 chunkById = emptyMap()
+                bookKeyByBookId = emptyMap()
                 chapterMaxCharEnd = emptyMap()
                 loadedScope = NO_SCOPE
                 false
@@ -256,6 +314,7 @@ class SemanticSearchRepository(
             index?.clear()
             index = null
             chunkById = emptyMap()
+            bookKeyByBookId = emptyMap()
             chapterMaxCharEnd = emptyMap()
             loadedScope = NO_SCOPE
         }
@@ -404,10 +463,18 @@ class SemanticSearchRepository(
             val vector = embedOne(text, EmbedKind.PASSAGE) ?: return@withContext emptyList()
             if (!preload()) return@withContext emptyList()
             val current = index ?: return@withContext emptyList()
-            val filter: ((String) -> Boolean)? = excludeBookId?.let { excluded ->
-                { chunkId -> chunkById[chunkId]?.bookId != excluded }
+            // Fast path: when the excluded book is in the index, skip it by interned key (an int
+            // compare per slot) instead of a chunkId→ChunkMeta HashMap lookup per scanned slot.
+            val excludeKey = excludeBookId?.let { bookKeyByBookId[it] }
+            val hits = if (excludeKey != null && current is QuantizedCosineIndex) {
+                current.searchExcludingBook(vector, limit + 1, excludeKey)
+            } else {
+                val filter: ((String) -> Boolean)? = excludeBookId?.let { excluded ->
+                    { chunkId -> chunkById[chunkId]?.bookId != excluded }
+                }
+                current.search(vector, limit + 1, filter)
             }
-            val picked = current.search(vector, limit + 1, filter)
+            val picked = hits
                 .filter { it.chunkId != excludeChunkId && it.score >= MIN_SIMILARITY }
                 .take(limit)
             val texts = runCatching { chunkRepository.chunkTexts(picked.map { it.chunkId }) }

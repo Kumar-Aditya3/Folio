@@ -130,7 +130,9 @@ fun FolioFigure(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = value,
-                style = valueStyle,
+                // Tabular figures: the number is the point of a figure, and it must
+                // not re-width as digits change (count-ups, live streak/minutes).
+                style = valueStyle.copy(fontFeatureSettings = "tnum"),
                 color = tint,
                 maxLines = 1,
             )

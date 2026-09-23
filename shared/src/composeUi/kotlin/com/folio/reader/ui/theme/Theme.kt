@@ -17,11 +17,13 @@ import com.folio.reader.settings.ReaderSettings
 
 // §12.6: the multi-series/chart hue role. Borrowed from the reader's paper
 // highlighters and reordered so the first six (the genre breakdown's cap) are
-// pairwise distinct. Reassign or override per palette HERE; feature files never
-// hardcode chart hues.
+// pairwise distinct AND no red sits directly beside a green — the one pairing
+// deuteranopes cannot separate — so adjacent genre rows stay tellable apart
+// without relying on hue alone. Reassign or override per palette HERE; feature
+// files never hardcode chart hues.
 private val chartSeriesDefault: List<Color> = listOf(
-    0xFFE8C84D, 0xFF4D8FC7, 0xFF5DAE5D, 0xFFD65F5F,
-    0xFF9B7BC7, 0xFFD67AB5, 0xFF5DB8B8, 0xFFD4A843
+    0xFFE8C84D, 0xFF4D8FC7, 0xFF5DAE5D, 0xFF9B7BC7,
+    0xFFD65F5F, 0xFFD67AB5, 0xFF5DB8B8, 0xFFD4A843
 ).map { Color(it) }
 
 data class FolioColors(
@@ -1438,13 +1440,15 @@ data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {
         fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 36f),
         fontWeight = FontWeight.W600,
         fontSize = 28.sp,
-        lineHeight = 36.sp
+        lineHeight = 36.sp,
+        letterSpacing = (-0.005).em
     )
     val headlineSmall: TextStyle = TextStyle(
         fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 28f),
         fontWeight = FontWeight.W600,
         fontSize = 24.sp,
-        lineHeight = 32.sp
+        lineHeight = 32.sp,
+        letterSpacing = (-0.005).em
     )
     val titleLarge: TextStyle = TextStyle(
         fontFamily = UiFonts.display(fontTheme, weight = 600, opticalSize = 22f),
@@ -1721,10 +1725,16 @@ object FolioTheme {
             // to the palette's own foreground instead.
             androidx.compose.material3.LocalContentColor provides ink.onSurface
         ) {
+            // Remembered so the app-root theme (which recomposes every minute on the daylight tick)
+            // doesn't re-allocate the full ColorScheme (30+ colors), Typography (15 styles) and
+            // Shapes each pass.
+            val materialColorScheme = remember(ink) { ink.toColorScheme() }
+            val materialTypography = remember(typography) { typography.toTypography() }
+            val materialShapes = remember { Shapes() }
             androidx.compose.material3.MaterialTheme(
-                colorScheme = ink.toColorScheme(),
-                typography = typography.toTypography(),
-                shapes = Shapes(),
+                colorScheme = materialColorScheme,
+                typography = materialTypography,
+                shapes = materialShapes,
                 content = content
             )
         }
@@ -1749,7 +1759,7 @@ object FolioTheme {
         daylight: FolioDaylight? = null,
         content: @Composable () -> Unit
     ) {
-        val typo = FolioTypography(fontTheme)
+        val typo = remember(fontTheme) { FolioTypography(fontTheme) }
         MaterialTheme(
             darkTheme = isDark,
             colors = colors,

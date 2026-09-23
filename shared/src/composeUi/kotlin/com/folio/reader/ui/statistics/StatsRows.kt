@@ -21,10 +21,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -82,7 +85,7 @@ internal fun FinishPredictionsCard(
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text = "${(book.progress * 100).toInt()}",
-                        style = FolioTheme.typography.titleLarge,
+                        style = FolioTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.accentProgress,
                     )
                     Text(
@@ -159,7 +162,7 @@ internal fun WhereYourTimeWentCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "${index + 1}",
-                        style = FolioTheme.typography.titleLarge,
+                        style = FolioTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.55f),
                         modifier = Modifier.width(26.dp),
                     )
@@ -169,7 +172,7 @@ internal fun WhereYourTimeWentCard(
                         author = entry.author,
                         width = FolioTokens.coverInline,
                         shape = FolioShapes.plateSmall,
-                        elevation = 5.dp,
+                        elevation = FolioTokens.elevationPanel,
                         small = true,
                     )
                     Spacer(Modifier.width(FolioTokens.space3))
@@ -194,7 +197,7 @@ internal fun WhereYourTimeWentCard(
                     Spacer(Modifier.width(FolioTokens.space2))
                     Text(
                         text = shortMinutes(entry.minutes),
-                        style = FolioTheme.typography.titleSmall,
+                        style = FolioTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.accentProgress,
                     )
                 }
@@ -217,7 +220,7 @@ internal fun WhereYourTimeWentCard(
                     )
                     Text(
                         text = shortMinutes(everythingElseMinutes),
-                        style = FolioTheme.typography.titleSmall,
+                        style = FolioTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
                 }
@@ -248,12 +251,15 @@ private fun TimeBar(progress: Float, peak: Boolean = false, subdued: Boolean = f
     Box(
         Modifier
             .fillMaxWidth((progress.coerceIn(0.04f, 1f) * growth).coerceAtLeast(0.0001f))
-            .height(5.dp)
+            .height(FolioTokens.chartTrack)
             .background(
                 Brush.horizontalGradient(
                     listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
                 ),
-                RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp),
+                RoundedCornerShape(
+                    topEnd = FolioTokens.chartBarRadiusTop,
+                    bottomEnd = FolioTokens.chartBarRadiusTop,
+                ),
             )
     )
 }
@@ -316,7 +322,7 @@ internal fun GenresCard(slices: List<TagSlice>) {
                     )
                     Text(
                         text = shortMinutes(slice.minutes),
-                        style = FolioTheme.typography.labelMedium,
+                        style = FolioTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
                 }
@@ -324,12 +330,15 @@ internal fun GenresCard(slices: List<TagSlice>) {
                 Box(
                     Modifier
                         .fillMaxWidth((target * growth).coerceAtLeast(0.0001f))
-                        .height(7.dp)
+                        .height(FolioTokens.chartTrack)
                         .background(
                             Brush.horizontalGradient(
                                 listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
                             ),
-                            RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp),
+                            RoundedCornerShape(
+                                topEnd = FolioTokens.chartBarRadiusTop,
+                                bottomEnd = FolioTokens.chartBarRadiusTop,
+                            ),
                         )
                 )
             }
@@ -430,7 +439,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                     ) {
                         Text(
                             text = "${index + 1}",
-                            style = FolioTheme.typography.titleSmall,
+                            style = FolioTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                             color = FolioTheme.colors.onSurfaceVariant.copy(alpha = 0.55f),
                             modifier = Modifier.width(20.dp),
                         )
@@ -444,7 +453,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
                         )
                         Text(
                             text = shortMinutes(entry.readMinutes),
-                            style = FolioTheme.typography.labelMedium,
+                            style = FolioTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                             color = FolioTheme.colors.accentProgress,
                         )
                     }
@@ -570,7 +579,7 @@ internal fun PatternsCard(stats: StatisticsUiState, mangaStats: MangaStatistics?
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .folioSunken(FolioShapes.edgeStart)
+                .folioSunken(FolioShapes.edgeStart, accent = FolioTheme.colors.accentDiscovery)
                 .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)
         ) {
             PatternRow("Average session", shortMinutes(stats.averageSessionMinutes.toLong()))
@@ -603,46 +612,66 @@ private fun HourBand(hourTotals: List<Long>, mostReadHour: String) {
     // left-to-right sweep. Read in the draw phase so the 24 bars never recompose
     // per frame; reduce-motion parks the state at 1f (rendered complete).
     val entry = rememberEntryState(hourTotals)
+    // Spoken form of the 24-hour band, built from the same buckets the bars draw,
+    // so the Canvas is not silent to a screen reader (Rule 17).
+    val activeHours = hourTotals.count { it > 0L }
+    val bandDesc = buildString {
+        append("Reading by hour of day.")
+        if (mostReadHour.isNotBlank()) append(" Busiest hour $mostReadHour.")
+        append(" Active in $activeHours of 24 hours.")
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .folioSunken(FolioShapes.edgeStart)
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
     ) {
-        Canvas(
+        Spacer(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-        ) {
-            val n = 24
-            val gap = 1.5.dp.toPx()
-            val barWidth = (size.width - gap * (n - 1)) / n
-            val sweep = entry.value
-            hourTotals.forEachIndexed { hour, minutes ->
-                // Each bar starts a touch after the one to its left, so the band
-                // fills like a wave rather than every column snapping up at once.
-                val grow = ((sweep - hour.toFloat() / n * 0.4f) / 0.6f).coerceIn(0f, 1f)
-                val h = if (peak > 0L) (minutes.toFloat() / peak) * size.height * grow else 0f
-                if (h <= 0f) {
-                    // A silent hour still shows its slot: a hairline at the base.
-                    drawRect(
-                        color = colors.onSurfaceVariant.copy(alpha = 0.14f),
-                        topLeft = Offset(hour * (barWidth + gap), size.height - 1.dp.toPx()),
-                        size = Size(barWidth, 1.dp.toPx()),
+                .semantics { contentDescription = bandDesc }
+                .drawWithCache {
+                    // Bar geometry follows the animated sweep (the wave fill), so it stays in
+                    // onDrawBehind; the two gradient brushes and the column metrics don't depend on
+                    // the sweep, so build them once per size/theme change instead of 24 brushes/frame.
+                    val n = 24
+                    val gap = 1.5.dp.toPx()
+                    val barWidth = (size.width - gap * (n - 1)) / n
+                    val hairlinePx = 1.dp.toPx()
+                    val silentColor = colors.onSurfaceVariant.copy(alpha = 0.14f)
+                    val progressBrush = Brush.verticalGradient(
+                        listOf(colors.accentProgress, colors.accentProgress.copy(alpha = FolioTokens.gradientMinAlpha))
                     )
-                } else {
-                    val isPeak = hour == peakIndex
-                    val hue = if (isPeak) colors.accentStreak else colors.accentProgress
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            listOf(hue, hue.copy(alpha = FolioTokens.gradientMinAlpha))
-                        ),
-                        topLeft = Offset(hour * (barWidth + gap), size.height - h),
-                        size = Size(barWidth, h),
+                    val streakBrush = Brush.verticalGradient(
+                        listOf(colors.accentStreak, colors.accentStreak.copy(alpha = FolioTokens.gradientMinAlpha))
                     )
+                    onDrawBehind {
+                        val sweep = entry.value
+                        hourTotals.forEachIndexed { hour, minutes ->
+                            // Each bar starts a touch after the one to its left, so the band
+                            // fills like a wave rather than every column snapping up at once.
+                            val grow = ((sweep - hour.toFloat() / n * 0.4f) / 0.6f).coerceIn(0f, 1f)
+                            val h = if (peak > 0L) (minutes.toFloat() / peak) * size.height * grow else 0f
+                            if (h <= 0f) {
+                                // A silent hour still shows its slot: a hairline at the base.
+                                drawRect(
+                                    color = silentColor,
+                                    topLeft = Offset(hour * (barWidth + gap), size.height - hairlinePx),
+                                    size = Size(barWidth, hairlinePx),
+                                )
+                            } else {
+                                val brush = if (hour == peakIndex) streakBrush else progressBrush
+                                drawRect(
+                                    brush = brush,
+                                    topLeft = Offset(hour * (barWidth + gap), size.height - h),
+                                    size = Size(barWidth, h),
+                                )
+                            }
+                        }
+                    }
                 }
-            }
-        }
+        )
         Spacer(Modifier.height(FolioTokens.space1))
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -692,7 +721,7 @@ private fun PatternRow(label: String, value: String, last: Boolean = false) {
             )
             Text(
                 text = value,
-                style = FolioTheme.typography.titleSmall,
+                style = FolioTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                 color = FolioTheme.colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

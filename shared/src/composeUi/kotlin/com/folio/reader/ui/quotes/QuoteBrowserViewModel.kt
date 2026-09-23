@@ -14,10 +14,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -74,7 +74,14 @@ class QuoteBrowserViewModel(
     private val getManga: suspend (String) -> MangaEntry? = { null },
     private val getMangaChapters: suspend (String) -> List<MangaChapter> = { emptyList() }
 ) {
-    private val editScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // One VM-owned scope, cancelled by close(). The two data flows are shared with
+    // WhileSubscribed so they stop querying when the hub is off-screen, instead of the old
+    // pair of inline never-cancelled Eagerly scopes that collected process-wide forever.
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    fun close() {
+        scope.cancel()
+    }
 
     /** Bumped after a tag edit so open hub queries re-resolve highlight tags. */
     private val tagsRevision = MutableStateFlow(0)
@@ -103,20 +110,25 @@ class QuoteBrowserViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     private val rawQuotes = flowOf(Unit)
         .flatMapLatest { getAllQuotes() }
-        .stateIn(CoroutineScope(Dispatchers.Default), SharingStarted.Eagerly, emptyList())
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val allBooksState = getAllBooks().stateIn(CoroutineScope(Dispatchers.Default), SharingStarted.Eagerly, emptyList())
+    private val allBooksState = getAllBooks().stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    fun filteredDisplayItems(filter: FilterState): kotlinx.coroutines.flow.Flow<List<QuoteDisplayItem>> {
-        return channelFlow {
-            combine(rawQuotes, allBooksState, tagsRevision) { quotes, books, _ ->
-                Pair(quotes, books)
-            }.collect { (quotes, books) ->
-                val items = withContext(Dispatchers.IO) {
+    /**
+     * The full resolved item set, computed once per data change (quotes/books/tag edit) — NOT per
+     * filter keystroke. Each keystroke's [filteredDisplayItems] is a cheap in-memory predicate over
+     * this shared list, so typing no longer re-resolves every quote (≈5 DB reads each) N times.
+     */
+    private val resolvedItems: kotlinx.coroutines.flow.StateFlow<List<QuoteDisplayItem>> =
+        combine(rawQuotes, allBooksState, tagsRevision) { quotes, books, _ -> quotes to books }
+            .map { (quotes, books) ->
+                withContext(Dispatchers.IO) {
+                    // Resolve each distinct book's chapters once, and fetch the highlight once
+                    // (the note is derived from it) instead of the old double getHighlight.
+                    val chaptersByBook = HashMap<String, List<Chapter>>()
                     quotes.mapNotNull { quote ->
                         val book = books.find { it.id == quote.bookId } ?: getBook(quote.bookId) ?: return@mapNotNull null
-                        val chapters = getChaptersForBook(quote.bookId)
+                        val chapters = chaptersByBook.getOrPut(quote.bookId) { getChaptersForBook(quote.bookId) }
                         val chapter = chapters.find { it.id == quote.chapterId }
                         val highlight = quote.highlightId.takeIf { it.isNotBlank() }?.let { getHighlight(it) }
                         // A highlight auto-creates a shadow quote (id = "quote-<highlightId>")
@@ -126,7 +138,7 @@ class QuoteBrowserViewModel(
                         if (quote.highlightId.isNotBlank() && (highlight == null || highlight.isDeleted)) {
                             return@mapNotNull null
                         }
-                        val note = quote.highlightId.takeIf { it.isNotBlank() }?.let { getHighlight(it)?.noteId }?.let { getNote(it) }
+                        val note = highlight?.noteId?.let { getNote(it) }
                             ?: if (quote.note != null) Note(
                                 id = "inline-${quote.id}",
                                 bookId = quote.bookId,
@@ -139,22 +151,25 @@ class QuoteBrowserViewModel(
                             ) else null
                         val tags = quote.highlightId.takeIf { it.isNotBlank() }?.let { getTagsForHighlight(it) } ?: emptyList()
                         QuoteDisplayItem(quote, book, chapter, highlight, note, tags)
-                    }.filter { item ->
-                        // Parenthesized: elvis binds looser than &&, so the old
-                        // `?: true && ...` shape dropped tag/search filters whenever
-                        // a book filter was active.
-                        (filter.bookId == null || item.book.id == filter.bookId) &&
-                        (filter.tagIds.isEmpty() || item.tags.any { it.id in filter.tagIds }) &&
-                        (filter.searchQuery.isBlank() ||
-                            item.quote.text.contains(filter.searchQuery, ignoreCase = true) ||
-                            item.book.title.contains(filter.searchQuery, ignoreCase = true) ||
-                            (item.note?.content?.contains(filter.searchQuery, ignoreCase = true) == true))
                     }
                 }
-                send(items)
+            }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun filteredDisplayItems(filter: FilterState): kotlinx.coroutines.flow.Flow<List<QuoteDisplayItem>> =
+        resolvedItems.map { items ->
+            items.filter { item ->
+                // Parenthesized: elvis binds looser than &&, so the old
+                // `?: true && ...` shape dropped tag/search filters whenever
+                // a book filter was active.
+                (filter.bookId == null || item.book.id == filter.bookId) &&
+                (filter.tagIds.isEmpty() || item.tags.any { it.id in filter.tagIds }) &&
+                (filter.searchQuery.isBlank() ||
+                    item.quote.text.contains(filter.searchQuery, ignoreCase = true) ||
+                    item.book.title.contains(filter.searchQuery, ignoreCase = true) ||
+                    (item.note?.content?.contains(filter.searchQuery, ignoreCase = true) == true))
             }
         }
-    }
 
     fun allBooks(): List<Book> = allBooksState.value
 
@@ -162,7 +177,7 @@ class QuoteBrowserViewModel(
 
     /** Diffs the picker's selection against current highlight tags, then refreshes the hub. */
     fun updateHighlightTags(highlightId: String, selected: Set<String>) {
-        editScope.launch {
+        scope.launch {
             val current = getTagsForHighlight(highlightId).map { it.id }.toSet()
             (current - selected).forEach { removeTagFromHighlight(highlightId, it) }
             (selected - current).forEach { addTagToHighlight(highlightId, it) }
@@ -197,7 +212,7 @@ class QuoteBrowserViewModel(
      * have already implicitly asked. The lookup is by the quote's own text, so it needs no
      * new model and no new index — only the vectors Phase 3 already wrote.
      *
-     * Runs on [editScope], which is `Dispatchers.Default`: the plan's rule is that no ML
+     * Runs on [scope], which is `Dispatchers.Default`: the plan's rule is that no ML
      * call may run on the composition dispatcher, and an embed of a 250-word passage is
      * exactly the kind of work that made `rememberCoverAccent` cost 10 ms per shelf.
      */
@@ -208,7 +223,7 @@ class QuoteBrowserViewModel(
 
         relatedSource.value = item.quote.id
         relatedState.value = RelatedState.Loading
-        editScope.launch {
+        scope.launch {
             val outcome = runCatching { lookup(text, RELATED_LIMIT) }
             relatedState.value = outcome.fold(
                 onSuccess = { result ->

@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.CustomAppTheme
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
+import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSliderRow
 import com.folio.reader.ui.components.folioField
 import com.folio.reader.ui.components.folioPanel
@@ -439,7 +440,7 @@ fun TransparencySettingsPanel(
         readerChrome = settings.readerChromeOpacity,
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)) {
         AppearanceMockup(
             colors = appColors.first,
             isDark = appColors.second,
@@ -605,7 +606,7 @@ fun CustomThemeSettingsPanel(
     var editing by remember { mutableStateOf(ThemeRole.BACKGROUND) }
     val appColors = resolveAppColors(settings)
 
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)) {
         AppearanceMockup(
             colors = appColors.first,
             isDark = appColors.second,
@@ -664,11 +665,7 @@ fun CustomThemeSettingsPanel(
             return@Column
         }
 
-        Text(
-            text = "Colours",
-            style = FolioTheme.typography.bodyLarge,
-            color = colors.onSurface,
-        )
+        FolioEyebrow("Colours", accent = colors.primary)
         ThemeRole.entries.forEach { role ->
             RoleRow(
                 role = role,
@@ -683,11 +680,7 @@ fun CustomThemeSettingsPanel(
             onChange = { onSettingsChange(settings.copy(customAppTheme = active.withRole(editing, it))) },
         )
 
-        Text(
-            text = "Start from a pack",
-            style = FolioTheme.typography.bodyLarge,
-            color = colors.onSurface,
-        )
+        FolioEyebrow("Start from a pack", accent = colors.primary)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(AppPalette.entries) { palette ->
                 SeedChip(
@@ -823,7 +816,7 @@ private fun SeedChip(palette: AppPalette, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Box(
-            Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(7.dp))
+            Modifier.fillMaxWidth().height(26.dp).clip(FolioShapes.chip)
                 .background(Brush.verticalGradient(listOf(c.background, c.surface)))
         ) {
             Row(

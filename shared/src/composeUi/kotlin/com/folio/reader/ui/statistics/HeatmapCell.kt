@@ -12,10 +12,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.theme.FolioTheme
 
 /**
  * §12.5: the Stats heatmap's cell — tints with the caller's accent role, scaled
- * by intensity. [accent] null keeps the original fixed-cyan ladder.
+ * by intensity. [accent] null falls back to the theme's accentProgress on the same
+ * alpha ladder.
  */
 @Composable
 internal fun HeatmapCell(
@@ -28,18 +30,19 @@ internal fun HeatmapCell(
     val colors = if (accent != null) {
         listOf(
             base,
-            accent.copy(alpha = 0.25f),
-            accent.copy(alpha = 0.5f),
-            accent.copy(alpha = 0.75f),
+            accent.copy(alpha = 0.4f),
+            accent.copy(alpha = 0.6f),
+            accent.copy(alpha = 0.8f),
             accent
         )
     } else {
+        val default = FolioTheme.colors.accentProgress
         listOf(
             base,
-            Color(0xFF4DD0E1),
-            Color(0xFF00BCD4),
-            Color(0xFF0097A7),
-            Color(0xFF006064)
+            default.copy(alpha = 0.4f),
+            default.copy(alpha = 0.6f),
+            default.copy(alpha = 0.8f),
+            default
         )
     }
 

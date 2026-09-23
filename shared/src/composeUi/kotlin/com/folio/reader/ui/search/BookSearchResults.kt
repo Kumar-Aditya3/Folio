@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,7 +24,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
+import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.LocalFolioTopInset
 
@@ -127,7 +131,7 @@ fun BookSearchResultsList(
                             "Titles & authors",
                             style = FolioTheme.typography.titleSmall,
                             color = FolioTheme.colors.secondary,
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
                         )
                     }
                     items(titleMatches, key = { "title:${it.id}" }) { book ->
@@ -145,7 +149,7 @@ fun BookSearchResultsList(
                             "Inside books",
                             style = FolioTheme.typography.titleSmall,
                             color = FolioTheme.colors.secondary,
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
                         )
                     }
                     items(results, key = { "hit:${it.book.id}:${it.spineIndex}:${it.context.hashCode()}" }) { hit ->
@@ -167,7 +171,7 @@ fun BookSearchResultsList(
                                 "${section.label} matches",
                                 style = FolioTheme.typography.titleSmall,
                                 color = FolioTheme.colors.secondary,
-                                modifier = Modifier.padding(16.dp)
+                                modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
                             )
                         }
                         items(
@@ -190,11 +194,12 @@ fun BookSearchResultsList(
             titleMatches.isEmpty() && results.isEmpty() && annotationResults.isEmpty()
         ) {
             item(key = "head:empty") {
-                Text(
-                    "No matches for \"$query\" in ${scope.label}.",
-                    style = FolioTheme.typography.bodyMedium,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp)
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    headline = "No matches for \"$query\"",
+                    body = "Nothing in ${scope.label} matches your search — " +
+                        "try another word, or a different scope.",
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }

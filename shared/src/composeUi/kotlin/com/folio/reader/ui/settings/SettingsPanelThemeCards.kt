@@ -19,23 +19,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.folio.reader.ui.components.FolioSegmented
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
@@ -154,7 +148,7 @@ internal fun ThemePackCard(
         ) { name ->
             Text(
                 name,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.folio.reader.ui.theme.FolioTheme.typography.titleSmall,
                 color = if (selected) colors.primary else colors.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -165,10 +159,11 @@ internal fun ThemePackCard(
 }
 
 /**
- * The light/dark switch for the theme packs section. Two segments, sun and
- * moon; the selected segment is lit with the palette's own primary. Tapping
- * the unselected segment flips the active pack to its other face — tapping the
- * selected one is a no-op, so the control is a switch, not two buttons.
+ * The light/dark switch for the theme packs section, built on [FolioSegmented]
+ * so its lit indicator glides between the two segments like every other
+ * segmented control in the app. Tapping the unselected segment flips the active
+ * pack to its other face; tapping the lit one is a no-op, so the control is a
+ * switch, not two buttons.
  *
  * Disabled while a custom app theme is active: a custom theme owns its
  * polarity, and flipping underneath it would change nothing the user can see.
@@ -179,67 +174,16 @@ internal fun ThemeModeToggle(
     enabled: Boolean = true,
     onToggle: () -> Unit,
 ) {
-    val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    Row(
-        modifier = Modifier
-            .alpha(if (enabled) 1f else 0.45f)
-            .clip(FolioShapes.pill)
-            .background(colors.surfaceVariant.copy(alpha = 0.6f))
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        ThemeModeSegment(
-            icon = Icons.Filled.LightMode,
-            contentDescription = "Light mode",
-            selected = !dark,
-            enabled = enabled,
-            onClick = onToggle,
-        )
-        ThemeModeSegment(
-            icon = Icons.Filled.DarkMode,
-            contentDescription = "Dark mode",
-            selected = dark,
-            enabled = enabled,
-            onClick = onToggle,
-        )
-    }
-}
-
-@Composable
-private fun ThemeModeSegment(
-    icon: ImageVector,
-    contentDescription: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = com.folio.reader.ui.theme.FolioTheme.colors
-    val interaction = rememberFolioInteraction()
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .folioPressable(interaction, scaleTo = 0.92f)
-            .clip(FolioShapes.pill)
-            .background(if (selected) colors.primary else Color.Transparent)
-            .then(
-                if (enabled) {
-                    Modifier.clickable(
-                        interactionSource = interaction,
-                        indication = null,
-                    ) { if (!selected) onClick() }
-                } else {
-                    Modifier
-                }
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            icon,
-            contentDescription = contentDescription,
-            tint = if (selected) colors.onPrimary else colors.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
-        )
-    }
+    FolioSegmented(
+        options = listOf("Light", "Dark"),
+        selectedIndex = if (dark) 1 else 0,
+        // FolioSegmented only fires onSelect for the segment that is not already
+        // lit, so a bare onToggle() flips to the tapped face. Gated on [enabled]
+        // because the control has no native disabled state: the dimmed alpha
+        // shows the state and the no-op keeps a custom theme's polarity fixed.
+        onSelect = { if (enabled) onToggle() },
+        modifier = Modifier.alpha(if (enabled) 1f else 0.45f),
+    )
 }
 
 /**
@@ -283,7 +227,7 @@ internal fun FontThemeCard(
         )
         Text(
             fontTheme.label,
-            style = MaterialTheme.typography.titleSmall,
+            style = com.folio.reader.ui.theme.FolioTheme.typography.titleSmall,
             color = if (selected) colors.primary else colors.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

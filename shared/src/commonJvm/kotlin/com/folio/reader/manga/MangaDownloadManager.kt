@@ -215,9 +215,15 @@ class MangaDownloadManager(
                     throw IllegalStateException("Cannot write page ${page.index + 1} to storage")
                 }
                 done++
-                downloadsRepo.update(
-                    item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = done)
-                )
+                // Throttle progress writes: each downloadsRepo.update bumps the queue revision and
+                // re-runs the whole `SELECT * FROM manga_downloads` behind observeQueue, so persist
+                // every PROGRESS_WRITE_EVERY pages instead of every page. The final DOWNLOADED
+                // update below writes the authoritative count.
+                if (done % PROGRESS_WRITE_EVERY == 0) {
+                    downloadsRepo.update(
+                        item.copy(status = MangaDownloadStatus.DOWNLOADING, totalPages = pages.size, downloadedPages = done)
+                    )
+                }
             }
 
             chapterRepo.setDownloadedPages(chapter.id, pages.size)
@@ -311,5 +317,8 @@ class MangaDownloadManager(
         /** Attempts per page fetch, and the pause before each retry. */
         const val FETCH_ATTEMPTS = 3
         const val FETCH_BACKOFF_MS = 1500L
+
+        /** How often chapter-download progress is persisted (each write re-queries the queue). */
+        const val PROGRESS_WRITE_EVERY = 4
     }
 }

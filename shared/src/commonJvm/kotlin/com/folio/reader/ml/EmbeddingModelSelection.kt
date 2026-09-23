@@ -93,7 +93,6 @@ class EmbeddingModelSelection(
             semanticSearch = semanticSearch,
             chunkRepository = chunkRepository,
             bookRepository = bookRepository,
-            cacheDir = modelsDir,
         ).also { _discovery = it }
 
     /**

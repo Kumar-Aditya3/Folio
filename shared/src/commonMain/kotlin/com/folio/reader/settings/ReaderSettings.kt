@@ -117,7 +117,16 @@ data class ReaderSettings(
      * contained no doc defaults: the document reader's mode was per-visit
      * memory, reset on every open and invisible to Settings, sync and backup.
      */
-    val documentReaderMode: String = "SINGLE_PAGE"
+    val documentReaderMode: String = "SINGLE_PAGE",
+    /**
+     * Eye-protection (warm/blue-light-reduction) filter — a global comfort
+     * preference, not a per-book reading choice, so it lives outside the
+     * per-book override lists like [liquidGlassEffects]. Off by default so
+     * existing installs are unchanged; [eyeProtectionIntensity] (0..1) scales the
+     * warmth of the amber overlay the reader paints over the page.
+     */
+    val eyeProtection: Boolean = false,
+    val eyeProtectionIntensity: Float = 0.4f
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(

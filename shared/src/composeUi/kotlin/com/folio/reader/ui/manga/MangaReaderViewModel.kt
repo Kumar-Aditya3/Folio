@@ -12,6 +12,7 @@ import com.folio.reader.manga.MangaRepository
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -451,16 +452,28 @@ class MangaReaderViewModel(
             }
             currentSnapshot()?.let { writeSnapshot(it) }
         }
-        val repo = sessionRepo ?: return
-        val session = activeSession ?: return
-        activeSession = null
-        val now = kotlinx.datetime.Clock.System.now()
-        val ended = session.copy(
-            endedAt = now,
-            durationMs = (now - session.startedAt).inWholeMilliseconds,
-            isActive = false,
-        )
-        runCatching { repo.updateSession(ended) }
+        val session = activeSession
+        if (session != null) {
+            activeSession = null
+            val repo = sessionRepo
+            if (repo != null) {
+                val now = kotlinx.datetime.Clock.System.now()
+                val ended = session.copy(
+                    endedAt = now,
+                    durationMs = (now - session.startedAt).inWholeMilliseconds,
+                    isActive = false,
+                )
+                runCatching { repo.updateSession(ended) }
+            }
+        }
+        // Release the reader's resources unconditionally: close the progress channel so the save
+        // worker's loop ends, drop the process-global decoded-page cache (~96 MB) since no manga is
+        // being read, and cancel the VM scope (save worker, prefetch and in-flight fetch jobs).
+        // Previously none of this ran, so each chapter-to-chapter navigation leaked the scope, the
+        // hung save worker and the byte caches. close() runs on the caller's scope, not this one.
+        progressQueue.close()
+        clearPageBitmapCache()
+        scope.cancel()
     }
 
     fun onPageChanged(index: Int) {

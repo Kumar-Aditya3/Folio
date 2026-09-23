@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,7 +38,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -145,18 +146,21 @@ fun MangaDetailScreen(
     val rail: (@Composable () -> Unit)? =
         if (!m.inLibrary) null else ({
             Box(Modifier.onSizeChanged { railPx = it.height }) {
+                val myCategories = remember(allCategories, myCategoryIds) {
+                    allCategories.filter { it.id in myCategoryIds }
+                }
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = FolioTokens.space3),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(allCategories.filter { it.id in myCategoryIds }) { category ->
+                    items(myCategories, key = { "c:${it.id}" }) { category ->
                         FolioChip(selected = true, onClick = { categoryPickerOpen = true }, label = category.name)
                     }
                     item {
                         FolioChip(selected = false, onClick = { categoryPickerOpen = true }, label = "Categories")
                     }
-                    items(tags) { tag ->
+                    items(tags, key = { "t:${it.id}" }) { tag ->
                         FolioChip(selected = true, onClick = { tagPickerOpen = true }, label = tag.name)
                     }
                     item {
@@ -185,7 +189,8 @@ fun MangaDetailScreen(
         val gap = resumeTopPx.floatValue - barBottomPx
         ((handoffPx - gap) / handoffPx).coerceIn(0f, 1f)
     }
-    val continueLabel = if (chapters.any { it.read }) "Continue" else "Start"
+    val continueLabel = remember(chapters) { if (chapters.any { it.read }) "Continue" else "Start" }
+    val hasUnread = remember(chapters) { chapters.any { !it.read } }
     val launchContinue: () -> Unit = {
         scope.launch {
             val target = viewModel.nextChapterToRead() ?: displayChapters.firstOrNull()
@@ -221,7 +226,7 @@ fun MangaDetailScreen(
                         Icon(Icons.Filled.CheckCircle, contentDescription = "Mark read")
                     }
                     IconButton(onClick = { viewModel.bulkMarkRead(false) }) {
-                        Icon(Icons.Filled.MenuBook, contentDescription = "Mark unread")
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Mark unread")
                     }
                     if (downloadsAvailable && !m.isLocal) {
                         IconButton(onClick = { viewModel.bulkDownload() }) {
@@ -323,7 +328,7 @@ fun MangaDetailScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text(if (sortAscending) "Oldest first" else "Newest first") },
-                                leadingIcon = { Icon(Icons.Filled.Sort, contentDescription = null) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
                                 onClick = { moreOpen = false; viewModel.toggleSort() },
                             )
                             HorizontalDivider()
@@ -344,7 +349,7 @@ fun MangaDetailScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("Mark all as unread") },
-                                leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
                                 onClick = { moreOpen = false; viewModel.markAllRead(false) },
                             )
                         }
@@ -459,7 +464,7 @@ fun MangaDetailScreen(
                     Column(Modifier.weight(1f)) {
                         Text(
                             m.title,
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = FolioTheme.typography.headlineSmall,
                             color = FolioTheme.colors.onSurface,
                             // Paired with the shelf tile's title and with a history
                             // row's, so the run of text travels with its cover from
@@ -469,7 +474,7 @@ fun MangaDetailScreen(
                             ),
                         )
                         listOfNotNull(m.author, m.artist).distinct().forEach {
-                            Text(it, style = MaterialTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)
+                            Text(it, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)
                         }
                         Text(
                             when (m.status) {
@@ -481,7 +486,7 @@ fun MangaDetailScreen(
                                 MangaStatus.ON_HIATUS -> "On hiatus"
                                 MangaStatus.UNKNOWN -> m.sourceName
                             },
-                            style = MaterialTheme.typography.bodySmall,
+                            style = FolioTheme.typography.bodySmall,
                             color = FolioTheme.colors.primary,
                         )
                     }
@@ -542,7 +547,7 @@ fun MangaDetailScreen(
                     if (downloadsAvailable && !m.isLocal) {
                         OutlinedButton(
                             onClick = { viewModel.downloadUnread() },
-                            enabled = chapters.any { !it.read },
+                            enabled = hasUnread,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.Download, contentDescription = null)
@@ -555,7 +560,7 @@ fun MangaDetailScreen(
 
             error?.let { message ->
                 item {
-                    Text(message, color = FolioTheme.colors.error, style = MaterialTheme.typography.bodyMedium)
+                    Text(message, color = FolioTheme.colors.error, style = FolioTheme.typography.bodyMedium)
                 }
                 item {
                     // A bot check is not a network error: it needs a browser view, and
@@ -573,7 +578,7 @@ fun MangaDetailScreen(
                                     .background(FolioTheme.colors.surfaceVariant, RoundedCornerShape(FolioTokens.radiusChip))
                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                             ) {
-                                Text(genre, style = MaterialTheme.typography.labelMedium, color = FolioTheme.colors.onSurfaceVariant)
+                                Text(genre, style = FolioTheme.typography.labelMedium, color = FolioTheme.colors.onSurfaceVariant)
                             }
                         }
                     }
@@ -583,14 +588,31 @@ fun MangaDetailScreen(
             if (!m.description.isNullOrBlank()) {
                 item {
                     var expanded by remember { mutableStateOf(false) }
-                    Text(
-                        m.description!!,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurface,
-                        maxLines = if (expanded) Int.MAX_VALUE else 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable { expanded = !expanded },
-                    )
+                    var hasOverflow by remember { mutableStateOf(false) }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = expanded || hasOverflow) { expanded = !expanded },
+                    ) {
+                        Text(
+                            m.description!!,
+                            style = FolioTheme.typography.bodyMedium,
+                            color = FolioTheme.colors.onSurface,
+                            maxLines = if (expanded) Int.MAX_VALUE else 4,
+                            overflow = TextOverflow.Ellipsis,
+                            onTextLayout = { if (!expanded) hasOverflow = it.hasVisualOverflow },
+                        )
+                        // A subtle, tappable hint so the collapsed blurb does not read as
+                        // dead text; only shown once the description actually overflows.
+                        if (expanded || hasOverflow) {
+                            Text(
+                                text = if (expanded) "Show less" else "Show more",
+                                style = FolioTheme.typography.labelMedium,
+                                color = FolioTheme.colors.primary,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -611,12 +633,12 @@ fun MangaDetailScreen(
                         ) {
                             Text(
                                 "$readCount of $totalCount chapters",
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = FolioTheme.typography.bodyMedium,
                                 color = FolioTheme.colors.onSurface,
                             )
                             Text(
                                 "${(progress * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelMedium,
+                                style = FolioTheme.typography.labelMedium,
                                 color = FolioTheme.colors.primary,
                             )
                         }
@@ -630,13 +652,20 @@ fun MangaDetailScreen(
             }
 
             item {
-                val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-                val weekAgo = kotlinx.datetime.Clock.System.now()
-                    .toLocalDateTime(zone).date.minus(kotlinx.datetime.DatePeriod(days = 7))
+                // Memoized: this section otherwise re-scans (and re-does a toLocalDateTime per read
+                // chapter) on every recomposition of the ~16-flow screen.
+                val readCounts = remember(chapters) {
+                    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+                    val weekAgo = kotlinx.datetime.Clock.System.now()
+                        .toLocalDateTime(zone).date.minus(kotlinx.datetime.DatePeriod(days = 7))
+                    val read = chapters.count { it.read }
+                    val readThisWeek = chapters.count { it.read && it.updatedAt.toLocalDateTime(zone).date >= weekAgo }
+                    read to readThisWeek
+                }
                 MangaReadingSection(
                     sessions = sessions,
-                    chaptersRead = chapters.count { it.read },
-                    chaptersReadThisWeek = chapters.count { it.read && it.updatedAt.toLocalDateTime(zone).date >= weekAgo },
+                    chaptersRead = readCounts.first,
+                    chaptersReadThisWeek = readCounts.second,
                     reReads = reReads,
                 )
             }
@@ -644,7 +673,7 @@ fun MangaDetailScreen(
             item {
                 Text(
                     "${chapters.size} CHAPTERS",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = FolioTheme.typography.labelSmall,
                     color = FolioTheme.colors.primary,
                 )
             }

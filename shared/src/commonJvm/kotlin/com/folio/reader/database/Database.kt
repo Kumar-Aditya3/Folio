@@ -52,6 +52,26 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     fun bumpBookData() { bookDataRevision.value += 1 }
 
     /**
+     * Bumped by the high-frequency reading-progress write (updateNormalizedProgress, ~every 1.2s
+     * while a book is open). Kept separate from [bookDataRevision] so a progress tick does NOT
+     * re-run the whole library decode + the Statistics aggregation. Only flows that show a live
+     * progress bar (the "Continue reading" shelf) merge this in addition to [bookDataRevision];
+     * every other list re-reads fresh on resubscription anyway, and no list is on screen while the
+     * reader is open.
+     */
+    val progressRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpProgress() { progressRevision.value += 1 }
+
+    /**
+     * Bumped after a reading_sessions write. [observeSessionsSince] keys on this so Statistics
+     * refreshes when a session is actually written (e.g. on reader close) rather than riding the
+     * old progress bump — which is what let progress separate from [bookDataRevision] without the
+     * stats "minutes read" number going stale after a session.
+     */
+    val sessionDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpSessionData() { sessionDataRevision.value += 1 }
+
+    /**
      * Bumped after every write to `chapter_chunks` / `chapter_vectors`.
      *
      * Deliberately separate from [bookDataRevision] rather than reusing it, for two reasons:
@@ -98,14 +118,24 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     private val writeMutex = Mutex() // Serialize ALL database access (SQLite single connection)
     private val driverDelegate = object : DatabaseDriver {
         var cachedConnection: Connection? = null
+        private var schemaReady = false
         override fun getConnection(): Connection = synchronized(this) {
-            cachedConnection?.takeIf { !it.isClosed }?.let { return it }
-            File(dbPath).parentFile?.mkdirs()
-            // Use autoCommit=true by default to prevent Android SQLiteConnectionPool deadlock
-            // Android wraps JDBC connections - a connection with pending transaction stays "unavailable"
-            val newConnection = openConnection().apply { autoCommit = true }
-            cachedConnection = newConnection
-            newConnection
+            val conn = cachedConnection?.takeIf { !it.isClosed } ?: run {
+                File(dbPath).parentFile?.mkdirs()
+                // Use autoCommit=true by default to prevent Android SQLiteConnectionPool deadlock
+                // Android wraps JDBC connections - a connection with pending transaction stays "unavailable"
+                openConnection().apply { autoCommit = true }.also { cachedConnection = it }
+            }
+            // Schema init runs here — on the first DB access, which is always the IO dispatcher
+            // under writeMutex — rather than in the constructor on the main thread. Cold start no
+            // longer blocks the first frame on ~50 DDL statements plus migrations. Guarded so a
+            // reconnect skips it; left false on failure so the next access retries rather than
+            // handing back a half-built schema.
+            if (!schemaReady) {
+                initializeSchema(conn)
+                schemaReady = true
+            }
+            conn
         }
 
         /**
@@ -134,9 +164,9 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         }
     }
 
-    init {
-        initializeSchema()
-    }
+    // Schema is initialized lazily on the first connection (see driverDelegate.getConnection), so
+    // constructing a Database does no blocking disk IO — building the AppGraph on the main thread
+    // at cold start no longer stalls the first frame on the schema DDL.
 
     interface DatabaseDriver {
         fun getConnection(): Connection
@@ -147,8 +177,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         createStatement().use { it.execute(sql) }
     }
 
-    private fun initializeSchema() {
-        val conn = driverDelegate.getConnection()
+    private fun initializeSchema(conn: Connection) {
         try {
             // Schema operations don't need explicit transaction with autoCommit=true
             conn.createStatementExec("""
@@ -303,6 +332,11 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     is_active INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
+            // reading_sessions grows unboundedly with reading activity and had no indexes: the
+            // per-tick getActiveSession and the whole statistics screen were full scans.
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_sessions_book ON reading_sessions (book_id, started_at)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_sessions_started ON reading_sessions (started_at)")
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_sessions_device ON reading_sessions (device_id)")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS highlights (
                     id TEXT PRIMARY KEY,
@@ -322,6 +356,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     deleted_at INTEGER
                 )
             """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_highlights_book ON highlights (book_id, chapter_id)")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id TEXT PRIMARY KEY,
@@ -338,6 +373,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     deleted_at INTEGER
                 )
             """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_notes_book ON notes (book_id)")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS bookmarks (
                     id TEXT PRIMARY KEY,
@@ -353,6 +389,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     deleted_at INTEGER
                 )
             """.trimIndent())
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks (book_id)")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS series (
                     id TEXT PRIMARY KEY,
@@ -379,6 +416,9 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     PRIMARY KEY (book_id, collection_id)
                 )
             """.trimIndent())
+            // Reverse lookup by collection_id (bookIdsInCollection / getBooksByCollection) was a full
+            // scan; the PK only covers the book_id-first direction. Mirrors idx_document_category_map_category.
+            conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_book_collections_collection ON book_collections (collection_id, book_id)")
             conn.createStatementExec("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -862,6 +902,66 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         }
     }
 
+    /** Books with any of [statuses], newest-opened first — pushes the predicate into SQL so
+     *  idx_books_status is used instead of filtering the whole library in memory. */
+    suspend fun getBooksByStatuses(statuses: List<BookStatus>): List<Book> = withContext(dispatcher) {
+        if (statuses.isEmpty()) return@withContext emptyList()
+        writeMutex.withLock {
+            val conn = driverDelegate.getConnection()
+            val placeholders = statuses.joinToString(",") { "?" }
+            conn.prepareStatement(
+                "SELECT * FROM books WHERE status IN ($placeholders) ORDER BY COALESCE(last_opened_at, added_at) DESC"
+            ).use { stmt ->
+                statuses.forEachIndexed { i, s -> stmt.setInt(i + 1, s.value) }
+                stmt.executeQuery().use { rs ->
+                    val books = mutableListOf<Book>()
+                    while (rs.next()) books.add(mapRowToBook(rs))
+                    books
+                }
+            }
+        }
+    }
+
+    /** Books in [seriesId], same order as [getAllBooks] — uses idx_books_series. */
+    suspend fun getBooksInSeriesId(seriesId: String): List<Book> = withContext(dispatcher) {
+        writeMutex.withLock {
+            val conn = driverDelegate.getConnection()
+            conn.prepareStatement(
+                "SELECT * FROM books WHERE series_id = ? ORDER BY COALESCE(last_opened_at, added_at) DESC"
+            ).use { stmt ->
+                stmt.setString(1, seriesId)
+                stmt.executeQuery().use { rs ->
+                    val books = mutableListOf<Book>()
+                    while (rs.next()) books.add(mapRowToBook(rs))
+                    books
+                }
+            }
+        }
+    }
+
+    /** Books in [collectionId] via a JOIN — uses idx_book_collections_collection and avoids
+     *  loading the whole library to filter it in memory. */
+    suspend fun getBooksInCollectionId(collectionId: String): List<Book> = withContext(dispatcher) {
+        writeMutex.withLock {
+            val conn = driverDelegate.getConnection()
+            conn.prepareStatement(
+                """
+                SELECT b.* FROM books b
+                JOIN book_collections bc ON bc.book_id = b.id
+                WHERE bc.collection_id = ?
+                ORDER BY COALESCE(b.last_opened_at, b.added_at) DESC
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, collectionId)
+                stmt.executeQuery().use { rs ->
+                    val books = mutableListOf<Book>()
+                    while (rs.next()) books.add(mapRowToBook(rs))
+                    books
+                }
+            }
+        }
+    }
+
     suspend fun getBook(bookId: String): Book? = withContext(dispatcher) {
         writeMutex.withLock {
             val conn = driverDelegate.getConnection()
@@ -998,6 +1098,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         withTransaction { conn ->
             listOf(
                 "DELETE FROM reading_positions WHERE book_id = ?",
+                // Scoped to this book's highlights and run before the highlights delete, so the old
+                // global anti-join (whole highlight_tags scanned against all highlights on every
+                // book delete) is gone.
+                "DELETE FROM highlight_tags WHERE highlight_id IN (SELECT id FROM highlights WHERE book_id = ?)",
                 "DELETE FROM highlights WHERE book_id = ?",
                 "DELETE FROM notes WHERE book_id = ?",
                 "DELETE FROM bookmarks WHERE book_id = ?",
@@ -1024,8 +1128,6 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                     stmt.executeUpdate()
                 }
             }
-            // highlight_tags orphan cleanup
-            conn.prepareStatement("DELETE FROM highlight_tags WHERE highlight_id NOT IN (SELECT id FROM highlights)").use { it.executeUpdate() }
             // Per-book reader overrides live in the settings KV table keyed by book id,
             // so the books DELETE above would leave the row behind permanently.
             conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->

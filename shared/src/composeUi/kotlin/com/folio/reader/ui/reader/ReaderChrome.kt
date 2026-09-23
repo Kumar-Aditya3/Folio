@@ -1,7 +1,13 @@
 package com.folio.reader.ui.reader
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,21 +17,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.automirrored.filled.Toc
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Highlight
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Toc
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -39,11 +45,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.PageBlock
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.theme.FolioHaptic
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.rememberFolioHaptics
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 
@@ -161,10 +170,10 @@ internal fun ReaderTopBar(
                         }
                     }
                     IconButton(onClick = onOpenToc) {
-                        Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.AutoMirrored.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
                     }
                     IconButton(onClick = onOpenAnnotations) {
-                        Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                        Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
                     }
                 }
                 IconButton(onClick = onSearchClick) {
@@ -174,12 +183,30 @@ internal fun ReaderTopBar(
                         tint = FolioTheme.colors.onSurface
                     )
                 }
-                IconButton(onClick = onBookmarkClick) {
-                    Icon(
-                        imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                        contentDescription = "Bookmark",
-                        tint = if (isBookmarked) bookmarkColor else FolioTheme.colors.onSurface
-                    )
+                val bookmarkMotion = rememberMotionEnabled()
+                val bookmarkHaptics = rememberFolioHaptics()
+                IconButton(onClick = {
+                    bookmarkHaptics.play(FolioHaptic.Confirm)
+                    onBookmarkClick()
+                }) {
+                    AnimatedContent(
+                        targetState = isBookmarked,
+                        transitionSpec = {
+                            if (bookmarkMotion) {
+                                fadeIn(tween(FolioTokens.motionStandard.toInt())) togetherWith
+                                    fadeOut(tween(FolioTokens.motionStandard.toInt()))
+                            } else {
+                                EnterTransition.None togetherWith ExitTransition.None
+                            }
+                        },
+                        label = "bookmark-glyph",
+                    ) { bookmarked ->
+                        Icon(
+                            imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                            contentDescription = if (bookmarked) "Remove bookmark" else "Bookmark this spot",
+                            tint = if (bookmarked) bookmarkColor else FolioTheme.colors.onSurface
+                        )
+                    }
                 }
                 IconButton(onClick = onToggleReaderPanel) {
                     Icon(
@@ -214,7 +241,7 @@ internal fun ReaderFloatingRail(
         modifier = Modifier
             .padding(start = 12.dp)
             .width(56.dp)
-            .folioVeil(RoundedCornerShape(24.dp), fillAlpha = FolioTheme.readerVeilAlpha)
+            .folioVeil(FolioShapes.card, fillAlpha = FolioTheme.readerVeilAlpha)
             .padding(vertical = 12.dp)
     ) {
         Column(
@@ -263,19 +290,37 @@ internal fun ReaderFloatingRail(
                     )
                 }
             }
-            HorizontalDivider(modifier = Modifier.width(32.dp), color = FolioTheme.colors.onSurface.copy(alpha = 0.2f))
+            FolioRule(modifier = Modifier.width(32.dp))
             IconButton(onClick = onOpenToc) {
-                Icon(Icons.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
+                Icon(Icons.AutoMirrored.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
             }
             IconButton(onClick = onOpenAnnotations) {
-                Icon(Icons.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+                Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
             }
-            IconButton(onClick = onBookmarkClick) {
-                Icon(
-                    imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                    contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark this spot",
-                    tint = if (isBookmarked) bookmarkColor else FolioTheme.colors.onSurface
-                )
+            val bookmarkMotion = rememberMotionEnabled()
+            val bookmarkHaptics = rememberFolioHaptics()
+            IconButton(onClick = {
+                bookmarkHaptics.play(FolioHaptic.Confirm)
+                onBookmarkClick()
+            }) {
+                AnimatedContent(
+                    targetState = isBookmarked,
+                    transitionSpec = {
+                        if (bookmarkMotion) {
+                            fadeIn(tween(FolioTokens.motionStandard.toInt())) togetherWith
+                                fadeOut(tween(FolioTokens.motionStandard.toInt()))
+                        } else {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        }
+                    },
+                    label = "bookmark-glyph",
+                ) { bookmarked ->
+                    Icon(
+                        imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                        contentDescription = if (bookmarked) "Remove bookmark" else "Bookmark this spot",
+                        tint = if (bookmarked) bookmarkColor else FolioTheme.colors.onSurface
+                    )
+                }
             }
         }
     }
@@ -339,11 +384,12 @@ fun BottomPageBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .folioVeil(
-                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                FolioShapes.sheet,
                 fillAlpha = FolioTheme.readerVeilAlpha,
             )
-            .padding(horizontal = 14.dp)
+            .padding(horizontal = FolioTokens.space3)
     ) {
         PageBlock(
             fraction = fraction,
@@ -382,7 +428,7 @@ fun BottomPageBlock(
                     // "forward motion" accent (Rule 14) without competing with the page's ink.
                     Text(
                         text = pagesLeftLabel,
-                        style = FolioTheme.typography.labelMedium,
+                        style = FolioTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                         color = FolioTheme.colors.accentProgress,
                         maxLines = 1,
                         modifier = Modifier

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -51,8 +50,11 @@ import com.folio.reader.ui.components.rememberEntryProgress
 import com.folio.reader.ui.statistics.ChartBar
 import com.folio.reader.ui.statistics.intensityFor
 import com.folio.reader.ui.statistics.shortMinutes
+import com.folio.reader.ui.theme.FolioHaptic
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToLong
 import kotlinx.datetime.Clock
 import kotlinx.datetime.LocalDate
@@ -147,7 +149,7 @@ internal fun BookDescription(description: String) {
     }
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp)
+        shape = FolioShapes.inset
     ) {
         var expanded by remember { mutableStateOf(false) }
         Column(
@@ -184,6 +186,7 @@ private fun ReadingActionSection(
     onStartReading: () -> Unit
 ) {
     val hasStarted = book.normalizedProgress > 0.0
+    val haptics = rememberFolioHaptics()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -191,8 +194,13 @@ private fun ReadingActionSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Button(
-            onClick = onStartReading,
-            shape = RoundedCornerShape(26.dp),
+            onClick = {
+                // Entering the reader: the "it took" commit tick from the Living
+                // Paper vocabulary, played alongside the existing navigation.
+                haptics.play(FolioHaptic.Commit)
+                onStartReading()
+            },
+            shape = FolioShapes.pill,
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             Icon(

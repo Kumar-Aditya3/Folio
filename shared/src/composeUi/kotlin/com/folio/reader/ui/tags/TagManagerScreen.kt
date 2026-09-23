@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,9 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -30,8 +29,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Book
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Tag
+import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -187,76 +186,49 @@ fun TagManagerScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                com.folio.reader.ui.components.FolioStatusBarBand()
-                TopAppBar(
-                    windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-                    title = {
-                        when {
-                            selectedTagDetail != null -> {
-                                Column {
-                                    Text("Tag Details", fontWeight = FontWeight.Bold)
-                                    selectedTagDetail?.let { detail ->
-                                        Text(
-                                            detail.tag.name,
-                                            style = FolioTheme.typography.bodySmall,
-                                            color = FolioTheme.colors.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                            else -> Text("Tags", fontWeight = FontWeight.Bold)
+            val detail = selectedTagDetail
+            FolioTopBar(
+                title = if (detail != null) "Tag Details" else "Tags",
+                navigationIcon = {
+                    if (detail != null) {
+                        IconButton(onClick = {
+                            selectedTagId = null
+                            selectedTagDetail = null
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Back")
                         }
-                    },
-                    navigationIcon = {
-                        if (selectedTagDetail != null) {
-                            IconButton(onClick = {
-                                selectedTagId = null
-                                selectedTagDetail = null
-                            }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Back")
-                            }
-                        } else {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    },
-                    actions = {
-                        if (selectedTagDetail == null) {
-                            IconButton(onClick = { showCreateDialog = true }) {
-                                Icon(Icons.Filled.Add, contentDescription = "Create tag")
-                            }
-                        } else {
-                            selectedTagDetail?.tag?.let { tag ->
-                                IconButton(onClick = { showColorPickerFor = tag }) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .background(
-                                                tag.color?.let { Color(it) } ?: FolioTheme.colors.primary,
-                                                CircleShape
-                                            )
+                    }
+                },
+                actions = {
+                    if (detail == null) {
+                        IconButton(onClick = { showCreateDialog = true }) {
+                            Icon(Icons.Filled.Add, contentDescription = "Create tag")
+                        }
+                    } else {
+                        val tag = detail.tag
+                        IconButton(onClick = { showColorPickerFor = tag }) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(
+                                        tag.color?.let { Color(it) } ?: FolioTheme.colors.primary,
+                                        CircleShape
                                     )
-                                }
-                                IconButton(onClick = { showEditDialog = tag }) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "Rename")
-                                }
-                                IconButton(onClick = { showDeleteDialog = tag }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Delete")
-                                }
-                            }
+                            )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        // No fill: the same at-rest rule FolioTopBar follows. An opaque
-                        // surface here made the bar a grey lid over the page.
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent,
-                        titleContentColor = FolioTheme.colors.onSurface
-                    )
-                )
-            }
+                        IconButton(onClick = { showEditDialog = tag }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Rename")
+                        }
+                        IconButton(onClick = { showDeleteDialog = tag }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    }
+                }
+            )
         }
     ) { padding ->
         when {
@@ -357,13 +329,11 @@ private fun TagListView(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("No tags yet", style = FolioTheme.typography.headlineSmall)
-                Text(
-                    "Tap + to create your first tag",
-                    color = FolioTheme.colors.onSurfaceVariant
-                )
-            }
+            EmptyState(
+                icon = Icons.AutoMirrored.Outlined.Label,
+                headline = "No tags yet",
+                body = "Tap + to create your first tag"
+            )
         }
     } else {
         LazyColumn(
@@ -405,21 +375,13 @@ private fun TagListItem(
                 onLongClick = onLongClick
             ),
         leadingContent = {
+            // A clean colour disc is the tag's identity. The old inner square was a
+            // hardcoded Color.White@0.3 that read as a placeholder glitch on the disc.
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .background(tagColor, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .background(
-                            Color.White.copy(alpha = 0.3f),
-                            RoundedCornerShape(4.dp)
-                        )
-                )
-            }
+                    .background(tagColor, CircleShape)
+            )
         },
         headlineContent = {
             Text(

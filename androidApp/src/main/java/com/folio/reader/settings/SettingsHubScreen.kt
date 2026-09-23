@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
@@ -24,7 +25,6 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
@@ -202,7 +202,7 @@ fun SettingsHubScreen(
             item {
                 HubSection("Library tools", colors.accentAnnotation) {
                     HubRow(
-                        icon = Icons.Filled.Label,
+                        icon = Icons.AutoMirrored.Filled.Label,
                         title = "Tags",
                         subtitle = "Organise books with tags",
                         accent = colors.accentAnnotation,

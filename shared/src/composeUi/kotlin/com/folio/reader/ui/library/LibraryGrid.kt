@@ -26,10 +26,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -43,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -122,7 +121,7 @@ fun BookGrid(
     }
     LazyVerticalGrid(
         state = gridScroll,
-        columns = GridCells.Adaptive(minSize = 116.dp),
+        columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
         contentPadding = PaddingValues(
             start = FolioTokens.gutter,
             end = FolioTokens.gutter,
@@ -145,9 +144,10 @@ fun BookGrid(
                 )
             }
         }
-        items(rest) { book ->
+        items(rest, key = { it.id }) { book ->
             BookCard(
                 book = book,
+                modifier = Modifier.animateItem(),
                 isSelected = book.id in selectedBooks,
                 isSelectionMode = isSelectionMode,
                 onClick = { onBookClick(book) },
@@ -203,7 +203,7 @@ private fun FeaturedShelfEntry(
             modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
             width = FolioTokens.coverFeature,
             halo = accent,
-            elevation = 14.dp,
+            elevation = FolioTokens.elevationRaised,
             // The featured plate's neighbours are the eyebrow, title and author
             // below it, all of which stay put while the plate flies — so the
             // fallback's own copy of title/author would be a third and fourth
@@ -300,6 +300,7 @@ private fun FeaturedShelfEntry(
 @Composable
 fun BookCard(
     book: Book,
+    modifier: Modifier = Modifier,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -313,7 +314,7 @@ fun BookCard(
     var menuOpen by remember { mutableStateOf(false) }
     val pickupHaptics = rememberFolioHaptics()
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .folioPressable(interaction)
             .graphicsLayer { alpha = if (inProgress) 1f else 0.86f }
@@ -384,7 +385,7 @@ fun BookCard(
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
                             .height(3.dp)
-                            .background(Color.Black.copy(alpha = 0.35f))
+                            .background(colors.onSurface.copy(alpha = 0.15f))
                             .semantics {
                                 contentDescription = "${book.progressPercent}% read"
                             }
@@ -469,7 +470,7 @@ internal fun BookItemMenu(
         DropdownMenuItem(
             text = { Text("Book details") },
             leadingIcon = {
-                Icon(Icons.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
             },
             onClick = {
                 onDismissRequest()

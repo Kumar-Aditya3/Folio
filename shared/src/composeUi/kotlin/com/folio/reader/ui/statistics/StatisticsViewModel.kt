@@ -8,6 +8,7 @@ import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
 import com.folio.reader.model.Book
+import com.folio.reader.model.BookStatus
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
@@ -222,12 +223,14 @@ class StatisticsViewModel(
             sessionRepository.observeSessionsSince(
                 today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
             ),
-            bookRepository.getCurrentlyReading(),
-            bookRepository.getFinishedBooks(),
-            // §12.5 top books / genres resolve titles, covers and tags against
-            // the whole library, not just the reading/finished subsets.
+            // One library query: the reading/finished subsets are strict, order-preserving filters
+            // of it (both order by COALESCE(last_opened_at, added_at) DESC). Dropping the separate
+            // getCurrentlyReading/getFinishedBooks flows also keeps Statistics off progressRevision,
+            // so it no longer re-runs on every reading-progress tick.
             bookRepository.getAllBooks()
-        ) { sessions, inProgress, finished, books ->
+        ) { sessions, books ->
+            val inProgress = books.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED }
+            val finished = books.filter { it.status == BookStatus.FINISHED }
             buildState(localSessions(sessions, books), inProgress, finished, books)
         }
     } else {
@@ -235,13 +238,11 @@ class StatisticsViewModel(
             sessionRepository.observeSessionsSince(
                 today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
             ),
-            bookRepository.getCurrentlyReading(),
-            bookRepository.getFinishedBooks(),
-            // Exclusions can hit books absent from both lists above (abandoned,
-            // unread, deleted) — resolve against the whole library.
             bookRepository.getAllBooks(),
             statsExclusionRepository.observeExclusions()
-        ) { sessions, inProgress, finished, allBooks, exclusions ->
+        ) { sessions, allBooks, exclusions ->
+            val inProgress = allBooks.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED }
+            val finished = allBooks.filter { it.status == BookStatus.FINISHED }
             val scope = StatsScope(exclusions)
             val excluded = excludedBookIds(allBooks, scope)
             // Direct BOOK rows also cover sessions whose book row is gone
@@ -365,31 +366,22 @@ class StatisticsViewModel(
         val excluded = HashSet<String>()
         val resolveTags = scope.hasRules(Scope.BOOK_TAG)
         val resolveCollections = scope.hasRules(Scope.BOOK_COLLECTION)
-        if (!resolveTags && !resolveCollections) {
-            for (book in books) {
-                if (!scope.includesBook(book.id, emptySet(), emptySet(), book.seriesId, book.status)) {
-                    excluded.add(book.id)
-                }
+        // Batch the group memberships once (a single scan of book_tags / book_collections) instead
+        // of two repository round-trips per book, which was the slow step on a large library.
+        val tagsByBook: Map<String, Set<String>> = if (resolveTags) {
+            val byBook = HashMap<String, MutableSet<String>>()
+            tagRepository?.getBookTagLinks()?.forEach { (tagId, bookIds) ->
+                bookIds.forEach { b -> byBook.getOrPut(b) { HashSet() }.add(tagId) }
             }
-            return excluded
+            byBook
+        } else {
+            emptyMap()
         }
-        val tagCache = HashMap<String, Set<String>>()
-        val collectionCache = HashMap<String, Set<String>>()
+        val collectionsByBook: Map<String, Set<String>> =
+            if (resolveCollections) collectionRepository?.getBookCollectionLinks().orEmpty() else emptyMap()
         for (book in books) {
-            val tagIds = if (resolveTags) {
-                tagCache.getOrPut(book.id) {
-                    tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
-                }
-            } else {
-                emptySet()
-            }
-            val collectionIds = if (resolveCollections) {
-                collectionCache.getOrPut(book.id) {
-                    collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
-                }
-            } else {
-                emptySet()
-            }
+            val tagIds = if (resolveTags) tagsByBook[book.id].orEmpty() else emptySet()
+            val collectionIds = if (resolveCollections) collectionsByBook[book.id].orEmpty() else emptySet()
             if (!scope.includesBook(book.id, tagIds, collectionIds, book.seriesId, book.status)) {
                 excluded.add(book.id)
             }
@@ -554,13 +546,16 @@ class StatisticsViewModel(
         val genres = if (tagRepository == null) {
             emptyList()
         } else {
-            val tagNamesByBook = HashMap<String, List<String>>()
+            // Two batched scans (tag names + book→tag links) instead of getTagsForBook per book.
+            val tagNameById = tagRepository.getAllTags().first().associate { it.id to it.name }
+            val tagIdsByBook = HashMap<String, MutableSet<String>>()
+            tagRepository.getBookTagLinks().forEach { (tagId, bookIds) ->
+                bookIds.forEach { b -> tagIdsByBook.getOrPut(b) { HashSet() }.add(tagId) }
+            }
             val minutesByTag = LinkedHashMap<String, Long>()
             for ((bookId, minutes) in minutesByBook) {
                 if (minutes <= 0L) continue
-                val names = tagNamesByBook.getOrPut(bookId) {
-                    tagRepository.getTagsForBook(bookId).map { it.name }
-                }
+                val names = tagIdsByBook[bookId]?.mapNotNull { tagNameById[it] }.orEmpty()
                 for (name in names) {
                     minutesByTag[name] = (minutesByTag[name] ?: 0L) + minutes
                 }

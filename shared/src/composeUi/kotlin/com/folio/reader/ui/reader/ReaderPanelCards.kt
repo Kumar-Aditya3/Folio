@@ -2,7 +2,6 @@ package com.folio.reader.ui.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,15 +11,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,22 +73,36 @@ internal fun QuickChoiceRow(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(
-                            if (isSel) selectedFill else FolioTheme.colors.surfaceVariant
+                        // Selection is spoken as a radio choice, not inferred from the
+                        // fill colour alone, and the pill keeps its compact look while
+                        // reserving a >=48dp thumb target.
+                        .selectable(
+                            selected = isSel,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(value) }
                         )
-                        .clickable { onSelect(value) }
-                        .padding(vertical = 9.dp),
+                        .minimumInteractiveComponentSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = title,
-                        style = FolioTheme.typography.labelMedium,
-                        color = if (isSel) selectedLabel else FolioTheme.colors.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(
+                                if (isSel) selectedFill else FolioTheme.colors.surfaceVariant
+                            )
+                            .padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = title,
+                            style = FolioTheme.typography.labelMedium,
+                            color = if (isSel) selectedLabel else FolioTheme.colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
@@ -114,6 +134,9 @@ internal fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: 
                 color = if (selected) ring else FolioTheme.colors.outline,
                 shape = RoundedCornerShape(12.dp)
             )
+            // Selection is announced to a screen reader rather than left to the
+            // 1dp/2dp border difference.
+            .semantics { this.selected = selected }
             .padding(horizontal = 12.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -150,6 +173,17 @@ internal fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: 
                 .size(width = 6.dp, height = 34.dp)
                 .background(Color(theme.progress), RoundedCornerShape(3.dp))
         )
+        // A width-independent selection cue: a check sits beside the swatch when
+        // this theme is the active one, so selection isn't carried by border
+        // thickness alone.
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = ring,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 

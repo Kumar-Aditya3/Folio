@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.map
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.sql.Connection
-import java.sql.PreparedStatement
 
 /**
  * JDBC implementation of [ChunkRepository], shared by Android and desktop.
@@ -284,6 +283,65 @@ class JdbcChunkRepository(private val db: Database) : ChunkRepository {
             }
         }
 
+    override suspend fun countVectors(modelId: String, dims: Int, bookId: String?): Int =
+        db.withConnection { conn ->
+            val bookScope = if (bookId != null) " AND c.book_id = ?" else ""
+            conn.prepareStatement(
+                """
+                SELECT COUNT(*)
+                FROM chapter_chunks c
+                JOIN chapter_vectors v ON v.chunk_id = c.id AND v.model_id = c.model_id
+                WHERE c.model_id = ? AND v.dims = ?$bookScope
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, modelId)
+                stmt.setInt(2, dims)
+                if (bookId != null) stmt.setString(3, bookId)
+                stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+            }
+        }
+
+    override suspend fun forEachVectorMetadata(
+        modelId: String,
+        dims: Int,
+        bookId: String?,
+        action: (ChunkMeta, FloatArray) -> Unit,
+    ) {
+        db.withConnection { conn ->
+            val bookScope = if (bookId != null) " AND c.book_id = ?" else ""
+            conn.prepareStatement(
+                """
+                SELECT c.id, c.book_id, c.chapter_id, c.spine_index,
+                       c.char_start, c.char_end, v.vector, v.dims
+                FROM chapter_chunks c
+                JOIN chapter_vectors v ON v.chunk_id = c.id AND v.model_id = c.model_id
+                WHERE c.model_id = ? AND v.dims = ?$bookScope
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, modelId)
+                stmt.setInt(2, dims)
+                if (bookId != null) stmt.setString(3, bookId)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        val blob = rs.getBytes("vector") ?: continue
+                        if (blob.size != dims * FLOAT_BYTES) continue
+                        action(
+                            ChunkMeta(
+                                id = rs.getString("id"),
+                                bookId = rs.getString("book_id"),
+                                chapterId = rs.getString("chapter_id"),
+                                spineIndex = rs.getInt("spine_index"),
+                                charStart = rs.getInt("char_start"),
+                                charEnd = rs.getInt("char_end"),
+                            ),
+                            decodeVector(blob, dims),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun loadVectorMetadataSampled(
         modelId: String,
         dims: Int,
@@ -548,10 +606,6 @@ class JdbcChunkRepository(private val db: Database) : ChunkRepository {
             if (arg != null) stmt.setString(1, arg)
             stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
         }
-
-    private fun PreparedStatement.setIntOrNull(index: Int, value: Int?) {
-        if (value == null) setNull(index, java.sql.Types.INTEGER) else setInt(index, value)
-    }
 
     companion object {
         private const val FLOAT_BYTES = 4

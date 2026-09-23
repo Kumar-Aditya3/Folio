@@ -334,7 +334,7 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
     override suspend fun markRead(chapterIds: List<String>, read: Boolean, emitSyncEvent: Boolean) {
         if (chapterIds.isEmpty()) return
         val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             val placeholders = chapterIds.joinToString(",") { "?" }
             // Unread restores never-read semantics: clear the saved page position too,
             // so badges, library progress and resume all treat the chapter as unseen.
@@ -350,14 +350,21 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                 stmt.executeUpdate()
             }
             if (read) {
-                chapterIds.forEach { cid ->
-                    conn.prepareStatement("SELECT manga_id, name FROM manga_chapters WHERE id = ?").use { q ->
-                        q.setString(1, cid)
-                        q.executeQuery().use { rs ->
-                            if (rs.next()) upsertHistoryRow(conn, rs.getString("manga_id"), rs.getString("name"))
+                // One query for every chapter's manga/name, then one history upsert per manga
+                // (last chapter in the list wins, as the per-chapter loop did) — not a SELECT +
+                // upsert per chapter.
+                val infoById = HashMap<String, Pair<String, String>>()
+                conn.prepareStatement("SELECT id, manga_id, name FROM manga_chapters WHERE id IN ($placeholders)").use { q ->
+                    chapterIds.forEachIndexed { i, id -> q.setString(i + 1, id) }
+                    q.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            infoById[rs.getString("id")] = rs.getString("manga_id") to rs.getString("name")
                         }
                     }
                 }
+                val lastByManga = LinkedHashMap<String, String>()
+                for (cid in chapterIds) infoById[cid]?.let { (mangaId, name) -> lastByManga[mangaId] = name }
+                for ((mangaId, name) in lastByManga) upsertHistoryRow(conn, mangaId, name)
             }
         }
         if (emitSyncEvent) chapterIds.forEach { emitChapterEvent(it) }
@@ -401,7 +408,7 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
         emitSyncEvent: Boolean,
         totalPages: Int,
     ) {
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             conn.prepareStatement(
                 "UPDATE manga_chapters SET read = ?, bookmarked = ?, last_page_read = ?, total_pages = ?, updated_at = ? WHERE id = ?"
             ).use {
@@ -530,9 +537,39 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
             }
         }
 
+    // Unread / progress / downloaded in one scan; the library view model derives the three maps
+    // from this so a page turn re-runs one whole-table GROUP BY instead of three.
+    override fun observeChapterAggregates(): Flow<Map<String, com.folio.reader.manga.MangaChapterAggregate>> =
+        db.mangaDataRevision.map {
+            db.withConnection { conn ->
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery(
+                        "SELECT manga_id, " +
+                            "SUM(CASE WHEN read = 0 THEN 1 ELSE 0 END) AS unread, " +
+                            "COUNT(*) AS total, " +
+                            "SUM(CASE WHEN read = 1 THEN 1 ELSE 0 END) AS readCount, " +
+                            "SUM(CASE WHEN downloaded_pages > 0 THEN 1 ELSE 0 END) AS downloaded " +
+                            "FROM manga_chapters GROUP BY manga_id"
+                    ).use { rs ->
+                        val map = mutableMapOf<String, com.folio.reader.manga.MangaChapterAggregate>()
+                        while (rs.next()) {
+                            val total = rs.getInt("total")
+                            val frac = if (total > 0) rs.getInt("readCount").toFloat() / total else 0f
+                            map[rs.getString("manga_id")] = com.folio.reader.manga.MangaChapterAggregate(
+                                unread = rs.getInt("unread"),
+                                progress = frac,
+                                downloaded = rs.getInt("downloaded"),
+                            )
+                        }
+                        map
+                    }
+                }
+            }
+        }
+
     override suspend fun markAllReadForManga(mangaId: String, read: Boolean) {
         val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-        db.withConnection { conn ->
+        db.withTransaction { conn ->
             val sql = if (read) {
                 "UPDATE manga_chapters SET read = ?, updated_at = ? WHERE manga_id = ?"
             } else {
@@ -1400,16 +1437,29 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         val week = MutableList(7) { 0 }
         val labels = MutableList(7) { "" }
         val fmt = java.time.format.DateTimeFormatter.ofPattern("E")
+        val today = java.time.LocalDate.now()
+        // One ranged GROUP BY over the last 7 days instead of rebuilding a prepared statement and
+        // running a non-indexable date() scan seven times.
+        val dayIndex = HashMap<String, Int>()
         for (i in 0 until 7) {
-            val day = java.time.LocalDate.now().minusDays(6 - i.toLong())
+            val day = today.minusDays(6 - i.toLong())
             labels[i] = day.format(fmt)
-            conn.prepareStatement(
-                "SELECT COUNT(*) FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
-                    "WHERE c.read = 1 AND date(c.updated_at/1000,'unixepoch','localtime') = ?" + notIn("c.manga_id")
-            ).use { st ->
-                st.setString(1, day.toString())
-                bindExclusions(st, 2)
-                st.executeQuery().use { rs -> if (rs.next()) week[i] = rs.getInt(1) }
+            dayIndex[day.toString()] = i
+        }
+        val earliest = today.minusDays(6).toString()
+        conn.prepareStatement(
+            "SELECT date(c.updated_at/1000,'unixepoch','localtime') AS d, COUNT(*) AS cnt " +
+                "FROM manga_chapters c JOIN manga_library m ON c.manga_id = m.id AND m.favorite = 1 " +
+                "WHERE c.read = 1 AND date(c.updated_at/1000,'unixepoch','localtime') >= ?" + notIn("c.manga_id") +
+                " GROUP BY d"
+        ).use { st ->
+            st.setString(1, earliest)
+            bindExclusions(st, 2)
+            st.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val idx = dayIndex[rs.getString(1)]
+                    if (idx != null) week[idx] = rs.getInt(2)
+                }
             }
         }
         val top = mutableListOf<com.folio.reader.manga.MangaTopEntry>()
@@ -1546,6 +1596,9 @@ object MangaSchema {
             )
             """.trimIndent()
         )
+        // Reverse lookup by category_id (mangaIdsInCategory) was a full scan; the PK only covers
+        // the manga_id-first direction.
+        exec("CREATE INDEX IF NOT EXISTS idx_manga_category_map_category ON manga_category_map (category_id, manga_id)")
         exec(
             """
             CREATE TABLE IF NOT EXISTS manga_history (

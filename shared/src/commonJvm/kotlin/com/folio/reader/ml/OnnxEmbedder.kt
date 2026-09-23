@@ -43,10 +43,6 @@ class OnnxEmbedder(
     var sessionInitMillis: Long = -1
         private set
 
-    /** Number of forward passes run, so a benchmark can warm up before it measures. */
-    var runCount: Int = 0
-        private set
-
     /**
      * Runs on [MlDispatchers.inference] unconditionally, rather than trusting the caller.
      *
@@ -82,7 +78,6 @@ class OnnxEmbedder(
                 batchSize = batch.batchSize,
                 seqLength = batch.sequenceLength,
             )
-            runCount++
 
             val pooled = if (output.isPooled) {
                 // Export already pooled: copy each row out so callers cannot alias the buffer.
@@ -101,10 +96,6 @@ class OnnxEmbedder(
             pooled.forEach { it.l2Normalize() }
             pooled
         }
-
-    /** One-shot convenience. The caller still owns the lifecycle — this does not close anything. */
-    suspend fun embedOne(text: String, kind: EmbedKind = EmbedKind.PASSAGE): FloatArray =
-        embed(listOf(text), kind).first()
 
     private fun ensureSession(): OnnxModel {
         session?.let { return it }

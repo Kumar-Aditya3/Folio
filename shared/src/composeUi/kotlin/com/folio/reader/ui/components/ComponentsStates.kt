@@ -1,6 +1,7 @@
 package com.folio.reader.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -33,7 +35,7 @@ fun ProgressRing(
     // a lazy-list item scrolled away and back does not replay it. Live progress
     // changes draw through immediately once the entry has played.
     val entry = rememberEntryProgress()
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.progressSemantics(progress.coerceIn(0f, 1f))) {
         val strokePx = strokeWidth.dp.toPx()
         val diameter = minOf(size.width, size.height) - strokePx
         val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
@@ -85,8 +87,18 @@ fun EmptyState(
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null
 ) {
+    // A blank state should feel intentional, not unfinished: a gentle one-shot
+    // fade + rise on first composition (draw-phase, and instant under reduce-motion
+    // via rememberEntryState).
+    val reveal = rememberEntryState(headline)
     Column(
-        modifier = modifier.fillMaxWidth().padding(32.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = reveal.value
+                translationY = (1f - reveal.value) * 8.dp.toPx()
+            }
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
     ) {
@@ -98,7 +110,7 @@ fun EmptyState(
         )
         Text(
             headline,
-            style = MaterialTheme.typography.titleMedium,
+            style = com.folio.reader.ui.theme.FolioTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )

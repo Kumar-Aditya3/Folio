@@ -28,10 +28,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,6 +58,14 @@ import kotlin.math.abs
 private const val PDF_CACHE_BYTES = 96L * 1024L * 1024L
 private const val MAX_RENDER_DIMENSION = 8192
 private const val MAX_RENDER_PIXELS = 16_777_216L
+
+/**
+ * The reader theme's paper colour, provided by [DocumentReaderScreen] so a fixed
+ * page's ground follows the reading theme (like the foxing and page block do)
+ * rather than the app palette. Null when no reader theme is in scope, in which
+ * case the app `surfaceVariant` is used as before.
+ */
+internal val LocalReaderPaper = staticCompositionLocalOf<Color?> { null }
 
 @Composable
 internal fun FixedPageSurfaceImpl(
@@ -356,7 +366,7 @@ private fun RenderedPdfPage(
 
     Box(
         modifier = modifier
-            .background(FolioTheme.colors.surfaceVariant)
+            .background(LocalReaderPaper.current ?: FolioTheme.colors.surfaceVariant)
             .padding(12.dp)
             .clip(FolioShapes.inset)
             .onSizeChanged { viewportSize = it }

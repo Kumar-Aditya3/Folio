@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -172,7 +173,6 @@ fun BookDetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 item {
                     BookHeaderSection(
@@ -208,13 +208,18 @@ fun BookDetailScreen(
                 // is not indexed yet", which is a sentence, not a chip.
                 if (tagSuggestions.isVisible) {
                     item {
-                        Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-                            TagSuggestionPanel(
-                                state = tagSuggestions,
-                                onApply = viewModel::applySuggestion,
-                                onApplyConfident = viewModel::applyConfidentSuggestions,
-                                onDismiss = viewModel::dismissSuggestions,
-                            )
+                        // A distinct proposal block after the header — a change of
+                        // section kind, so the full movement gap leads it.
+                        Column {
+                            Spacer(Modifier.height(FolioTokens.spaceMovement))
+                            Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+                                TagSuggestionPanel(
+                                    state = tagSuggestions,
+                                    onApply = viewModel::applySuggestion,
+                                    onApplyConfident = viewModel::applyConfidentSuggestions,
+                                    onDismiss = viewModel::dismissSuggestions,
+                                )
+                            }
                         }
                     }
                 }
@@ -223,30 +228,52 @@ fun BookDetailScreen(
                     // The card carries the page's side margin like every other block
                     // here; without it the panel ran under both screen edges and its
                     // rim was clipped away.
-                    Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-                        BookReadingSection(
-                            sessions = sessions,
-                            highlights = highlights,
-                            totalWords = b.totalWords,
-                            progress = b.normalizedProgress,
-                        )
+                    //
+                    // Header/proposal → reading card is a change of section kind, so
+                    // the movement gap (36dp) leads this block.
+                    Column {
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                        Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+                            BookReadingSection(
+                                sessions = sessions,
+                                highlights = highlights,
+                                totalWords = b.totalWords,
+                                progress = b.normalizedProgress,
+                            )
+                        }
                     }
                 }
 
                 if (b.cloudState != CloudState.LOCAL_ONLY) {
                     item {
-                        CloudStatusSection(cloudState = b.cloudState)
+                        // Opens the status/stats grouping — a change of kind from the
+                        // reading card above.
+                        Column {
+                            Spacer(Modifier.height(FolioTokens.spaceMovement))
+                            CloudStatusSection(cloudState = b.cloudState)
+                        }
                     }
                 }
 
                 item {
-                    StatsRow(
-                        sessionsCount = sessions.size,
-                        wordsRead = sessions.sumOf { it.wordsRead },
-                        highlightsCount = highlights.size,
-                        bookmarksCount = bookmarks.size,
-                        notesCount = notes.size
-                    )
+                    // A related line when the cloud-status line precedes it (beat, 20dp);
+                    // otherwise the reading card is directly above, a change of kind
+                    // (movement, 36dp).
+                    val statsLeadingGap = if (b.cloudState != CloudState.LOCAL_ONLY) {
+                        FolioTokens.spaceBeat
+                    } else {
+                        FolioTokens.spaceMovement
+                    }
+                    Column {
+                        Spacer(Modifier.height(statsLeadingGap))
+                        StatsRow(
+                            sessionsCount = sessions.size,
+                            wordsRead = sessions.sumOf { it.wordsRead },
+                            highlightsCount = highlights.size,
+                            bookmarksCount = bookmarks.size,
+                            notesCount = notes.size
+                        )
+                    }
                 }
 
                 // Removed ReadingActionSection - just tap cover to read
@@ -267,6 +294,7 @@ private fun FloatingIconButton(
 ) {
     Box(
         modifier = Modifier
+            .minimumInteractiveComponentSize()
             .size(38.dp)
             .clip(CircleShape)
             .background(FolioTheme.colors.surface.copy(alpha = 0.42f))
@@ -286,7 +314,7 @@ private fun CloudStatusSection(cloudState: CloudState) {
         CloudState.DOWNLOADING, CloudState.DOWNLOADING_PROGRESS -> "Downloading from cloud…" to FolioTheme.colors.secondary
         CloudState.REMOTE_ONLY -> "Available in cloud (not on this device)" to FolioTheme.colors.secondary
         CloudState.LOCAL_ONLY -> "On this device only" to FolioTheme.colors.secondary
-        CloudState.SYNC_ERROR -> "Cloud backup failed — try again" to MaterialTheme.colorScheme.error
+        CloudState.SYNC_ERROR -> "Cloud backup failed — try again" to FolioTheme.colors.error
     }
 
     Row(

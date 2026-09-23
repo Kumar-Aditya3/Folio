@@ -139,13 +139,22 @@ class HomeStatsScopeTest {
         override suspend fun ensureSeeded() {}
     }
 
-    /** Counts group lookups — the N+1 the §11.2 fast path exists to avoid. */
-    private class CountingTagRepo(private val tags: List<Tag> = emptyList()) : EmptyTagRepo() {
+    /** Counts group lookups — the per-book query the §11.2 batch path replaces. */
+    private class CountingTagRepo(
+        private val tags: List<Tag> = emptyList(),
+        private val links: Map<String, Set<String>> = emptyMap(),
+    ) : EmptyTagRepo() {
         var calls = 0
+            private set
+        var linkCalls = 0
             private set
         override suspend fun getTagsForBook(bookId: String): List<Tag> {
             calls++
             return tags
+        }
+        override suspend fun getBookTagLinks(): Map<String, Set<String>> {
+            linkCalls++
+            return links
         }
     }
 
@@ -384,8 +393,11 @@ class HomeStatsScopeTest {
     }
 
     @Test
-    fun `a tag rule resolves groups per book as before`() = runBlocking {
-        val tagRepo = CountingTagRepo(listOf(Tag("t-dnf", "Did not finish")))
+    fun `a tag rule resolves groups from the batched links query`() = runBlocking {
+        val tagRepo = CountingTagRepo(
+            tags = listOf(Tag("t-dnf", "Did not finish")),
+            links = mapOf("t-dnf" to setOf("a", "b", "c")),
+        )
         val exclusions = FakeExclusionRepo().apply { add(Scope.BOOK_TAG, "t-dnf") }
         val state = HomeViewModel(
             bookRepository = FakeBookRepo(listOf(book("a"), book("b"), book("c"))),
@@ -395,7 +407,8 @@ class HomeStatsScopeTest {
             collectionRepository = CountingCollectionRepo()
         ).state.first()
 
-        assertEquals(3, tagRepo.calls, "every book's tags must resolve under a BOOK_TAG rule")
+        assertEquals(0, tagRepo.calls, "the batched links query replaces the per-book tag query")
+        assertTrue(tagRepo.linkCalls >= 1, "book→tag links must resolve under a BOOK_TAG rule")
         assertNull(state.hero, "every book carries the excluded tag, so none may be the hero")
     }
 }

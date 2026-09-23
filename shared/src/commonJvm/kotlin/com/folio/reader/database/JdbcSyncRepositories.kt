@@ -97,8 +97,13 @@ class JdbcSyncQueueRepository(private val db: Database) : SyncRepository {
 
     override suspend fun markSynced(id: String) {
         db.withConnection { conn ->
-            conn.prepareStatement("DELETE FROM sync_queue WHERE id = ?").use { stmt ->
+            // Delete only if still SYNCING. An edit made during the in-flight push re-enqueues the
+            // same id via INSERT OR REPLACE, resetting it to PENDING with the new payload; a blind
+            // delete-by-id would drop that fresh edit. The conditional delete no-ops instead, so the
+            // newer payload survives and re-pushes next cycle.
+            conn.prepareStatement("DELETE FROM sync_queue WHERE id = ? AND status = ?").use { stmt ->
                 stmt.setString(1, id)
+                stmt.setInt(2, SyncStatus.SYNCING.value)
                 stmt.executeUpdate()
             }
         }

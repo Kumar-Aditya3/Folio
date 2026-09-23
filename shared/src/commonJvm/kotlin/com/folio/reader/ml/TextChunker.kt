@@ -60,6 +60,29 @@ object TextChunker {
     private class Word(val start: Int, val end: Int)
 
     /**
+     * One [MessageDigest] per thread, reused across chunks. Chunking runs tens of thousands of
+     * times over a full backfill, and `MessageDigest.getInstance("SHA-256")` is a provider
+     * lookup each time; a thread-local instance turns that into a single lookup per worker.
+     * `digest()` fully resets the instance, and we `reset()` defensively before each use, so
+     * reuse is safe within a thread.
+     */
+    private val digestLocal: ThreadLocal<MessageDigest> =
+        ThreadLocal.withInitial { MessageDigest.getInstance("SHA-256") }
+
+    private val HEX = "0123456789abcdef".toCharArray()
+
+    private fun sha256Digest(): MessageDigest = digestLocal.get().apply { reset() }
+
+    /** Lowercase hex of the first [count] bytes, matching the old `"%02x".format` output exactly. */
+    private fun appendHex(sb: StringBuilder, bytes: ByteArray, count: Int) {
+        for (i in 0 until count) {
+            val v = bytes[i].toInt() and 0xff
+            sb.append(HEX[v ushr 4])
+            sb.append(HEX[v and 0x0f])
+        }
+    }
+
+    /**
      * @param text chapter plain text
      * @param bookId owning book
      * @param chapterId owning chapter
@@ -189,7 +212,7 @@ object TextChunker {
      * the offset keeps chunks distinct even when two windows happen to share their text.
      */
     fun chunkId(bookId: String, chapterId: String, charStart: Int, contentHash: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+        val digest = sha256Digest()
         digest.update(bookId.toByteArray(Charsets.UTF_8))
         digest.update(0)
         digest.update(chapterId.toByteArray(Charsets.UTF_8))
@@ -199,12 +222,14 @@ object TextChunker {
         digest.update(contentHash.toByteArray(Charsets.UTF_8))
         val bytes = digest.digest()
         val sb = StringBuilder(32)
-        for (i in 0 until 16) sb.append("%02x".format(bytes[i]))
+        appendHex(sb, bytes, 16)
         return sb.toString()
     }
 
     fun sha256(text: String): String {
-        val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
-        return buildString(64) { for (b in bytes) append("%02x".format(b)) }
+        val bytes = sha256Digest().digest(text.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder(64)
+        appendHex(sb, bytes, bytes.size)
+        return sb.toString()
     }
 }

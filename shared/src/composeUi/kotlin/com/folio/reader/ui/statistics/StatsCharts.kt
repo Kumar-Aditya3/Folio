@@ -1,8 +1,6 @@
 package com.folio.reader.ui.statistics
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,16 +28,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioChip
@@ -207,12 +206,25 @@ internal fun ActivityHeatmap(
                 )
                 return@Column
             }
-            val peak = (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
+            val peak = remember(days) { (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L) }
             val cellAccent = FolioTheme.colors.accentProgress
-            val weeks = days.chunked(7)
-            // The tapped day, if any. Keyed on `mode` so switching All/Books/Manga
-            // clears a stale selection rather than pointing at a cell that moved.
-            var selected by remember(mode) { mutableStateOf<StatDay?>(null) }
+            // Up to 365 cells → 52 week sublists; memoize so a mode toggle / entry animation / parent
+            // scroll doesn't re-scan and re-chunk the whole year every recomposition.
+            val weeks = remember(days) { days.chunked(7) }
+            // A single spoken summary stands in for 365 individually-tappable
+            // cells. 13dp is far below a usable touch target, so the per-cell tap
+            // is gone (Rule 17) and the year reads through this description on the
+            // grid instead — built from the same days the cells are tinted from.
+            val activeDays = days.count { it.minutes > 0L }
+            val totalMinutes = days.sumOf { it.minutes }
+            val busiest = days.maxByOrNull { it.minutes }?.takeIf { it.minutes > 0L }
+            val heatmapSummary = buildString {
+                append("Reading activity, ")
+                append("${days.first().date.shortLabel()} to ${days.last().date.shortLabel()}. ")
+                append("$activeDays active ${if (activeDays == 1) "day" else "days"}, ")
+                append("${shortMinutes(totalMinutes)} total.")
+                if (busiest != null) append(" Busiest ${heatmapDayDetail(busiest)}.")
+            }
             // GitHub orientation: one column per week, most recent on the right;
             // even 4dp gutters on both axes so cells never chain into a wall. At a
             // full year the grid overflows a phone, so it scrolls and lands on the
@@ -260,11 +272,15 @@ internal fun ActivityHeatmap(
                     }
                     Spacer(Modifier.height(colGap))
                     Column(
-                        modifier = Modifier.graphicsLayer {
-                            val p = gridEntry.value
-                            scaleX = p
-                            scaleY = p
-                        },
+                        modifier = Modifier
+                            .graphicsLayer {
+                                val p = gridEntry.value
+                                scaleX = p
+                                scaleY = p
+                            }
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = heatmapSummary
+                            },
                         verticalArrangement = Arrangement.spacedBy(colGap)
                     ) {
                         (0..6).forEach { index ->
@@ -276,8 +292,6 @@ internal fun ActivityHeatmap(
                                         peak = peak,
                                         size = cell,
                                         accent = cellAccent,
-                                        selected = day != null && day == selected,
-                                        onClick = { selected = day },
                                     )
                                 }
                             }
@@ -290,14 +304,13 @@ internal fun ActivityHeatmap(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // The tooltip line: a tapped day states its date and minutes here,
-                // in place of the range, so the detail never floats over the grid.
+                // The range this grid spans. Per-cell selection is gone — the
+                // cells are far too small to tap — so the spoken grid summary
+                // carries the day-level detail for assistive tech instead.
                 Text(
-                    text = selected?.let { heatmapDayDetail(it) }
-                        ?: "${days.first().date.shortLabel()} – ${days.last().date.shortLabel()}",
-                    style = FolioTheme.typography.bodySmall,
-                    color = if (selected != null) FolioTheme.colors.onSurface
-                        else FolioTheme.colors.onSurfaceVariant,
+                    text = "${days.first().date.shortLabel()} – ${days.last().date.shortLabel()}",
+                    style = FolioTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                    color = FolioTheme.colors.onSurfaceVariant,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Row(
@@ -344,6 +357,15 @@ internal fun ReadingFingerprint(
     val spoke = colors.accentProgress
     val peakSpoke = colors.accentStreak
     val entry = rememberEntryState(hourTotals)
+    // Spoken form of the radial clock, built from the same buckets it draws, so
+    // the fingerprint is not a silent Canvas to a screen reader (Rule 17).
+    val activeHours = hourTotals.count { it > 0L }
+    val fingerprintDesc = buildString {
+        append("Reading fingerprint, a 24-hour radial clock.")
+        if (chronotype.isNotBlank()) append(" $chronotype.")
+        if (mostReadHour.isNotBlank()) append(" Busiest hour $mostReadHour.")
+        append(" Active in $activeHours of 24 hours.")
+    }
 
     Column(
         modifier = Modifier
@@ -360,57 +382,81 @@ internal fun ReadingFingerprint(
                 .align(Alignment.CenterHorizontally),
             contentAlignment = Alignment.Center,
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                val outer = min(size.width, size.height) / 2f
-                val hub = outer * 0.30f          // inner clear zone for the label
-                val span = outer * 0.94f - hub    // spoke travel
-                val grow = entry.value
-
-                // Two faint guide rings: the hub edge and the full-day maximum, so
-                // an empty rhythm still reads as a clock rather than a blank disc.
-                drawCircle(color = ring, radius = hub, center = center, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
-                drawCircle(color = ring, radius = hub + span, center = center, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
-
-                val n = 24
-                val strokePx = (2f * PI.toFloat() * (hub + span) / n) * 0.5f
-                for (hour in 0 until n) {
-                    // Midnight at the top (−90°), clockwise like a clock face.
-                    val angle = (-PI / 2.0) + (hour * 2.0 * PI / n)
-                    val ux = cos(angle).toFloat()
-                    val uy = sin(angle).toFloat()
-                    val minutes = hourTotals.getOrElse(hour) { 0L }
-                    val frac = if (peak > 0L) minutes.toFloat() / peak else 0f
-                    val start = Offset(center.x + ux * hub, center.y + uy * hub)
-                    if (frac <= 0f) {
-                        // A silent hour keeps its tick: a stub at the hub.
-                        val stub = Offset(center.x + ux * (hub + 2.dp.toPx()), center.y + uy * (hub + 2.dp.toPx()))
-                        drawLine(color = ring, start = start, end = stub, strokeWidth = strokePx, cap = StrokeCap.Round)
-                    } else {
-                        val len = span * frac * grow
-                        val end = Offset(center.x + ux * (hub + len), center.y + uy * (hub + len))
-                        val isPeak = hour == peakIndex
-                        val hue = if (isPeak) peakSpoke else spoke
-                        drawLine(
-                            brush = Brush.linearGradient(
-                                colors = listOf(hue.copy(alpha = FolioTokens.gradientMinAlpha), hue),
-                                start = start,
-                                end = end,
-                            ),
-                            start = start,
-                            end = end,
-                            strokeWidth = if (isPeak) strokePx * 1.15f else strokePx,
-                            cap = StrokeCap.Round,
-                        )
+            Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics { contentDescription = fingerprintDesc }
+                    .drawWithCache {
+                        // Geometry that doesn't depend on the animated `grow` (center, radii, the
+                        // 24 unit vectors and their hub start/stub points, the guide-ring stroke) is
+                        // built once per size change; only the spoke length + its moving gradient
+                        // read `grow` in onDrawBehind. Was 24 cos/sin + Offset allocs every frame.
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val outer = min(size.width, size.height) / 2f
+                        val hub = outer * 0.30f
+                        val span = outer * 0.94f - hub
+                        val n = 24
+                        val strokePx = (2f * PI.toFloat() * (hub + span) / n) * 0.5f
+                        val ringStroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                        val stubPx = 2.dp.toPx()
+                        val ux = FloatArray(n)
+                        val uy = FloatArray(n)
+                        val fracs = FloatArray(n)
+                        val starts = arrayOfNulls<Offset>(n)
+                        val stubs = arrayOfNulls<Offset>(n)
+                        for (hour in 0 until n) {
+                            // Midnight at the top (−90°), clockwise like a clock face.
+                            val angle = (-PI / 2.0) + (hour * 2.0 * PI / n)
+                            val vx = cos(angle).toFloat()
+                            val vy = sin(angle).toFloat()
+                            ux[hour] = vx
+                            uy[hour] = vy
+                            val minutes = hourTotals.getOrElse(hour) { 0L }
+                            fracs[hour] = if (peak > 0L) minutes.toFloat() / peak else 0f
+                            starts[hour] = Offset(center.x + vx * hub, center.y + vy * hub)
+                            stubs[hour] = Offset(center.x + vx * (hub + stubPx), center.y + vy * (hub + stubPx))
+                        }
+                        onDrawBehind {
+                            val grow = entry.value
+                            // Two faint guide rings: the hub edge and the full-day maximum, so
+                            // an empty rhythm still reads as a clock rather than a blank disc.
+                            drawCircle(color = ring, radius = hub, center = center, style = ringStroke)
+                            drawCircle(color = ring, radius = hub + span, center = center, style = ringStroke)
+                            for (hour in 0 until n) {
+                                val start = starts[hour]!!
+                                val frac = fracs[hour]
+                                if (frac <= 0f) {
+                                    // A silent hour keeps its tick: a stub at the hub.
+                                    drawLine(color = ring, start = start, end = stubs[hour]!!, strokeWidth = strokePx, cap = StrokeCap.Round)
+                                } else {
+                                    val len = span * frac * grow
+                                    val end = Offset(center.x + ux[hour] * (hub + len), center.y + uy[hour] * (hub + len))
+                                    val isPeak = hour == peakIndex
+                                    val hue = if (isPeak) peakSpoke else spoke
+                                    drawLine(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(hue.copy(alpha = FolioTokens.gradientMinAlpha), hue),
+                                            start = start,
+                                            end = end,
+                                        ),
+                                        start = start,
+                                        end = end,
+                                        strokeWidth = if (isPeak) strokePx * 1.15f else strokePx,
+                                        cap = StrokeCap.Round,
+                                    )
+                                }
+                            }
+                        }
                     }
-                }
-            }
+            )
             if (chronotype.isNotBlank()) {
                 Text(
                     text = chronotype,
                     style = FolioTheme.typography.labelMedium,
                     color = colors.onSurface,
                     textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(0.42f),
                 )
             }
@@ -444,45 +490,34 @@ private fun LocalDate.shortLabel(): String = "$dayOfMonth.$monthNumber"
 /**
  * One heatmap day: transparent when the slot has no date (the leading/trailing
  * days of the first/last calendar weeks), the faint empty tint on a day with no
- * reading, else the accent stepped by [intensityFor] — the same 0.25/0.5/0.75/1
- * ladder [HeatmapCell] and the legend use, so grid and key read identically. A
- * tapped cell carries a peak-accent ring. Only dated cells are tappable, and each
- * carries a spoken description for screen readers (Rule 17).
+ * reading, else the accent stepped by [intensityFor]. The non-empty ladder is
+ * floored at 0.4 alpha so the lowest activity level stays clearly distinct from a
+ * no-reading cell rather than fading into it. Cells are purely visual — the year's
+ * day-level detail is spoken once through the grid's summary description (Rule 17),
+ * so there is no impossible per-13dp-cell tap target.
  */
+private val HEATMAP_CELL_SHAPE = RoundedCornerShape(3.dp)
+private val HEATMAP_LADDER = listOf(0.4f, 0.6f, 0.8f, 1f)
+
 @Composable
 private fun HeatmapDayCell(
     day: StatDay?,
     peak: Long,
     size: Dp,
     accent: Color,
-    selected: Boolean,
-    onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(3.dp)
-    val ladder = remember { listOf(0.25f, 0.5f, 0.75f, 1f) }
+    val shape = HEATMAP_CELL_SHAPE
+    val ladder = HEATMAP_LADDER
     val hasReading = day != null && day.minutes > 0L
     val fill = when {
         day == null -> Color.Transparent
         !hasReading -> FolioTheme.colors.outline.copy(alpha = 0.14f)
         else -> accent.copy(alpha = ladder[(intensityFor(day.minutes, peak) - 1).coerceIn(0, 3)])
     }
-    val desc = day?.let { heatmapDayDetail(it) }
     Box(
         modifier = Modifier
             .size(size)
             .background(fill, shape)
-            .then(
-                if (selected) Modifier.border(1.5.dp, FolioTheme.colors.accentStreak, shape)
-                else Modifier
-            )
-            .then(
-                if (day != null) Modifier.pointerInput(day) {
-                    detectTapGestures(onTap = { onClick() })
-                } else Modifier
-            )
-            .then(
-                if (desc != null) Modifier.semantics { contentDescription = desc } else Modifier
-            )
     )
 }
 

@@ -776,31 +776,22 @@ class HomeViewModel(
         val excluded = HashSet<String>()
         val resolveTags = scope.hasRules(Scope.BOOK_TAG)
         val resolveCollections = scope.hasRules(Scope.BOOK_COLLECTION)
-        if (!resolveTags && !resolveCollections) {
-            for (book in books) {
-                if (!scope.includesBook(book.id, emptySet(), emptySet(), book.seriesId, book.status)) {
-                    excluded.add(book.id)
-                }
+        // Batch the group memberships once (a single scan of book_tags / book_collections) instead
+        // of two repository round-trips per book, which was the slow step on a large library.
+        val tagsByBook: Map<String, Set<String>> = if (resolveTags) {
+            val byBook = HashMap<String, MutableSet<String>>()
+            tagRepository?.getBookTagLinks()?.forEach { (tagId, bookIds) ->
+                bookIds.forEach { b -> byBook.getOrPut(b) { HashSet() }.add(tagId) }
             }
-            return excluded
+            byBook
+        } else {
+            emptyMap()
         }
-        val tagCache = HashMap<String, Set<String>>()
-        val collectionCache = HashMap<String, Set<String>>()
+        val collectionsByBook: Map<String, Set<String>> =
+            if (resolveCollections) collectionRepository?.getBookCollectionLinks().orEmpty() else emptyMap()
         for (book in books) {
-            val tagIds = if (resolveTags) {
-                tagCache.getOrPut(book.id) {
-                    tagRepository?.getTagsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
-                }
-            } else {
-                emptySet()
-            }
-            val collectionIds = if (resolveCollections) {
-                collectionCache.getOrPut(book.id) {
-                    collectionRepository?.getCollectionsForBook(book.id)?.map { it.id }?.toSet().orEmpty()
-                }
-            } else {
-                emptySet()
-            }
+            val tagIds = if (resolveTags) tagsByBook[book.id].orEmpty() else emptySet()
+            val collectionIds = if (resolveCollections) collectionsByBook[book.id].orEmpty() else emptySet()
             if (!scope.includesBook(book.id, tagIds, collectionIds, book.seriesId, book.status)) {
                 excluded.add(book.id)
             }

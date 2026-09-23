@@ -16,7 +16,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,6 +33,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.folioPanel
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.theme.FolioTokens
 
 @Composable
 fun CloudSyncSettingsPanel(
@@ -50,7 +51,7 @@ fun CloudSyncSettingsPanel(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
     ) {
         // Real-time sync status card
         com.folio.reader.ui.components.SyncStatusCard(
@@ -169,7 +170,7 @@ fun CloudSyncSettingsPanel(
 
                 // Cloud sync opt-in toggle and granular controls
                 if (isConnected) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    FolioRule(modifier = Modifier.padding(vertical = 8.dp))
                     Text("Sync Preferences", style = MaterialTheme.typography.titleSmall)
 
                     // Master cloud sync toggle

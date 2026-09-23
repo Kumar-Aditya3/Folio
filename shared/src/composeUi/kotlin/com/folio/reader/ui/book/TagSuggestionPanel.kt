@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,11 +74,17 @@ internal fun TagSuggestionPanel(
                     color = FolioTheme.colors.onSurface,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                IconButton(
+                    onClick = onDismiss,
+                    // Keep the 48dp touch target the forced .size(28.dp) was
+                    // suppressing; the glyph stays small via the Icon size below.
+                    modifier = Modifier.minimumInteractiveComponentSize(),
+                ) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "Dismiss suggestions",
                         tint = FolioTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }

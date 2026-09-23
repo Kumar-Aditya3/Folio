@@ -1,7 +1,11 @@
 package com.folio.reader.manga
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+
+/** Per-manga chapter roll-up computed in one query: unread/progress/downloaded from one scan. */
+data class MangaChapterAggregate(val unread: Int, val progress: Float, val downloaded: Int)
 
 interface MangaRepository {
     suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean = true)
@@ -36,6 +40,20 @@ interface MangaChapterRepository {
     fun observeProgress(): Flow<Map<String, Float>>
     fun observeLastRead(): Flow<Map<String, MangaLastRead>>
     fun observeDownloadedCounts(): Flow<Map<String, Int>>
+
+    /**
+     * Unread count, read fraction and downloaded count per manga in one pass. The default derives
+     * it from the three separate flows (keeps fakes working); [JdbcMangaChapterRepository] backs it
+     * with a single GROUP BY so a page turn re-runs one whole-table scan instead of three.
+     */
+    fun observeChapterAggregates(): Flow<Map<String, MangaChapterAggregate>> =
+        combine(observeUnreadCounts(), observeProgress(), observeDownloadedCounts()) { unread, prog, down ->
+            val ids = HashSet<String>().apply { addAll(unread.keys); addAll(prog.keys); addAll(down.keys) }
+            ids.associateWith { id ->
+                MangaChapterAggregate(unread[id] ?: 0, prog[id] ?: 0f, down[id] ?: 0)
+            }
+        }
+
     suspend fun markAllReadForManga(mangaId: String, read: Boolean)
 }
 
