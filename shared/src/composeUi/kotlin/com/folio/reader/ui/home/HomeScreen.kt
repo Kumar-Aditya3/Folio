@@ -268,10 +268,25 @@ fun HomeScreen(
                     LedgerStrip(state, climate, onOpenStats, onOpenExclusions)
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
                 }
-                if (atlasReady) {
-                    item {
-                        AtlasEntryCard(onOpenAtlas)
-                        Spacer(Modifier.height(FolioTokens.spaceMovement))
+                // Atlas entry. The card animates in (fade + expand) rather than popping, because
+                // its eligibility can resolve a beat after Home's first frame; on revisits the
+                // session-cached answer means it is already visible on frame one.
+                item(key = "atlas-entry") {
+                    val motionOn = rememberMotionEnabled()
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = atlasReady,
+                        enter = if (motionOn) {
+                            androidx.compose.animation.fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                                androidx.compose.animation.expandVertically(tween(FolioTokens.motionStandard.toInt()))
+                        } else {
+                            androidx.compose.animation.fadeIn(snap())
+                        },
+                        exit = androidx.compose.animation.fadeOut(snap()),
+                    ) {
+                        Column {
+                            AtlasEntryCard(onOpenAtlas)
+                            Spacer(Modifier.height(FolioTokens.spaceMovement))
+                        }
                     }
                 }
                 // The shelf is the rest of the same ranked list — books and manga
@@ -978,13 +993,33 @@ private fun BecauseYouFinishedShelf(
  * Built from the same material vocabulary as the reading-now anchor (raised plane + liquid glass,
  * gated on the specular capability) so it reads as a first-class Home surface rather than a button,
  * and carries the discovery accent (Rule 14) since it is a discovery affordance, not a progress one.
+ *
+ * A cheap **mini-galaxy backdrop** (a seeded ~40-star Canvas over two nebula pools in the genre
+ * palette, ramped brighter toward the right so the text stays legible) advertises that this is the
+ * door to a *visual* map — not the full 384px nebula bake, which is far too heavy for a Home item.
  */
+private data class MiniStar(val x: Float, val y: Float, val r: Float, val a: Float)
+
 @Composable
 private fun AtlasEntryCard(onOpenAtlas: () -> Unit) {
     val colors = FolioTheme.colors
     val light = LocalFolioDaylight.current.lightDirection()
     val interaction = rememberFolioInteraction()
     val tint = colors.accentDiscovery
+    // Baked once, deterministically — a Home list item must never pay for randomness per frame.
+    val stars = remember {
+        val rnd = kotlin.random.Random(0x0A71A5)
+        List(40) {
+            MiniStar(
+                x = rnd.nextFloat(),
+                y = rnd.nextFloat(),
+                r = 0.6f + rnd.nextFloat() * 1.6f,
+                a = 0.25f + rnd.nextFloat() * 0.6f,
+            )
+        }
+    }
+    val nebulaA = com.folio.reader.ui.atlas.AtlasGalaxy.communityColor(0)
+    val nebulaB = com.folio.reader.ui.atlas.AtlasGalaxy.communityColor(3)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -998,17 +1033,62 @@ private fun AtlasEntryCard(onOpenAtlas: () -> Unit) {
                 lightY = light.second,
                 enabled = LocalGlassCapabilities.current.specular,
             )
-            .clickable(interactionSource = interaction, indication = null) { onOpenAtlas() }
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            .clickable(interactionSource = interaction, indication = null) { onOpenAtlas() },
     ) {
-        Column {
+        // Full-bleed mini-galaxy, clipped to the plate. Strongest on the right, behind the text.
+        Canvas(
+            Modifier
+                .matchParentSize()
+                .clip(FolioShapes.plate),
+        ) {
+            val w = size.width
+            val h = size.height
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(nebulaA.copy(alpha = 0.22f), Color.Transparent),
+                    center = Offset(w * 0.82f, h * 0.35f), radius = h * 1.1f,
+                ),
+                radius = h * 1.1f, center = Offset(w * 0.82f, h * 0.35f),
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(nebulaB.copy(alpha = 0.18f), Color.Transparent),
+                    center = Offset(w * 0.62f, h * 0.85f), radius = h * 0.9f,
+                ),
+                radius = h * 0.9f, center = Offset(w * 0.62f, h * 0.85f),
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(tint.copy(alpha = 0.16f), Color.Transparent),
+                    center = Offset(w * 0.96f, h * 0.6f), radius = h,
+                ),
+                radius = h, center = Offset(w * 0.96f, h * 0.6f),
+            )
+            stars.forEach { s ->
+                val ramp = (s.x * 1.15f).coerceIn(0f, 1f)
+                val a = s.a * ramp
+                if (a <= 0.02f) return@forEach
+                val c = Offset(s.x * w, s.y * h)
+                drawCircle(color = tint.copy(alpha = a * 0.45f), radius = s.r * 2.2f, center = c)
+                drawCircle(color = Color.White.copy(alpha = a), radius = s.r, center = c)
+            }
+        }
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
             FolioEyebrow("Discover", accent = tint)
             Spacer(Modifier.height(4.dp))
-            Text(
-                "Open the Atlas",
-                style = FolioTheme.typography.titleLarge,
-                color = colors.onSurface,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Open the Atlas",
+                    style = FolioTheme.typography.titleLarge,
+                    color = colors.onSurface,
+                )
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = tint,
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
                 "A map of your library by what it is about — drawn on this device.",

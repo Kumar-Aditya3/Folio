@@ -38,6 +38,18 @@ class BookImporter(
      * to when the embedding model has not been downloaded.
      */
     private val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer? = null,
+    /**
+     * Optional genre store. When present, the book's parsed `<dc:subject>` strings are recorded so
+     * the Atlas's metadata-first genre path has something to canonicalize. Null keeps imports
+     * byte-for-byte as they were (tests).
+     */
+    private val genreRepository: com.folio.reader.database.GenreRepository? = null,
+    /**
+     * Optional genre classifier. When present (and a model is on disk), the freshly imported and
+     * embedded book is classified immediately so it appears on the Atlas with a genre rather than
+     * waiting for the next backfill pass. Best-effort and null-safe.
+     */
+    private val genreClassification: com.folio.reader.ml.GenreClassificationService? = null,
 ) {
     suspend fun importEpub(filePath: String): Result<Book> {
         return withContext(Dispatchers.IO) {
@@ -174,6 +186,18 @@ class BookImporter(
                     val result = runCatching { indexer.indexChapters(bookId, indexEntries) }
                     result.onFailure { it.printStackTrace() }
                     println("Import: Semantic indexing -> ${result.getOrNull()}")
+                }
+
+                // Record parsed subjects for the metadata-first genre path (cheap, no model), then
+                // classify the just-embedded book so it lands on the Atlas already coloured. Both
+                // best-effort: the Atlas degrades to a "Mixed" community without them.
+                genreRepository?.let { repo ->
+                    runCatching { repo.setSubjects(bookId, parsed.metadata.subject) }
+                        .onFailure { println("Import: could not record subjects: ${it.message}") }
+                }
+                genreClassification?.let { svc ->
+                    runCatching { svc.classifyBook(bookId) }
+                        .onFailure { println("Import: genre classification skipped: ${it.message}") }
                 }
 
                 println("Import: Successfully imported '${book.title}'")

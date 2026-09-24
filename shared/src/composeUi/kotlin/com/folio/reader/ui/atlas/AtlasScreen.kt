@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,14 +70,18 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.ml.AtlasBook
+import com.folio.reader.ml.AtlasEdge
 import com.folio.reader.ml.AtlasModel
+import com.folio.reader.ui.components.FolioBackHandler
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.rememberSlowPhases
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -107,6 +112,15 @@ private val ATLAS_POOLS = listOf(
  */
 private val ATLAS_AMBIENT_PERIODS_MS = listOf(5_200L, 60_000L)
 
+/**
+ * Camera zoom bounds. [MIN_SCALE] is the fit-to-galaxy overview: at 1.0 the baked nebula (spanning
+ * ±[AtlasGalaxy.EXTENT]) still fully covers the viewport given the projection's padding, so zooming
+ * out can never reveal black margins beyond the nebula. [clampPan] keeps the nebula edges outside
+ * the viewport at every scale for the same reason.
+ */
+private const val MIN_SCALE = 1f
+private const val MAX_SCALE = 6f
+
 /** One topic cluster, prepared for the map's region headings and zoom-in passage reveal. */
 private data class ClusterInfo(
     val bookId: String,
@@ -117,6 +131,16 @@ private data class ClusterInfo(
     val chunkId: String,
     val label: String,
     val candidates: List<String>,
+)
+
+/** One emergent community, prepared as a named, coloured region of the map. */
+private data class RegionInfo(
+    val id: Int,
+    val label: String,
+    val x: Float,
+    val y: Float,
+    val color: Color,
+    val size: Int,
 )
 
 /** A four-point star marker with a soft glow — the map's "book" / region glyph. */
@@ -278,16 +302,18 @@ private fun AtlasGalaxyMap(
     val priorityOrder = remember(nodes) {
         nodes.sortedByDescending { it.degree * 2f + it.sizeScale + it.readFraction }
     }
-    // Every topic cluster in the library, largest first — the "regions" the map names at overview
-    // and the anchors whose theme phrases + passage appear as you zoom in.
+    // Every topic cluster in the library, largest first — the anchors whose theme phrases + passage
+    // appear as you zoom in. Coloured by the book's genre when known, else its community, so the
+    // map is colourful even before genres are classified ("colours = genres" once they exist).
     val clusters = remember(model) {
         val out = ArrayList<ClusterInfo>()
         model.books.forEach { b ->
+            val col = AtlasGalaxy.bookColor(b)
             b.clusters.forEach { c ->
                 out.add(
                     ClusterInfo(
                         bookId = b.bookId, x = c.x, y = c.y, mass = c.mass,
-                        color = AtlasGalaxy.ringColor(AtlasGalaxy.angle01(c.x, c.y)),
+                        color = col,
                         chunkId = c.exemplarChunkId, label = c.label, candidates = c.labelCandidates,
                     )
                 )
@@ -296,9 +322,58 @@ private fun AtlasGalaxyMap(
         out.sortedByDescending { it.mass }
     }
 
-    // Nebula bitmap — baked off the main thread; blitted under the camera once ready.
-    val nebula: ImageBitmap? by produceState<ImageBitmap?>(null, model) {
-        value = withContext(Dispatchers.Default) { AtlasGalaxy.bakeNebula(model) }
+    // Genre-first overview regions: one label per broad genre, at the centroid of that genre's
+    // confident books (computed in the roll-up). This replaces per-community labelling, so there is
+    // no duplicate "Historical Fiction" and no c-TF-IDF character name ("Bernard") can ever appear.
+    val regions = remember(model) {
+        model.genreRegions
+            .map { r ->
+                RegionInfo(
+                    id = r.id,
+                    label = r.genre,
+                    x = r.centroidX,
+                    y = r.centroidY,
+                    color = AtlasGalaxy.genreColor(r.genre),
+                    size = r.size,
+                )
+            }
+            .sortedByDescending { it.size }
+    }
+
+    // Bridge books: a book whose strongest borders reach into a *different* community than its own —
+    // the volumes that tie two genres together. Marked with a faint ring and called out in the sheet.
+    val bridgeBooks = remember(model) {
+        val community = model.books.associate { it.bookId to it.communityId }
+        val byBook = HashMap<String, MutableList<AtlasEdge>>()
+        model.edges.forEach { e ->
+            byBook.getOrPut(e.bookIdA) { ArrayList() }.add(e)
+            byBook.getOrPut(e.bookIdB) { ArrayList() }.add(e)
+        }
+        val out = HashSet<String>()
+        byBook.forEach { (bookId, edges) ->
+            val own = community[bookId] ?: return@forEach
+            val reachesOther = edges.sortedByDescending { it.weight }.take(4).any { e ->
+                val other = if (e.bookIdA == bookId) e.bookIdB else e.bookIdA
+                (community[other] ?: own) != own
+            }
+            if (reachesOther) out.add(bookId)
+        }
+        out
+    }
+
+    // The library's genre composition (largest share first) — drives the legend + the genre lens.
+    val composition = remember(model) { model.composition }
+
+    // Genre lens: tapping a legend/lens chip dims everything not of that genre (alpha only, one
+    // render path). Null = no lens. A book's genre is resolved through its community's label.
+    var lensGenre by remember(model) { mutableStateOf<String?>(null) }
+    val genreByBook = remember(model) { model.books.associate { it.bookId to it.genre } }
+
+    // Nebula bitmap — reused from a single-entry cache when the map is unchanged (so a repeat open
+    // shows the gas on the first frame), otherwise baked off the main thread. The reveal below holds
+    // the whole map until this is ready so stars and gas fade in together.
+    val nebula: ImageBitmap? by produceState<ImageBitmap?>(AtlasGalaxy.peekNebula(model), model) {
+        if (value == null) value = withContext(Dispatchers.Default) { AtlasGalaxy.nebulaFor(model) }
     }
 
     // ── camera (Animatable so gestures snap and focus transitions can animate) ──────────────
@@ -339,10 +414,43 @@ private fun AtlasGalaxyMap(
         }
     }
 
+    // Ease the camera back to the whole-galaxy overview (and drop any selection). Shared by the
+    // recenter compass, double-tap, and the back handler so they stay in lock-step on MIN_SCALE.
+    fun recenter() {
+        selectedId = null
+        scope.launch { scaleAnim.animateTo(MIN_SCALE, tween(440)) }
+        scope.launch { panAnim.animateTo(Offset.Zero, tween(440)) }
+    }
+
+    // System back unwinds the map's on-screen state before it ever pops the Atlas route: first a
+    // selected book (dismiss + recenter), then a genre lens, then a non-overview camera. Only when
+    // none of those hold is the handler disabled, so back falls through to the route pop on the
+    // header arrow. derivedStateOf keeps the camera reads off the per-frame recomposition path —
+    // `enabled` only flips when the boolean actually changes, not on every animation tick.
+    val canUnwind by remember(model) {
+        derivedStateOf {
+            selectedId != null || lensGenre != null ||
+                scaleAnim.value > 1.02f || panAnim.value != Offset.Zero
+        }
+    }
+    FolioBackHandler(enabled = canUnwind) {
+        when {
+            selectedId != null -> recenter()
+            lensGenre != null -> lensGenre = null
+            scaleAnim.value > 1.02f || panAnim.value != Offset.Zero -> recenter()
+            else -> {}
+        }
+    }
+
     // ── open + ambient animations ───────────────────────────────────────────────────────────
-    val reveal = remember(model) { Animatable(if (motion) 0f else 1f) }
+    val reveal = remember(model) { Animatable(0f) }
     LaunchedEffect(model, motion) {
-        if (motion) { reveal.snapTo(0f); reveal.animateTo(1f, tween(900)) } else reveal.snapTo(1f)
+        // Hold the whole map hidden until the nebula bitmap is ready, then fade stars + gas in on the
+        // same curve so the galaxy arrives as one coherent field rather than stars-first, gas-late.
+        // Never wait forever: reveal anyway after a short cap if the bake is slow so it can't stick
+        // blank. Repeat opens hit the nebula cache, so `nebula` is already non-null and this is instant.
+        withTimeoutOrNull(1600) { snapshotFlow { nebula != null }.first { it } }
+        if (motion) reveal.animateTo(1f, tween(900)) else reveal.snapTo(1f)
     }
     // Ambient twinkle + pool drift sampled at ~10 Hz (see [ATLAS_AMBIENT_PERIODS_MS]) instead of a
     // per-vsync rememberInfiniteTransition, so an idle Atlas stops invalidating the background every
@@ -432,13 +540,35 @@ private fun AtlasGalaxyMap(
                 }
             }
         }
+        // Genre region headings: one label per community at its centroid. Keyed on community id and
+        // memoised on the (data, styles) so panning/zooming never re-measures — the perf pattern the
+        // rest of this screen already follows.
+        val genreRegionLayouts = remember(regions, regionStyle, labelMaxPx, textMeasurer) {
+            val regionMax = (labelMaxPx * 1.4f).toInt()
+            HashMap<Int, TextLayoutResult>().apply {
+                regions.forEach { r ->
+                    if (r.label.isBlank()) return@forEach
+                    put(
+                        r.id,
+                        textMeasurer.measure(
+                            r.label, regionStyle, overflow = TextOverflow.Ellipsis, maxLines = 1,
+                            constraints = Constraints(maxWidth = regionMax),
+                        ),
+                    )
+                }
+            }
+        }
 
-        // Clamp a pan offset so the galaxy can never be flung entirely off-screen: the
-        // screen centre must stay inside the (scaled) content box, which still allows
-        // generous panning while always keeping stars in view.
+        // Clamp a pan offset so the nebula always covers the viewport — its edges stay outside the
+        // screen at every scale. project(±EXTENT) maps the baked nebula's corners; we bound pan so
+        // the top-left corner never crosses (0,0) and the bottom-right never crosses (wPx,hPx). The
+        // half-extent in screen space is EXTENT·½·(content span)·sc; the allowed pan is that minus
+        // the half-viewport (>=0 because MIN_SCALE keeps the nebula covering at the overview).
         fun clampPan(p: Offset, sc: Float): Offset {
-            val maxX = (cx - padX) * sc
-            val maxY = (cy - padY) * sc
+            val halfNebX = AtlasGalaxy.EXTENT * 0.5f * (wPx - 2 * padX) * sc
+            val halfNebY = AtlasGalaxy.EXTENT * 0.5f * (hPx - 2 * padY) * sc
+            val maxX = (halfNebX - cx).coerceAtLeast(0f)
+            val maxY = (halfNebY - cy).coerceAtLeast(0f)
             return Offset(p.x.coerceIn(-maxX, maxX), p.y.coerceIn(-maxY, maxY))
         }
 
@@ -485,15 +615,28 @@ private fun AtlasGalaxyMap(
                     val p = project(s.x, s.y, sc, pn)
                     if (!onScreen(p, 8f)) continue
                     val tw = if (phases != null) (1f - s.twinkleAmp) + s.twinkleAmp * (0.5f + 0.5f * sin(phase + s.twinklePhase)) else 1f
-                    val a = (s.baseAlpha * tw * starReveal).coerceIn(0f, 0.85f)
+                    val a = (s.baseAlpha * tw * starReveal).coerceIn(0f, 0.98f)
                     val rPx = bgStarRadii[i]
                     if (s.glow) {
+                        // Big stars: broad coloured glow + white-hot centre + a small sparkle glint.
                         drawCircle(
-                            brush = Brush.radialGradient(listOf(s.color.copy(alpha = a * 0.55f), Color.Transparent), center = p, radius = rPx * 3.2f),
-                            radius = rPx * 3.2f, center = p,
+                            brush = Brush.radialGradient(listOf(s.color.copy(alpha = a * 0.65f), Color.Transparent), center = p, radius = rPx * 3.8f),
+                            radius = rPx * 3.8f, center = p,
                         )
+                        drawCircle(color = lerp(s.color, Color.White, 0.45f).copy(alpha = a), radius = rPx, center = p)
+                        drawCircle(color = Color.White.copy(alpha = (a * 0.95f).coerceIn(0f, 1f)), radius = rPx * 0.5f, center = p)
+                        val gl = rPx * 3.4f
+                        val ga = (a * 0.5f).coerceIn(0f, 0.6f)
+                        drawLine(Color.White.copy(alpha = ga), Offset(p.x - gl, p.y), Offset(p.x + gl, p.y), strokeWidth = 1.1f, cap = StrokeCap.Round)
+                        drawLine(Color.White.copy(alpha = ga), Offset(p.x, p.y - gl), Offset(p.x, p.y + gl), strokeWidth = 1.1f, cap = StrokeCap.Round)
+                    } else {
+                        // Ordinary stars: a soft halo + a core lifted toward white so they read crisp.
+                        drawCircle(
+                            brush = Brush.radialGradient(listOf(s.color.copy(alpha = a * 0.4f), Color.Transparent), center = p, radius = rPx * 2.3f),
+                            radius = rPx * 2.3f, center = p,
+                        )
+                        drawCircle(color = lerp(s.color, Color.White, 0.4f).copy(alpha = a), radius = rPx, center = p)
                     }
-                    drawCircle(color = s.color.copy(alpha = a), radius = rPx, center = p)
                 }
             }
         }
@@ -513,7 +656,7 @@ private fun AtlasGalaxyMap(
                 .pointerInput(model) {
                     detectTransformGestures { centroid, panChange, zoomChange, _ ->
                         val sc0 = scaleAnim.value
-                        val sc1 = (sc0 * zoomChange).coerceIn(0.7f, 6f)
+                        val sc1 = (sc0 * zoomChange).coerceIn(MIN_SCALE, MAX_SCALE)
                         val factor = sc1 / sc0 - 1f
                         val p0 = panAnim.value
                         // Keep the point under the fingers fixed while zooming (pivot on
@@ -527,9 +670,8 @@ private fun AtlasGalaxyMap(
                 .pointerInput(model, wPx, hPx) {
                     detectTapGestures(
                         onDoubleTap = {
-                            selectedId = null
-                            scope.launch { scaleAnim.animateTo(1f, tween(420)) }
-                            scope.launch { panAnim.animateTo(Offset.Zero, tween(420)) }
+                            lensGenre = null
+                            recenter()
                         },
                         onTap = { tap ->
                             val sc = scaleAnim.value
@@ -542,7 +684,35 @@ private fun AtlasGalaxyMap(
                                 if (d < bestD) { bestD = d; best = n.bookId }
                             }
                             val threshold = with(density) { 34.dp.toPx() }
-                            if (best != null && bestD <= threshold) select(best!!) else selectedId = null
+                            if (best != null && bestD <= threshold) {
+                                select(best!!)
+                            } else {
+                                // No star under the finger — did they tap a nebula? Focus the nearest
+                                // community's genre: toggle the lens onto it and ease the camera in.
+                                var bestRegion: RegionInfo? = null
+                                var bestRegionD = Float.MAX_VALUE
+                                for (r in regions) {
+                                    if (r.label.isBlank()) continue
+                                    val p = project(r.x, r.y, sc, pn)
+                                    val d = hypot(tap.x - p.x, tap.y - p.y)
+                                    if (d < bestRegionD) { bestRegionD = d; bestRegion = r }
+                                }
+                                val regionThreshold = with(density) { 120.dp.toPx() }
+                                val target = bestRegion
+                                if (target != null && bestRegionD <= regionThreshold) {
+                                    selectedId = null
+                                    val focusing = lensGenre != target.label
+                                    lensGenre = if (focusing) target.label else null
+                                    if (focusing) {
+                                        val rp = project(target.x, target.y, sc, pn)
+                                        val panTo = pn + Offset(cx - rp.x, cy - rp.y)
+                                        scope.launch { panAnim.animateTo(clampPan(panTo, sc.coerceAtLeast(1.7f)), tween(380)) }
+                                        scope.launch { scaleAnim.animateTo(sc.coerceAtLeast(1.7f), tween(380)) }
+                                    }
+                                } else {
+                                    selectedId = null
+                                }
+                            }
                         },
                     )
                 },
@@ -551,10 +721,11 @@ private fun AtlasGalaxyMap(
             val pn = panAnim.value
             val rv = reveal.value
 
-            // Nebula — additive glow so it reads as luminous gas over the stars.
+            // Nebula — additive glow so it reads as luminous gas over the stars. Same reveal curve
+            // as the stars (below) so gas and stars fade in together.
             val bmp = nebula
             if (bmp != null) {
-                val nebAlpha = AtlasGalaxy.smoothstep(0.15f, 0.7f, rv)
+                val nebAlpha = AtlasGalaxy.smoothstep(0.1f, 0.75f, rv)
                 if (nebAlpha > 0.01f) {
                     val tl = project(-AtlasGalaxy.EXTENT, -AtlasGalaxy.EXTENT, sc, pn)
                     val br = project(AtlasGalaxy.EXTENT, AtlasGalaxy.EXTENT, sc, pn)
@@ -592,8 +763,8 @@ private fun AtlasGalaxyMap(
                 }
             }
 
-            // Book stars.
-            val starReveal = AtlasGalaxy.smoothstep(0.35f, 1f, rv)
+            // Book stars — same reveal curve as the nebula so the whole field arrives together.
+            val starReveal = AtlasGalaxy.smoothstep(0.1f, 0.75f, rv)
             nodes.forEach { n ->
                 val p = project(n.x, n.y, sc, pn)
                 val isSel = n.bookId == selId
@@ -606,18 +777,49 @@ private fun AtlasGalaxyMap(
                     related -> 0.92f
                     else -> 0.4f
                 }
-                val bright = (0.45f + 0.55f * n.readFraction) * dim * starReveal
+                // Genre lens: everything not of the focused genre fades back (alpha only).
+                val lensDim = if (lensGenre == null || genreByBook[n.bookId] == lensGenre) 1f else 0.16f
+                // Even an unread book is a bright star; reading only pushes it brighter still.
+                val bright = (0.64f + 0.36f * n.readFraction) * dim * lensDim * starReveal
                 val coreR = coreRadiusOf(n.sizeScale, isSel)
 
+                // Wide coloured bloom.
                 drawCircle(
                     brush = Brush.radialGradient(
-                        listOf(n.color.copy(alpha = 0.5f * bright), n.color.copy(alpha = 0.12f * bright), Color.Transparent),
+                        listOf(n.color.copy(alpha = 0.6f * bright), n.color.copy(alpha = 0.16f * bright), Color.Transparent),
                         center = p, radius = glowR,
                     ),
                     radius = glowR, center = p,
                 )
-                val coreColor = lerp(n.color, Color.White, 0.72f)
-                drawCircle(color = coreColor.copy(alpha = (0.85f * bright + 0.12f).coerceIn(0f, 1f)), radius = coreR, center = p)
+                // Tighter, hotter inner bloom lifts the core off the gas.
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(lerp(n.color, Color.White, 0.5f).copy(alpha = 0.75f * bright), Color.Transparent),
+                        center = p, radius = coreR * 2.3f,
+                    ),
+                    radius = coreR * 2.3f, center = p,
+                )
+                // Coloured core, then a white-hot centre — the "shine".
+                drawCircle(color = lerp(n.color, Color.White, 0.55f).copy(alpha = (0.92f * bright).coerceIn(0f, 1f)), radius = coreR * 1.15f, center = p)
+                drawCircle(color = Color.White.copy(alpha = (0.9f * bright + 0.08f).coerceIn(0f, 1f)), radius = coreR * 0.5f, center = p)
+
+                // A faint 4-point diffraction glint so brighter stars sparkle like the real thing.
+                if (bright > 0.5f) {
+                    val gl = coreR * (2.4f + 1.8f * n.sizeScale)
+                    val ga = (0.55f * bright).coerceIn(0f, 0.7f)
+                    val gw = ringStroke * 0.45f
+                    drawLine(Color.White.copy(alpha = ga), Offset(p.x - gl, p.y), Offset(p.x + gl, p.y), strokeWidth = gw, cap = StrokeCap.Round)
+                    drawLine(Color.White.copy(alpha = ga), Offset(p.x, p.y - gl), Offset(p.x, p.y + gl), strokeWidth = gw, cap = StrokeCap.Round)
+                }
+
+                // Bridge books — volumes tying two genres together — wear a faint ring so they read
+                // as connectors rather than ordinary members.
+                if (!isSel && n.bookId in bridgeBooks && bright > 0.05f) {
+                    drawCircle(
+                        color = Color.White.copy(alpha = (0.45f * bright).coerceIn(0f, 1f)),
+                        radius = coreR * 2.3f, center = p, style = Stroke(width = ringStroke * 0.5f),
+                    )
+                }
 
                 if (isSel) {
                     val hv = halo.value
@@ -663,24 +865,27 @@ private fun AtlasGalaxyMap(
                 }
             }
 
-            // Region headings at the biggest clusters — sparkle + theme phrase + descriptor words.
+            // Region headings: the emergent communities, named by their dominant broad genre, at
+            // the community centroid. A genre lens fades the communities that are not the focus.
             if (regionAlpha > 0.02f) {
                 var placedR = 0; var scanned = 0
-                for (cl in clusters) {
+                for (r in regions) {
                     if (placedR >= 9 || scanned > 44) break
-                    val p = project(cl.x, cl.y, sc, pn)
+                    val p = project(r.x, r.y, sc, pn)
                     if (!onScreen(p, 20f)) continue
                     scanned++
-                    val (res, dRes) = regionLayouts[cl.chunkId] ?: continue
-                    val w = maxOf(res.size.width.toFloat(), dRes?.size?.width?.toFloat() ?: 0f)
-                    val totalH = res.size.height.toFloat() + (dRes?.let { it.size.height.toFloat() + 3f } ?: 0f)
+                    val res = genreRegionLayouts[r.id] ?: continue
+                    val lensA = if (lensGenre == null || lensGenre == r.label) 1f else 0.14f
+                    val a = regionAlpha * lensA
+                    if (a <= 0.02f) continue
+                    val w = res.size.width.toFloat()
+                    val h = res.size.height.toFloat()
                     val top = p.y + 10f
-                    if (!tryPlace(p.x - w / 2f, top, w, totalH)) continue
+                    if (!tryPlace(p.x - w / 2f, top, w, h)) continue
                     // Dark backing so a heading stays legible over a bright nebula core.
-                    drawRoundRect(Color(0xFF070912).copy(alpha = 0.5f * regionAlpha), topLeft = Offset(p.x - w / 2f - 7f, top - 5f), size = Size(w + 14f, totalH + 10f), cornerRadius = CornerRadius(9f, 9f))
-                    drawSparkle(p, 5.5f, lerp(cl.color, Color.White, 0.5f), regionAlpha * 0.9f)
-                    drawText(res, color = Color(0xFFF1F0FA).copy(alpha = regionAlpha), topLeft = Offset(p.x - res.size.width / 2f, top))
-                    if (dRes != null) drawText(dRes, color = cl.color.copy(alpha = regionAlpha * 0.85f), topLeft = Offset(p.x - dRes.size.width / 2f, top + res.size.height + 3f))
+                    drawRoundRect(Color(0xFF070912).copy(alpha = 0.5f * a), topLeft = Offset(p.x - w / 2f - 7f, top - 5f), size = Size(w + 14f, h + 10f), cornerRadius = CornerRadius(9f, 9f))
+                    drawSparkle(p, 5.5f, lerp(r.color, Color.White, 0.5f), a * 0.9f)
+                    drawText(res, color = Color(0xFFF1F0FA).copy(alpha = a), topLeft = Offset(p.x - w / 2f, top))
                     placedR++
                 }
             }
@@ -742,6 +947,8 @@ private fun AtlasGalaxyMap(
         }
 
         // Legend — the map's key. Hidden while a book is selected (the sheet takes the stage).
+        // When genres are known it doubles as the genre lens: a colour swatch + share per genre,
+        // and tapping one focuses that genre (dims the rest). "Colours = genres" is now literally true.
         if (selectedId == null) {
             Column(
                 Modifier
@@ -753,10 +960,37 @@ private fun AtlasGalaxyMap(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LegendRow("Each dot is a book", Color(0xFFDDE0F4))
-                LegendRow("Closer = more similar", Color(0xFF8FA6E6))
-                LegendRow("Colours = themes", Color(0xFFB98FC9))
-                LegendRow("Pinch to explore", Color(0xFF7FC7C0))
+                if (composition.isEmpty()) {
+                    LegendRow("Each dot is a book", Color(0xFFDDE0F4))
+                    LegendRow("Closer = more similar", Color(0xFF8FA6E6))
+                    LegendRow("Pinch to explore", Color(0xFF7FC7C0))
+                } else {
+                    Text(
+                        if (lensGenre == null) "Genres · tap to focus" else "Tap again to clear",
+                        style = FolioTheme.typography.labelSmall,
+                        color = COSMIC_MUTED,
+                    )
+                    composition.take(6).forEach { share ->
+                        val pct = (share.fraction * 100f).roundToInt()
+                        val active = lensGenre == share.genre
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .clickable { lensGenre = if (active) null else share.genre }
+                                .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        ) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(AtlasGalaxy.genreColor(share.genre)))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "$pct%  ${share.genre}",
+                                style = FolioTheme.typography.labelSmall,
+                                color = if (active) Color(0xFFF4F2FF) else COSMIC_MUTED,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -770,9 +1004,7 @@ private fun AtlasGalaxyMap(
                 .clip(CircleShape)
                 .background(Color(0x73090C18))
                 .clickable {
-                    selectedId = null
-                    scope.launch { scaleAnim.animateTo(1f, tween(440)) }
-                    scope.launch { panAnim.animateTo(Offset.Zero, tween(440)) }
+                    recenter()
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -820,6 +1052,8 @@ private fun AtlasGalaxyMap(
             book = selBook,
             author = selectedId?.let { authorByBook[it] },
             accent = accent,
+            genre = selBook?.genre,
+            isBridge = selectedId != null && selectedId in bridgeBooks,
             related = related,
             themes = themes,
             passage = passage,

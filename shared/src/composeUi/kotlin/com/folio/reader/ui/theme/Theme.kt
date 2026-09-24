@@ -1562,6 +1562,15 @@ object FolioTokens {
      */
     val motionMorph = 450L
 
+    /**
+     * The cover-morph spec used only for a **tab↔tab dissolve** (Home↔Library), which shares one
+     * shared-transition scope with the shelf→detail/reader morph but should not float. Shorter than
+     * [motionMorph] so the cover settles quickly across the tab switch instead of trailing a long
+     * FastOutSlowIn tail across the viewport; the shelf→detail/reader morph keeps [motionMorph]
+     * untouched (so `DesignSystemTest`'s morph invariants are unaffected).
+     */
+    val motionTabMorph = 300L
+
     val chipAutoDismiss = 4000L   // End-of-chapter chip dwell before fading out
 
     /**

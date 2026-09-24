@@ -35,6 +35,13 @@ class SemanticDiscoveryRepository(
     private val semanticSearch: SemanticSearchRepository,
     private val chunkRepository: ChunkRepository,
     private val bookRepository: BookRepository,
+    /**
+     * Reads the pre-computed per-book broad genre (written by the backfill's genre pass) so the
+     * roll-up can name each community. Null degrades gracefully: communities fall back to a
+     * c-TF-IDF term or "Mixed", exactly as when no book has been classified yet. The roll-up never
+     * *computes* genre — that would open ONNX during the roll-up, which is the documented OOM path.
+     */
+    private val genreRepository: com.folio.reader.database.GenreRepository? = null,
     /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [Dispatchers.Default]. */
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
     /**
@@ -181,13 +188,22 @@ class SemanticDiscoveryRepository(
             return empty
         }
 
+        // Pre-computed broad genres for this model (written by the backfill's genre pass). A cheap
+        // bulk read; empty when nothing has been classified yet. Read *before* the layout so the
+        // force-directed layout can apply a mild same-genre attraction (books of a genre drift into
+        // one cloud), and reused below to colour + label the map by genre. Never *computed* here —
+        // that would open ONNX during the roll-up, the documented OOM path.
+        val genresByBook: Map<String, String> = runCatching {
+            genreRepository?.genresForModel(model.id)?.mapValues { it.value.genre } ?: emptyMap()
+        }.getOrDefault(emptyMap())
+
         // Cooperative cancellation: the roll-up is a multi-second CPU loop with no suspension
         // points, so without this it would run to completion (burning battery, holding the mutex)
         // even after the reader left the Atlas mid-load. The lambda lets the pure code bail at
         // loop boundaries when this coroutine is cancelled.
         val job = currentCoroutineContext()[Job]
         val geometry = withContext(Dispatchers.Default) {
-            AtlasRollup.compute(entries, shouldCancel = { job?.isActive == false })
+            AtlasRollup.compute(entries, bookGenre = genresByBook, shouldCancel = { job?.isActive == false })
         }
 
         // Index the loaded metadata so each cluster's exemplar can be turned into a reader
@@ -228,11 +244,16 @@ class SemanticDiscoveryRepository(
         var flat = 0
         val books = geometry.books.map { g ->
             val book = bookCache.getOrPut(g.bookId) { runCatching { bookRepository.getBook(g.bookId) }.getOrNull() }
+            val genreName = genresByBook[g.bookId]
             AtlasBook(
                 bookId = g.bookId,
                 title = book?.title.orEmpty(),
                 coverPath = book?.coverPath,
                 readFraction = book?.normalizedProgress?.toFloat()?.coerceIn(0f, 1f) ?: 0f,
+                x = g.x,
+                y = g.y,
+                communityId = g.communityId,
+                genre = genreName?.let { GenreTaxonomy.byName(it)?.displayName ?: it },
                 clusters = g.clusters.map { c ->
                     val meta = metaById[c.exemplarChunkId]
                     val phrases = candidates.getOrElse(flat) { emptyList() }
@@ -253,12 +274,120 @@ class SemanticDiscoveryRepository(
                 },
             )
         }
-        val result = AtlasModel(books, geometry.edges)
+
+        val communities = rollUpCommunities(geometry.books, books, genresByBook)
+        val composition = libraryComposition(books)
+        val genreRegions = buildGenreRegions(books)
+        val result = AtlasModel(books, geometry.edges, communities, composition, genreRegions)
         cachedAtlas = result
         cachedFingerprint = fingerprint
         writeDiskCache(fingerprint, result)
         result
     }
+
+    /**
+     * Rolls each emergent community up to a display genre and colour.
+     *
+     * The name is the **plurality broad genre** among the community's member books (metadata- or
+     * inference-derived, whichever the backfill stored). When no member has a genre, it falls back
+     * to the most common c-TF-IDF phrase across the community's clusters, and finally to "Mixed" —
+     * never inventing a confident label. Colour is the genre's stable hue slot, or a
+     * community-derived slot past the genre range when there is no genre.
+     */
+    private fun rollUpCommunities(
+        geometry: List<AtlasBookGeometry>,
+        books: List<AtlasBook>,
+        genresByBook: Map<String, String>,
+    ): List<AtlasCommunity> {
+        val geomById = geometry.associateBy { it.bookId }
+        return books.groupBy { it.communityId }.entries.sortedBy { it.key }.map { (cid, members) ->
+            // Plurality broad genre by enum name, deterministic on ties (taxonomy order).
+            val genreVotes = members.mapNotNull { genresByBook[it.bookId] }
+                .groupingBy { it }.eachCount()
+            val pluralityGenre = genreVotes.entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { GenreTaxonomy.byName(it.key)?.ordinal ?: Int.MAX_VALUE })
+                .firstOrNull()?.key
+                ?.let { GenreTaxonomy.byName(it) }
+
+            val label: String
+            val hue: Int
+            if (pluralityGenre != null) {
+                label = pluralityGenre.displayName
+                hue = pluralityGenre.hueId
+            } else {
+                // Fallback: the most common distinctive phrase across the community's clusters.
+                val phraseVotes = members.flatMap { it.clusters }.flatMap { it.labelCandidates }
+                    .groupingBy { it }.eachCount()
+                val topPhrase = phraseVotes.entries
+                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                    .firstOrNull()?.key
+                label = topPhrase?.let { ClusterLabeler.display(listOf(it)) }?.takeIf { it.isNotBlank() } ?: "Mixed"
+                hue = BroadGenre.entries.size + cid
+            }
+
+            var cx = 0f; var cy = 0f
+            members.forEach { cx += it.x; cy += it.y }
+            val n = members.size.coerceAtLeast(1)
+            val tightness = members.flatMap { geomById[it.bookId]?.clusters ?: emptyList() }
+                .map { it.tightness }.average().let { if (it.isNaN()) 0f else it.toFloat() }
+
+            AtlasCommunity(
+                id = cid,
+                genreLabel = label,
+                colorHueId = hue,
+                memberBookIds = members.map { it.bookId },
+                centroidX = cx / n,
+                centroidY = cy / n,
+                size = members.size,
+                tightness = tightness,
+            )
+        }
+    }
+
+    /** The library's genre composition, largest share first — the legend's "42% Sci-Fi · …". */
+    private fun libraryComposition(books: List<AtlasBook>): List<GenreShare> {
+        if (books.isEmpty()) return emptyList()
+        val total = books.size
+        return books.mapNotNull { it.genre }
+            .groupingBy { it }.eachCount()
+            .entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .map { GenreShare(it.key, it.value, it.value.toFloat() / total) }
+    }
+
+    /**
+     * One region per broad genre with at least [MIN_REGION_BOOKS] confident books, placed at the
+     * centroid of that genre's books. This is the genre-first overview labelling: exactly one label
+     * per genre (no duplicate "Historical Fiction"), and only for genres that actually resolved
+     * (unclassified books get no region and no label — never a c-TF-IDF character name). Largest
+     * genre first so the renderer labels the biggest clouds when space is tight.
+     */
+    private fun buildGenreRegions(books: List<AtlasBook>): List<AtlasGenreRegion> {
+        val byGenre = books.filter { !it.genre.isNullOrBlank() }.groupBy { it.genre!! }
+        return byGenre.entries
+            .mapNotNull { (genre, members) ->
+                if (members.size < MIN_REGION_BOOKS) return@mapNotNull null
+                var cx = 0f; var cy = 0f
+                members.forEach { cx += it.x; cy += it.y }
+                val n = members.size.coerceAtLeast(1)
+                Triple(genre, members.size, Offsets(cx / n, cy / n))
+            }
+            .sortedWith(compareByDescending<Triple<String, Int, Offsets>> { it.second }.thenBy { it.first })
+            .mapIndexed { i, (genre, size, c) ->
+                AtlasGenreRegion(
+                    id = i,
+                    genre = genre,
+                    colorHueId = GenreTaxonomy.byDisplayName(genre)?.hueId ?: genre.hashCode(),
+                    centroidX = c.x,
+                    centroidY = c.y,
+                    size = size,
+                )
+            }
+    }
+
+    /** Tiny internal pair-of-floats to avoid pulling a Compose Offset into this module. */
+    private data class Offsets(val x: Float, val y: Float)
 
     /**
      * Reads a previously computed map from [cacheDir], but only when it was computed for the same
@@ -381,12 +510,33 @@ class SemanticDiscoveryRepository(
     private suspend fun fingerprint(): String {
         val chunks = runCatching { chunkRepository.chunkCount(model.id) }.getOrDefault(0)
         val books = runCatching { chunkRepository.embeddedBookCount(model.id) }.getOrDefault(0)
-        return "${model.id}:$chunks:$books"
+        // Genre rows are part of the key too: the map is now coloured, labelled and laid out by
+        // genre, so when the backfill classifies more books (or a classifier-version bump clears and
+        // re-derives them) the count changes and a stale genre-blind atlas_cache.json is recomputed
+        // instead of served. Without this the first cached map — built before genres existed — would
+        // stay grey and unlabelled forever. Cheap indexed COUNT; stable once the library is classified.
+        val genres = runCatching { genreRepository?.genreCount(model.id) ?: 0 }.getOrDefault(0)
+        // ATLAS_ALGO_VERSION is part of the key so a change to the roll-up maths (robust adjacency,
+        // force-directed layout, communities, genre) invalidates a stale atlas_cache.json on the
+        // first run rather than serving a map built by the old algorithm.
+        return "${model.id}:$chunks:$books:$genres:$ATLAS_ALGO_VERSION"
     }
 
     companion object {
         /** The Home hero requires at least this many embedded books before a map reads as a map. */
         const val ATLAS_BOOK_THRESHOLD = 5
+
+        /**
+         * Bumped whenever the roll-up's structure changes, so a cached [atlas_cache.json] built by an
+         * older algorithm is discarded via [fingerprint] rather than reused. v2 introduced the robust
+         * similarity graph, force-directed layout, emergent communities and broad-genre labelling; v3
+         * moved overview labelling to genre-first regions (one per genre, no c-TF-IDF fallback) and
+         * added same-genre attraction to the layout.
+         */
+        const val ATLAS_ALGO_VERSION = 3
+
+        /** Fewest confident books of one genre before it earns a labelled region on the overview. */
+        const val MIN_REGION_BOOKS = 2
 
         /**
          * Hard ceiling on chunks fed to the roll-up. Whitening allocates an n×dims double matrix,
@@ -429,6 +579,59 @@ data class EchoHit(
 data class AtlasModel(
     val books: List<AtlasBook>,
     val edges: List<AtlasEdge>,
+    /** Emergent communities (kept for the nebula/bridge grouping); no longer the label source. */
+    val communities: List<AtlasCommunity> = emptyList(),
+    /** The library's genre composition, largest share first — drives the legend readout. */
+    val composition: List<GenreShare> = emptyList(),
+    /**
+     * One region per broad genre that has enough confident books — the map's overview labels. Placed
+     * at the centroid of that genre's books, so the same genre is one labelled cloud rather than the
+     * duplicated, character-name-prone community labels it replaced.
+     */
+    val genreRegions: List<AtlasGenreRegion> = emptyList(),
+)
+
+/**
+ * One genre region on the map: a single label per broad genre, at the centroid of that genre's
+ * confident books. Replaces per-community labelling for the overview — one label per genre means no
+ * duplicate "Historical Fiction", and being genre-derived (not c-TF-IDF) means no character names.
+ */
+@Serializable
+data class AtlasGenreRegion(
+    /** Stable index among the model's regions (largest first) — the renderer's layout key. */
+    val id: Int,
+    /** Broad-genre display name shown as the region heading. */
+    val genre: String,
+    /** [BroadGenre.hueId] (or a name hash fallback) so the region's colour matches its stars. */
+    val colorHueId: Int,
+    val centroidX: Float,
+    val centroidY: Float,
+    val size: Int,
+)
+
+/**
+ * One emergent community — a nebula on the map — named by the plurality broad genre of its member
+ * books. [colorHueId] is a stable palette slot (a [BroadGenre.hueId] when a genre resolved, or a
+ * community-derived slot past the genre range otherwise) so the renderer colours it consistently.
+ */
+@Serializable
+data class AtlasCommunity(
+    val id: Int,
+    val genreLabel: String,
+    val colorHueId: Int,
+    val memberBookIds: List<String>,
+    val centroidX: Float,
+    val centroidY: Float,
+    val size: Int,
+    val tightness: Float,
+)
+
+/** One genre's share of the library, for the composition readout ("42% Science Fiction"). */
+@Serializable
+data class GenreShare(
+    val genre: String,
+    val count: Int,
+    val fraction: Float,
 )
 
 /** On-disk envelope: the map plus the fingerprint it was computed for. */
@@ -442,6 +645,13 @@ data class AtlasBook(
     val coverPath: String?,
     /** 0..1 reading progress; the renderer lights read regions and fogs unread ones. */
     val readFraction: Float,
+    /** The book's macro position in roughly [-1, 1] on each axis, from the force-directed layout. */
+    val x: Float = 0f,
+    val y: Float = 0f,
+    /** The emergent community this book belongs to; the renderer colours the star by it. */
+    val communityId: Int = 0,
+    /** Broad genre display name (e.g. "Science Fiction"), or null when unclassified. */
+    val genre: String? = null,
     val clusters: List<AtlasCluster>,
 )
 

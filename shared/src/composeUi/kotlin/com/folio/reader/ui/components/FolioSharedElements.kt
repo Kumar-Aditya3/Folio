@@ -92,6 +92,27 @@ internal val folioMorphBounds = BoundsTransform { _, _ ->
 }
 
 /**
+ * The morph spec for a **tab↔tab dissolve** only. Home and Library share one shared-transition
+ * scope (so their covers can each morph shelf→detail/reader), which as a side effect pairs the
+ * *same* cover key across the Home↔Library tab switch. On that switch the full [folioMorphBounds]
+ * (450ms, contentSize resize, text in tow) reads as floaty; this shorter spec — plus forcing
+ * `animatedSize` and skipping the text morph in [sharedElementOrNoop]/[sharedTextOrNoop] when
+ * [LocalTabMorphActive] is set — keeps the cover flight but strips the float. See Issue 3.
+ */
+internal val folioTabMorphBounds = BoundsTransform { _, _ ->
+    tween(FolioTokens.motionTabMorph.toInt(), easing = FastOutSlowInEasing)
+}
+
+/**
+ * Set true only while a tab↔tab dissolve is in flight (both the outgoing and incoming pages are
+ * top-level bar destinations — see `FolioNavHost`). The cover-morph modifiers read it to de-float
+ * the tab switch without unwrapping the shared scope: the cover still flies, but on the shorter
+ * [folioTabMorphBounds] with `animatedSize`, and the paired title/author does not morph at all.
+ * Default false, so every other morph (shelf→detail/reader push) is completely unaffected.
+ */
+internal val LocalTabMorphActive = compositionLocalOf { false }
+
+/**
  * CompositionLocal holding the SharedTransitionScope provided by SharedTransitionLayout.
  * On desktop/other targets, this is null and the shared-element modifier is a no-op.
  */
@@ -114,14 +135,20 @@ internal val LocalSharedElementScopes = compositionLocalOf<SharedElementScopes?>
  *
  * Call from within SharedTransitionLayout's content lambda on Android.
  * On desktop, pass null and shared element transitions are skipped.
+ *
+ * [tabMorphActive] is true only while a tab↔tab dissolve is in flight; it publishes
+ * [LocalTabMorphActive] so the cover-morph modifiers below can de-float the tab switch. It stays
+ * false on desktop and for every push/pop, so those morphs are unchanged.
  */
 @Composable
 fun FolioSharedElementProvider(
     sharedTransitionScope: SharedTransitionScope?,
+    tabMorphActive: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
         LocalSharedTransitionScope provides sharedTransitionScope,
+        LocalTabMorphActive provides tabMorphActive,
         content = content,
     )
 }
@@ -297,13 +324,19 @@ fun Modifier.sharedElementOrNoop(
     val enabled = rememberMorphAttachment()
     val scopes = LocalSharedElementScopes.current
     if (!enabled || scopes == null) return this
+    // Across a tab↔tab dissolve, keep the flight but strip the float: force the shorter spec and
+    // animatedSize (never the continuous contentSize resize) regardless of what the caller asked.
+    val tabMorph = LocalTabMorphActive.current
+    val effectiveBounds = if (tabMorph) folioTabMorphBounds else boundsTransform
+    val effectiveSize =
+        if (tabMorph) SharedTransitionScope.PlaceHolderSize.animatedSize else placeHolderSize
     return with(scopes.sharedTransitionScope) {
         val state = rememberSharedContentState(key)
         this@sharedElementOrNoop.sharedElement(
             state,
             scopes.animatedVisibilityScope,
-            boundsTransform = boundsTransform,
-            placeHolderSize = placeHolderSize,
+            boundsTransform = effectiveBounds,
+            placeHolderSize = effectiveSize,
         )
     }
 }
@@ -331,6 +364,10 @@ fun Modifier.sharedTextOrNoop(
     val enabled = rememberMorphAttachment()
     val scopes = LocalSharedElementScopes.current
     if (!enabled || scopes == null) return this
+    // Do not fly the title/author across a tab↔tab dissolve — the sharedBounds text flight is a
+    // big part of what made the Home↔Library switch feel floaty. It still cross-fades with the
+    // normal tab fade. Every other morph keeps the text morph.
+    if (LocalTabMorphActive.current) return this
     return with(scopes.sharedTransitionScope) {
         val state = rememberSharedContentState(key)
         this@sharedTextOrNoop.sharedBounds(

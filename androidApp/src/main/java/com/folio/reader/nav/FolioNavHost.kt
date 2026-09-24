@@ -9,6 +9,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -96,21 +98,30 @@ fun FolioNavHost(
 ) {
     val graph = navModel.graph
 
+    // A tab↔tab dissolve is in flight exactly when two top-level bar destinations are visible at
+    // once (the outgoing tab stays composed for its exit while the incoming one enters). A push
+    // (Home→Reader) only ever has one top-level route visible, so this stays false and the
+    // shelf→detail/reader cover morph is untouched. Fed to the shared-element provider so the tab
+    // switch can keep its cover flight but drop the floaty contentSize resize + text flight.
+    val visibleEntries by navController.visibleEntries.collectAsState()
+    val tabMorphActive = visibleEntries.count { it.destination.route in topLevelRoutes } >= 2
+
     // §17 tab↔tab flies the covers. A book on the Home hero and the same book in
     // the Library grid publish the same cover key, so switching tabs morphs the
-    // cover from where it sat to where it lands. The background must not wait for
-    // that 450ms flight, though: the incoming tab fades in fast (motionFast) so the
-    // field reads as swapped almost at once, and the outgoing tab fades out just as
-    // fast so its masthead/hero tint don't hang on top for the whole flight — it
-    // stays composed but transparent while the shared-element overlay carries the
-    // covers the rest of the way. A hard cut (None) can't coexist with the morph:
-    // the transition has to stay live for the covers to travel, so the swap is a
-    // short fade rather than an instant flip. Pushes (shelf → detail/reader) keep
-    // their fade+slide below.
+    // cover from where it sat to where it lands. The incoming tab is drawn on top,
+    // so its background must not fade *in* — while it was transparent the outgoing
+    // tab's masthead/hero showed through behind the new one's Books/Manga/Docs
+    // masthead. Instead it enters at full opacity (initialAlpha = 1) over the tab
+    // morph's own duration: the field reads as swapped on the first frame, yet the
+    // transition stays *live* for that whole window so the shared-element covers can
+    // still travel. (A hard cut — EnterTransition.None — collapses the transition to
+    // zero and the covers snap; holding the content opaque for the duration keeps the
+    // morph without the crossfade.) Pushes (shelf → detail/reader) keep their
+    // fade+slide below.
     SharedTransitionLayout(modifier = modifier) {
         // §17 shared elements: one transition scope spans every destination, so a
         // cover tapped on a shelf is the same object that lands on the detail page.
-        FolioSharedElementProvider(sharedTransitionScope = this) {
+        FolioSharedElementProvider(sharedTransitionScope = this, tabMorphActive = tabMorphActive) {
             NavHost(
                 navController = navController,
                 // Home is the first of the four bar items and the app's opening
@@ -120,36 +131,32 @@ fun FolioNavHost(
                 startDestination = FolioRoutes.HOME,
                 modifier = Modifier.fillMaxSize(),
                 // §17 morphing tabs: a switch between the bar's destinations is the same
-                // page changing its mind, not travel down a stack. It fades in place (no
-                // slide, no scale — scaling a whole page re-rasterises every cover and glyph
-                // and was a reported glitch) while a push keeps its fade+slide travel, so
-                // opening a book reads as moving *into* it and back as returning.
+                // page changing its mind, not travel down a stack. The incoming tab holds
+                // full opacity (so the background swaps at once and the old tab never shows
+                // through) while the shared-element covers fly; a push keeps its fade+slide
+                // travel, so opening a book reads as moving *into* it and back as returning.
                 enterTransition = {
-                    // A tab↔tab switch fades — it does not slide or scale. The bars (top
-                    // segmented switch, mastheads) and the nav capsule are all glass, so this
-                    // fade is kept short (motionFast): long enough to let the cover morph stay
-                    // live and fly, short enough that the incoming background reads as swapped
-                    // almost at once instead of hanging behind a slow crossfade. Pushes and
-                    // pops keep their fade+slide below.
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionFast.toInt()))
+                    // Tab↔tab: opaque from the first frame (initialAlpha = 1) so the incoming
+                    // background/masthead swaps instantly instead of fading in over the outgoing
+                    // one — but held for the tab-morph duration so the cover flight stays live.
+                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
                     else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
                 },
                 exitTransition = {
-                    // Outgoing tab clears on the same fast fade so its masthead/hero tint
-                    // don't linger on top through the 450ms cover flight; it stays composed
-                    // but transparent while the shared-element overlay finishes the covers.
-                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionFast.toInt()))
+                    // Outgoing tab is covered by the opaque incoming one, so its fade is unseen;
+                    // it runs for the same duration only to keep the transition active for the morph.
+                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
                     else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                         slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
                 },
                 popEnterTransition = {
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionFast.toInt()))
+                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
                     else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
                 },
                 popExitTransition = {
-                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionFast.toInt()))
+                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
                     else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                         slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
                 }

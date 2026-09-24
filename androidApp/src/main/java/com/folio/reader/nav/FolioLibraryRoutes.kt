@@ -135,10 +135,12 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             var atlasReady by remember { mutableStateOf(navModel.atlasEligible == true) }
             LaunchedEffect(navModel.globalSettings.semanticDiscovery) {
                 if (!navModel.globalSettings.semanticDiscovery) { atlasReady = false; return@LaunchedEffect }
-                // Use the session-cached answer immediately if we have it; otherwise resolve it
-                // once, AFTER a short beat so it does not contend with Home's own startup queries
-                // for the DB (that contention was what delayed the screen). Cheap COUNT(DISTINCT),
-                // off the ML dispatcher, cached in the nav model so revisits never re-query.
+                // Use the session-cached answer immediately if we have it (revisits are instant);
+                // otherwise resolve it once here, but AFTER a short beat so the COUNT(DISTINCT) does
+                // not contend with Home's own startup queries on the single serialized DB connection
+                // — that contention is what made the screen janky on launch. The card fades/expands
+                // in when the answer lands (see HomeScreen's AnimatedVisibility), so the deferral
+                // reads as a gentle arrival rather than a pop. Cached in the nav model thereafter.
                 navModel.atlasEligible?.let { atlasReady = it; return@LaunchedEffect }
                 kotlinx.coroutines.delay(700)
                 val eligible = runCatching { graph.semanticDiscoveryRepository.atlasHeroEligible() }.getOrDefault(false)

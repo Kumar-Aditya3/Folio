@@ -327,6 +327,7 @@ class EmbeddingBackfillWorker(
                     continueLater(totalChapters, totalChunks)
                 } else {
                     Log.i(TAG, "library exhausted after $rounds slice(s)")
+                    classifyGenresBestEffort(graph)
                     Result.success()
                 }
             }
@@ -348,12 +349,46 @@ class EmbeddingBackfillWorker(
             "run finished: $totalChapters chapter(s), $totalChunks chunk(s), " +
                 "$totalFailed failure(s) over $rounds slice(s)",
         )
+        classifyGenresBestEffort(graph)
         return Result.success(
             workDataOf(
                 PROGRESS_CHAPTERS to totalChapters,
                 PROGRESS_CHUNKS to totalChunks,
             )
         )
+    }
+
+    /**
+     * Best-effort broad-genre classification of embedded books that still lack a genre row for the
+     * current model (Atlas galaxy communities). Runs after the embedding pass, so the books just
+     * embedded this run are covered; a model swap re-derives genres because they are keyed by model
+     * id. Null-safe and never fatal — the Atlas degrades to "Mixed" communities without it.
+     *
+     * It reuses the *stored* chunk vectors (a cheap mean per book) rather than re-embedding whole
+     * books, and only embeds the ≈20 fixed taxonomy labels once, so it is far lighter than the
+     * embedding pass it follows and does not need the same memory gating.
+     */
+    private suspend fun classifyGenresBestEffort(graph: AppGraph) {
+        val service = graph.genreClassification ?: return
+        // Re-derive genres once when the classifier algorithm changes. Rows are keyed by model, not
+        // by algorithm, so a library already classified by the previous (flat-threshold) classifier
+        // would otherwise keep its stale genres forever. A stored per-model version makes the clear
+        // happen exactly once per bump; failures here are swallowed so classification still runs.
+        runCatching {
+            val key = "genre_classifier_version:${service.model.id}"
+            val seen = graph.settingsRepository.getRaw(key)?.toIntOrNull()
+            if (seen != com.folio.reader.ml.GenreClassificationService.CLASSIFIER_VERSION) {
+                val cleared = service.clearForModel()
+                if (cleared > 0) Log.i(TAG, "genre: cleared $cleared stale row(s) for reclassification")
+                graph.settingsRepository.setRaw(
+                    key,
+                    com.folio.reader.ml.GenreClassificationService.CLASSIFIER_VERSION.toString(),
+                )
+            }
+        }.onFailure { Log.w(TAG, "genre reclassification gate skipped", it) }
+        runCatching { service.backfillMissing() }
+            .onSuccess { classified -> if (classified > 0) Log.i(TAG, "genre: classified $classified book(s)") }
+            .onFailure { Log.w(TAG, "genre classification skipped", it) }
     }
 
     /**

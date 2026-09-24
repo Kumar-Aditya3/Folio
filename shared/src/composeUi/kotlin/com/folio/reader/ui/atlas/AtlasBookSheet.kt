@@ -81,6 +81,8 @@ internal fun AtlasBookSheet(
     themes: List<String>,
     passage: String?,
     description: String? = null,
+    genre: String? = null,
+    isBridge: Boolean = false,
     onOpen: (String) -> Unit,
     onReadPassage: () -> Unit,
     onSelectRelated: (String) -> Unit,
@@ -177,6 +179,10 @@ internal fun AtlasBookSheet(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    if (!genre.isNullOrBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        GenreChip(genre, accent, isBridge)
                     }
                     if (themes.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
@@ -279,6 +285,40 @@ private fun ProgressLine(fraction: Float, accent: Color) {
             style = FolioTheme.typography.labelSmall,
             color = SHEET_SUB,
         )
+    }
+}
+
+@Composable
+private fun GenreChip(genre: String, accent: Color, bridge: Boolean) {
+    val ink = lerp(accent, Color.White, 0.45f)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(accent.copy(alpha = 0.22f))
+                .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(50))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(RoundedCornerShape(50)).background(accent))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = genre,
+                    style = FolioTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (bridge) {
+            Text(
+                text = "· bridges genres",
+                style = FolioTheme.typography.labelSmall,
+                color = SHEET_SUB,
+                maxLines = 1,
+            )
+        }
     }
 }
 
