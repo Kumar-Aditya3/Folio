@@ -148,3 +148,23 @@ screenshot/
 .continue/
 .github/copilot-instructions.md
 AGENTS.md
+
+# AI/agent-generated plan, spec, report and handoff docs (root and docs/). The
+# code is the source of truth; these were session artifacts, not documentation.
+ML_PLAN.md
+PHASES.md
+PROGRESS_*.md
+SETTINGS_FIX_*.md
+ANDROID_ISSUES.md
+ADVERTISED_PRODUCT_GAP_REPORT.md
+BOOK_DETAIL_UPDATE.md
+TROUBLESHOOTING.md
+debug-*.md
+FOLIO_*_PLAN.md
+FOLIO_*_SPEC.md
+docs/ML_PLAN_STATUS.md
+docs/HANDOFF-*.md
+docs/BUGS-*.md
+docs/TROUBLESHOOTING.md
+docs/FOLIO_*_PLAN.md
+docs/FOLIO_*_SPEC.md
