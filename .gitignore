@@ -133,3 +133,18 @@ dbpull/
 # Personal bug-report captures (own library, highlights, stats). Kept locally
 # for reference; they are the reader's private reading life, not repo assets.
 screenshot/
+
+# Local AI-assistant tooling and scratch. These are per-developer editor/agent
+# working dirs and notes; they are not project sources and stay out of the repo.
+.kilo/
+.qoder/
+.cursor/
+.trae/
+.workbuddy-ai/
+.clinerules
+.aider*
+.windsurf/
+.roo/
+.continue/
+.github/copilot-instructions.md
+AGENTS.md
