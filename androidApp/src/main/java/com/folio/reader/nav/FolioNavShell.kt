@@ -63,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.folio.reader.ui.components.FolioTabReselect
-import com.folio.reader.ui.components.FolioSuppressibleBackdrop
 import com.folio.reader.ui.components.folioGlassPress
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.GlassSpec
@@ -126,28 +125,17 @@ fun FolioNavShell(
     val contentBottomInset =
         systemBottomInset + FolioTokens.navFloatHeight + FolioTokens.navFloatInset * 2
 
-    // Route tracking for the glass "stale backdrop" windows, hoisted so both the page
-    // (mastheads) and the capsule can read it.
+    // Route tracking for the glass "stale backdrop" window on pushes (detail/reader): the incoming
+    // screen's hazeSource registers a frame after the outgoing layer drops, so the capsule would
+    // blur the previous screen for that gap. Short, capsule-only window; tab↔tab is left alone.
     val tabRoutes = remember { folioNavBarItems.map { it.route }.toSet() }
     fun isTabSurface(route: String) = route in tabRoutes || route.startsWith("settings/")
-    // Pushes (detail/reader): the incoming screen's hazeSource registers a frame after the
-    // outgoing layer drops, so the *capsule* would blur the previous screen for that gap.
     var suppressBlur by remember { mutableStateOf(false) }
-    // Tab↔tab: the ONE shared backdrop momentarily captures BOTH the outgoing and incoming
-    // pages, so the incoming masthead's glass blurred the *previous* tab showing behind it
-    // ("old Home behind the Books/Manga/Docs masthead"). Hold the backdrop off the page for
-    // the morph window so the mastheads read as solid glass while the tabs cross; the capsule
-    // keeps its own backdrop (it samples the stable field at the bottom, not the swapping top).
-    var tabSwapSuppress by remember { mutableStateOf(false) }
     var previousRoute by remember { mutableStateOf(currentRoute) }
     LaunchedEffect(currentRoute) {
         val from = previousRoute
         previousRoute = currentRoute
-        if (from == currentRoute) return@LaunchedEffect
-        if (isTabSurface(from) && isTabSurface(currentRoute)) {
-            tabSwapSuppress = true
-            kotlinx.coroutines.delay(FolioTokens.motionTabMorph.toLong() + 40)
-            tabSwapSuppress = false
+        if (from == currentRoute || (isTabSurface(from) && isTabSurface(currentRoute))) {
             return@LaunchedEffect
         }
         suppressBlur = true
@@ -174,12 +162,8 @@ fun FolioNavShell(
         CompositionLocalProvider(
             LocalFolioBarInset provides if (showBottomBar) contentBottomInset else 0.dp,
         ) {
-            // Hold the shared blur backdrop off the page (mastheads) during a tab swap so the
-            // incoming masthead's glass cannot blur the outgoing tab still fading behind it.
-            FolioSuppressibleBackdrop(suppress = tabSwapSuppress) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    content()
-                }
+            Box(modifier = Modifier.fillMaxSize()) {
+                content()
             }
         }
 

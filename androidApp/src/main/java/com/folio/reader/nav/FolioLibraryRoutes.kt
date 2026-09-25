@@ -125,6 +125,12 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 )
             }
         }
+        // Publish Home's masthead bottom so a tab-morph cover flight originating on Home (its hero
+        // sits right under the bar) is clipped below the masthead like the Library side is —
+        // otherwise the clip would be a no-op here and the hero's outline would cross the bar.
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.folio.reader.ui.theme.LocalFolioTopInset provides folioBarTopInset(),
+        ) {
         Box(modifier = Modifier.fillMaxSize().folioBackdropSource()) {
             // One view model for the app's lifetime, with its state kept hot
             // from app start (FolioNavModelImpl.homeState) — the skeleton used
@@ -199,6 +205,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                     heroTint = tint
                 }
             )
+        }
         }
     }
 }

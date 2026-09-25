@@ -161,6 +161,15 @@ fun rememberFolioHeaderState(range: Dp = 56.dp): FolioHeaderState {
 }
 
 /**
+ * When true (a tab↔tab swap is in flight), the masthead paints an opaque field behind itself and
+ * drops its blur, so the outgoing tab — still composed for the shared-element cover flight — cannot
+ * show through the bar's translucent glass. Restored to glass the instant the swap settles. This is
+ * the occluder half of "keep the cover morph but never see the old tab behind the new masthead":
+ * the flying cover is drawn in the shared-element overlay *above* the bar, so it still morphs.
+ */
+val LocalChromeOccludeSwap = androidx.compose.runtime.compositionLocalOf { false }
+
+/**
  * The screen's masthead. Editorial, not Material: the title carries the display
  * face at `headlineMedium`, the bar has no fill of its own so the page's field
  * runs behind it, and the only structure at rest is a soft scrim holding the OS
@@ -211,6 +220,9 @@ fun FolioTopBar(
     val glassCaps = LocalGlassCapabilities.current
     val glassBackdrop = LocalGlassBackdrop.current
     val blurred = glassCaps.blur && glassBackdrop != null
+    // Occlude behind the bar during a tab↔tab swap so the outgoing tab cannot bleed through the
+    // glass while its cover still flies (see [LocalChromeOccludeSwap]).
+    val occlude = LocalChromeOccludeSwap.current
     // The user's top-bar preference *is* the crown's alpha, not a factor on the
     // designed one: scaling a 0.36 `barGlass` could only ever go down, so the
     // slider ran from invisible to nearly invisible and its ends looked the same.
@@ -225,7 +237,7 @@ fun FolioTopBar(
     // Blur only while something is passing underneath — the same condition as the
     // fill — fading in with the bar's presence. A bar at rest over the page's own
     // field has nothing to refract.
-    val canBlur = blurred && fill.presence > 0.01f
+    val canBlur = blurred && fill.presence > 0.01f && !occlude
     val daylight = LocalFolioDaylight.current
     // §17 living light, draw-phase read: the crown's specular catch drifts with
     // the room's slow light, so even a bar over an entirely still page has one
@@ -248,6 +260,12 @@ fun FolioTopBar(
             )
             .then(if (glassCaps.noise && !canBlur) Modifier.folioGlassGrain() else Modifier)
             .drawBehind {
+                // Tab↔tab swap: lay down an opaque field first so nothing behind the bar (the
+                // outgoing tab, still composed for the cover flight) can bleed through the glass.
+                // Uses the field's own top colour so it reads as the page thickening, not a slab.
+                if (occlude) {
+                    drawRect(atmos.fieldTop.copy(alpha = 1f))
+                }
                 // The OS icons need their own ground on every theme; the page does
                 // not need a band. The scrim decays fast — full strength only in the
                 // few pixels the icons actually occupy, and effectively gone by the

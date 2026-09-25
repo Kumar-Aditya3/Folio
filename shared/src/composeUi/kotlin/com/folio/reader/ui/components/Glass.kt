@@ -1,5 +1,6 @@
 package com.folio.reader.ui.components
 
+import androidx.compose.animation.EnterExitState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
@@ -174,6 +175,14 @@ fun FolioGlassRoot(
 fun Modifier.folioBackdropSource(): Modifier {
     val backdrop = LocalGlassBackdrop.current ?: return this
     if (!LocalGlassCapabilities.current.blur) return this
+    // While a screen is *exiting* — the outgoing page of a tab morph — stop feeding its content to
+    // the shared blur backdrop. The floating masthead and the nav capsule both blur that backdrop,
+    // so an exiting Home's warm hero colours were being blurred in under the incoming Library's
+    // Books/Manga/Documents bar until the morph settled (the "out-of-place colours in the masthead").
+    // The incoming and at-rest screens still register, so the glass always has the *current* page to
+    // refract; only the leaving screen drops out, and its own alpha-0 exit hides it everywhere else.
+    val avScope = LocalSharedElementScopes.current?.animatedVisibilityScope
+    if (avScope != null && avScope.transition.targetState == EnterExitState.PostExit) return this
     return hazeSource(backdrop)
 }
 

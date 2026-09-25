@@ -137,20 +137,18 @@ fun FolioNavHost(
                 // through) while the shared-element covers fly; a push keeps its fade+slide
                 // travel, so opening a book reads as moving *into* it and back as returning.
                 enterTransition = {
-                    // Tab↔tab: opaque from the first frame (initialAlpha = 1) so the incoming
-                    // background/masthead swaps instantly instead of fading in over the outgoing
-                    // one — but held for the tab-morph duration so the cover flight stays live.
+                    // Tab↔tab: opaque from frame 0 (initialAlpha = 1) so the background/masthead
+                    // swaps instantly, but the transition stays live for the morph window so the
+                    // cover still flies (clipped below the masthead — see sharedElementOrNoop). The
+                    // outgoing tab is invisible from frame 0 (exit below), so nothing bleeds.
                     if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
                     else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
                 },
                 exitTransition = {
                     // Outgoing tab drops to fully transparent on the *first* frame and stays there
-                    // for the morph window (keyframes: 0 at 0). It is kept composed only so the
-                    // shared-element cover still has a source to fly *from* — but nothing of the old
-                    // tab (masthead, hero, shelves) is ever painted behind the incoming glass
-                    // masthead, which is what "old Home behind the Books/Manga/Docs bar" was. A plain
-                    // fadeOut would keep it visible (fading) through that whole window.
+                    // for the morph window (keyframes: 0 at 0), kept composed only so the flying
+                    // cover still has a source. None of the old tab is ever painted behind the bar.
                     if (isTabMorph()) {
                         fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
                     } else {

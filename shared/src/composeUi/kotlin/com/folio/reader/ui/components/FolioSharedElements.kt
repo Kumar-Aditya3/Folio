@@ -13,7 +13,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioTopInset
 import com.folio.reader.ui.theme.rememberMotionEnabled
 
 /**
@@ -101,6 +107,26 @@ internal val folioMorphBounds = BoundsTransform { _, _ ->
  */
 internal val folioTabMorphBounds = BoundsTransform { _, _ ->
     tween(FolioTokens.motionTabMorph.toInt(), easing = FastOutSlowInEasing)
+}
+
+/**
+ * Clips a tab-morph cover's overlay flight to **below the masthead** ([topPx] = the masthead+rail
+ * bottom, from [LocalFolioTopInset]). The shared-element cover renders in an overlay that sits above
+ * the glass masthead, so a cover travelling from Home's hero (up by the bar) down into the Library
+ * grid would paint its outline across the Books/Manga/Documents bar; clipping the overlay to the
+ * content area keeps the flight but never lets it touch the bar. No clip (null) when there is no
+ * inset — desktop, or a screen with no floating bar — so those flights are unclipped as before.
+ */
+private class BelowMastheadOverlayClip(private val topPx: Float) : SharedTransitionScope.OverlayClip {
+    override fun getClipPath(
+        state: SharedTransitionScope.SharedContentState,
+        bounds: Rect,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Path? {
+        if (topPx <= 0.5f) return null
+        return Path().apply { addRect(Rect(-100_000f, topPx, 100_000f, 100_000f)) }
+    }
 }
 
 /**
@@ -324,20 +350,32 @@ fun Modifier.sharedElementOrNoop(
     val enabled = rememberMorphAttachment()
     val scopes = LocalSharedElementScopes.current
     if (!enabled || scopes == null) return this
-    // Across a tab↔tab dissolve, keep the flight but strip the float: force the shorter spec and
-    // animatedSize (never the continuous contentSize resize) regardless of what the caller asked.
+    // Read the masthead+rail bottom unconditionally (cheap CompositionLocal read) so the tab-morph
+    // clip below can be remembered without a conditional `remember`.
+    val topPx = with(LocalDensity.current) { LocalFolioTopInset.current.toPx() }
+    val tabClip = remember(topPx) { BelowMastheadOverlayClip(topPx) }
     val tabMorph = LocalTabMorphActive.current
-    val effectiveBounds = if (tabMorph) folioTabMorphBounds else boundsTransform
-    val effectiveSize =
-        if (tabMorph) SharedTransitionScope.PlaceHolderSize.animatedSize else placeHolderSize
     return with(scopes.sharedTransitionScope) {
         val state = rememberSharedContentState(key)
-        this@sharedElementOrNoop.sharedElement(
-            state,
-            scopes.animatedVisibilityScope,
-            boundsTransform = effectiveBounds,
-            placeHolderSize = effectiveSize,
-        )
+        if (tabMorph) {
+            // Tab↔tab keeps the cover flight but on the shorter spec, with animatedSize, and — the
+            // fix — clipped to below the masthead so the cover never paints over the glass bar it
+            // flies past. The paired title/author does not morph (see sharedTextOrNoop).
+            this@sharedElementOrNoop.sharedElement(
+                state,
+                scopes.animatedVisibilityScope,
+                boundsTransform = folioTabMorphBounds,
+                placeHolderSize = SharedTransitionScope.PlaceHolderSize.animatedSize,
+                clipInOverlayDuringTransition = tabClip,
+            )
+        } else {
+            this@sharedElementOrNoop.sharedElement(
+                state,
+                scopes.animatedVisibilityScope,
+                boundsTransform = boundsTransform,
+                placeHolderSize = placeHolderSize,
+            )
+        }
     }
 }
 
