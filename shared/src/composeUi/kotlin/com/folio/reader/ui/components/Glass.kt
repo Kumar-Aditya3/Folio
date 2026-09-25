@@ -178,6 +178,26 @@ fun Modifier.folioBackdropSource(): Modifier {
 }
 
 /**
+ * Holds the glass backdrop off its subtree while [suppress] is true, then restores it — without
+ * ever surfacing the Haze type to the caller (the seam rule: only this file names `HazeState`).
+ *
+ * The one use is the tab↔tab swap: the app shares a single backdrop registry across the four tabs,
+ * so during a swap it briefly captures BOTH the outgoing and incoming pages and the incoming
+ * masthead's glass would blur the *previous* tab showing behind it. Wrapping the page content in
+ * this with `suppress = true` for the morph window makes the mastheads fall back to their solid
+ * glass fill (no backdrop to sample) instead of blurring the old tab; the nav capsule sits outside
+ * this and keeps its backdrop.
+ */
+@Composable
+fun FolioSuppressibleBackdrop(suppress: Boolean, content: @Composable () -> Unit) {
+    val backdrop = if (suppress) null else LocalGlassBackdrop.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalGlassBackdrop provides backdrop,
+        content = content,
+    )
+}
+
+/**
  * The single `hazeEffect` call site. Draws the blurred backdrop *under* the
  * caller's own fill, so the surface's fill alpha still governs — at 100% the
  * surface is a lid and the blur is invisible; at the designed glass points the

@@ -268,25 +268,13 @@ fun HomeScreen(
                     LedgerStrip(state, climate, onOpenStats, onOpenExclusions)
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
                 }
-                // Atlas entry. The card animates in (fade + expand) rather than popping, because
-                // its eligibility can resolve a beat after Home's first frame; on revisits the
-                // session-cached answer means it is already visible on frame one.
-                item(key = "atlas-entry") {
-                    val motionOn = rememberMotionEnabled()
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = atlasReady,
-                        enter = if (motionOn) {
-                            androidx.compose.animation.fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                                androidx.compose.animation.expandVertically(tween(FolioTokens.motionStandard.toInt()))
-                        } else {
-                            androidx.compose.animation.fadeIn(snap())
-                        },
-                        exit = androidx.compose.animation.fadeOut(snap()),
-                    ) {
-                        Column {
-                            AtlasEntryCard(onOpenAtlas)
-                            Spacer(Modifier.height(FolioTokens.spaceMovement))
-                        }
+                // Atlas entry. Shown only once eligibility resolves; the card itself carries a
+                // mini-galaxy backdrop. (An AnimatedVisibility wrapper here could get stuck hidden
+                // across tab re-entry, so the card is emitted conditionally like the other shelves.)
+                if (atlasReady) {
+                    item(key = "atlas-entry") {
+                        AtlasEntryCard(onOpenAtlas)
+                        Spacer(Modifier.height(FolioTokens.spaceMovement))
                     }
                 }
                 // The shelf is the rest of the same ranked list — books and manga

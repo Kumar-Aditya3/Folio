@@ -1,6 +1,7 @@
 package com.folio.reader.nav
 
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -144,11 +145,18 @@ fun FolioNavHost(
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
                 },
                 exitTransition = {
-                    // Outgoing tab is covered by the opaque incoming one, so its fade is unseen;
-                    // it runs for the same duration only to keep the transition active for the morph.
-                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
-                    else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                        slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                    // Outgoing tab drops to fully transparent on the *first* frame and stays there
+                    // for the morph window (keyframes: 0 at 0). It is kept composed only so the
+                    // shared-element cover still has a source to fly *from* — but nothing of the old
+                    // tab (masthead, hero, shelves) is ever painted behind the incoming glass
+                    // masthead, which is what "old Home behind the Books/Manga/Docs bar" was. A plain
+                    // fadeOut would keep it visible (fading) through that whole window.
+                    if (isTabMorph()) {
+                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                    } else {
+                        fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                            slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                    }
                 },
                 popEnterTransition = {
                     if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
@@ -156,9 +164,12 @@ fun FolioNavHost(
                         slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
                 },
                 popExitTransition = {
-                    if (isTabMorph()) fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
-                    else fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                        slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                    if (isTabMorph()) {
+                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                    } else {
+                        fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
+                            slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                    }
                 }
             ) {
                 // ── Bottom-bar destinations ─────────────────────────────────────────
