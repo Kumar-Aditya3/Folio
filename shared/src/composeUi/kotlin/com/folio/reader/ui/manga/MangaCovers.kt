@@ -33,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
+import com.folio.reader.ui.components.COVER_TARGET_WIDTH_PX
 import com.folio.reader.ui.components.decodeCoverImage
 import com.folio.reader.ui.components.folioShimmer
 import com.folio.reader.ui.components.coverHalo
@@ -41,9 +42,19 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 private const val MANGA_COVER_CACHE_MAX_BYTES = 48L * 1024L * 1024L
+
+// Cap concurrent cover fetch+decode. A multi-source ("all sources") result grid can
+// list hundreds of covers, and each MangaCover cell launches its own load; without a
+// gate that fans out into hundreds of simultaneous network fetches and full-size
+// bitmap decodes — the memory spike that got the app reclaimed under OEM low-memory
+// pressure while browsing. Six in flight keeps the visible grid filling quickly while
+// bounding peak memory.
+private val coverLoadGate = Semaphore(6)
 
 // Access-order LRU bounded by decoded-bitmap bytes (not entry count), guarded by its own monitor.
 // The old structure never cached local (coverPath) covers and evicted FIFO by count, so scrolling a
@@ -84,7 +95,11 @@ private suspend fun loadMangaCover(
             // re-decode every locally-imported (CBZ) cover.
             val key = "local:$path:${file.lastModified()}"
             cachedCover(key)?.let { return it }
-            val bmp = withContext(Dispatchers.IO) { decodeCoverImage(file.readBytes()) } ?: return null
+            val bmp = coverLoadGate.withPermit {
+                // Re-check under the permit: another cell may have loaded it while we waited.
+                cachedCover(key)
+                    ?: withContext(Dispatchers.IO) { decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) }
+            } ?: return null
             cacheCover(key, bmp)
             return bmp
         }
@@ -92,23 +107,28 @@ private suspend fun loadMangaCover(
     val key = "$sourceId:$thumbnailUrl"
     cachedCover(key)?.let { return it }
     if (thumbnailUrl.isNullOrBlank()) return null
-    // Disk before network: a cover seen in any previous session is a plain file
-    // read, which is what keeps library thumbnails loaded across cold starts.
-    // Only a genuine miss goes to the source, and its bytes are written through
-    // so the next start starts warm.
-    var bytes = MangaCoverDiskCache.read(key)
-    if (bytes == null) {
-        bytes = try {
-            backend.fetchCover(sourceId, thumbnailUrl)
-        } catch (_: Throwable) {
-            null
+    // Gate fetch+decode so a large multi-source grid can't spike memory (see coverLoadGate).
+    return coverLoadGate.withPermit {
+        cachedCover(key)?.let { return@withPermit it }
+        // Disk before network: a cover seen in any previous session is a plain file
+        // read, which is what keeps library thumbnails loaded across cold starts.
+        // Only a genuine miss goes to the source, and its bytes are written through
+        // so the next start starts warm.
+        var bytes = MangaCoverDiskCache.read(key)
+        if (bytes == null) {
+            bytes = try {
+                backend.fetchCover(sourceId, thumbnailUrl)
+            } catch (_: Throwable) {
+                null
+            }
+            if (bytes != null) MangaCoverDiskCache.write(key, bytes)
         }
-        if (bytes != null) MangaCoverDiskCache.write(key, bytes)
+        val raw = bytes ?: return@withPermit null
+        val bitmap = withContext(Dispatchers.IO) { decodeCoverImage(raw, COVER_TARGET_WIDTH_PX) }
+            ?: return@withPermit null
+        cacheCover(key, bitmap)
+        bitmap
     }
-    bytes ?: return null
-    val bitmap = withContext(Dispatchers.IO) { decodeCoverImage(bytes) } ?: return null
-    cacheCover(key, bitmap)
-    return bitmap
 }
 
 @Composable

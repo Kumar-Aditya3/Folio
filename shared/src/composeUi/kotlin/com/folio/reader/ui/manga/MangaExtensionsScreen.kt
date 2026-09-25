@@ -82,6 +82,11 @@ fun ExtensionsScreen(
     val untrusted = visibleExt.filter { it.isUntrusted }
     val available = visibleExt.filter { !it.isInstalled && !it.isUntrusted }
     var extQuery by remember { mutableStateOf("") }
+    // Package the user just tapped Install on, so the trust prompt can pop the
+    // moment that extension lands as untrusted (see LaunchedEffect below).
+    var justInstalledPkg by remember { mutableStateOf<String?>(null) }
+    // The extension whose trust confirmation is currently shown at screen level.
+    var pendingTrust by remember { mutableStateOf<ExtensionEntry?>(null) }
 
     LaunchedEffect(Unit) {
         if (viewModel.supportsExtensions && available.isEmpty()) {
@@ -90,6 +95,22 @@ fun ExtensionsScreen(
     }
     LaunchedEffect(extensions) {
         if (installed.isEmpty() && available.isNotEmpty() && tab == 0) tab = 1
+        // As soon as a just-installed extension finishes and lands as untrusted,
+        // surface its trust prompt immediately so it can be enabled without hunting
+        // for the Untrusted tab. Only the extension the user just installed triggers
+        // this, so the one-time bulk re-trust after upgrading never spams dialogs.
+        val pkg = justInstalledPkg
+        if (pkg != null) {
+            when (val entry = extensions.firstOrNull { it.pkgName == pkg }) {
+                null -> Unit
+                else -> if (entry.isUntrusted) {
+                    pendingTrust = entry
+                    justInstalledPkg = null
+                } else if (entry.isInstalled) {
+                    justInstalledPkg = null
+                }
+            }
+        }
     }
 
     val shownBase = when (tab) {
@@ -184,7 +205,7 @@ fun ExtensionsScreen(
                 ExtensionRow(
                     entry = entry,
                     installStep = installStates[entry.pkgName],
-                    onInstall = { viewModel.install(entry.pkgName) },
+                    onInstall = { justInstalledPkg = entry.pkgName; viewModel.install(entry.pkgName) },
                     onUpdate = { viewModel.update(entry.pkgName) },
                     onUninstall = { viewModel.uninstall(entry.pkgName) },
                     onTrust = { viewModel.trust(entry) },
@@ -204,7 +225,7 @@ fun ExtensionsScreen(
                 ExtensionRow(
                     entry = entry,
                     installStep = installStates[entry.pkgName],
-                    onInstall = { viewModel.install(entry.pkgName) },
+                    onInstall = { justInstalledPkg = entry.pkgName; viewModel.install(entry.pkgName) },
                     onUpdate = { viewModel.update(entry.pkgName) },
                     onUninstall = { viewModel.uninstall(entry.pkgName) },
                     onTrust = { viewModel.trust(entry) },
@@ -346,6 +367,19 @@ fun ExtensionsScreen(
             onDismiss = { showAddRepo = false },
         )
     }
+
+    // Auto-surfaced trust prompt for a just-installed extension, so it can be
+    // enabled right away instead of via the Untrusted tab.
+    pendingTrust?.let { entry ->
+        TrustExtensionDialog(
+            entry = entry,
+            onConfirm = {
+                viewModel.trust(entry)
+                pendingTrust = null
+            },
+            onDismiss = { pendingTrust = null },
+        )
+    }
 }
 
 @Composable
@@ -358,6 +392,7 @@ private fun ExtensionRow(
     onTrust: () -> Unit,
 ) {
     val colors = FolioTheme.colors
+    var showTrustConfirm by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -400,7 +435,7 @@ private fun ExtensionRow(
         }
         Spacer(Modifier.width(FolioTokens.space2))
         when {
-            entry.isUntrusted -> Button(onClick = onTrust) { Text("Trust") }
+            entry.isUntrusted -> Button(onClick = { showTrustConfirm = true }) { Text("Trust") }
             installStep == ExtensionInstallStep.Downloading -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             installStep == ExtensionInstallStep.Installing -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             // A failed install used to silently revert the button to Install; the
@@ -428,6 +463,67 @@ private fun ExtensionRow(
             else -> Button(onClick = onInstall) { Text("Install") }
         }
     }
+
+    if (showTrustConfirm) {
+        TrustExtensionDialog(
+            entry = entry,
+            onConfirm = {
+                showTrustConfirm = false
+                onTrust()
+            },
+            onDismiss = { showTrustConfirm = false },
+        )
+    }
+}
+
+@Composable
+private fun TrustExtensionDialog(
+    entry: ExtensionEntry,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Trust this extension?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                Text(
+                    "Extensions are third-party code that runs inside Folio. Only trust an " +
+                        "extension you recognize -- a matching repository key is not proof of safety.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.onSurface,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                    Text(
+                        entry.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = FolioTheme.colors.onSurface,
+                    )
+                    Text(
+                        "Package: ${entry.pkgName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    Text(
+                        "Version: ${entry.versionName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    Text(
+                        "Signature: ${entry.signatureHash}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Trust") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

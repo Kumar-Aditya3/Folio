@@ -323,7 +323,10 @@ class SyncEngine(
 
     private suspend fun pushHighlight(item: SyncQueueItem) {
         val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
-        if (settings?.syncAnnotations == false) return
+        // Fail closed: upload only when the toggle is explicitly on. Unreadable settings
+        // (getGlobalSettings threw -> null) must not leak private annotations against an
+        // off switch, so require an explicit true rather than merely "not false".
+        if (settings?.syncAnnotations != true) return
 
         val highlight = Json.Default.decodeFromString(Highlight.serializer(), item.payload)
         // A fresher remote copy wins; uploading this stale payload would resurrect
@@ -337,7 +340,10 @@ class SyncEngine(
 
     private suspend fun pushNote(item: SyncQueueItem) {
         val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
-        if (settings?.syncAnnotations == false) return
+        // Fail closed: upload only when the toggle is explicitly on. Unreadable settings
+        // (getGlobalSettings threw -> null) must not leak private annotations against an
+        // off switch, so require an explicit true rather than merely "not false".
+        if (settings?.syncAnnotations != true) return
 
         val note = Json.Default.decodeFromString(Note.serializer(), item.payload)
         val remote = fetchedNotes.firstOrNull { it.id == note.id }
@@ -348,7 +354,10 @@ class SyncEngine(
 
     private suspend fun pushBookmark(item: SyncQueueItem) {
         val settings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
-        if (settings?.syncAnnotations == false) return
+        // Fail closed: upload only when the toggle is explicitly on. Unreadable settings
+        // (getGlobalSettings threw -> null) must not leak private annotations against an
+        // off switch, so require an explicit true rather than merely "not false".
+        if (settings?.syncAnnotations != true) return
 
         val bookmark = Json.Default.decodeFromString(Bookmark.serializer(), item.payload)
         val remote = fetchedBookmarks.firstOrNull { it.id == bookmark.id }
@@ -379,7 +388,9 @@ class SyncEngine(
 
     private suspend fun pushSettings(item: SyncQueueItem) {
         val current = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
-        if (current?.syncSettings == false) return
+        // Fail closed: push only when the toggle is explicitly on; unreadable settings
+        // (null) or an explicit off both block the push.
+        if (current?.syncSettings != true) return
 
         val settings = com.folio.reader.util.JsonUtils.Compact.decodeFromString(ReaderSettings.serializer(), item.payload)
         // Credentials never leave the device: the payload would otherwise carry the
@@ -683,7 +694,13 @@ class SyncEngine(
             syncAccountEmail = current.syncAccountEmail,
             syncAccountPassword = current.syncAccountPassword
         )
-        runCatching { settingsRepository.saveGlobalSettings(merged, emitSyncEvent = false) }
+        // Stamp the applied watermark only after the local save actually succeeds. A
+        // failed save must not be marked "applied", or these remote settings would be
+        // treated as done and never re-applied on any device. saveGlobalSettings signals
+        // failure by throwing, so letting it propagate skips the stamp below and routes
+        // the error through performSync's existing catch (println + lastError) so the
+        // next cycle retries; the watermark still holds its previous value.
+        settingsRepository.saveGlobalSettings(merged, emitSyncEvent = false)
         runCatching { settingsRepository.setRaw(KEY_SETTINGS_APPLIED_AT, remote.updatedAt.toString()) }
     }
 

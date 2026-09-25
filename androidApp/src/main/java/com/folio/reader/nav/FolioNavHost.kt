@@ -68,12 +68,16 @@ private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.n
  * It replaces popping exactly one destination (`popBackStack()`), which is what produced the
  * bug: that pops to *whatever* is underneath, and from Home that is Home.
  *
- * Doing it here rather than in a `BackHandler` on the reader screen is deliberate. The reader
- * is a destination; where a destination's back leads is a property of the graph, and a
- * screen-level handler cannot see the tab beneath it — which is exactly the information the
- * fix needs. The host's own back walk (`MainActivity.onBackWalked`) only reaches
- * `navController.popBackStack()` after the reader's `onBack` has already run, so the two do
- * not fight.
+ * Where a destination's back leads is a property of the graph, so the pop *target* lives
+ * here rather than being duplicated per screen. The route-based pop is origin-agnostic: it
+ * pops to the Library wherever it sits, so a screen-level handler need not see the tab
+ * beneath it - it only has to invoke this same `onBack`. The reader route does exactly
+ * that: it installs a `BackHandler` that calls `viewModel.closeBook { onBackPress() }`, the
+ * identical callback its chrome back arrow uses, so physical/gesture back and the arrow run
+ * the same logic and both land on the Library. That handler is the deepest active
+ * interceptor while the reader is on screen, so it claims the press first and the host's own
+ * back walk (`MainActivity.onBackWalked` -> `navController.popBackStack()`) never runs for
+ * the reader; the two do not fight because only one ever fires.
  *
  * Deliberately *not* asserted to succeed: if the Library is somehow not on the stack,
  * popping the reader is still the right fallback, and the return value is not worth a crash.

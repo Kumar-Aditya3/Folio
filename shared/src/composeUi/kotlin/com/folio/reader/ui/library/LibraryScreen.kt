@@ -451,7 +451,11 @@ fun LibraryScreen(
     // reset was removed; keying this on entry/search-open (not every recomposition) avoids the
     // title snapping around under a mode switch.
     LaunchedEffect(Unit) { headerState.reset() }
-    LaunchedEffect(bookSearchActive) { if (bookSearchActive) headerState.reset() }
+    // Reset (expand) whenever any search opens OR closes. The masthead is pinned
+    // (non-collapsing) while a search is active — see `searchPinned` below — so any
+    // collapse the nested-scroll accumulated under it must not snap in when the field
+    // closes, and a search always opens with its full rail showing.
+    LaunchedEffect(bookSearchActive, mangaSearchActive, documentSearchActive) { headerState.reset() }
     // The collapse is a sticky accumulator shared by all three shelves. v1.2.11
     // reset it on every mode switch so an incoming shelf could not arrive with its
     // rail folded under the bar — but the collapse also drives the masthead title's
@@ -723,6 +727,13 @@ fun LibraryScreen(
         )
     }
 
+    // The masthead is pinned (does not collapse) while any search is active. The search
+    // rail is much taller than the 56dp collapse range, so letting it fold folds the whole
+    // rail while the list only scrolls 56px — leaving a reserved-inset gap under the
+    // collapsed bar ("just empty space"). Pinning keeps the field + tabs on screen and the
+    // results flush beneath them. Normal (non-search) collapse is unaffected.
+    val searchPinned = bookSearchActive || mangaSearchActive || documentSearchActive
+
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             documentMode && documentSelectionActive -> {
@@ -833,7 +844,7 @@ fun LibraryScreen(
                 // the wordmark form the masthead; repeating it here left the library
                 // as the only top-level screen that never said what it was.
                 title = "Library",
-                collapse = headerState.collapse,
+                collapse = if (searchPinned) 0f else headerState.collapse,
                 modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
                 actions = {
                     if (syncState != null && syncNeedsAttention) {
@@ -1304,22 +1315,40 @@ fun LibraryScreen(
                                             )
                                         }
                                     } else {
-                                        LibraryContent(
-                                            books = displayed,
-                                            libraryEmpty = allBooks.isEmpty(),
-                                            viewMode = booksViewMode,
-                                            selectedBooks = selectedBooks,
-                                            isSelectionMode = isSelectionMode,
-                                            preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
-                                            finishEstimates = finishEstimates,
-                                            onBookClick = {
-                                                if (isSelectionMode) viewModel.toggleSelection(it.id)
-                                                else onBookDetailClick(it)
-                                            },
-                                            onBookLongClick = { viewModel.toggleSelection(it.id) },
-                                            onDeleteBook = { bookToDelete = it },
-                                            onImportClick = onImportClick
-                                        )
+                                        // #16/B3: on phones the search rail stacks into two rows, but this
+                                        // in-place filtered grid top inset is frozen to the shorter filter rail
+                                        // (shelfInset), so the second rail row overlays the first grid row. While
+                                        // a Titles search is actively filtering (non-empty query), clear the taller rail with the same
+                                        // measured inset the other scopes apply above so the grid sits below both
+                                        // rows. Empty query or search closed -> inherit the normal shelfInset unchanged.
+                                        val titlesInset = if (bookSearchActive && queryText.isNotEmpty()) {
+                                            folioBarTopInset(
+                                                with(shelfDensity) {
+                                                    (if (searchRailPx > 0) searchRailPx
+                                                    else railPxByMode[LibraryMode.BOOKS] ?: 0).toDp()
+                                                }
+                                            )
+                                        } else {
+                                            LocalFolioTopInset.current
+                                        }
+                                        CompositionLocalProvider(LocalFolioTopInset provides titlesInset) {
+                                            LibraryContent(
+                                                books = displayed,
+                                                libraryEmpty = allBooks.isEmpty(),
+                                                viewMode = booksViewMode,
+                                                selectedBooks = selectedBooks,
+                                                isSelectionMode = isSelectionMode,
+                                                preserveFeaturedDuringSelection = preserveFeaturedBookDuringSelection,
+                                                finishEstimates = finishEstimates,
+                                                onBookClick = {
+                                                    if (isSelectionMode) viewModel.toggleSelection(it.id)
+                                                    else onBookDetailClick(it)
+                                                },
+                                                onBookLongClick = { viewModel.toggleSelection(it.id) },
+                                                onDeleteBook = { bookToDelete = it },
+                                                onImportClick = onImportClick
+                                            )
+                                        }
                                     }
                                 }
                             }

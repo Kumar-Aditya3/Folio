@@ -1139,6 +1139,18 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 "DELETE FROM bookmarks WHERE book_id = ?",
                 "DELETE FROM reading_sessions WHERE book_id = ?",
                 "DELETE FROM chapters WHERE book_id = ?",
+                // Semantic index rows. chapter_vectors has no book_id column (PRIMARY KEY is
+                // (chunk_id, model_id)), so it is scoped through the chapter_chunks subquery and
+                // MUST run BEFORE chapter_chunks is emptied: once the chunks are gone the subquery
+                // matches nothing and the vectors are orphaned. chapter_chunks carries book_id
+                // directly, so it deletes on that. Both cover every model (model_id is irrelevant
+                // to a book delete), so indexes for other books are untouched. Omitting these was
+                // the confirmed leak: orphaned chunks/vectors reloaded into the in-memory semantic
+                // index on every search and surfaced as ghost passages (blank title, real snippet)
+                // in the Echoes/Related panel. chunk_recipes is per-model (keyed by model_id only,
+                // no book_id) and is deliberately NOT deleted here.
+                "DELETE FROM chapter_vectors WHERE chunk_id IN (SELECT id FROM chapter_chunks WHERE book_id = ?)",
+                "DELETE FROM chapter_chunks WHERE book_id = ?",
                 "DELETE FROM book_tags WHERE book_id = ?",
                 "DELETE FROM book_collections WHERE book_id = ?",
                 "DELETE FROM quotes WHERE book_id = ?",

@@ -11,6 +11,7 @@ import androidx.navigation.NavHostController
 import com.folio.reader.AppGraph
 import com.folio.reader.MainActivity
 import com.folio.reader.FolioApplication
+import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.diffFields
 import com.folio.reader.settings.withFieldsFrom
@@ -60,6 +61,13 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
 
     // ── Hoisted UI state (was remembered in setContent before the nav move) ──
     var globalSettings by mutableStateOf(ReaderSettings())
+
+    /**
+     * Cloud-sync credentials, mirrored from the no-backup [SecureCredentialStore] for the sync
+     * settings screen. The store — not this snapshot and not [globalSettings] — is the source of
+     * truth; this is loaded on the sync screen and updated optimistically on save.
+     */
+    var syncCredentials by mutableStateOf(SyncCredentials())
 
     /**
      * Session-cached Atlas hero eligibility. Computed once (lazily, off Home's critical path) so
@@ -378,6 +386,18 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
             }
         }
         if (credsChanged) graph.restartSync(activity.appScope)
+    }
+
+    /**
+     * Persists sync credentials to the no-backup SecureCredentialStore (never the backed-up
+     * settings blob) and rebuilds the sync loop so new credentials take effect immediately.
+     */
+    fun saveSyncCredentials(credentials: SyncCredentials) {
+        syncCredentials = credentials // optimistic; the store is the source of truth
+        activity.appScope.launch(Dispatchers.IO) {
+            graph.secureCredentialStore.save(credentials)
+            withContext(Dispatchers.Main) { graph.restartSync(activity.appScope) }
+        }
     }
 
     @Composable

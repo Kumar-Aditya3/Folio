@@ -84,10 +84,15 @@ class ZeroShotTagger(
         try {
             val tagVectors = embedder.embed(clean.map { it.name }, EmbedKind.QUERY)
 
-            // Chapters are embedded in one batch and averaged, so a 150-chapter book is one
-            // session and one forward pass per batch — not one session per chapter.
+            // Chapters are embedded in one session and averaged, so a 150-chapter book is one
+            // session, not one session per chapter. The forward pass itself, though, is now
+            // bounded by [embedBatched]: embedding up to MAX_CHAPTERS documents at the full
+            // token window in a single embed() would allocate an attention buffer of
+            // rows x window^2 (~4 GB for 60 rows at 512 tokens) -- the same OOM-kill that
+            // EmbeddingIndexer.flush sub-batches to avoid. embedBatched reuses the indexer
+            // token-aware derivation, so both paths stay memory-safe on one native budget.
             val documents = chapters.take(MAX_CHAPTERS).map { it.content.take(MAX_CHAPTER_CHARS) }
-            val chapterVectors = embedder.embed(documents, EmbedKind.PASSAGE)
+            val chapterVectors = embedBatched(embedder, documents, EmbedKind.PASSAGE)
             val mean = meanOf(chapterVectors) ?: return@withContext emptyList()
 
             rank(clean, tagVectors, mean, limit)
@@ -117,6 +122,38 @@ class ZeroShotTagger(
         } finally {
             runCatching { embedder.close() }
         }
+    }
+
+    /**
+     * Embeds [documents] in token-aware sub-batches, preserving order.
+     *
+     * A single embed() over all MAX_CHAPTERS documents would issue one forward pass whose peak
+     * native memory is rows x window^2 -- up to ~4 GB for 60 rows at a 512-token window, the
+     * exact OOM-kill [EmbeddingIndexer] was refactored around (its [EmbeddingIndexer.flush]
+     * sub-batches for the same reason). This routes the tagger through the identical derivation:
+     * [EmbeddingIndexer.batchFor] applied to model.maxTokens, so the two paths stay calibrated
+     * to the same [EmbeddingIndexer.NATIVE_BATCH_BUDGET_BYTES] and
+     * [EmbeddingIndexer.BYTES_PER_ROW_PER_TOKEN_SQUARED]. Effective rows-per-pass: 5 at a
+     * 512-token window (Arctic-S), 20 at 256 (MiniLM).
+     *
+     * chunked() keeps each pass slice contiguous and appends its vectors in order, so the
+     * concatenation is what a single embed(documents) would have returned -- the chapter-to-
+     * vector alignment [meanOf] relies on is preserved. Embedding is per-row and independent,
+     * so splitting the pass changes only ORT call overhead, not the vectors themselves.
+     */
+    private suspend fun embedBatched(
+        embedder: Embedder,
+        documents: List<String>,
+        kind: EmbedKind,
+    ): List<FloatArray> {
+        if (documents.isEmpty()) return emptyList()
+        val rowsPerPass = EmbeddingIndexer.batchFor(model.maxTokens).coerceAtLeast(1)
+        if (documents.size <= rowsPerPass) return embedder.embed(documents, kind)
+        val vectors = ArrayList<FloatArray>(documents.size)
+        for (pass in documents.chunked(rowsPerPass)) {
+            vectors += embedder.embed(pass, kind)
+        }
+        return vectors
     }
 
     /**

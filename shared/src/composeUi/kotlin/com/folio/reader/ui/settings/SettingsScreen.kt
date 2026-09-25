@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.theme.FolioTheme
@@ -67,6 +68,9 @@ fun SettingsScreen(
     onPickScanDeviceRoot: (() -> Unit)? = null,
     onScanOnStartChange: (Boolean) -> Unit = {},
     onScanNow: () -> Unit = {},
+    /** Cloud-sync credentials, held in the no-backup store rather than the settings blob. */
+    syncCredentials: SyncCredentials = SyncCredentials(),
+    onSyncCredentialsChange: (SyncCredentials) -> Unit = {},
 ) {
     var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
     var showPreview by remember { mutableStateOf(true) }
@@ -142,7 +146,9 @@ fun SettingsScreen(
                                         settings,
                                         syncState,
                                         onSettingsChange,
-                                        onSyncNow
+                                        onSyncNow,
+                                        syncCredentials,
+                                        onSyncCredentialsChange
                                     )
 
                                     SettingsCategory.ADVANCED -> Column {
@@ -256,7 +262,9 @@ fun SettingsScreen(
                                         settings,
                                         syncState,
                                         onSettingsChange,
-                                        onSyncNow
+                                        onSyncNow,
+                                        syncCredentials,
+                                        onSyncCredentialsChange
                                     )
 
                                     SettingsCategory.ADVANCED -> Column {

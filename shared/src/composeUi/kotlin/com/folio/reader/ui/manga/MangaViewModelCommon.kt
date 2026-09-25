@@ -10,9 +10,6 @@ import kotlinx.coroutines.SupervisorJob
 /** Folio ViewModels are plain Kotlin classes; this keeps their scope style consistent. */
 internal fun mangaVmScope() = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-/** Library-level "Downloaded" mode: the shelf stays whole, but detail screens
- *  narrow their chapter lists to downloaded chapters while this is on. */
-internal const val KEY_LIBRARY_DOWNLOADED_FILTER = "manga.library.downloaded.filter"
 /**
  * Story position of a chapter. Sources disagree on list direction (some fetch
  * newest-first, so sortOrder 0 is the LATEST chapter) and many leave

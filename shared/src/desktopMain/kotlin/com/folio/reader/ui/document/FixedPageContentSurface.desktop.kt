@@ -10,9 +10,12 @@ import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -40,7 +43,10 @@ actual suspend fun openFixedPageDocument(path: String): FixedPageDocument = with
 private class DesktopFixedPageDocument(private val document: PDDocument) : FixedPageDocument {
     private val renderer = PDFRenderer(document)
     private val mutex = Mutex()
-    private var closed = false
+    // Teardown runs here, off the UI thread, once the in-flight render releases
+    // the mutex (see close()), so dispose never blocks the caller.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var closed = false
     override val pageCount: Int = document.numberOfPages
 
     /** cropBox + /Rotate, remembered per page — the strip asks for every page. */
@@ -88,13 +94,23 @@ private class DesktopFixedPageDocument(private val document: PDDocument) : Fixed
     }
 
     override fun close() {
-        runBlocking(Dispatchers.IO) {
-            mutex.withLock {
-                if (closed) return@withLock
-                closed = true
-                document.close()
+        // Dispose must not block the UI thread. Flag the document closed
+        // immediately so any waiting or later render bails, then close the
+        // PDDocument off the UI thread once the in-flight render releases the
+        // mutex. Closing while PDFBox is still rendering would corrupt it, so
+        // the mutex hand-off is still required; it just happens on IO now
+        // instead of under runBlocking on the caller thread.
+        if (closed) return
+        closed = true
+        scope.launch {
+            try {
+                mutex.withLock {
+                    document.close()
+                }
+            } catch (_: Throwable) {
+                // Best-effort teardown: nothing actionable if closing fails.
             }
-        }
+        }.invokeOnCompletion { scope.cancel() }
     }
 }
 

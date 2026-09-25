@@ -85,10 +85,10 @@ document.addEventListener('selectionchange',function(){clearTimeout(window.__fol
     val emptyHideJs: String = """
 document.querySelectorAll('p,div,section,blockquote').forEach(function(el){if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length)el.style.display='none';});
 """
-    fun js(fraction: Float, cols: Int, gutter: Float, measure: Int): String = """
+    fun js(fraction: Float, cols: Int, gutter: Float, measure: Int, desktopEvents: Boolean = true): String = """
 (function(){
 if(window.__folioEngine)return;window.__folioEngine=true;
-var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction;
+var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction,DESKTOP=$desktopEvents;
 var body=document.body,docEl=document.documentElement;
 // Hide here, not in CSS: a document whose engine JS never lands must still paint
 // text instead of staying a solid blank page under a CSS opacity:0 gate.
@@ -118,18 +118,30 @@ function widthize(el,cw){
   el.style.boxSizing='border-box';
   el.style.width=cw+'px';
   var pad=G;
-  if(MEASURE>0&&cw>MEASURE){pad=Math.floor((cw-MEASURE)/2);}
+  if(MEASURE>0&&cw>MEASURE){pad=Math.floor((cw-MEASURE)/2)+G;}
   el.style.paddingLeft=pad+'px';
   el.style.paddingRight=pad+'px';
   el.style.margin='0';
   el.style.textIndent='0';
+  el.style.transform='';
   el.style.left='0px';
   el.style.top='0px';
+}
+// A block that is, or wraps, an element the line-splitter cannot break: an image,
+// table, canvas, video, svg, iframe or rule. querySelector only sees descendants,
+// so the element's own tag is checked too - a bare <img> has no descendants and
+// empty textContent, and would otherwise read as an empty hole.
+function atomicBlock(el){
+  var t=(el.tagName||'').toUpperCase();
+  if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO'||t==='TABLE'||t==='IFRAME'||t==='HR')return true;
+  return !!(el.querySelector&&el.querySelector('img,svg,canvas,video,hr,iframe,table'));
 }
 function flatten(el,out,cw,H){
   // Publisher markup littered with empty <p>/<br> blocks reads as huge holes
   // once absolute positioning stops margin collapsing; drop them in paged mode.
-  if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length){el.style.display='none';return;}
+  // Never drop a block that carries atomic media (even a bare <img>, which has
+  // no text of its own): that is the oversized-image-silently-vanishes path.
+  if(!atomicBlock(el)&&!(el.textContent||'').replace(/\s/g,'').length){el.style.display='none';return;}
   widthize(el,cw);
   if(el.offsetHeight>H*1.5&&el.children.length>0){
     var par=el.parentNode,child;
@@ -192,6 +204,26 @@ function trySplit(el,col,y,cw,H){
   }
   return [c,lastSh];
 }
+// An atomic block taller than one page cannot be sliced, and paged mode clips at
+// the page box (body overflow:hidden) with no scroll, so anything past H would be
+// lost. Cap its media to the page box (aspect ratio preserved via object-fit); if
+// it is still taller than a page (e.g. a big table), scale the whole block down.
+// Returns the height the packer should treat it as, never more than one page.
+function fitAtomic(el,H){
+  var t=(el.tagName||'').toUpperCase();
+  var media=(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO')?[el]:(el.querySelectorAll?el.querySelectorAll('img,svg,canvas,video'):[]);
+  for(var m=0;m<media.length;m++){
+    media[m].style.maxHeight=H+'px';
+    media[m].style.maxWidth='100%';
+    media[m].style.objectFit='contain';
+  }
+  if(el.offsetHeight>H){
+    var s=H/el.offsetHeight;
+    if(s>0&&s<1){el.style.transformOrigin='top left';el.style.transform='scale('+s+')';}
+    return H;
+  }
+  return el.offsetHeight;
+}
 function layout(){
   pinBox();
   var cw=colW(),H=pageH();
@@ -219,13 +251,17 @@ function layout(){
   for(i=0;i<kids.length;i++)widthize(kids[i],cw);
   var hs=[];
   for(i=0;i<kids.length;i++){
+    var kh=kids[i].offsetHeight;
+    // Oversized atomic block (image/table/etc): trySplit can't slice it and paged
+    // mode clips past the page box, so fit it to one page rather than lose it.
+    if(kh>H&&atomicBlock(kids[i]))kh=fitAtomic(kids[i],H);
     cs=getComputedStyle(kids[i]);
-    hs.push(kids[i].offsetHeight+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom));
+    hs.push(kh+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom));
   }
   var col=0,y=0;
   for(i=0;i<kids.length;i++){
     if(y>0&&y+hs[i]>H){
-      var after=trySplit(kids[i],col,y,cw,H);
+      var after=atomicBlock(kids[i])?null:trySplit(kids[i],col,y,cw,H);
       if(after){col=after[0];y=after[1];continue;}
       col++;y=0;
     }
@@ -265,10 +301,14 @@ function goTo(p,instant){
   p=Math.max(0,Math.min(maxPage(),p));
   if(p===page){setScroll(false);report();return;}
   if(animating)return;
+  // Raise the re-entrancy guard before the reduced-motion branch: that path has no
+  // animation, so without settling `animating` here a second near-simultaneous call
+  // (the synthetic mouseup after a touchend) would turn a second page. settle()
+  // drops the guard after a beat on both paths.
+  animating=true;
   page=p;
   posFrac=maxPage()>0?page/maxPage():0;
-  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);report();return;}
-  animating=true;
+  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);settle();report();return;}
   setScroll(true);
   settle();
   report();
@@ -387,7 +427,7 @@ function handleTap(x,y,moved,ms){
   var w=vw();
   if(x>w*0.66){userActed=true;goTo(page+1);}
   else if(x<w*0.33){userActed=true;goTo(page-1);}
-  else document.title='folio-tap:'+(++nonce);
+  else if(DESKTOP)document.title='folio-tap:'+(++nonce);
 }
 document.addEventListener('click',function(ev){
   var el=ev.target;
@@ -396,6 +436,9 @@ document.addEventListener('click',function(ev){
 },true);
 document.addEventListener('mouseup',function(e){
   if(e.button!==0)return;
+  // Suppress the compatibility mouse event a touch synthesizes right after
+  // touchend: without this one physical tap ran handleTap twice (touchend+mouseup).
+  if(Date.now()-lastTouchEnd<700)return;
   if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
   var sel=window.getSelection();
   if(sel&&!sel.isCollapsed)return;

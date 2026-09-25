@@ -107,7 +107,7 @@ fun EpubImage(
                 val decoded = withContext(Dispatchers.IO) {
                     runCatching {
                         val file = File(path)
-                        if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes()) else null
+                if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) else null
                     }.getOrNull()
                 }
                 if (decoded != null) {
@@ -276,6 +276,13 @@ fun FallbackCover(
         title.hashCode().let { if (it < 0) -it else it } % palettes.size
     ]
 
+    // White washes out on the light end of these gradients (measured
+    // 1.86-2.98:1 against the accent stop). Route it through the shared
+    // legibleOn guard against the lightest stop (accent): white is kept where
+    // the gradient is dark enough and darkened toward ink only where it would
+    // be unreadable. The black title shadow still carries the darker end.
+    val titleInk = legibleOn(Color.White, accent, Color.Black)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -297,7 +304,7 @@ fun FallbackCover(
                 style = (if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium)
                     .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                color = Color.White,
+                color = titleInk,
                 textAlign = TextAlign.Center,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
@@ -307,7 +314,7 @@ fun FallbackCover(
                     text = author.take(24),
                     style = FolioTheme.typography.labelSmall
                         .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = titleInk.copy(alpha = 0.85f),
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

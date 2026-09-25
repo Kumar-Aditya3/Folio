@@ -39,8 +39,10 @@ class DocumentReaderViewModel(
     private val onModeChanged: suspend (DocumentReaderMode) -> Unit = {},
     dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
-) : AutoCloseable {
-    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+) {
+    // Public so a dispose site can launch [close] on a scope that outlives the
+    // composition (mirrors MangaReaderViewModel.scope); [close] cancels it last.
+    val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val _state = MutableStateFlow(DocumentReaderState(mode = initialMode))
     val state: StateFlow<DocumentReaderState> = _state.asStateFlow()
 
@@ -239,10 +241,18 @@ class DocumentReaderViewModel(
         currentPosition()?.let { position -> scope.launch { repository.upsertPosition(position) } }
     }
 
-    override fun close() {
-        currentPosition()?.let { position ->
-            kotlinx.coroutines.runBlocking(ioDispatcher) { runCatching { repository.upsertPosition(position) } }
-        }
+    /**
+     * Persists the final reader position on the way out, then tears the scope
+     * down. This used to wrap the write in runBlocking(ioDispatcher), but it is
+     * invoked from onDispose on the UI thread, where the write can stall for
+     * hundreds of ms behind the global DB write mutex (a backfill or sync drain
+     * holds it), long enough to drop frames and trip the 5s ANR watchdog. It is
+     * now suspend: the dispose site launches it on [scope], which outlives the
+     * composition, so the position is still persisted without blocking the UI.
+     * The repository switches to IO internally, exactly as flush() relies on.
+     */
+    suspend fun close() {
+        currentPosition()?.let { position -> runCatching { repository.upsertPosition(position) } }
         scope.cancel()
     }
 

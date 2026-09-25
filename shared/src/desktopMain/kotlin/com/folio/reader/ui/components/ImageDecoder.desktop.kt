@@ -40,10 +40,12 @@ private fun readSubsampled(bytes: ByteArray, targetWidthPx: Int): java.awt.image
     }
 }
 
-actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
+actual fun decodeCoverImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
     return try {
-        // Subsample to cover size instead of decoding the (often 2000px+) source at full resolution.
-        (readSubsampled(bytes, COVER_MAX_WIDTH_PX) ?: return null).toComposeImageBitmap()
+        // Subsample to the requested cover size (or the default cap) instead of
+        // decoding the (often 2000px+) source at full resolution.
+        val target = if (targetWidthPx > 0) targetWidthPx else COVER_MAX_WIDTH_PX
+        (readSubsampled(bytes, target) ?: return null).toComposeImageBitmap()
     } catch (_: Exception) {
         null
     }
@@ -72,7 +74,7 @@ actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
         }
         scaled.toComposeImageBitmap()
     } catch (_: Exception) {
-        decodeCoverImage(bytes)
+        decodeCoverImage(bytes, 0)
     }
 }
 

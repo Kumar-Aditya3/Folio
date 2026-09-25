@@ -31,6 +31,8 @@ import com.folio.reader.importer.IncomingContentCoordinator
 import com.folio.reader.importer.SearchIndexer
 import com.folio.reader.platform.AndroidPlatform
 import com.folio.reader.platform.renderAndroidDocumentThumbnail
+import com.folio.reader.security.SecureCredentialStore
+import com.folio.reader.security.SyncCredentials
 import com.folio.reader.sync.NoopStorageSync
 import com.folio.reader.sync.RestFirebaseStorageSync
 import com.folio.reader.sync.RestFirestoreSync
@@ -76,6 +78,12 @@ class AppGraph(private val app: Application) {
     val quoteRepository = JdbcQuoteRepository(database)
     val revisitRepository = JdbcRevisitRepository(database)
     val settingsRepository = JdbcSettingsRepository(database)
+
+    /**
+     * Sync credentials live in a no-backup file store, NOT in the backed-up settings blob, so the
+     * plaintext sync password never ships to Android cloud backup / device transfer.
+     */
+    val secureCredentialStore = SecureCredentialStore(platform.fileSystem)
     val statisticsRepository = JdbcStatisticsRepository(database)
     val syncQueueRepository = JdbcSyncQueueRepository(database)
     val deviceRepository = JdbcDeviceRepository(database)
@@ -140,10 +148,17 @@ class AppGraph(private val app: Application) {
     val onDeviceTextTools = com.folio.reader.ml.onDeviceTextTools()
 
     // ---------- Manga category (Mihon-powered backend) ----------
-    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database) { mangaId ->
-        // Cascade delete also removes the manga's downloaded pages from disk.
-        mangaDownloadManager.deleteMangaDownloads(mangaId)
-    }
+    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(
+        database,
+        onMangaDeleted = { mangaId ->
+            // Cascade delete also removes the manga's downloaded pages from disk.
+            mangaDownloadManager.deleteMangaDownloads(mangaId)
+        },
+        onRemovedFromLibrary = { mangaId ->
+            // Drop shelf memberships so a re-add starts on the default shelf.
+            mangaCategoryRepository.assign(mangaId, emptySet())
+        },
+    )
     val mangaChapterRepository = com.folio.reader.database.JdbcMangaChapterRepository(database)
     val mangaCategoryRepository = com.folio.reader.database.JdbcMangaCategoryRepository(database)
     val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
@@ -529,14 +544,13 @@ class AppGraph(private val app: Application) {
      */
     private val bundledFirebaseProjectId = "folio-sync-53b90"
 
-    private fun firebaseCreds(): FirebaseCredentials {
-        // User-entered API key (Settings > Advanced) takes priority over env fallback.
-        val global = cachedGlobalSettings
-        val projectId = global?.firebaseProjectId?.takeIf { it.isNotBlank() }
+    private fun firebaseCreds(creds: SyncCredentials = cachedSyncCredentials): FirebaseCredentials {
+        // User-entered credentials (from the no-backup store) take priority over the env fallback.
+        val projectId = creds.firebaseProjectId.takeIf { it.isNotBlank() }
             ?: System.getenv("FOLIO_FB_PROJECT_ID")
             ?: stringRes(app, "folio_fb_project_id")
             ?: bundledFirebaseProjectId
-        val apiKey = global?.firebaseApiKey?.takeIf { it.isNotBlank() }
+        val apiKey = creds.firebaseApiKey.takeIf { it.isNotBlank() }
             ?: System.getenv("FOLIO_FB_API_KEY")
             ?: stringRes(app, "folio_fb_api_key")
         return FirebaseCredentials(projectId, apiKey)
@@ -589,16 +603,33 @@ class AppGraph(private val app: Application) {
     @Volatile
     private var cachedGlobalSettings: com.folio.reader.settings.ReaderSettings? = null
 
+    /**
+     * Composition-safe snapshot of the sync credentials read from [secureCredentialStore]. Primed
+     * at startup (after the migration below) and refreshed by [restartSync]. Used by [firebaseCreds]
+     * for the cheap `isSyncConfigured` check; the engine itself reads the store fresh.
+     */
+    @Volatile
+    private var cachedSyncCredentials: SyncCredentials = SyncCredentials()
+
     private val graphScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Guards [runStartupTasks] so process-level startup runs once per process, not once per
-     * Activity relaunch. Reset naturally on process death because the whole graph is rebuilt.
+     * Activity relaunch. Reset on process death because the whole graph is rebuilt, and reset
+     * explicitly by [shutdown] so a same-process reopen after a back-exit re-runs startup:
+     * Android often keeps the process (and this graph) alive after the user backs out, so
+     * Application.onCreate does not re-run, and without this reset the reopen's runStartupTasks
+     * would early-return against a graph whose sync was stopped and DB was closed.
      */
     private val startupTasksStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     init {
         graphScope.launch {
+            // One-time, idempotent: pull any credentials out of the backed-up settings blob into
+            // the no-backup store and blank them in settings, BEFORE priming the snapshots below.
+            runCatching { secureCredentialStore.migrateFromSettings(settingsRepository) }
+            cachedSyncCredentials =
+                runCatching { secureCredentialStore.load() }.getOrDefault(SyncCredentials())
             cachedGlobalSettings =
                 runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
         }
@@ -649,11 +680,15 @@ class AppGraph(private val app: Application) {
         }
 
     private fun createSyncEngine(): SyncEngine? {
-        val creds = firebaseCreds()
+        // Read the primed credential snapshot rather than the store on disk: the engine getter is
+        // reached from composition, so it must not do I/O here (the same reason the old code read
+        // cachedGlobalSettings instead of the DB). The snapshot is primed after the startup
+        // migration and refreshed by restartSync, so a save always rebuilds against fresh values.
+        val stored = cachedSyncCredentials
+        val creds = firebaseCreds(stored)
         if (!creds.isConfigured) return null
-        val settings = cachedGlobalSettings
-        val email = settings?.syncAccountEmail?.takeIf { it.isNotBlank() }
-        val password = settings?.syncAccountPassword?.takeIf { it.isNotBlank() }
+        val email = stored.syncAccountEmail.takeIf { it.isNotBlank() }
+        val password = stored.syncAccountPassword.takeIf { it.isNotBlank() }
         return SyncEngine(
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
             syncRepository = syncQueueRepository,
@@ -709,6 +744,8 @@ class AppGraph(private val app: Application) {
         syncEngineState.value = null
         old?.stop()
         appScope.launch(Dispatchers.IO) {
+            cachedSyncCredentials =
+                runCatching { secureCredentialStore.load() }.getOrDefault(SyncCredentials())
             cachedGlobalSettings =
                 runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
             cachedSyncEngine = null
@@ -752,9 +789,24 @@ class AppGraph(private val app: Application) {
     }
 
     fun shutdown() {
+        // Final flush, then stop the running loop. stop() uses cancelChildren (not scope.cancel),
+        // so the engine's own scope stays reusable, but the graph must still drop its reference.
         syncEngine?.syncOnAppClose()
         syncEngine?.stop()
+        // Drop the stopped engine (and its Compose mirror) so the next runStartupTasks ->
+        // startSync -> syncEngine getter rebuilds a fresh engine via createSyncEngine() instead of
+        // handing back the stopped instance. Mirrors restartSync's cache-clear.
+        cachedSyncEngine = null
+        syncEngineState.value = null
+        // Closing only nulls Database's cached JDBC connection; getConnection() lazily reopens a
+        // fresh one on the next access, so this does not permanently wedge the DB - a same-process
+        // reopen gets a working connection back.
         database.close()
+        // Make shutdown reversible: this guard is process-scoped, and on a back-exit Android often
+        // keeps the process (and this graph) alive, so Application.onCreate does not re-run. Without
+        // this reset a same-process reopen's runStartupTasks would early-return and sync, interrupted
+        // downloads, scans and backfills would never restart against the reopened DB.
+        startupTasksStarted.set(false)
     }
 }
 

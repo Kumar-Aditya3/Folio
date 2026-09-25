@@ -101,44 +101,55 @@ class MangaLibraryViewModel(
     val selectedIds = MutableStateFlow<Set<String>>(emptySet())
     val isSelectionMode = MutableStateFlow(false)
     val selectedCategoryId = MutableStateFlow<String?>(null)
-    /**
-     * False until the shelf's category selection has settled onto a category that
-     * actually exists.
-     *
-     * The remembered category (`KEY_LIBRARY_CATEGORY`) is restored from a *suspend*
-     * settings read, so it cannot be known at construction: the view model opens with
-     * `selectedCategoryId == null`, which means "no membership filter", which means
-     * the shelf's first frames render the **entire library**. The restore then lands
-     * a frame or two later and the shelf snaps to the remembered category — a visible
-     * flash of the wrong (unfiltered) shelf on every entry to Manga.
-     *
-     * `ready` cannot cover this: it tracks whether `library` has emitted, and that
-     * happens *before* the category settles. Hosts gate the shelf on this signal so
-     * the unfiltered list is never drawn, exactly as [ready] already prevents the
-     * empty state from flashing. It flips true when a real category is selected, and
-     * also when the category list is known to be empty (a library with no categories
-     * has nothing to restore — waiting would hang the screen forever).
-     */
-    val categoryReady: StateFlow<Boolean> = combine(selectedCategoryId, categories) { selected, list ->
-        // A selected id that resolves to a real category is settled. So is "there is
-        // no category to select" — both are stable first-frame answers.
-        selected != null || list.isEmpty()
-    }.stateIn(scope, SharingStarted.Lazily, false)
+    private data class CategoryMembership(val categoryId: String, val ids: Set<String>)
 
-    /** Live membership of the selected category; a stale snapshot here is what made
-     *  freshly added manga invisible until the library was re-entered. */
-    private val categoryMembership: StateFlow<Set<String>?> = selectedCategoryId
+    /** Live membership of the selected category, tagged with the id it was computed
+     *  for. The tag lets [baseList] and [categoryReady] tell "the current category's
+     *  membership" apart from a set still left over from the previous category during a
+     *  switch — showing another category's manga before the real set arrives was the
+     *  "manga bled through until it reset to their own categories" report. A stale
+     *  snapshot here is also what made freshly added manga invisible until re-entry. */
+    private val categoryMembership: StateFlow<CategoryMembership?> = selectedCategoryId
         .flatMapLatest { id ->
-            if (id == null) flowOf<Set<String>?>(null)
-            else categoryRepo.observeMangaIdsInCategory(id).map { ids -> ids as Set<String>? }
+            if (id == null) flowOf<CategoryMembership?>(null)
+            else categoryRepo.observeMangaIdsInCategory(id).map { ids -> CategoryMembership(id, ids) }
         }
         .stateIn(scope, SharingStarted.Lazily, null)
 
+    /**
+     * False until the shelf's category selection has settled AND that category's
+     * membership has actually resolved.
+     *
+     * The remembered category (`KEY_LIBRARY_CATEGORY`) is restored from a *suspend*
+     * settings read, so at construction `selectedCategoryId == null` and no membership
+     * set is known. Gating only on "a category is selected" still let the shelf draw for
+     * a frame or two while the id-filter was empty or still belonged to the previous
+     * category — the whole library, or another category, flashing through. Requiring the
+     * membership to have resolved *for the selected category* closes that window. "No
+     * category to select" (an empty list) stays a stable first-frame answer so a library
+     * with no categories does not hang on the loading placeholder.
+     */
+    val categoryReady: StateFlow<Boolean> = combine(selectedCategoryId, categories, categoryMembership) { selected, list, membership ->
+        (selected != null && membership != null && membership.categoryId == selected) || list.isEmpty()
+    }.stateIn(scope, SharingStarted.Lazily, false)
+
     private val baseList: StateFlow<List<MangaEntry>> =
-        combine(library, query, searchActive, categoryMembership) { list, q, searching, membership ->
+        combine(library, query, searchActive, selectedCategoryId, categoryMembership) { list, q, searching, selectedCat, membership ->
+            // Effective category id-filter for the CURRENT selection:
+            //  - no category selected (only the pre-seed first frame, which the host gates
+            //    on categoryReady) → whole library
+            //  - membership resolved for exactly this category → that set
+            //  - a category is selected but its membership hasn't landed yet, or the set
+            //    still belongs to the previous category mid-switch → empty, so other
+            //    categories' manga never bleed through before the real set arrives.
+            val ids: Set<String>? = when {
+                selectedCat == null -> null
+                membership != null && membership.categoryId == selectedCat -> membership.ids
+                else -> emptySet()
+            }
             list.filter { manga ->
                 ((!searching || q.isBlank()) || manga.title.contains(q, ignoreCase = true)) &&
-                    (membership == null || manga.id in membership)
+                    (ids == null || manga.id in ids)
             }
         }.stateIn(scope, SharingStarted.Lazily, emptyList())
 
@@ -148,7 +159,7 @@ class MangaLibraryViewModel(
 
     val visible: StateFlow<List<MangaEntry>> =
         combine(baseList, counts, activeFilters, sortBy) { list, c, filters, sort ->
-            val (unread, prog, _) = c
+            val (unread, prog, downloaded) = c
             val filtered = list.filter { manga ->
                 filters.all { f ->
                     val p = prog[manga.id] ?: 0f
@@ -156,9 +167,9 @@ class MangaLibraryViewModel(
                         MangaLibFilter.UNREAD -> p == 0f && (unread[manga.id] ?: 0) > 0
                         MangaLibFilter.READING -> p > 0f && p < 1f
                         MangaLibFilter.COMPLETED -> p >= 1f
-                        // Downloaded is a mode, not a shelf filter: the library stays
-                        // whole and detail screens narrow to downloaded chapters.
-                        MangaLibFilter.DOWNLOADED -> true
+                        // Shelf filter: keep only manga that have at least one
+                        // downloaded chapter.
+                        MangaLibFilter.DOWNLOADED -> (downloaded[manga.id] ?: 0) > 0
                     }
                 }
             }
@@ -209,27 +220,14 @@ class MangaLibraryViewModel(
                 }
             }
         }
-        scope.launch {
-            if (settingsRepo.getRaw(KEY_LIBRARY_DOWNLOADED_FILTER) == "true") {
-                activeFilters.value = activeFilters.value + MangaLibFilter.DOWNLOADED
-            }
-        }
     }
 
     fun toggleFilter(filter: MangaLibFilter) {
         activeFilters.value = if (filter in activeFilters.value) activeFilters.value - filter else activeFilters.value + filter
-        persistDownloadedMode()
     }
 
     fun setQuickFilter(filter: MangaLibFilter?) {
         activeFilters.value = if (filter == null) emptySet() else setOf(filter)
-        persistDownloadedMode()
-    }
-
-    /** The Downloaded toggle is a library-wide mode; detail screens read it back. */
-    private fun persistDownloadedMode() {
-        val on = MangaLibFilter.DOWNLOADED in activeFilters.value
-        scope.launch { settingsRepo.setRaw(KEY_LIBRARY_DOWNLOADED_FILTER, if (on) "true" else "false") }
     }
 
     suspend fun createCategory(name: String): String? =

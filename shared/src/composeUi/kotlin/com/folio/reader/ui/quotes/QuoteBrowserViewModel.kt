@@ -108,9 +108,11 @@ class QuoteBrowserViewModel(
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val rawQuotes = flowOf(Unit)
+    private val rawQuotes: kotlinx.coroutines.flow.StateFlow<List<Quote>?> = flowOf(Unit)
         .flatMapLatest { getAllQuotes() }
-        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        // Seeded null (not emptyList) so the hub can tell "store has not emitted yet"
+        // from "store emitted an empty list": the former is loading, the latter is empty.
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val allBooksState = getAllBooks().stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -119,9 +121,11 @@ class QuoteBrowserViewModel(
      * filter keystroke. Each keystroke's [filteredDisplayItems] is a cheap in-memory predicate over
      * this shared list, so typing no longer re-resolves every quote (≈5 DB reads each) N times.
      */
-    private val resolvedItems: kotlinx.coroutines.flow.StateFlow<List<QuoteDisplayItem>> =
+    private val resolvedItems: kotlinx.coroutines.flow.StateFlow<List<QuoteDisplayItem>?> =
         combine(rawQuotes, allBooksState, tagsRevision) { quotes, books, _ -> quotes to books }
             .map { (quotes, books) ->
+                // Still loading until the quote store's first emission arrives.
+                if (quotes == null) return@map null
                 withContext(Dispatchers.IO) {
                     // Resolve each distinct book's chapters once, and fetch the highlight once
                     // (the note is derived from it) instead of the old double getHighlight.
@@ -154,11 +158,16 @@ class QuoteBrowserViewModel(
                     }
                 }
             }
-            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** True until [resolvedItems] has its first real value; drives the hub's loading placeholder. */
+    val loading: kotlinx.coroutines.flow.Flow<Boolean> = resolvedItems.map { it == null }
 
     fun filteredDisplayItems(filter: FilterState): kotlinx.coroutines.flow.Flow<List<QuoteDisplayItem>> =
         resolvedItems.map { items ->
-            items.filter { item ->
+            // null (still loading) collapses to an empty list so callers keep a non-null
+            // contract; the loading state is surfaced separately through [loading].
+            items.orEmpty().filter { item ->
                 // Parenthesized: elvis binds looser than &&, so the old
                 // `?: true && ...` shape dropped tag/search filters whenever
                 // a book filter was active.

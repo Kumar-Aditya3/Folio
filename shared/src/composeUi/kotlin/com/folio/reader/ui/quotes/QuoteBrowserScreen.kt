@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioCallout
+import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.theme.FolioShapes
@@ -102,10 +103,13 @@ fun QuoteBrowserScreen(
         onDispose { viewModel.close() }
     }
 
+    val quotesLoading by viewModel.loading.collectAsState(initial = true)
     val displayItems by viewModel.filteredDisplayItems(filter)
         .collectAsState(initial = emptyList())
+    // null = the manga-notes flow has not emitted yet (loading); an empty list is a real
+    // "no manga notes". Kept distinct so a slow manga source cannot force a false empty state.
     val mangaItems by viewModel.mangaItems(filter)
-        .collectAsState(initial = emptyList())
+        .collectAsState(initial = null)
 
     Scaffold(
         topBar = {
@@ -274,8 +278,32 @@ fun QuoteBrowserScreen(
             if (viewModel.canFindRelated) ({ item -> viewModel.findRelatedFor(item) }) else null
 
         Box(modifier = Modifier.fillMaxSize()) {
-            if (displayItems.isEmpty() && mangaItems.isEmpty()) {
-                Box(
+            val manga = mangaItems.orEmpty()
+            when {
+                // Anything to show wins immediately, so quotes arriving before the manga
+                // flow (or vice-versa) never flashes a spinner over real content.
+                displayItems.isNotEmpty() || manga.isNotEmpty() -> when (viewMode) {
+                    QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
+                        displayItems, manga, onQuoteClick, onMangaNoteClick, padding,
+                        onEditTags = { tagEditorFor = it },
+                        onFindRelated = onFindRelated
+                    )
+                    QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
+                        displayItems, manga, onQuoteClick, onMangaNoteClick, padding,
+                        onEditTags = { tagEditorFor = it },
+                        onFindRelated = onFindRelated
+                    )
+                }
+                // Nothing yet AND a source is still loading: the honest "still loading",
+                // not the old false "No quotes found".
+                quotesLoading || mangaItems == null -> Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LoadingPlaceholder()
+                }
+                // Both sources have loaded and are genuinely empty.
+                else -> Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center
                 ) {
@@ -283,19 +311,6 @@ fun QuoteBrowserScreen(
                         icon = Icons.Outlined.FormatQuote,
                         headline = "No quotes found",
                         body = "Create highlights in the reader to see them here"
-                    )
-                }
-            } else {
-                when (viewMode) {
-                    QuoteBrowserViewModel.ViewMode.GRID -> QuoteGrid(
-                        displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                        onEditTags = { tagEditorFor = it },
-                        onFindRelated = onFindRelated
-                    )
-                    QuoteBrowserViewModel.ViewMode.LIST -> QuoteList(
-                        displayItems, mangaItems, onQuoteClick, onMangaNoteClick, padding,
-                        onEditTags = { tagEditorFor = it },
-                        onFindRelated = onFindRelated
                     )
                 }
             }

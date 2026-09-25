@@ -59,6 +59,17 @@ interface FolioFileSystem {
     fun getBookMetadataPath(bookId: String): String
     fun getCacheDir(bookId: String): File
     fun getDatabasePath(): String
+
+    /**
+     * A files directory the platform keeps OUT of backups. Sensitive sync credentials live here
+     * (see [com.folio.reader.security.SecureCredentialStore]) so they never ship to Google cloud
+     * backup / device transfer inside the backed-up folio.db.
+     *
+     * Android: `Context.getNoBackupFilesDir()`, which auto-backup and device transfer exclude.
+     * Desktop: a local dir under the app config root (desktop has no cloud auto-backup).
+     */
+    fun getNoBackupFilesDir(): File
+
     fun getThumbnailPath(bookId: String): String
     fun getFontsDir(): File
     fun getFontPath(fontId: String): String

@@ -147,4 +147,52 @@ class TransactionalDeleteTest {
         assertNull(mangaRepo.get("m1"))
         assertEquals(0, countRows("manga_chapters", "manga_id", "m1"))
     }
+
+    /**
+     * #6 regression: deleting a book must also remove its semantic-index rows
+     * (chapter_chunks + chapter_vectors). These were previously omitted from the delete
+     * transaction, so orphaned chunks/vectors survived, reloaded into the in-memory index on
+     * every search and surfaced as ghost passages in the Echoes/Related panel. chapter_vectors
+     * has no book_id, so the delete is scoped through the chunk subquery; a second book proves
+     * the delete stays scoped and does not wipe the whole index.
+     */
+    @Test
+    fun deleteBookRemovesSemanticIndexRows() = runBlocking {
+        val bookRepo = JdbcBookRepository(database)
+        bookRepo.insertBook(Book(id = "b1", title = "Indexed", epubHash = "h1", epubFileSize = 1L), emitSyncEvent = false)
+        bookRepo.insertBook(Book(id = "b2", title = "Survivor", epubHash = "h2", epubFileSize = 1L), emitSyncEvent = false)
+        seedChunkAndVector(bookId = "b1", chunkId = "b1-c1", modelId = "model-a")
+        seedChunkAndVector(bookId = "b2", chunkId = "b2-c1", modelId = "model-a")
+
+        bookRepo.deleteBook("b1")
+
+        assertEquals(0, countRows("chapter_chunks", "book_id", "b1"), "chunks for the deleted book must be gone")
+        assertEquals(0, countRows("chapter_vectors", "chunk_id", "b1-c1"), "vectors for the deleted book must be gone")
+        // The surviving book keeps its rows: the delete is scoped, not a full wipe.
+        assertEquals(1, countRows("chapter_chunks", "book_id", "b2"))
+        assertEquals(1, countRows("chapter_vectors", "chunk_id", "b2-c1"))
+    }
+
+    private suspend fun seedChunkAndVector(bookId: String, chunkId: String, modelId: String) {
+        database.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT INTO chapter_chunks (id, book_id, chapter_id, spine_index, chunk_index, " +
+                    "char_start, char_end, text, content_hash, model_id, dims) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, chunkId); stmt.setString(2, bookId); stmt.setString(3, "ch1")
+                stmt.setInt(4, 0); stmt.setInt(5, 0); stmt.setInt(6, 0); stmt.setInt(7, 10)
+                stmt.setString(8, "a passage of prose"); stmt.setString(9, "hash-" + chunkId)
+                stmt.setString(10, modelId); stmt.setInt(11, 2)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement(
+                "INSERT INTO chapter_vectors (chunk_id, model_id, dims, vector) VALUES (?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, chunkId); stmt.setString(2, modelId); stmt.setInt(3, 2)
+                stmt.setBytes(4, byteArrayOf(0, 0, 0x80.toByte(), 0x3F, 0, 0, 0, 0))
+                stmt.executeUpdate()
+            }
+        }
+    }
 }

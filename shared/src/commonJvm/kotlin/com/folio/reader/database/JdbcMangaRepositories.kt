@@ -35,6 +35,13 @@ class JdbcMangaRepository(
     private val db: Database,
     /** Deletes the manga's downloaded pages from disk; wired by the app graph to the download manager. */
     private val onMangaDeleted: suspend (String) -> Unit = {},
+    /**
+     * Runs when a manga leaves the library (favorite → 0). Wired by the app graph to
+     * clear the manga's category memberships, so a later re-add lands on the default
+     * shelf instead of silently rejoining the categories it had before removal (and
+     * the cloud category documents drop it too).
+     */
+    private val onRemovedFromLibrary: suspend (String) -> Unit = {},
 ) : com.folio.reader.manga.MangaRepository {
 
     override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {
@@ -81,8 +88,8 @@ class JdbcMangaRepository(
 
     override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) {
         val existing = get(mangaId)
-        // One transaction: chapters, notes, downloads, tag links, history and
-        // categories are all children of the library row and must not outlive
+        // One transaction: chapters, notes, downloads, tag links, history,
+        // categories, reading sessions and update state must not outlive
         // it. None of them are synced entities, so no tombstones — the manga
         // row itself carries the DELETE event below.
         db.withTransaction { conn ->
@@ -102,6 +109,18 @@ class JdbcMangaRepository(
                 it.setString(1, mangaId); it.executeUpdate()
             }
             conn.prepareStatement("DELETE FROM manga_downloads WHERE manga_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
+            // The manga reader writes reading_sessions keyed by manga.id (book_id);
+            // the general Statistics tab aggregates every manga session whether or
+            // not the manga still exists, so orphaned rows would inflate global
+            // reading time forever. Mirrors the book-delete path in Database.kt.
+            conn.prepareStatement("DELETE FROM reading_sessions WHERE book_id = ?").use {
+                it.setString(1, mangaId); it.executeUpdate()
+            }
+            // manga_update_state is keyed by manga_id; a stale row resurfaces as a
+            // "N new chapters" badge if the deterministic id (sourceId:url) is re-added.
+            conn.prepareStatement("DELETE FROM manga_update_state WHERE manga_id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
             conn.prepareStatement("DELETE FROM manga_library WHERE id = ?").use {
@@ -175,6 +194,11 @@ class JdbcMangaRepository(
             }
         }
         db.bumpMangaData()
+        // A removed manga must not keep its shelf memberships: the row survives (a
+        // soft delete, so history/downloads/progress persist), but leaving stale
+        // category_map rows meant re-adding the same manga silently resurrected its
+        // old categories. Best-effort so a category-side hiccup never fails removal.
+        if (!inLibrary) runCatching { onRemovedFromLibrary(mangaId) }
         get(mangaId)?.let { manga ->
             db.onEntityChanged?.invoke(
                 "manga",

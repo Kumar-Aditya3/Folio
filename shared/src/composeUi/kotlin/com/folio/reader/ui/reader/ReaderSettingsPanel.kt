@@ -358,7 +358,7 @@ fun ReaderSettingsPanel(
             // Margins
             LabeledSlider(
                 label = "Margins",
-                valueLabel = "${settings.margins.left.toInt()} dp",
+                valueLabel = "${settings.margins.left.toInt()} px",
                 overridden = "margins" in overriddenFields,
                 value = settings.margins.left,
                 valueRange = 0f..64f,

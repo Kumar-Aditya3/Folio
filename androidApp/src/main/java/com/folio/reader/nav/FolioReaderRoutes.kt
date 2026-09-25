@@ -1,5 +1,6 @@
 package com.folio.reader.nav
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -204,6 +205,17 @@ private fun ReaderRouteContent(
     val onResolveResource: suspend (String, String) -> String? =
         remember(graph, book.id) { { href, src -> graph.contentProvider.resolveResource(book.id, href, src) } }
 
+    // Physical/gesture back must do exactly what the chrome back arrow does: close the
+    // book (end the session, persist position) and then run the route's [onBackPress],
+    // which is FolioNavHost's popToTab(LIBRARY). One shared lambda keeps the two paths
+    // identical. Without this handler the reader registered none, so system back fell
+    // through to MainActivity's PredictiveBackHandler -> popBackStack(), which pops to
+    // whatever tab sits under the reader (Home when opened from Home) instead of the
+    // Library. A BackHandler here is the deepest active interceptor, so it wins over the
+    // host-level handler for as long as the reader is on screen.
+    val onReaderBack = { viewModel.closeBook { onBackPress() } }
+    BackHandler(onBack = onReaderBack)
+
     ReaderScreen(
         bookTitle = book.title,
         chapters = chapters,
@@ -228,7 +240,7 @@ private fun ReaderRouteContent(
         onPrewarmEchoes = { viewModel.prewarmEchoes() },
         onOpenEcho = { echoBookId, spine, frac -> viewModel.closeBook { onOpenEcho(echoBookId, spine, frac) } },
         onChapterChange = { viewModel.goToChapter(it) },
-        onBackPress = { viewModel.closeBook { onBackPress() } },
+        onBackPress = onReaderBack,
         onSearchClick = { viewModel.closeBook { onSearchClick() } },
         onBookmarkClick = { viewModel.toggleBookmark() },
         onSettingsClick = { viewModel.closeBook { onSettingsClick() } },
@@ -324,11 +336,14 @@ fun DocumentReaderRoute(
             }
         )
     }
+    val vmScope = viewModel.scope
     LaunchedEffect(documentId) {
         viewModel.open(documentId)
     }
+    // close() is suspend now; launch it on the VM scope, which outlives the
+    // composition, so the final position write cannot block the UI thread here.
     DisposableEffect(viewModel) {
-        onDispose { viewModel.close() }
+        onDispose { vmScope.launch { viewModel.close() } }
     }
     DocumentReaderScreen(
         viewModel = viewModel,

@@ -5,14 +5,22 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 
-actual fun decodeCoverImage(bytes: ByteArray): ImageBitmap? {
+actual fun decodeCoverImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
     return try {
         // A local CBZ's first page can be a giant strip; covers render at thumbnail
-        // size, so cap the long edge instead of decoding (and drawing) hundreds of MB.
+        // size, so subsample toward the display width instead of decoding (and
+        // drawing) hundreds of MB.
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val srcW = bounds.outWidth
+        val srcH = bounds.outHeight
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2048) sample *= 2
+        // Subsample toward the requested cell width when one is given.
+        if (targetWidthPx > 0 && srcW > 0) {
+            while (srcW / (sample * 2) >= targetWidthPx) sample *= 2
+        }
+        // Always keep the long edge under ~2048 as a safety cap, even with no target.
+        while (maxOf(srcW, srcH) / (sample * 2) >= 2048) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
     } catch (_: Exception) {

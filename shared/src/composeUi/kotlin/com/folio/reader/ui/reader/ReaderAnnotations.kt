@@ -69,21 +69,26 @@ internal class ReaderAnnotations(
             deviceId = deviceId()
         )
         scope.launch {
-            runCatching { bookmarkRepository.insertBookmark(bookmark) }
-            runCatching {
-                revisitRepository?.insertRevisitItem(
-                    RevisitItem(
-                        id = "revisit-b-${bookmark.id}",
-                        bookId = bookmark.bookId,
-                        chapterId = bookmark.chapterId,
-                        type = RevisitType.BOOKMARK,
-                        sourceId = bookmark.id,
-                        deviceId = bookmark.deviceId
+            val saved = runCatching { bookmarkRepository.insertBookmark(bookmark) }.isSuccess
+            if (saved) {
+                // #9: reflect the bookmark in memory only once the write actually persisted.
+                _bookmarks.value = _bookmarks.value + bookmark
+                runCatching {
+                    revisitRepository?.insertRevisitItem(
+                        RevisitItem(
+                            id = "revisit-b-${bookmark.id}",
+                            bookId = bookmark.bookId,
+                            chapterId = bookmark.chapterId,
+                            type = RevisitType.BOOKMARK,
+                            sourceId = bookmark.id,
+                            deviceId = bookmark.deviceId
+                        )
                     )
-                )
+                }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed bookmark write; the annotation is silently dropped.
             }
         }
-        _bookmarks.value = _bookmarks.value + bookmark
     }
 
     fun toggleBookmark() {
@@ -100,8 +105,14 @@ internal class ReaderAnnotations(
     }
 
     fun removeBookmark(bookmarkId: String) {
-        scope.launch { runCatching { bookmarkRepository.deleteBookmark(bookmarkId) } }
-        _bookmarks.value = _bookmarks.value.filterNot { it.id == bookmarkId }
+        scope.launch {
+            val deleted = runCatching { bookmarkRepository.deleteBookmark(bookmarkId) }.isSuccess
+            if (deleted) {
+                _bookmarks.value = _bookmarks.value.filterNot { it.id == bookmarkId }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed bookmark delete; the removal is silently reverted on reload.
+            }
+        }
     }
 
     fun addHighlight(
@@ -126,33 +137,38 @@ internal class ReaderAnnotations(
             deviceId = deviceId()
         )
         scope.launch {
-            runCatching { highlightRepository.insertHighlight(highlight) }
-            runCatching {
-                quoteRepository?.insertQuote(
-                    Quote(
-                        id = "quote-${highlight.id}",
-                        bookId = highlight.bookId,
-                        chapterId = highlight.chapterId,
-                        highlightId = highlight.id,
-                        text = highlight.selectedText,
-                        deviceId = highlight.deviceId
+            val saved = runCatching { highlightRepository.insertHighlight(highlight) }.isSuccess
+            if (saved) {
+                // #9: reflect the highlight in memory only once the write actually persisted.
+                _highlights.value = _highlights.value + highlight
+                runCatching {
+                    quoteRepository?.insertQuote(
+                        Quote(
+                            id = "quote-${highlight.id}",
+                            bookId = highlight.bookId,
+                            chapterId = highlight.chapterId,
+                            highlightId = highlight.id,
+                            text = highlight.selectedText,
+                            deviceId = highlight.deviceId
+                        )
                     )
-                )
-            }
-            runCatching {
-                revisitRepository?.insertRevisitItem(
-                    RevisitItem(
-                        id = "revisit-h-${highlight.id}",
-                        bookId = highlight.bookId,
-                        chapterId = highlight.chapterId,
-                        type = RevisitType.HIGHLIGHT,
-                        sourceId = highlight.id,
-                        deviceId = highlight.deviceId
+                }
+                runCatching {
+                    revisitRepository?.insertRevisitItem(
+                        RevisitItem(
+                            id = "revisit-h-${highlight.id}",
+                            bookId = highlight.bookId,
+                            chapterId = highlight.chapterId,
+                            type = RevisitType.HIGHLIGHT,
+                            sourceId = highlight.id,
+                            deviceId = highlight.deviceId
+                        )
                     )
-                )
+                }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed highlight write; the annotation is silently dropped.
             }
         }
-        _highlights.value = _highlights.value + highlight
     }
 
     /** The reader's chosen slot in the active theme's highlight palette. */
@@ -164,8 +180,14 @@ internal class ReaderAnnotations(
     }
 
     fun removeHighlight(highlightId: String) {
-        scope.launch { runCatching { highlightRepository.deleteHighlight(highlightId) } }
-        _highlights.value = _highlights.value.filterNot { it.id == highlightId }
+        scope.launch {
+            val deleted = runCatching { highlightRepository.deleteHighlight(highlightId) }.isSuccess
+            if (deleted) {
+                _highlights.value = _highlights.value.filterNot { it.id == highlightId }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed highlight delete; the removal is silently reverted on reload.
+            }
+        }
     }
 
     fun addNote(content: String, type: com.folio.reader.model.NoteType = com.folio.reader.model.NoteType.GENERAL, highlightId: String? = null) {
@@ -184,30 +206,41 @@ internal class ReaderAnnotations(
             deviceId = deviceId()
         )
         scope.launch {
-            runCatching { noteRepository.insertNote(note) }
-            runCatching {
-                revisitRepository?.insertRevisitItem(
-                    RevisitItem(
-                        id = "revisit-n-${note.id}",
-                        bookId = note.bookId,
-                        chapterId = note.chapterId ?: "",
-                        type = RevisitType.NOTE,
-                        sourceId = note.id,
-                        deviceId = note.deviceId
+            val saved = runCatching { noteRepository.insertNote(note) }.isSuccess
+            if (saved) {
+                // #9: reflect the note in memory only once the write actually persisted.
+                _notes.value = _notes.value + note
+                if (highlight != null) linkNoteToHighlight(highlight.id, note.id)
+                runCatching {
+                    revisitRepository?.insertRevisitItem(
+                        RevisitItem(
+                            id = "revisit-n-${note.id}",
+                            bookId = note.bookId,
+                            chapterId = note.chapterId ?: "",
+                            type = RevisitType.NOTE,
+                            sourceId = note.id,
+                            deviceId = note.deviceId
+                        )
                     )
-                )
+                }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed note write; the annotation is silently dropped.
             }
         }
-        _notes.value = _notes.value + note
-        if (highlight != null) linkNoteToHighlight(highlight.id, note.id)
     }
 
     /** Points a highlight at its note; the reverse link is what the lists render on. */
     private fun linkNoteToHighlight(highlightId: String, noteId: String) {
         val existing = _highlights.value.firstOrNull { it.id == highlightId } ?: return
         val updated = existing.withNote(noteId)
-        _highlights.value = _highlights.value.map { if (it.id == highlightId) updated else it }
-        scope.launch { runCatching { highlightRepository.updateHighlight(updated) } }
+        scope.launch {
+            val saved = runCatching { highlightRepository.updateHighlight(updated) }.isSuccess
+            if (saved) {
+                _highlights.value = _highlights.value.map { if (it.id == highlightId) updated else it }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed highlight-note link; the link is silently lost on reload.
+            }
+        }
     }
 
     /** The note attached to a highlight, if it has one. */
@@ -220,15 +253,27 @@ internal class ReaderAnnotations(
         if (existing != null) {
             if (content.isBlank()) return
             val updated = existing.copy(content = content, updatedAt = kotlinx.datetime.Clock.System.now())
-            _notes.value = _notes.value.map { if (it.id == updated.id) updated else it }
-            scope.launch { runCatching { noteRepository.updateNote(updated) } }
+            scope.launch {
+                val saved = runCatching { noteRepository.updateNote(updated) }.isSuccess
+                if (saved) {
+                    _notes.value = _notes.value.map { if (it.id == updated.id) updated else it }
+                } else {
+                    // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed note update; the edit is silently reverted on reload.
+                }
+            }
         } else {
             addNote(content, highlightId = highlightId)
         }
     }
 
     fun removeNote(noteId: String) {
-        scope.launch { runCatching { noteRepository.deleteNote(noteId) } }
-        _notes.value = _notes.value.filterNot { it.id == noteId }
+        scope.launch {
+            val deleted = runCatching { noteRepository.deleteNote(noteId) }.isSuccess
+            if (deleted) {
+                _notes.value = _notes.value.filterNot { it.id == noteId }
+            } else {
+                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed note delete; the removal is silently reverted on reload.
+            }
+        }
     }
 }

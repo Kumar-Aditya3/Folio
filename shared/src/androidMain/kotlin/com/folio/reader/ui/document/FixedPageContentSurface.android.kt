@@ -13,9 +13,12 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,7 +54,10 @@ private class AndroidFixedPageDocument(
     private val renderer: PdfRenderer
 ) : FixedPageDocument {
     private val mutex = Mutex()
-    private var closed = false
+    // Native teardown runs here, off the UI thread, once the in-flight render
+    // releases the mutex (see close()), so dispose never blocks the caller.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var closed = false
     override val pageCount: Int = renderer.pageCount
 
     /** Dimensions come from openPage, which must close promptly and is cached — a 500-page document asks for every page. */
@@ -102,14 +108,25 @@ private class AndroidFixedPageDocument(
     }
 
     override fun close() {
-        runBlocking(Dispatchers.IO) {
-            mutex.withLock {
-                if (closed) return@withLock
-                closed = true
-                renderer.close()
-                descriptor.close()
+        // Dispose must not block the UI thread. Flag the document closed
+        // immediately so any waiting or later render bails, then free the
+        // native renderer and descriptor off the UI thread once the in-flight
+        // render releases the mutex. PdfRenderer.close throws while a page is
+        // open, so the mutex hand-off is still required; it just happens on IO
+        // now instead of under runBlocking on the caller thread.
+        if (closed) return
+        closed = true
+        scope.launch {
+            try {
+                mutex.withLock {
+                    renderer.close()
+                    descriptor.close()
+                }
+            } catch (_: Throwable) {
+                // Best-effort teardown: nothing actionable if the native
+                // handles fail to close.
             }
-        }
+        }.invokeOnCompletion { scope.cancel() }
     }
 }
 

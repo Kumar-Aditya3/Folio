@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.FolioRule
@@ -41,13 +42,17 @@ fun CloudSyncSettingsPanel(
     settings: ReaderSettings,
     syncState: com.folio.reader.sync.SyncState,
     onSettingsChange: (ReaderSettings) -> Unit,
-    onSyncNow: () -> Unit
+    onSyncNow: () -> Unit,
+    // Credentials live in the no-backup SecureCredentialStore, not in the backed-up settings blob,
+    // so they are supplied and saved separately from the rest of the sync preferences.
+    credentials: SyncCredentials = SyncCredentials(),
+    onCredentialsChange: (SyncCredentials) -> Unit = {}
 ) {
-    var apiKey by remember(settings.firebaseApiKey) { mutableStateOf(settings.firebaseApiKey) }
-    var projectId by remember(settings.firebaseProjectId) { mutableStateOf(settings.firebaseProjectId) }
-    var accountEmail by remember(settings.syncAccountEmail) { mutableStateOf(settings.syncAccountEmail) }
-    var accountPassword by remember(settings.syncAccountPassword) { mutableStateOf(settings.syncAccountPassword) }
-    val isConnected = settings.firebaseApiKey.isNotBlank() && settings.firebaseProjectId.isNotBlank()
+    var apiKey by remember(credentials.firebaseApiKey) { mutableStateOf(credentials.firebaseApiKey) }
+    var projectId by remember(credentials.firebaseProjectId) { mutableStateOf(credentials.firebaseProjectId) }
+    var accountEmail by remember(credentials.syncAccountEmail) { mutableStateOf(credentials.syncAccountEmail) }
+    var accountPassword by remember(credentials.syncAccountPassword) { mutableStateOf(credentials.syncAccountPassword) }
+    val isConnected = credentials.firebaseApiKey.isNotBlank() && credentials.firebaseProjectId.isNotBlank()
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -85,7 +90,7 @@ fun CloudSyncSettingsPanel(
                         )
                         Text(
                             if (isConnected)
-                                "Syncing via project \"${settings.firebaseProjectId}\""
+                                "Syncing via project \"${credentials.firebaseProjectId}\""
                             else
                                 "Connect your Firebase account to sync books, progress and annotations across devices.",
                             style = MaterialTheme.typography.bodySmall,
@@ -131,19 +136,24 @@ fun CloudSyncSettingsPanel(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            onSettingsChange(
-                                settings.copy(
+                            // Credentials go to the no-backup store; only the enable flag lands in settings.
+                            onCredentialsChange(
+                                SyncCredentials(
                                     firebaseApiKey = apiKey.trim(),
                                     firebaseProjectId = projectId.trim(),
                                     syncAccountEmail = accountEmail.trim(),
-                                    syncAccountPassword = accountPassword.trim(),
+                                    syncAccountPassword = accountPassword.trim()
+                                )
+                            )
+                            onSettingsChange(
+                                settings.copy(
                                     cloudSyncEnabled = true // Enable cloud sync when credentials saved
                                 )
                             )
                         },
                         enabled = apiKey.isNotBlank() && projectId.isNotBlank() &&
-                                (apiKey != settings.firebaseApiKey || projectId != settings.firebaseProjectId ||
-                                        accountEmail != settings.syncAccountEmail || accountPassword != settings.syncAccountPassword)
+                                (apiKey != credentials.firebaseApiKey || projectId != credentials.firebaseProjectId ||
+                                        accountEmail != credentials.syncAccountEmail || accountPassword != credentials.syncAccountPassword)
                     ) {
                         Text("Save")
                     }
@@ -153,12 +163,10 @@ fun CloudSyncSettingsPanel(
                             projectId = ""
                             accountEmail = ""
                             accountPassword = ""
+                            // Clear the credentials in the no-backup store; keep the flag in settings.
+                            onCredentialsChange(SyncCredentials())
                             onSettingsChange(
                                 settings.copy(
-                                    firebaseApiKey = "",
-                                    firebaseProjectId = "",
-                                    syncAccountEmail = "",
-                                    syncAccountPassword = "",
                                     cloudSyncEnabled = false
                                 )
                             )

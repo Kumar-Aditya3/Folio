@@ -179,7 +179,7 @@ class ReaderQuickSettingsNoLeakTest {
         val book = settingsRepo.getBookSettings("b1")!!
         assertEquals(24f, book.fontSize)
         assertEquals("dusk", book.themeId)
-        assertNull(book.lineHeight)
+        assertEquals(1.9f, book.lineHeight, "the book's untouched lineHeight override survives")
 
         // And back off again — a toggle that only latches one way is still broken.
         vm.updateGlobalSettings(vm.effective().copy(eyeProtection = false))

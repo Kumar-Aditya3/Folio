@@ -120,27 +120,48 @@ class BookImporter(
                     coverFile.absolutePath
                 } else null
 
-                // 8. Create book record
+                // 8. Create (fresh import) or relink (re-import of a book whose local file
+                //    was lost) the book record.
                 println("Import: Creating book record...")
-                val book = Book(
-                    id = bookId,
-                    title = usableTitle(parsed.metadata.title, sourceFile),
-                    subtitle = parsed.metadata.subtitle,
-                    authors = parsed.metadata.authors,
-                    publisher = parsed.metadata.publisher,
-                    language = parsed.metadata.language,
-                    isbn = parsed.metadata.isbn,
-                    description = parsed.metadata.description,
-                    publicationDate = parsed.metadata.publicationDate,
-                    coverPath = coverPath,
-                    epubHash = hash,
-                    epubFileSize = sourceFile.length(),
-                    addedAt = Clock.System.now(),
-                    totalCharacters = parsed.totalCharacters,
-                    totalWords = parsed.totalWords,
-                    chapterCount = parsed.chapters.size,
-                    formattingMode = parsed.chapters.firstOrNull()?.let { _ -> com.folio.reader.model.FormattingMode.HYBRID } ?: com.folio.reader.model.FormattingMode.HYBRID
-                )
+                val book = if (existingByHash != null) {
+                    // Relink branch: this file's content hash already matches an existing
+                    // (often cloud-synced) metadata record whose local EPUB was missing — a
+                    // present file returns early above as a duplicate. The file is byte-identical
+                    // to whatever produced that record, so no user-visible metadata actually
+                    // changes here; only local storage artefacts (the freshly re-extracted cover)
+                    // are new. Build the row from the EXISTING record so we never reset reading
+                    // progress or status, never replace addedAt/lastOpenedAt, never drop series or
+                    // cloud/sync state, and never bump updatedAt. A fresh Book() here would reset
+                    // normalized_progress -> 0 and status -> UNREAD and bump updatedAt, letting the
+                    // reset win last-writer-wins sync and wipe progress on every device (bug #3).
+                    // normalizedProgress is a body property, not a constructor arg, so copy() drops
+                    // it — re-apply it explicitly, mirroring Database.mapRowToBook.
+                    existingByHash.copy(
+                        coverPath = coverPath ?: existingByHash.coverPath,
+                        epubHash = hash,
+                        epubFileSize = sourceFile.length(),
+                    ).also { it.updateProgress(existingByHash.normalizedProgress) }
+                } else {
+                    Book(
+                        id = bookId,
+                        title = usableTitle(parsed.metadata.title, sourceFile),
+                        subtitle = parsed.metadata.subtitle,
+                        authors = parsed.metadata.authors,
+                        publisher = parsed.metadata.publisher,
+                        language = parsed.metadata.language,
+                        isbn = parsed.metadata.isbn,
+                        description = parsed.metadata.description,
+                        publicationDate = parsed.metadata.publicationDate,
+                        coverPath = coverPath,
+                        epubHash = hash,
+                        epubFileSize = sourceFile.length(),
+                        addedAt = Clock.System.now(),
+                        totalCharacters = parsed.totalCharacters,
+                        totalWords = parsed.totalWords,
+                        chapterCount = parsed.chapters.size,
+                        formattingMode = parsed.chapters.firstOrNull()?.let { _ -> com.folio.reader.model.FormattingMode.HYBRID } ?: com.folio.reader.model.FormattingMode.HYBRID
+                    )
+                }
 
                 // 9. Update chapters with book ID
                 val chaptersWithBookId = parsed.chapters.map { it.copy(bookId = bookId) }

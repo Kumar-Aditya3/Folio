@@ -16,6 +16,10 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
     private val fontsDirectory: File by lazy { File(appDir, "fonts").apply { mkdirs() } }
     private val modelsDirectory: File by lazy { File(appDir, "models").apply { mkdirs() } }
 
+    // Desktop has no cloud auto-backup, so a local dir under the app config root is an acceptable
+    // "no-backup" location for sync credentials (SecureCredentialStore).
+    private val noBackupDirectory: File by lazy { File(appDir, "secure").apply { mkdirs() } }
+
     override val libraryBooksDir: File
         get() = File(libraryDir, "books").apply { mkdirs() }
 
@@ -48,6 +52,8 @@ class DesktopFileSystem(private val rootOverride: File? = null) : FolioFileSyste
         File(getBookDir(bookId), "cache").apply { mkdirs() }
 
     override fun getDatabasePath(): String = File(databaseDir, "folio.db").absolutePath
+
+    override fun getNoBackupFilesDir(): File = noBackupDirectory
 
     override fun getThumbnailPath(bookId: String): String =
         File(thumbnailsDir, "$bookId.jpg").absolutePath

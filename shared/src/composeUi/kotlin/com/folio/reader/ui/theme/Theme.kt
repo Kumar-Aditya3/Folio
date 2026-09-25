@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.legibleOn
 
 // §12.6: the multi-series/chart hue role. Borrowed from the reader's paper
 // highlighters and reordered so the first six (the genre breakdown's cap) are
@@ -1722,7 +1723,7 @@ object FolioTheme {
         // root, the reader's re-themed chrome and the Appearance previews all
         // inherit the same derivation. The raw palettes stay exactly as
         // authored and as tested; only what the eye sees moves.
-        val ink = remember(colors) { deepenInkRoles(colors) }
+        val ink = remember(colors) { deepenInkRoles(colors).withLegibleAccents() }
         CompositionLocalProvider(
             LocalFolioColors provides ink,
             LocalFolioTypography provides typography,
@@ -1779,6 +1780,30 @@ object FolioTheme {
         )
     }
 }
+
+/**
+ * Legibility guard for the four semantic accent roles (progress, streak,
+ * discovery, annotation). Those roles are read as foreground text across the
+ * app -- eyebrows, figures, progress read-outs, section tints -- yet a hand-
+ * authored or wallpaper-derived palette can land one below the 4.5:1 body-text
+ * floor on its own surface. Each accent is routed through the app's single
+ * contrast implementation, [legibleOn], against the palette surface (falling
+ * back to the deepened ink): it is nudged toward the ink, hue preserved, only
+ * when it fails, and returned unchanged when it already clears the floor -- so
+ * every shipped palette (whose accents ThemeSchemeTest pins at >= 4.5:1) stays
+ * byte-identical, and only a failing custom or derived accent moves.
+ *
+ * The Material fill/container roles -- primary, the *Container family and the
+ * surface ramp -- are left alone: those are background fills, and primary in
+ * particular is dual-use, so accent-tinted text drawn from primary stays the
+ * call site's job via [rememberLegibleAccent], not this guard's.
+ */
+private fun FolioColors.withLegibleAccents(): FolioColors = copy(
+    accentProgress = legibleOn(accentProgress, surface, onSurface),
+    accentStreak = legibleOn(accentStreak, surface, onSurface),
+    accentDiscovery = legibleOn(accentDiscovery, surface, onSurface),
+    accentAnnotation = legibleOn(accentAnnotation, surface, onSurface),
+)
 
 private fun FolioColors.toColorScheme(): androidx.compose.material3.ColorScheme {
     return androidx.compose.material3.ColorScheme(

@@ -51,6 +51,10 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
     override suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean) {
         db.deleteBook(bookId)
         db.bumpBookData()
+        // deleteBook now also deletes chapter_chunks/chapter_vectors for the book, so honour the
+        // documented chunkDataRevision invariant (bumped after every write to those tables). This
+        // refreshes the "N of M chapters indexed" readout, which keys on chunkDataRevision.
+        db.bumpChunkData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("book", bookId, "DELETE", "{}")
     }
     override suspend fun getBook(bookId: String): Book? = db.getBook(bookId)

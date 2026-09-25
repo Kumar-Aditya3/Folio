@@ -34,6 +34,7 @@ class SafDownloadStorage(context: Context, val treeUri: Uri) : MangaDownloadStor
                     DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                     DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_SIZE,
                 ),
                 null, null, null,
             )?.use { c ->
@@ -41,9 +42,14 @@ class SafDownloadStorage(context: Context, val treeUri: Uri) : MangaDownloadStor
                     val id = c.getString(0)
                     val name = c.getString(1) ?: continue
                     val mime = c.getString(2) ?: continue
+                    // COLUMN_SIZE can be null when the provider does not report a size;
+                    // treat unknown as 0 so listNonEmptyFiles excludes it, matching
+                    // FileDownloadStorage's File.length() (0 for empty/unknown files).
+                    val size = if (c.isNull(3)) 0L else c.getLong(3)
                     out[name] = ChildDoc(
                         uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id),
                         isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR,
+                        size = size,
                     )
                 }
             } ?: Log.w(TAG, "children($dirUri): null cursor")
@@ -53,7 +59,7 @@ class SafDownloadStorage(context: Context, val treeUri: Uri) : MangaDownloadStor
         return out
     }
 
-    private data class ChildDoc(val uri: Uri, val isDir: Boolean)
+    private data class ChildDoc(val uri: Uri, val isDir: Boolean, val size: Long)
 
     private fun dirAt(relativePath: String, create: Boolean): Uri? {
         var cur: Uri = dirCache[""] ?: rootUri
@@ -117,6 +123,11 @@ class SafDownloadStorage(context: Context, val treeUri: Uri) : MangaDownloadStor
     override fun listFiles(relativePath: String): List<String> {
         val dir = dirAt(relativePath, create = false) ?: return emptyList()
         return children(dir).filterValues { !it.isDir }.keys.toList()
+    }
+
+    override fun listNonEmptyFiles(relativePath: String): List<String> {
+        val dir = dirAt(relativePath, create = false) ?: return emptyList()
+        return children(dir).filterValues { !it.isDir && it.size > 0L }.keys.toList()
     }
 
     override fun listSubDirs(relativePath: String): List<String> {

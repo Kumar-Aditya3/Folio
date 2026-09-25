@@ -57,6 +57,8 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.CloudState
 import com.folio.reader.platform.DesktopPlatform
 import com.folio.reader.platform.renderDesktopDocumentThumbnail
+import com.folio.reader.security.SecureCredentialStore
+import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.diffFields
 import com.folio.reader.settings.normalized
 import com.folio.reader.settings.withFieldsFrom
@@ -151,6 +153,12 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val quoteRepository = JdbcQuoteRepository(database)
     val revisitRepository = JdbcRevisitRepository(database)
     val settingsRepository = JdbcSettingsRepository(database)
+
+    /**
+     * Sync credentials live in a no-backup file store rather than the settings blob. Desktop has no
+     * cloud auto-backup, but this keeps the credential handling identical across platforms.
+     */
+    val secureCredentialStore = SecureCredentialStore(platform.fileSystem)
     val statisticsRepository = JdbcStatisticsRepository(database)
     val syncQueueRepository = JdbcSyncQueueRepository(database)
     val deviceRepository = JdbcDeviceRepository(database)
@@ -207,10 +215,17 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val onDeviceTextTools = com.folio.reader.ml.onDeviceTextTools()
 
     // ---------- Manga category (local source on desktop) ----------
-    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(database) { mangaId ->
-        // Cascade delete also removes the manga's downloaded pages from disk.
-        mangaDownloadManager.deleteMangaDownloads(mangaId)
-    }
+    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(
+        database,
+        onMangaDeleted = { mangaId ->
+            // Cascade delete also removes the manga's downloaded pages from disk.
+            mangaDownloadManager.deleteMangaDownloads(mangaId)
+        },
+        onRemovedFromLibrary = { mangaId ->
+            // Drop shelf memberships so a re-add starts on the default shelf.
+            mangaCategoryRepository.assign(mangaId, emptySet())
+        },
+    )
     val mangaChapterRepository = com.folio.reader.database.JdbcMangaChapterRepository(database)
     val mangaCategoryRepository = com.folio.reader.database.JdbcMangaCategoryRepository(database)
     val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
@@ -281,6 +296,13 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         appScope.launch {
             runCatching { modelSelection.start() }
         }
+        // Move any credentials still in the backed-up settings blob into the no-backup store. This
+        // does not touch the cached snapshots below (which the constructor is still initializing);
+        // main()'s refreshSettingsSnapshot() and restartSync() pick up the migrated values, and the
+        // engine reads the store fresh (with an idempotent migration) regardless.
+        appScope.launch {
+            runCatching { secureCredentialStore.migrateFromSettings(settingsRepository) }
+        }
         database.onEntityChanged = { type, id, op, payload ->
             appScope.launch {
                 syncQueueRepository.enqueueSync(type, id, com.folio.reader.sync.SyncOperation.fromString(op), payload)
@@ -339,8 +361,13 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     @Volatile
     private var cachedGlobalSettings: com.folio.reader.settings.ReaderSettings? = null
 
+    /** Composition-safe snapshot of the credentials read from [secureCredentialStore]. */
+    @Volatile
+    private var cachedSyncCredentials: SyncCredentials = SyncCredentials()
+
     suspend fun refreshSettingsSnapshot() {
         cachedGlobalSettings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+        cachedSyncCredentials = runCatching { secureCredentialStore.load() }.getOrDefault(SyncCredentials())
     }
 
     /**
@@ -370,16 +397,15 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val isSyncConfigured: Boolean get() = firebaseCreds() != null
     val storageConfigured: Boolean get() = loadEnvFile()["storageBucket"] != null || System.getenv("FOLIO_FB_STORAGE_BUCKET") != null
 
-    private fun firebaseCreds(): Pair<String, String>? {
-        // User-entered API key (Settings > Advanced) takes priority over env fallback.
+    private fun firebaseCreds(creds: SyncCredentials = cachedSyncCredentials): Pair<String, String>? {
+        // User-entered credentials (from the no-backup store) take priority over the env fallback.
         // Reads the primed snapshot instead of a per-recomposition runBlocking DB read.
-        val global = cachedGlobalSettings
         val env = loadEnvFile()
-        val projectId = global?.firebaseProjectId?.takeIf { it.isNotBlank() }
+        val projectId = creds.firebaseProjectId.takeIf { it.isNotBlank() }
             ?: env["projectId"]
             ?: System.getenv("FOLIO_FB_PROJECT_ID")
             ?: BUNDLED_FIREBASE_PROJECT_ID
-        val apiKey = global?.firebaseApiKey?.takeIf { it.isNotBlank() }
+        val apiKey = creds.firebaseApiKey.takeIf { it.isNotBlank() }
             ?: env["apiKey"]
             ?: System.getenv("FOLIO_FB_API_KEY")
             ?: return null
@@ -405,10 +431,16 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     }
 
     private fun createSyncEngine(): SyncEngine? {
-        val (projectId, apiKey) = firebaseCreds() ?: return null
-        val settings = runBlocking { runCatching { settingsRepository.getGlobalSettings() }.getOrNull() }
-        val email = settings?.syncAccountEmail?.takeIf { it.isNotBlank() }
-        val password = settings?.syncAccountPassword?.takeIf { it.isNotBlank() }
+        // Read credentials fresh from the no-backup store. The inline (idempotent) migration ensures
+        // a user upgrading from a build that kept credentials in the settings blob has them moved
+        // into the store before the engine reads them, with no first-launch sync gap.
+        val stored = runBlocking {
+            runCatching { secureCredentialStore.migrateFromSettings(settingsRepository) }
+            secureCredentialStore.load()
+        }
+        val (projectId, apiKey) = firebaseCreds(stored) ?: return null
+        val email = stored.syncAccountEmail.takeIf { it.isNotBlank() }
+        val password = stored.syncAccountPassword.takeIf { it.isNotBlank() }
         val firestoreSync = RestFirestoreSync(
             projectId = projectId,
             apiKey = apiKey,
@@ -635,6 +667,8 @@ fun main(args: Array<String>) {
         var pendingImportBooks by remember { mutableStateOf<List<com.folio.reader.model.Book>?>(null) }
         var pendingImportScreen by remember { mutableStateOf<Screen?>(null) }
         var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
+        // Sync credentials come from the no-backup store, not the settings blob.
+        var syncCredentials by remember { mutableStateOf(SyncCredentials()) }
         var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
         var libraryModeLoaded by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
@@ -724,6 +758,12 @@ fun main(args: Array<String>) {
 
         LaunchedEffect(Unit) {
             runCatching { globalSettings = deps.settingsRepository.getGlobalSettings() }
+            // Migrate-then-load so an upgrading user sees their credentials in the panel on the very
+            // first launch (the store may not have been seeded yet at app start). Idempotent.
+            runCatching {
+                deps.secureCredentialStore.migrateFromSettings(deps.settingsRepository)
+                syncCredentials = deps.secureCredentialStore.load()
+            }
             deps.startSync(appScope)
         }
 
@@ -1405,6 +1445,16 @@ fun main(args: Array<String>) {
                                     }
                                     SettingsScreen(
                                         settings = globalSettings,
+                                        syncCredentials = syncCredentials,
+                                        onSyncCredentialsChange = { updated ->
+                                            // Persist credentials to the no-backup store (never the
+                                            // settings blob) and rebuild the sync loop.
+                                            syncCredentials = updated
+                                            appScope.launch(Dispatchers.IO) {
+                                                deps.secureCredentialStore.save(updated)
+                                                withContext(Dispatchers.Main) { deps.restartSync(appScope) }
+                                            }
+                                        },
                                         onSettingsChange = { updated ->
                                             // Field-scoped patch: the screen's snapshot may be
                                             // stale, so only the fields it actually changed are
@@ -1839,11 +1889,14 @@ private fun DocumentReaderRoute(
             }
         )
     }
+    val vmScope = viewModel.scope
     LaunchedEffect(documentId) {
         viewModel.open(documentId)
     }
+    // close() is suspend now; launch it on the VM scope, which outlives the
+    // composition, so the final position write cannot block the UI thread here.
     DisposableEffect(viewModel) {
-        onDispose { viewModel.close() }
+        onDispose { vmScope.launch { viewModel.close() } }
     }
     DocumentReaderScreen(
         viewModel = viewModel,

@@ -52,10 +52,13 @@ class MangaCascadeDeleteTest {
     @Test
     fun deleteRemovesChildRowsDownloadDirAndEmitsTombstone() = runBlocking {
         val mangaId = "m1"
-        val mangaRepo = JdbcMangaRepository(database) { id ->
-            deletedDirs += id
-            downloadDir(id).deleteRecursively()
-        }
+        val mangaRepo = JdbcMangaRepository(
+            database,
+            onMangaDeleted = { id ->
+                deletedDirs += id
+                downloadDir(id).deleteRecursively()
+            },
+        )
         val chapterRepo = JdbcMangaChapterRepository(database)
         val noteRepo = JdbcMangaNoteRepository(database)
         val downloadRepo = JdbcMangaDownloadRepository(database)
@@ -79,6 +82,32 @@ class MangaCascadeDeleteTest {
         downloadDir(mangaId).apply {
             mkdirs()
             File(this, "001.png").writeBytes(byteArrayOf(1))
+        }
+        // Seed a reading session keyed by the manga id (book_id) and a new-chapter
+        // badge row keyed by manga_id — both must go when the manga is deleted or the
+        // orphans inflate global stats / resurface as a badge after re-add.
+        database.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT INTO reading_sessions (id, book_id, device_id, started_at, start_position, duration_ms) " +
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+            ).use { st ->
+                st.setString(1, "sess-1")
+                st.setString(2, mangaId)
+                st.setString(3, "dev-1")
+                st.setLong(4, 1_000L)
+                st.setString(5, "manga-page-0")
+                st.setLong(6, 60_000L)
+                st.executeUpdate()
+            }
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO manga_update_state (manga_id, last_checked_at, new_chapter_count, last_error) " +
+                    "VALUES (?, ?, ?, NULL)"
+            ).use { st ->
+                st.setString(1, mangaId)
+                st.setLong(2, 1_000L)
+                st.setInt(3, 3)
+                st.executeUpdate()
+            }
         }
         events.clear()
         val revisionBefore = database.mangaDataRevision.value
@@ -106,6 +135,26 @@ class MangaCascadeDeleteTest {
                 }
             },
             "download queue rows must be deleted"
+        )
+        assertEquals(
+            0,
+            database.withConnection { conn ->
+                conn.prepareStatement("SELECT COUNT(*) FROM reading_sessions WHERE book_id = ?").use { stmt ->
+                    stmt.setString(1, mangaId)
+                    stmt.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                }
+            },
+            "reading sessions keyed by the manga id must be deleted"
+        )
+        assertEquals(
+            0,
+            database.withConnection { conn ->
+                conn.prepareStatement("SELECT COUNT(*) FROM manga_update_state WHERE manga_id = ?").use { stmt ->
+                    stmt.setString(1, mangaId)
+                    stmt.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                }
+            },
+            "manga_update_state badge row must be deleted"
         )
         assertEquals(listOf(mangaId), deletedDirs, "the disk cleanup hook must run for this manga")
         assertTrue(!downloadDir(mangaId).exists(), "the download directory must be gone")

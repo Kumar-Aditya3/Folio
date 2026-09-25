@@ -10,9 +10,14 @@ import androidx.core.content.pm.PackageInfoCompat
 class TrustExtension(private val store: TrustStore) {
 
     suspend fun isTrusted(pkgInfo: PackageInfo, fingerprints: List<String>): Boolean {
-        val trustedFingerprints = store.repoSigningKeys()
+        // SECURITY: trust is granted ONLY by explicit user consent -- an entry the user
+        // approved from the Extensions "Untrusted" tab, persisted via store.trustedExtensions().
+        // Repository signing keys are deliberately NOT used as an auto-trust anchor here:
+        // those keys are declared by the fetched remote index (index.json) and are therefore
+        // attacker-controllable if the repo host/account is compromised, which would let a
+        // malicious repo auto-approve its own APK and load native code with no user prompt.
         val key = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:${fingerprints.last()}"
-        return trustedFingerprints.any { fingerprints.contains(it) } || key in store.trustedExtensions()
+        return key in store.trustedExtensions()
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {

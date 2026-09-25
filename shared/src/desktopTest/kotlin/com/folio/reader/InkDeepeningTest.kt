@@ -43,11 +43,33 @@ class InkDeepeningTest {
     }
 
     @Test
-    fun secondaryInkAndSurfacesAreUntouched() {
+    fun secondaryInkIsDeepenedToo() {
+        // onSurfaceVariant now rides the same push: it carries most of the
+        // secondary text, and a few light palettes authored it a hair under the
+        // 4.5:1 AA floor, so it is deepened toward the palette own extreme just
+        // like onSurface/onBackground. Mirrors the primary ink contract exactly
+        // — contrast only ever rises, and it actually moves.
         for (palette in AppPalette.entries) {
             val c = palette.colors
             val d = deepenInkRoles(c)
-            assertEquals(c.onSurfaceVariant, d.onSurfaceVariant, "${palette.id}: variant moved")
+            val raw = wcag(c.onSurfaceVariant, c.surface)
+            val deep = wcag(d.onSurfaceVariant, d.surface)
+            assertTrue(
+                deep >= raw - 1e-9,
+                "${palette.id}: onSurfaceVariant contrast fell ($raw → $deep)",
+            )
+            assertTrue(deep > raw, "${palette.id}: onSurfaceVariant did not deepen (already at extreme?)")
+        }
+    }
+
+    @Test
+    fun surfaceFillsAndAccentsAreUntouched() {
+        // True fill and accent roles keep their own pinned contracts; this pass
+        // is about type hierarchy and selected-state ink, not a restyle, so the
+        // surfaces and accents must not move.
+        for (palette in AppPalette.entries) {
+            val c = palette.colors
+            val d = deepenInkRoles(c)
             assertEquals(c.surface, d.surface, "${palette.id}: surface moved")
             assertEquals(c.background, d.background, "${palette.id}: background moved")
             assertEquals(c.primary, d.primary, "${palette.id}: primary moved")

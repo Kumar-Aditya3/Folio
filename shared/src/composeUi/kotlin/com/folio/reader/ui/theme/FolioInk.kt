@@ -23,11 +23,14 @@ import androidx.compose.ui.graphics.lerp
  *    [atmosphereFor] decides its lighting model. Contrast only ever rises;
  *    hue is preserved because the extreme is achromatic; an achromatic ink
  *    stays achromatic, so the Rule 22 allowlist palettes keep their character.
- *  - [FolioColors.onSurfaceVariant] is deliberately untouched. Pushing the
- *    secondary ink the same way would narrow the hierarchy this pass exists
- *    to widen, and pushing it the other way could drop a palette that sits
- *    near the 4.5:1 AA floor under it. Deepening the primary alone widens the
- *    ΔE split by exactly the amount the primary travelled.
+ *  - [FolioColors.onSurfaceVariant] now rides the same push. It carries most of
+ *    the app's secondary text, and a few light palettes (Arctic, Sakura,
+ *    Silver) authored it a hair under the 4.5:1 AA floor (about 3.99, 4.44
+ *    and 4.49), so lerping it the same [INK_DEEPEN_FRACTION] toward the
+ *    palette's own extreme lifts it back over the line. It travels the same
+ *    fraction as the primary ink, so contrast only rises and the primary ink
+ *    stays strictly ahead of the secondary; the ordering holds even as the
+ *    absolute gap tightens.
  *  - Everything else — surfaces, accents, outlines — is untouched: those have
  *    their own pinned roles, and this pass is about type hierarchy and
  *    selected-state ink, not a restyle.
@@ -51,6 +54,7 @@ fun deepenInkRoles(colors: FolioColors): FolioColors {
     return colors.copy(
         onSurface = push(colors.onSurface),
         onBackground = push(colors.onBackground),
+        onSurfaceVariant = push(colors.onSurfaceVariant),
     )
 }
 

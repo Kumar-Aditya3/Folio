@@ -63,6 +63,7 @@ import com.folio.reader.model.RevisitItem
 import com.folio.reader.model.RevisitType
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
@@ -194,7 +195,9 @@ fun RevisitItemsScreen(
     // instance, so an unremembered new instance would tear down and re-run the full per-item
     // resolution (getBook/getChapters/getHighlight/getBookmark/getNote…) on every recomposition.
     val itemsFlow = remember(filterType) { viewModel.unresolvedItems(filterType) }
-    val items by itemsFlow.collectAsState(initial = emptyList())
+    // null = the revisit store has not emitted yet (loading); an empty list is the real
+    // "nothing to revisit". Distinguishing them is what stops the false "All caught up!".
+    val items by itemsFlow.collectAsState(initial = null)
 
     Scaffold(
         topBar = {
@@ -235,8 +238,17 @@ fun RevisitItemsScreen(
             )
         }
     ) { padding ->
-        if (items.isEmpty()) {
-            Box(
+        val list = items
+        when {
+            // Still waiting on the first emission from the revisit store: show the shared
+            // loading placeholder, not the false "All caught up!" empty state.
+            list == null -> Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                LoadingPlaceholder()
+            }
+            list.isEmpty() -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
@@ -246,13 +258,12 @@ fun RevisitItemsScreen(
                     body = "No items to revisit right now"
                 )
             }
-        } else {
-            LazyColumn(
+            else -> LazyColumn(
                 contentPadding = PaddingValues(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize().padding(padding)
             ) {
-                items(items, key = { it.revisitItem.id }) { item ->
+                items(list, key = { it.revisitItem.id }) { item ->
                     RevisitCard(
                         item = item,
                         onItemClick = { onItemClick(item) },

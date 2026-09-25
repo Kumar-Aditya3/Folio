@@ -90,15 +90,15 @@ class MangaDetailViewModel(
             manga.value = mangaRepo.get(mangaId)
             chapters.value = chapterRepo.getChapters(mangaId)
             refreshCycles(mangaId)
-            // The library-wide Downloaded mode wins over the per-manga saved filter:
-            // opening a manga shows only its downloaded chapters while it is on.
-            val downloadedMode = settingsRepo.getRaw(KEY_LIBRARY_DOWNLOADED_FILTER) == "true"
+            // The chapter filter is per-manga only: this manga's saved choice, or all
+            // chapters. It is deliberately NOT driven by the library-wide "Downloaded"
+            // quick-filter — that coupling forced every opened manga (including a
+            // source-browse result with nothing downloaded) into an empty
+            // "Downloaded only" list and overrode the user's own per-manga choice.
             val savedFilter = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.$mangaId")
-            chapterFilter.value = when {
-                downloadedMode -> ChapterFilter.DOWNLOADED
-                savedFilter != null -> ChapterFilter.entries.firstOrNull { it.name == savedFilter } ?: ChapterFilter.ALL
-                else -> ChapterFilter.ALL
-            }
+            chapterFilter.value = savedFilter
+                ?.let { name -> ChapterFilter.entries.firstOrNull { it.name == name } }
+                ?: ChapterFilter.ALL
             val savedSort = settingsRepo.getRaw("$KEY_CHAPTER_SORT.$mangaId")
             sortAscending.value = savedSort == "ASC"
             if (manga.value?.initialized != true || chapters.value.isEmpty()) {

@@ -31,6 +31,13 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
         File(context.filesDir, "fonts").apply { mkdirs() }
     }
 
+    // Excluded from Android auto-backup / device transfer: noBackupFilesDir is the standard
+    // no-backup location. Sensitive sync credentials live here (SecureCredentialStore) so they
+    // never ship to cloud backup inside the backed-up folio.db.
+    private val noBackupDirectory: File by lazy {
+        File(context.noBackupFilesDir, "secure").apply { mkdirs() }
+    }
+
     override val libraryBooksDir: File
         get() = File(libraryDir, "books").apply { mkdirs() }
 
@@ -66,6 +73,8 @@ class AndroidFileSystem(private val context: Context) : FolioFileSystem {
 
     override fun getDatabasePath(): String =
         File(databaseDir, "folio.db").absolutePath
+
+    override fun getNoBackupFilesDir(): File = noBackupDirectory
 
     override fun getThumbnailPath(bookId: String): String =
         File(thumbnailsDir, "$bookId.jpg").absolutePath

@@ -483,7 +483,7 @@ actual fun HtmlContentSurface(
                 // flip); continuous runs the section-aware bridge — one
                 // implementation for windows and plain single-section documents.
                 val baseJs = if (pagedCols > 0) {
-                    PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth))
+                    PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth), desktopEvents = false)
                 } else {
                     val seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
                         ?: sections.firstOrNull()?.spineIndex

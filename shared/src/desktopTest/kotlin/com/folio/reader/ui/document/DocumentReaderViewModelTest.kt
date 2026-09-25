@@ -37,7 +37,8 @@ class DocumentReaderViewModelTest {
 
     @AfterTest
     fun tearDown() {
-        viewModel?.close()
+        // close() is suspend now; bridge it here since @AfterTest must be non-suspend.
+        runBlocking { viewModel?.close() }
         database.close()
         root.deleteRecursively()
     }
@@ -79,6 +80,10 @@ class DocumentReaderViewModelTest {
 
         reader.removeBookmark(bookmarked.bookmarks.single().id)
         withTimeout(2_000) { reader.state.first { it.bookmarks.isEmpty() } }
+        // Pin the return type to Unit. This is an expression-body runBlocking whose
+        // trailing withTimeout yields DocumentReaderState, and JUnit5 silently drops
+        // (never runs) test methods that do not return void/Unit.
+        Unit
     }
 
     @Test

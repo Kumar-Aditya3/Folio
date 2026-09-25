@@ -55,6 +55,7 @@ import com.folio.reader.model.Document
 import com.folio.reader.model.DocumentFormat
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.COVER_TARGET_WIDTH_PX
 import com.folio.reader.ui.components.decodeCoverImage
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
@@ -266,7 +267,7 @@ internal fun DocumentThumbnail(
             withContext(Dispatchers.IO) {
                 val file = File(path)
                 if (file.isFile && file.length() > 0) {
-                    decodeCoverImage(file.readBytes())?.also {
+                    decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX)?.also {
                         documentThumbnailPut(path, it)
                     }
                 } else {

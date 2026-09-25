@@ -97,13 +97,15 @@ class AndroidMangaBackend(
             showNsfw.value = settings.getRaw(KEY_NSFW) == "1"
         }
         scope.launch {
+            // SECURITY: repo signing keys are declared by the fetched remote index
+            // (index.json), so they are attacker-controllable if the repo host or account
+            // is compromised. Persist them for reference, but NEVER auto-trust an APK just
+            // because its signature matches one -- that would silently load third-party
+            // native code into this process with no user consent. Untrusted extensions
+            // instead surface in the Extensions "Untrusted" tab and are loaded only after
+            // the user explicitly taps Trust (extensionManager.trust via trustExtension()).
             extensionApi.repoSigningKeys.collect { keys ->
                 trustStore.setRepoKeys(keys)
-                if (keys.isNotEmpty()) {
-                    untrustedSnapshot.value
-                        .filter { it.signatureHash in keys }
-                        .forEach { extensionManager.trust(it) }
-                }
             }
         }
         scope.launch {

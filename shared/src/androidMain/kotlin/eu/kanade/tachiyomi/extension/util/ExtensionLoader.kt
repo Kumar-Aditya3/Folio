@@ -51,7 +51,20 @@ internal object ExtensionLoader {
     private const val METADATA_EXTENSION_LIB = "tachiyomix.extensionLib"
     private const val METADATA_CONTENT_WARNING = "tachiyomix.contentWarning"
 
-    private val SUPPORTED_LIB_VERSIONS = listOf(1.4, 1.6)
+    /**
+     * Minimum supported tachiyomix extension-lib version (inclusive). Extensions built
+     * against an older lib predate API contracts the loader relies on and are refused.
+     */
+    private const val LIB_VERSION_MIN = 1.4
+
+    /**
+     * Maximum supported tachiyomix extension-lib version (inclusive). This is a RANGE
+     * ceiling, not an exact-match set: 1.5.x is the widely-shipped ecosystem version, and
+     * we leave headroom through 1.6/1.7 so a future minor lib bump is not wrongly refused
+     * the way the old exact list (1.4, 1.6) silently dropped every 1.5 extension while
+     * admitting a 1.6 that did not exist yet. Matches/slightly exceeds upstream Mihon.
+     */
+    private const val LIB_VERSION_MAX = 1.7
 
     @Suppress("DEPRECATION")
     private val PACKAGE_FLAGS = PackageManager.GET_CONFIGURATIONS or
@@ -60,6 +73,16 @@ internal object ExtensionLoader {
         (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else 0)
 
     private const val PRIVATE_EXTENSION_EXTENSION = "ext"
+
+    /**
+     * Pure, framework-free gate for the extension-lib version, extracted so it can be unit
+     * tested in isolation (no PackageInfo/ApplicationInfo required). Accepts an inclusive
+     * [LIB_VERSION_MIN]..[LIB_VERSION_MAX] range instead of an exact-match set. A null
+     * libVersion (missing metadata and an unparseable versionName) is treated as
+     * unsupported, preserving the previous behavior.
+     */
+    internal fun isSupportedLibVersion(libVersion: Double): Boolean =
+        libVersion in LIB_VERSION_MIN..LIB_VERSION_MAX
 
     private fun getPrivateExtensionDir(context: Context) = File(context.filesDir, "exts")
 
@@ -256,13 +279,13 @@ internal object ExtensionLoader {
             ?.toString()
             ?.toDouble()
             ?: versionName.substringBeforeLast('.').toDoubleOrNull()
-        if (libVersion == null || libVersion !in SUPPORTED_LIB_VERSIONS) {
+        if (libVersion == null || !isSupportedLibVersion(libVersion)) {
             logcat(LogPriority.WARN) {
-                "Lib version is $libVersion, while only version(s) ${SUPPORTED_LIB_VERSIONS.joinToString()} are supported"
+                "Lib version is $libVersion, while only versions $LIB_VERSION_MIN to $LIB_VERSION_MAX are supported"
             }
             return LoadResult.Error(
                 "$extName ($pkgName): unsupported library version $libVersion " +
-                    "(supported: ${SUPPORTED_LIB_VERSIONS.joinToString()})"
+                    "(supported: $LIB_VERSION_MIN..$LIB_VERSION_MAX)"
             )
         }
 

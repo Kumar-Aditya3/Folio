@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
 
 // ---------- Browse / extensions ----------
@@ -157,6 +158,20 @@ class BrowseViewModel(
      *  when the search is explicitly closed or blanked. */
     private var heldGlobalQuery: String? = null
 
+    companion object {
+        /**
+         * Generous safety-net bound on how long a global search waits for the
+         * installed-source list to resolve. This is NOT a performance budget: on a
+         * cold start, extensions unpack and sources initialize, which can legitimately
+         * take several seconds, so real source init should finish well within this
+         * window. The timeout only triggers when sources will never load - no extension
+         * installed, a stalled source init, or a language filter that empties the list -
+         * cases where [visibleSources] never emits a non-empty snapshot and, without
+         * this bound, the await (and the "preparing sources" spinner) would hang forever.
+         */
+        private const val SOURCE_WAIT_TIMEOUT_MS = 30_000L
+    }
+
     var globalListScrollIndex: Int = 0
     var globalListScrollOffset: Int = 0
 
@@ -228,7 +243,21 @@ class BrowseViewModel(
             val targets = if (visibleSources.value.isNotEmpty()) {
                 visibleSources.value
             } else {
-                visibleSources.first { it.isNotEmpty() }
+                // Bounded wait: an unbounded first { it.isNotEmpty() } strands the search
+                // (and the spinner) forever when no non-empty source list ever arrives: no
+                // extension installed, a stalled source init, or a language filter that
+                // empties the list. Time out and fall through to the empty-targets path.
+                withTimeoutOrNull(SOURCE_WAIT_TIMEOUT_MS) {
+                    visibleSources.first { it.isNotEmpty() }
+                }
+            }
+            if (targets.isNullOrEmpty()) {
+                // Timed out (null) or resolved empty: nothing to search. Clear any stale
+                // results and drop the spinner so the UI never sticks on "preparing sources".
+                globalResults.value = emptyList()
+                searchArrival.value = emptyList()
+                preparingSources.value = false
+                return@launch
             }
             globalResults.value = targets.map { GlobalSourceResult(it) }
             searchArrival.value = emptyList()
