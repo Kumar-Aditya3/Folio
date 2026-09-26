@@ -86,7 +86,13 @@ data class RecentQuote(
     val bookTitle: String,
     val bookId: String,
     /** Epoch-ms timestamp used to sort the merged feed; 0 when unknown. */
-    val sortKey: Long = 0L
+    val sortKey: Long = 0L,
+    /** Spine index of the passage when known, so tapping opens that chapter of the
+     *  book rather than wherever the reader was last. Null falls back to opening the book. */
+    val spineIndex: Int? = null,
+    /** The underlying highlight id when this passage is (or is backed by) a highlight, so a
+     *  tap can scroll the reader to the exact mark. Null for a standalone quote. */
+    val highlightId: String? = null,
 )
 
 /** §12.5 top-books leaderboard row: reading time inside the stats window. */
@@ -428,9 +434,11 @@ class StatisticsViewModel(
                 // The shadow-quote leak again: a highlight writes a `quote-<id>` row
                 // that outlives it, and `quotes` has no is_deleted column to
                 // tombstone it with — so resolve and skip.
+                var quoteSpine: Int? = null
                 if (highlights != null && q.highlightId.isNotBlank()) {
                     val source = highlights.getHighlight(q.highlightId)
                     if (source == null || source.isDeleted) continue
+                    quoteSpine = source.spineIndex
                 }
                 entries.add(
                     RecentQuote(
@@ -438,7 +446,9 @@ class StatisticsViewModel(
                         text = q.text,
                         bookTitle = book.displayTitle,
                         bookId = q.bookId,
-                        sortKey = q.createdAt.toEpochMilliseconds()
+                        sortKey = q.createdAt.toEpochMilliseconds(),
+                        spineIndex = quoteSpine,
+                        highlightId = q.highlightId.takeIf { it.isNotBlank() },
                     )
                 )
             }
@@ -468,7 +478,9 @@ class StatisticsViewModel(
                                 text = trimmed,
                                 bookTitle = book.displayTitle,
                                 bookId = book.id,
-                                sortKey = h.createdAt.toEpochMilliseconds()
+                                sortKey = h.createdAt.toEpochMilliseconds(),
+                                spineIndex = h.spineIndex,
+                                highlightId = h.id,
                             )
                         )
                         highlightBudget--
@@ -476,9 +488,22 @@ class StatisticsViewModel(
                 }
             }
 
-            // Sort newest-first, cap the feed.
+            // Sort newest-first, drop duplicates, then cap. A highlight and the shadow
+            // quote it auto-creates ("quote-<id>") describe the SAME passage, and a
+            // user-saved quote on that highlight is a third copy — so without this the
+            // same passage showed up two or three times. Dedup by the underlying
+            // highlight when known, otherwise by book + text.
             entries.sortByDescending { it.sortKey }
-            entries.take(FLOATING_FEED_CAP).map { it.copy(text = capText(it.text)) }
+            val seen = HashSet<String>()
+            entries.asSequence()
+                .filter { rq ->
+                    val key = rq.highlightId?.let { "h:$it" }
+                        ?: "t:${rq.bookId}:${rq.text.trim().lowercase()}"
+                    seen.add(key)
+                }
+                .take(FLOATING_FEED_CAP)
+                .map { it.copy(text = capText(it.text)) }
+                .toList()
         }
     }
 

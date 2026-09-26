@@ -57,6 +57,9 @@ interface FolioNavModel {
         // runtime the moment the reader route composes (it still compiles cleanly). Every caller
         // passes this explicitly, so requiring it costs nothing.
         targetFraction: Float?,
+        /** Highlight to scroll to once the book loads (Stats "kept passages" tap). Null = none.
+         *  No default for the same @Composable-interface ABI reason as [targetFraction] above. */
+        targetHighlightId: String?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,

@@ -15,7 +15,7 @@ object FolioRoutes {
     const val MORE = "more"
 
     // Pushed routes (bar hidden, §3.3).
-    const val READER = "reader/{bookId}?spine={spine}&frac={frac}"
+    const val READER = "reader/{bookId}?spine={spine}&frac={frac}&hl={hl}"
     const val DOCUMENT_READER = "document/{documentId}"
     const val BOOK_DETAIL = "book/{bookId}"
     const val MANGA_DETAIL = "manga/{mangaId}"
@@ -65,8 +65,8 @@ object FolioDestination {
      *   (0..1000), or null for "chapter top". Per-mille keeps it an [Int] nav arg like [spine]
      *   rather than encoding a float into the route.
      */
-    fun reader(bookId: String, spine: Int? = null, fractionMille: Int? = null): String =
-        "reader/${enc(bookId)}?spine=${spine ?: -1}&frac=${fractionMille ?: -1}"
+    fun reader(bookId: String, spine: Int? = null, fractionMille: Int? = null, highlightId: String? = null): String =
+        "reader/${enc(bookId)}?spine=${spine ?: -1}&frac=${fractionMille ?: -1}&hl=${enc(highlightId ?: "")}"
 
     fun documentReader(documentId: String): String =
         "document/${enc(documentId)}"
@@ -90,6 +90,7 @@ object FolioNavArgs {
     const val DOCUMENT_ID = "documentId"
     const val SPINE = "spine"
     const val FRAC = "frac"
+    const val HL = "hl"
     const val MANGA_ID = "mangaId"
     const val CHAPTER_ID = "chapterId"
     const val SOURCE_ID = "sourceId"

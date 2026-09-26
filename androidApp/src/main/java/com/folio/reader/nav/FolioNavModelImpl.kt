@@ -458,11 +458,12 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         bookId: String,
         targetSpineIndex: Int?,
         targetFraction: Float?,
+        targetHighlightId: String?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,
         onOpenEcho: (String, Int?, Float?) -> Unit
-    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, onBack, onOpenSearch, onOpenSettings, onOpenEcho)
+    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, targetHighlightId, onBack, onOpenSearch, onOpenSettings, onOpenEcho)
 
     @Composable
     override fun documentReaderContent(

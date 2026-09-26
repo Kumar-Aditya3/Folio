@@ -83,7 +83,10 @@ private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.n
  * popping the reader is still the right fallback, and the return value is not worth a crash.
  */
 private fun NavHostController.popToTab(route: String) {
-    popBackStack(route, inclusive = false)
+    // Try to return to the tab; if it isn't on this stack (e.g. the reader was opened
+    // from Stats, which has no Library entry beneath it), fall back to popping the
+    // reader itself so back always does *something* instead of dead-ending on the page.
+    if (!popBackStack(route, inclusive = false)) popBackStack()
 }
 
 /**
@@ -238,7 +241,8 @@ fun FolioNavHost(
                     arguments = listOf(
                         navArgument(FolioNavArgs.BOOK_ID) { type = NavType.StringType },
                         navArgument(FolioNavArgs.SPINE) { type = NavType.IntType; defaultValue = -1 },
-                        navArgument(FolioNavArgs.FRAC) { type = NavType.IntType; defaultValue = -1 }
+                        navArgument(FolioNavArgs.FRAC) { type = NavType.IntType; defaultValue = -1 },
+                        navArgument(FolioNavArgs.HL) { type = NavType.StringType; defaultValue = "" }
                     ),
                     deepLinks = listOf(navDeepLink { uriPattern = "folio://reader/{${FolioNavArgs.BOOK_ID}}" })
                 ) { entry ->
@@ -247,6 +251,7 @@ fun FolioNavHost(
                     // Per-mille back to a fraction; -1 (the default) means "no intra-chapter target".
                     val targetFraction = entry.arguments?.getInt(FolioNavArgs.FRAC)
                         ?.takeIf { it in 0..1000 }?.let { it / 1000f }
+                    val targetHighlightId = entry.arguments?.getString(FolioNavArgs.HL)?.takeIf { it.isNotBlank() }
                     // §17: the reader is a morph destination too. A cover tapped on a
                     // shelf lands here as the plate the first chapter starts under, so
                     // opening a book reads as the cover flying to where you will read
@@ -257,6 +262,7 @@ fun FolioNavHost(
                             bookId = bookId,
                             targetSpineIndex = spine,
                             targetFraction = targetFraction,
+                            targetHighlightId = targetHighlightId,
                             // Back from the reader lands on the **Library**, whichever tab it
                             // was opened from — including Home. See [popToTab].
                             onBack = { navController.popToTab(FolioRoutes.LIBRARY) },

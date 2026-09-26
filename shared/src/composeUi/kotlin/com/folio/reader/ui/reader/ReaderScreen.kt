@@ -69,6 +69,8 @@ fun ReaderScreen(
     bookmarks: List<Bookmark>,
     highlights: List<Highlight>,
     notes: List<Note>,
+    /** When set (opened from the Stats "kept passages" card), scroll to this highlight once loaded. */
+    targetHighlightId: String? = null,
     showControls: Boolean,
     showToc: Boolean,
     showAnnotations: Boolean,
@@ -455,6 +457,20 @@ fun ReaderScreen(
             onToggleAnnotations = onToggleAnnotations,
             jump = { spine, chapterId, locator, markId -> jumpToLocation(spine, chapterId, locator, markId) }
         )
+
+    // Opened from the Stats "kept passages" card: once the book has loaded and the target
+    // highlight is in the list, scroll to it exactly once — the same jump the in-reader
+    // annotations panel performs. Keyed on the id so it re-arms only for a new target, not
+    // on every scroll tick.
+    var jumpedToTargetHighlight by remember(targetHighlightId) { mutableStateOf(false) }
+    LaunchedEffect(targetHighlightId, highlights, isLoadingContent, chapterHtml) {
+        val hid = targetHighlightId ?: return@LaunchedEffect
+        if (jumpedToTargetHighlight) return@LaunchedEffect
+        if (isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
+        if (highlights.none { it.id == hid }) return@LaunchedEffect
+        jumpToAnnotation("hl", hid)
+        jumpedToTargetHighlight = true
+    }
 
     val isBookmarked = remember(position, bookmarks) {
         position?.let { pos ->

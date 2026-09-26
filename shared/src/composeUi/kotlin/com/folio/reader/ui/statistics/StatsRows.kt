@@ -353,7 +353,10 @@ internal fun GenresCard(slices: List<TagSlice>) {
  * these read as log entries.
  */
 @Composable
-internal fun FloatingQuotesCard(quotes: List<RecentQuote>) {
+internal fun FloatingQuotesCard(
+    quotes: List<RecentQuote>,
+    onQuoteClick: (RecentQuote) -> Unit = {},
+) {
     Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
         FolioSectionHead(
             title = "Passages you kept",
@@ -362,21 +365,23 @@ internal fun FloatingQuotesCard(quotes: List<RecentQuote>) {
         Spacer(Modifier.height(FolioTokens.space3))
         quotes.forEachIndexed { index, quote ->
             if (index > 0) Spacer(Modifier.height(FolioTokens.spaceBeat))
-            FolioCallout(accent = FolioTheme.colors.accentAnnotation) {
-                Text(
-                    text = quote.text,
-                    style = FolioTheme.typography.quote,
-                    color = FolioTheme.colors.onSurface,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = quote.bookTitle,
-                    style = FolioTheme.typography.labelSmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Box(modifier = Modifier.fillMaxWidth().clickable { onQuoteClick(quote) }) {
+                FolioCallout(accent = FolioTheme.colors.accentAnnotation) {
+                    Text(
+                        text = quote.text,
+                        style = FolioTheme.typography.quote,
+                        color = FolioTheme.colors.onSurface,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = quote.bookTitle,
+                        style = FolioTheme.typography.labelSmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

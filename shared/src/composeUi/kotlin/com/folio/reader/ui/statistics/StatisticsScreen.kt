@@ -139,6 +139,9 @@ fun StatisticsTabContent(
     exclusionsFlow: StateFlow<Set<Pair<Scope, String>>> = viewModel.sharedExclusions,
     /** Companion to [state]; see [StatisticsViewModel.recentQuotes]. */
     recentQuotesFlow: StateFlow<List<RecentQuote>> = viewModel.sharedRecentQuotes,
+    /** Tapping a kept passage opens that quote's chapter in the reader (bookId, spineIndex).
+     *  Default no-op keeps other hosts unchanged. */
+    onOpenQuote: (RecentQuote) -> Unit = {},
 ) {
     val stats by state.collectAsState()
     // Gate the first frames on the real emission. `state` is a combine of four
@@ -228,6 +231,7 @@ fun StatisticsTabContent(
             recentQuotes = recentQuotes,
             onBookClick = onBookClick,
             onOpenExclusions = onOpenExclusions,
+            onOpenQuote = onOpenQuote,
         )
     }
 }
@@ -250,6 +254,7 @@ private fun StatisticsContent(
     recentQuotes: List<RecentQuote>,
     onBookClick: (String) -> Unit,
     onOpenExclusions: (() -> Unit)?,
+    onOpenQuote: (RecentQuote) -> Unit,
 ) {
     LazyColumn(
         state = listState,
@@ -360,7 +365,7 @@ private fun StatisticsContent(
 
         if (recentQuotes.isNotEmpty()) {
             item {
-                FloatingQuotesCard(quotes = recentQuotes)
+                FloatingQuotesCard(quotes = recentQuotes, onQuoteClick = onOpenQuote)
                 Spacer(Modifier.height(FolioTokens.spaceMovement))
             }
         }

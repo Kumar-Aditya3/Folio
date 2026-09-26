@@ -114,9 +114,15 @@ actual fun HtmlContentSurface(
         if (clearSelectionRequest == null || clearSelectionRequest == 0L) return@LaunchedEffect
         wv.evaluateJavascript("window.__folioClearSel&&window.__folioClearSel();", null)
     }
+    // Bumped once the page has committed and its engine JS has run (onPageFinished, or the
+    // fallback inject). The highlight paint is keyed on this so the marks are (re)applied the
+    // moment the painter exists: the baked load-time paint can miss highlights that finish
+    // loading from the DB a beat later — the "sometimes coloured instantly, sometimes not"
+    // race. Painting is idempotent (it unwraps first), so an extra apply is harmless.
+    var pageReadyTick by remember(loadKey) { mutableStateOf(0) }
     // Adding or removing a highlight re-runs the painter on the page that is
     // already up — reloading the chapter here would flash the whole screen.
-    LaunchedEffect(highlights, settings.themeId, settings.customTheme, webViewRef) {
+    LaunchedEffect(highlights, settings.themeId, settings.customTheme, webViewRef, pageReadyTick) {
         val wv = webViewRef ?: return@LaunchedEffect
         val theme = settings.customTheme
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
@@ -304,7 +310,7 @@ actual fun HtmlContentSurface(
                 // morph cover plate can dissolve on real paint instead of on the
                 // HTML *string* being ready (which left a blank-paper flash). Posted
                 // to the main thread since onPageFinished can arrive off it.
-                mainHandler.post { latestContentReady() }
+                mainHandler.post { pageReadyTick++; latestContentReady() }
             }
         }
     }
@@ -528,7 +534,7 @@ actual fun HtmlContentSurface(
                         pageState.markReady(webView)
                         // Same first-paint signal as onPageFinished, for the WebView
                         // whose onPageFinished never fires (see tryInject above).
-                        mainHandler.post { latestContentReady() }
+                        mainHandler.post { pageReadyTick++; latestContentReady() }
                     } else if (attempt < 10) {
                         webView.postDelayed({ tryInject(attempt + 1) }, 200)
                     } else {

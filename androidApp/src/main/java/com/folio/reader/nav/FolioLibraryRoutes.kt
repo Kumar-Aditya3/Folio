@@ -429,7 +429,10 @@ fun LibraryRoute(
 }
 
 @Composable
-fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) {
+fun StatsRoute(
+    navModel: FolioNavModelImpl,
+    onOpenBookDetail: (String) -> Unit,
+) {
     val navController = navModel.navController ?: return
     // Same scroll-linked masthead as Library and Home: the charts dissolve into the
     // bar's glass instead of sliding under a fixed slab.
@@ -460,7 +463,12 @@ fun StatsRoute(navModel: FolioNavModelImpl, onOpenBookDetail: (String) -> Unit) 
                     mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database),
                     onOpenExclusions = {
                         navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
-                    }
+                    },
+                    onOpenQuote = { q ->
+                        navController.navigate(
+                            FolioDestination.reader(q.bookId, q.spineIndex, null, q.highlightId)
+                        )
+                    },
                 )
             }
         }
