@@ -183,6 +183,14 @@ actual fun HtmlContentSurface(
     // once after each real load (setting identical CSS), which is a no-op.
     LaunchedEffect(settings, content, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
+        // Debounce: dragging the font-size / spacing sliders emits a new `settings`
+        // every frame, and each live restyle re-columnises the whole chapter
+        // (measure() reads scrollWidth = a forced reflow). Without this, a slider
+        // drag queued dozens of full re-layouts and applied visibly late and jerkily.
+        // LaunchedEffect cancels the prior coroutine on each change, so only the last
+        // value within the window actually restyles; a real load re-keys via `content`
+        // and eats just this short delay once.
+        kotlinx.coroutines.delay(110)
         val css = readerStyleSheet(settings)
         val shadowCss = ReaderCss.shadowStyleSheet(settings)
         wv.evaluateJavascript(

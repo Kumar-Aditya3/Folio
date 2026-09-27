@@ -82,6 +82,13 @@ var sts=doc.querySelectorAll('style');
 for(i=0;i<sts.length;i++){var sid=sts[i].id?(' id="'+sts[i].id+'"'):'';styleHtml+='<style'+sid+'>'+sts[i].textContent+'<\/style>';}
 var lnk=doc.querySelectorAll('link[rel="stylesheet"]');
 for(i=0;i<lnk.length;i++){styleHtml+=lnk[i].outerHTML;}
+// Classic print-book paragraphs (paged mode only): no blank line between prose
+// paragraphs and a first-line indent on every paragraph that follows another —
+// so the first paragraph of a chapter / the one after a heading, scene break,
+// blockquote, image or list stays flush, exactly like a printed page. Appended
+// AFTER the reader sheet so these equal-specificity !important rules win on
+// source order and beat the reader's text-indent:0 / paragraph-spacing rules.
+styleHtml+='<style id="folio-paged-type">p{margin-top:0 !important;margin-bottom:0 !important;}p + p{text-indent:1.2em !important;}</style>';
 // Everything that is not a style/script/overlay is the chapter; move it into the iframe.
 var holder=doc.createElement('div'),kids=[].slice.call(body.childNodes),k;
 for(k=0;k<kids.length;k++){var el=kids[k],t=el.nodeType===1?el.tagName:'';
@@ -132,6 +139,13 @@ function scroller(){return parent.document.getElementById('folio-scroller');}
 function frameEl(){return parent.document.getElementById('folio-frame');}
 function report(s){try{parent.document.title=s;}catch(e){}}
 function pageW(){var sc=scroller();return Math.max(1,(sc&&sc.clientWidth)||window.innerWidth);}
+// Inter-page gutter. Pages step by a PITCH of one viewport + this gap, so at rest
+// a page still fills the viewport exactly (the gap sits just off the right edge),
+// but during the slide a strip of blank paper passes between the outgoing and
+// incoming page — a real book gutter — so their naturally-misaligned text rows are
+// separated by whitespace instead of abutting, which is what read as jarring.
+function gap(){return Math.max(28,Math.round(pageW()*0.05));}
+function pitch(){return pageW()+gap();}
 function pageH(){var sc=scroller();return Math.max(1,(sc&&sc.clientHeight)||window.innerHeight);}
 function padPx(){var W=pageW();if(MEASURE>0&&W>MEASURE)return Math.floor((W-MEASURE)/2);return 0;}
 // Inset the whole page from the screen edges by the reader's margins, so the
@@ -153,7 +167,7 @@ function applyCols(){
   // on a column boundary and cannot accumulate drift. (The earlier colW+gap
   // scheme let the engine stretch columns, which drifted a few px per page.)
   st.setProperty('column-width',W+'px','important');
-  st.setProperty('column-gap','0','important');
+  st.setProperty('column-gap',gap()+'px','important');
   st.setProperty('column-fill','auto','important');
   st.setProperty('height',H+'px','important');
   st.setProperty('margin','0','important');
@@ -174,11 +188,11 @@ function applyCols(){
 function measure(){
   insetScroller();
   applyCols();
-  var W=pageW();
-  total=Math.max(1,Math.round(root.scrollWidth/W));
-  // Size to exactly N columns of W: the browser then makes N columns each
+  var W=pageW(),G=gap(),P=W+G;
+  total=Math.max(1,Math.round((root.scrollWidth+G)/P));
+  // Size to exactly N columns of W at pitch P: the browser then makes N columns each
   // exactly W wide (no leftover space to stretch into), preserving exact pitch.
-  var expanded=total*W;
+  var expanded=total*P-G;
   root.style.setProperty('width',expanded+'px','important');
   root.style.setProperty('column-width',W+'px','important');
   var fe=frameEl();if(fe)fe.style.width=expanded+'px';
@@ -187,7 +201,7 @@ function measure(){
 function maxPage(){return Math.max(0,total-1);}
 function apply(animate){
   var sc=scroller();if(!sc)return;
-  var x=page*pageW();
+  var x=page*pitch();
   if(animate&&sc.scrollTo){try{sc.scrollTo({left:x,behavior:'smooth'});return;}catch(e){}}
   sc.scrollLeft=x;
 }
@@ -219,11 +233,11 @@ function targetEl(t){
   if(!el){var pi=isH?parts[2]:parts[1];if(pi===undefined||pi==='')return null;var i=parseInt(pi,10);if(isNaN(i))return null;var ps=doc.querySelectorAll('p');if(!ps.length)return null;el=ps[Math.min(Math.max(0,i),ps.length-1)];}
   return el;
 }
-function land(el){if(dirty)measure();var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pageW())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';report_();}
+function land(el){if(dirty)measure();var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';report_();}
 window.__folioSeekTo=function(t){var parts=String(t).split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);var el=targetEl(t);if(el){land(el);return;}if(!isNaN(f))window.__folioSeek(f);};
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
-window.__folioAnchorSave=function(){var ch=root.children.length?bodyEl.children:[];var lo=page*pageW(),i,el,l;var list=doc.querySelectorAll('p,div,section,blockquote,h1,h2,h3,img,figure');for(i=0;i<list.length;i++){el=list[i];l=absLeft(el);if(l+el.getBoundingClientRect().width>lo+2&&l<lo+pageW()-2){el.setAttribute('data-folio-anchor','1');return 'a';}}return '';};
-window.__folioAnchorRestore=function(a){if(dirty)measure();var el=doc.querySelector('[data-folio-anchor="1"]');if(!el)return;el.removeAttribute('data-folio-anchor');var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pageW())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';report_();};
+window.__folioAnchorSave=function(){var ch=root.children.length?bodyEl.children:[];var lo=page*pitch(),i,el,l;var list=doc.querySelectorAll('p,div,section,blockquote,h1,h2,h3,img,figure');for(i=0;i<list.length;i++){el=list[i];l=absLeft(el);if(l+el.getBoundingClientRect().width>lo+2&&l<lo+pageW()-2){el.setAttribute('data-folio-anchor','1');return 'a';}}return '';};
+window.__folioAnchorRestore=function(a){if(dirty)measure();var el=doc.querySelector('[data-folio-anchor="1"]');if(!el)return;el.removeAttribute('data-folio-anchor');var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';report_();};
 window.__folioRestyle=function(fc,sc){
   var a=window.__folioAnchorSave();
   var f=doc.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
@@ -262,7 +276,7 @@ doc.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY
 // measured against what is actually on screen. Centre-tap is emitted from the
 // engine itself (like PageEngine); the host's native centre-tap detector stands
 // down in paged mode so the two cannot double-toggle.
-doc.addEventListener('touchend',function(e){var t=e.changedTouches[0];var dx=t.clientX-tX,dy=t.clientY-tY;if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4){goTo(page+(dx<0?1:-1));return;}var moved=Math.hypot(dx,dy),ms=Date.now()-tT;var el=doc.elementFromPoint(t.clientX,t.clientY);var a=el&&el.closest?el.closest('a[href]'):null;if(a){var href=a.getAttribute('href')||'';if(href&&href.charAt(0)!=='#')report('folio-link:'+(++nonce)+':'+encodeURIComponent(href));return;}if(moved>24||ms>350)return;var w=pageW();var rel=t.clientX-page*w;if(DIAG)console.log('FOLIO-TAP cx='+Math.round(t.clientX)+' page='+page+' w='+Math.round(w)+' rel='+Math.round(rel)+' zone='+(rel>w*0.66?'next':(rel<w*0.33?'prev':'tap')));if(rel>w*0.66)goTo(page+1);else if(rel<w*0.33)goTo(page-1);else report('folio-tap:'+(++nonce));},{passive:true});
+doc.addEventListener('touchend',function(e){var t=e.changedTouches[0];var dx=t.clientX-tX,dy=t.clientY-tY;if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4){goTo(page+(dx<0?1:-1));return;}var moved=Math.hypot(dx,dy),ms=Date.now()-tT;var el=doc.elementFromPoint(t.clientX,t.clientY);var a=el&&el.closest?el.closest('a[href]'):null;if(a){var href=a.getAttribute('href')||'';if(href&&href.charAt(0)!=='#')report('folio-link:'+(++nonce)+':'+encodeURIComponent(href));return;}if(moved>24||ms>350)return;var w=pageW();var rel=t.clientX-page*pitch();if(DIAG)console.log('FOLIO-TAP cx='+Math.round(t.clientX)+' page='+page+' w='+Math.round(w)+' rel='+Math.round(rel)+' zone='+(rel>w*0.66?'next':(rel<w*0.33?'prev':'tap')));if(rel>w*0.66)goTo(page+1);else if(rel<w*0.33)goTo(page-1);else report('folio-tap:'+(++nonce));},{passive:true});
 doc.addEventListener('click',function(ev){var a=ev.target&&ev.target.closest?ev.target.closest('a[href]'):null;if(a){var h=a.getAttribute('href')||'';if(h&&h.charAt(0)!=='#')ev.preventDefault();}},true);
 window.addEventListener('resize',function(){dirty=true;relayout();});
 // The scroller has overflow:hidden and is only ever moved programmatically by
