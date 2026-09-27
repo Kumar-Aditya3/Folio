@@ -85,16 +85,16 @@ document.addEventListener('selectionchange',function(){clearTimeout(window.__fol
     val emptyHideJs: String = """
 document.querySelectorAll('p,div,section,blockquote').forEach(function(el){if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length)el.style.display='none';});
 """
-    fun js(fraction: Float, cols: Int, gutter: Float, measure: Int, desktopEvents: Boolean = true): String = """
+    fun js(fraction: Float, cols: Int, gutter: Float, measure: Int, desktopEvents: Boolean = true, diag: Boolean = false): String = """
 (function(){
 if(window.__folioEngine)return;window.__folioEngine=true;
-var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction,DESKTOP=$desktopEvents;
+var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction,DESKTOP=$desktopEvents,DIAG=$diag;
 var body=document.body,docEl=document.documentElement;
 // Hide here, not in CSS: a document whose engine JS never lands must still paint
 // text instead of staying a solid blank page under a CSS opacity:0 gate.
 body.style.opacity='0';
 var page=0,animating=false,userActed=false,nonce=0,posFrac=frac;
-var totalCols=1,kids=[],dirty=true;
+var totalCols=1,kids=[],dirty=true,stackReported=false;
 function vw(){return Math.max(1, body.clientWidth || window.innerWidth);}
 function colW(){return vw()/COLS;}
 function padY(){var cs=getComputedStyle(body);return (parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0);}
@@ -123,6 +123,8 @@ function widthize(el,cw){
   el.style.paddingRight=pad+'px';
   el.style.margin='0';
   el.style.textIndent='0';
+  // A stale scale() from a previous fit must not survive a relayout: the block would
+  // keep its old size while the packer measured the new one.
   el.style.transform='';
   el.style.left='0px';
   el.style.top='0px';
@@ -135,6 +137,12 @@ function atomicBlock(el){
   var t=(el.tagName||'').toUpperCase();
   if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO'||t==='TABLE'||t==='IFRAME'||t==='HR')return true;
   return !!(el.querySelector&&el.querySelector('img,svg,canvas,video,hr,iframe,table'));
+}
+// The media inside a block that decides its height, own tag included.
+function atomicMedia(el){
+  var t=(el.tagName||'').toUpperCase();
+  if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO')return [el];
+  return el.querySelectorAll?el.querySelectorAll('img,svg,canvas,video'):[];
 }
 function flatten(el,out,cw,H){
   // Publisher markup littered with empty <p>/<br> blocks reads as huge holes
@@ -156,7 +164,46 @@ function flatten(el,out,cw,H){
   }
 }
 var layoutTries=0;
+var imgTries=0,imagesSettled=false;
+// Every block is absolutely positioned, so one that grows AFTER it was measured paints over
+// its neighbour instead of pushing it down. Nothing re-paginated in that case: an image that
+// was already `complete` when we measured fires no load event at all, and a web font that
+// settles after the remeasure budget fires no resize — which is why the overlap stuck.
+var measuredHs=[],growWatch=null,growTries=0,lastGrowFix=0;
 function lineH(el){var v=parseFloat(getComputedStyle(el).lineHeight);return isFinite(v)&&v>4?v:0;}
+// The y of every real line box inside a block, relative to its top. Slicing at multiples of
+// the *computed* line-height cuts through glyphs whenever a line is actually taller than that
+// number — a superscript, an inline image, a larger span, CJK with a different strut — which
+// is the half-clipped text at a page boundary. The range's client rects are the lines the
+// browser actually laid out.
+function lineTops(el){
+  var out=[],base=el.getBoundingClientRect().top,i,r,y,last=-9999,rects;
+  try{var range=document.createRange();range.selectNodeContents(el);rects=range.getClientRects();}
+  catch(e){return out;}
+  for(i=0;i<rects.length;i++){
+    r=rects[i];if(r.height<1)continue;
+    y=r.top-base;
+    if(y>last+1){out.push(y);last=y;}
+  }
+  // RTL and multi-column inline content can hand back rects out of vertical order, and the
+  // cut search below walks this list assuming it ascends.
+  return out.sort(function(a,b){return a-b;});
+}
+// How far an element's content actually reaches below its own top. A cover built from
+// absolutely positioned layers measures nothing while painting a whole page, and a packer
+// working from that zero places every later block at the same y — text printed over the
+// artwork. Only short blocks are walked: page furniture is short, prose chapters are not,
+// and the cost would otherwise be a rect read per node per layout.
+function paintedBottom(el){
+  if(el.innerHTML.length>6000)return el.offsetHeight;
+  var base=el.getBoundingClientRect().top,h=el.offsetHeight;
+  var all=el.querySelectorAll('*'),i,r,max=0;
+  for(i=0;i<all.length;i++){
+    r=all[i].getBoundingClientRect();
+    if(r.bottom-base>max){max=r.bottom-base;if(max>h+2)break;}
+  }
+  return Math.max(h,max);
+}
 function addSlice(el,off,sh,c,top,cw){
   var w=document.createElement('div');w.className='folio-slice';
   w.style.position='absolute';
@@ -167,7 +214,12 @@ function addSlice(el,off,sh,c,top,cw){
   w.style.overflow='hidden';
   var inner=el;
   if(off>0){
-    inner=document.createElement(el.tagName==='P'?'div':el.tagName);
+    // Same tag AND same class: the publisher's class is what carries this block's font,
+    // indent and alignment, so a continuation rendered as a bare <div> with no class styles
+    // the second half of a paragraph differently from its first — the inconsistent alignment
+    // across a page break.
+    inner=document.createElement(el.tagName);
+    inner.className=el.className;
     inner.innerHTML=el.innerHTML;
     inner.style.position='absolute';
     inner.style.boxSizing='border-box';
@@ -183,46 +235,110 @@ function addSlice(el,off,sh,c,top,cw){
   w.appendChild(inner);
   strip.appendChild(w);
 }
-// A block that cannot fit in the column's remaining space is sliced at line
-// boundaries instead of leaving a hole at the page bottom. Returns the column
-// and y where the next block should continue: below the last slice.
-function trySplit(el,col,y,cw,H){
-  if(el.querySelector('img,svg,canvas,video,hr,iframe,table'))return null;
+// Cut list at real line boundaries, or null when the block cannot be tiled that way.
+function lineCuts(el,rem,H,ch){
+  var tops=lineTops(el);if(tops.length<2)return null;
+  var cuts=[],off=0,guard=0;
+  while(off<ch-1&&guard++<80){
+    var budget=(cuts.length===0?rem:H),cut=ch,j;
+    for(j=0;j<tops.length;j++){
+      if(tops[j]<=off+1)continue;
+      if(tops[j]-off>budget)break;
+      cut=tops[j];
+    }
+    var sh=cut-off;
+    // Too thin to read as a line, or taller than the page: neither is a clean cut.
+    if(sh<10||sh>budget+1)return null;
+    cuts.push(sh);off+=sh;
+  }
+  return (off>=ch-1&&cuts.length>1)?cuts:null;
+}
+// The old computed-line-height cut, used only when no clean line boundary tiles the block.
+// Moving such a block whole instead empties the rest of the page, and a nearly blank page
+// reads as a worse defect than a line clipped at its descenders.
+function legacyCuts(el,rem,H,ch){
   var lh=lineH(el);if(!lh)return null;
+  var cuts=[],off=0,guard=0;
+  while(off<ch-1&&guard++<80){
+    var budget=(cuts.length===0?rem:H);
+    var sh=Math.min(ch-off,Math.floor(budget/lh)*lh);
+    if(sh<lh)sh=Math.min(ch-off,budget);
+    if(sh<1)return null;
+    cuts.push(sh);off+=sh;
+  }
+  return cuts.length>1?cuts:null;
+}
+// A block that cannot fit in the column's remaining space is sliced at real line
+// boundaries instead of leaving a hole at the page bottom. Returns the column and y where
+// the next block should continue, or null to move the whole block on.
+function trySplit(el,col,y,cw,H){
+  if(atomicBlock(el))return null;
   var ch=el.offsetHeight,rem=H-y;
   if(ch<=rem)return null;
-  var first=Math.floor(rem/lh)*lh;
-  if(first<lh*2)return null;
-  var off=0,c=col,top=y,lastSh=0;
-  while(off<ch){
-    var maxH=(off===0?rem:H);
-    var sh=Math.min(ch-off,Math.floor(maxH/lh)*lh);
-    if(sh<lh)sh=Math.min(ch-off,maxH);
-    addSlice(el,off,sh,c,top,cw);
-    off+=sh;lastSh=sh;
-    if(off<ch){c++;top=0;}
+  var tag=el.tagName+'.'+(el.className||''),cuts=lineCuts(el,rem,H,ch),i;
+  if(cuts==null){
+    cuts=legacyCuts(el,rem,H,ch);
+    if(cuts==null){
+      if(DIAG)console.log('folio-split MOVE '+tag+' h'+ch+' rem'+Math.round(rem)+' lines='+lineTops(el).length);
+      return null;
+    }
+    if(DIAG)console.log('folio-split legacy '+tag+' h'+ch+' pieces='+cuts.length);
+  } else if(DIAG)console.log('folio-split lines '+tag+' h'+ch+' pieces='+cuts.length);
+  var c=col,top=y,at=0;
+  for(i=0;i<cuts.length;i++){
+    addSlice(el,at,cuts[i],c,top,cw);
+    at+=cuts[i];
+    if(i<cuts.length-1){c++;top=0;}
   }
-  return [c,lastSh];
+  return [c,cuts[cuts.length-1]];
 }
 // An atomic block taller than one page cannot be sliced, and paged mode clips at
 // the page box (body overflow:hidden) with no scroll, so anything past H would be
 // lost. Cap its media to the page box (aspect ratio preserved via object-fit); if
 // it is still taller than a page (e.g. a big table), scale the whole block down.
 // Returns the height the packer should treat it as, never more than one page.
+// A definite px max-height is what makes this work: the publisher's
+// `max-height:100%` resolves against an auto-height parent to ~0, which collapses
+// the art box and stacks the following text on top of it.
 function fitAtomic(el,H){
-  var t=(el.tagName||'').toUpperCase();
-  var media=(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO')?[el]:(el.querySelectorAll?el.querySelectorAll('img,svg,canvas,video'):[]);
+  var media=atomicMedia(el);
   for(var m=0;m<media.length;m++){
-    media[m].style.maxHeight=H+'px';
     media[m].style.maxWidth='100%';
+    media[m].style.maxHeight=H+'px';
+    media[m].style.height='auto';
     media[m].style.objectFit='contain';
   }
   if(el.offsetHeight>H){
     var s=H/el.offsetHeight;
-    if(s>0&&s<1){el.style.transformOrigin='top left';el.style.transform='scale('+s+')';}
+    // top centre, not top left: the layout box stays column-wide, so scaling about the
+    // left edge would leave the shrunk plate hugging the left of the page.
+    if(s>0&&s<1){el.style.transformOrigin='top center';el.style.transform='scale('+s+')';}
     return H;
   }
   return el.offsetHeight;
+}
+// Repaginate when a laid-out block turns out taller (or shorter) than the height the packer
+// used. Observing the blocks themselves is what catches the cases no event reports: a
+// `complete` image, a late-settling face, inline art that only lays out after first paint.
+function watchGrowth(){
+  if(!window.ResizeObserver||growTries>12)return;
+  if(!growWatch){
+    growWatch=new ResizeObserver(function(es){
+      if(dirty||animating)return;
+      // Relayout changes these boxes, so without a cooldown the observer feeds itself.
+      if(Date.now()-lastGrowFix<400)return;
+      for(var i=0;i<es.length;i++){
+        var el=es[i].target,idx=kids.indexOf(el);
+        if(idx<0)continue;
+        var was=measuredHs[idx];
+        if(was===undefined)continue;
+        if(Math.abs(el.getBoundingClientRect().height-was)>1.5){
+          growTries++;lastGrowFix=Date.now();dirty=true;relayout();return;
+        }
+      }
+    });
+  }
+  for(var i=0;i<kids.length;i++)growWatch.observe(kids[i]);
 }
 function layout(){
   pinBox();
@@ -234,6 +350,16 @@ function layout(){
     document.title='folio-engdiag:collapse:'+H+':'+cw+':'+(++nonce);
     body.style.opacity='1';
     return;
+  }
+  if(!imagesSettled){
+    // Paginating over an image that has no size yet is what puts text on top of
+    // artwork: the plate measures as a zero-height block, so every block after it
+    // is packed at the same y and the decoded art paints underneath the prose.
+    // Wait out the decode, bounded, then lay out with whatever sizes we have.
+    if(pendingImages()>0){
+      if(imgTries++<8){setTimeout(function(){dirty=true;relayout();},150);return;}
+    }
+    imagesSettled=true;
   }
   strip.style.position='relative';
   strip.style.height=H+'px';
@@ -251,17 +377,33 @@ function layout(){
   for(i=0;i<kids.length;i++)widthize(kids[i],cw);
   var hs=[];
   for(i=0;i<kids.length;i++){
-    var kh=kids[i].offsetHeight;
-    // Oversized atomic block (image/table/etc): trySplit can't slice it and paged
-    // mode clips past the page box, so fit it to one page rather than lose it.
-    if(kh>H&&atomicBlock(kids[i]))kh=fitAtomic(kids[i],H);
+    // Normalise every image in the block to fit one page. A definite px max-height avoids two
+    // failures: the publisher's `max-height:100%` collapsing to ~0 (which stacks the following
+    // text on top of the art), and an oversized plate overflowing the page box (which reads as
+    // a "jump to the bottom of the image" on the next page turn).
+    var ims=atomicMedia(kids[i]);
+    var pend=false;
+    for(var mi=0;mi<ims.length;mi++){
+      ims[mi].style.maxWidth='100%';
+      ims[mi].style.maxHeight=H+'px';
+      ims[mi].style.height='auto';
+      if(!ims[mi].complete||!ims[mi].naturalHeight)pend=true;
+    }
+    var kh0=kids[i].offsetHeight,kh=paintedBottom(kids[i]);
+    if(DIAG&&kh>kh0+2)console.log('folio-paint '+kids[i].tagName+'.'+(kids[i].className||'')+' '+kh0+'->'+kh+' len'+kids[i].innerHTML.length);
+    // Not decoded yet -> measures near-zero. Reserve a full page so nothing packs on top; the
+    // img-load relayout re-measures it at the real height.
+    if(ims.length&&pend&&kh<H*0.5)kh=H;
+    // Settled but still taller than the page box: it cannot be sliced and the overflow is
+    // unreachable, so scale it into one page and pack against the height it now occupies.
+    else if(kh>H&&atomicBlock(kids[i]))kh=fitAtomic(kids[i],H);
     cs=getComputedStyle(kids[i]);
     hs.push(kh+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom));
   }
   var col=0,y=0;
   for(i=0;i<kids.length;i++){
     if(y>0&&y+hs[i]>H){
-      var after=atomicBlock(kids[i])?null:trySplit(kids[i],col,y,cw,H);
+      var after=trySplit(kids[i],col,y,cw,H);
       if(after){col=after[0];y=after[1];continue;}
       col++;y=0;
     }
@@ -271,6 +413,8 @@ function layout(){
   }
   totalCols=col+1;
   strip.style.width=Math.round(totalCols*cw)+'px';
+  measuredHs=hs;
+  watchGrowth();
   dirty=false;
 }
 function report(){
@@ -315,6 +459,9 @@ function goTo(p,instant){
 }
 function relayout(){
   if(dirty)layout();
+  // Still waiting on image sizes: layout() bailed and scheduled the retry, so keep
+  // the page hidden rather than revealing it unpaginated.
+  if(!imagesSettled)return;
   page=Math.round(posFrac*maxPage());
   setScroll(false);
   body.style.opacity='1';
@@ -394,7 +541,21 @@ window.addEventListener('resize',function(){dirty=true;relayout();});
 window.addEventListener('load',function(){dirty=true;relayout();});
 document.addEventListener('visibilitychange',function(){dirty=true;relayout();});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});
-document.querySelectorAll('img').forEach(function(i){i.addEventListener('load',function(){dirty=true;relayout();});i.addEventListener('error',function(){dirty=true;relayout();});});
+// Block heights come from the page, and an image that decodes after a layout leaves
+// the packer working from the near-zero height it measured while the art was pending
+// — which is how a full-page title plate ends up underneath the following text.
+// Per-element listeners only cover images that existed when this script ran, and the
+// engine is injected after the WebView's own load event may already have fired, so
+// watch every image load in the capture phase and re-measure once nothing is pending.
+function pendingImages(){var im=document.images,n=0,q;for(q=0;q<im.length;q++){if(!im[q].complete)n++;}return n;}
+document.addEventListener('load',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
+document.addEventListener('error',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
+(function remeasure(tries,sawPending){
+  var p=pendingImages(),seen=sawPending||p>0;
+  if(!p){if(seen){dirty=true;relayout();}return;}
+  if(tries>20)return;
+  setTimeout(function(){remeasure(tries+1,seen);},250);
+})(0,false);
 window.addEventListener('wheel',function(e){
   if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
   e.preventDefault();userActed=true;
@@ -451,7 +612,7 @@ console.log('folio-geom:H='+pageH()+' vw='+vw()+' cols='+totalCols+' kids='+kids
 $selectionWatchJs
 page=Math.round(posFrac*maxPage());
 setScroll(false);
-body.style.opacity='1';
+if(imagesSettled)body.style.opacity='1';
 document.title='folio-engdiag:ok:'+pageH()+':'+vw()+':'+totalCols+':'+kids.length+':'+(++nonce);
 setTimeout(function(){dirty=true;relayout();},250);
 setTimeout(function(){dirty=true;relayout();},700);

@@ -12,7 +12,15 @@ import com.folio.reader.model.Chapter
  */
 internal fun List<Chapter>.needsTitleRepair(): Boolean {
     if (size <= 2) return false
-    return distinctBy { it.title }.size == 1 || any { it.isNumberedFurniture() }
+    if (distinctBy { it.title }.size == 1) return true
+    if (any { it.isNumberedFurniture() }) return true
+    // Old spine-position numbering mixed generated "Chapter N" (N = file index) in with the
+    // book's real chapter titles, so the auto numbers ran out of order ("Chapter 1",
+    // "Chapter 13", "Chapter 2"). Content-based numbering is monotonic down the spine, so any
+    // decrease in the bare "Chapter N" sequence means the stored labels predate the fix.
+    val numbers = mapNotNull { chapterNumberOf(it.title) }
+    if (numbers.zipWithNext().any { (a, b) -> b < a }) return true
+    return false
 }
 
 /** A "Chapter N" title on a page too short to be prose is a spine position, not a chapter. */
@@ -20,6 +28,9 @@ private fun Chapter.isNumberedFurniture(): Boolean =
     title.matches(spinePositionNumber) && wordCount < FrontMatterLabels.MIN_BODY_WORDS
 
 private val spinePositionNumber = Regex("Chapter \\d+")
+private val chapterNumberExact = Regex("^Chapter (\\d+)$")
+private fun chapterNumberOf(title: String): Int? =
+    chapterNumberExact.matchEntire(title.trim())?.groupValues?.get(1)?.toIntOrNull()
 
 /**
  * Re-derives stored chapter titles for one book, and returns without touching the database when

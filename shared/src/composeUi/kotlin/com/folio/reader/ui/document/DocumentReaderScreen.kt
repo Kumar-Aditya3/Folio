@@ -177,12 +177,17 @@ fun DocumentReaderScreen(
                         // A reflowed document is one section — same shape a chapter
                         // window uses, with no chapter identity of its own.
                         sections = listOf(
-                            com.folio.reader.ui.render.ReaderSection(
-                                spineIndex = -1,
-                                chapterId = DOCUMENT_REFLOWABLE_SECTION,
-                                href = content.chapterHref,
-                                html = content.html
-                            )
+                            com.folio.reader.ui.render.FixedLayoutDetector.detect(content.html).let { fxl ->
+                                com.folio.reader.ui.render.ReaderSection(
+                                    spineIndex = -1,
+                                    chapterId = DOCUMENT_REFLOWABLE_SECTION,
+                                    href = content.chapterHref,
+                                    html = content.html,
+                                    isFixedLayout = fxl.isFixedLayout,
+                                    fxlWidth = fxl.width,
+                                    fxlHeight = fxl.height,
+                                )
+                            }
                         ),
                         windowed = false,
                         anchorChapterId = null,

@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Bookmark
+import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
@@ -59,6 +60,11 @@ private const val WORDS_PER_PAGE = 275
 fun ReaderScreen(
     bookTitle: String,
     chapters: List<Chapter>,
+    /**
+     * The book's own nav/NCX Contents rows. Empty falls back to one row per chapter,
+     * which is what a book with a chapter-per-file spine shows anyway.
+     */
+    bookToc: List<BookTocRow> = emptyList(),
     currentChapterIndex: Int,
     chapterHtml: String,
     isLoadingContent: Boolean,
@@ -409,6 +415,9 @@ fun ReaderScreen(
         chapters.firstOrNull { spineIndex != null && it.spineIndex == spineIndex }?.title
             ?: chapters.firstOrNull { chapterId != null && it.id == chapterId }?.title
             ?: if (spineIndex == null && chapterId == null) "Whole book" else "Spine ${(spineIndex ?: 0) + 1}"
+    // One list for both Contents surfaces: the book's own navigation when it has
+    // any, else every chapter in spine order.
+    val tocEntries = bookToc.ifEmpty { chapters.mapIndexed { index, ch -> BookTocRow(ch.title, index) } }
     val overlayHtml = readerOverlayHtml(
         occludes = occludes,
         showReaderPanel = showReaderPanel,
@@ -416,7 +425,7 @@ fun ReaderScreen(
         showAnnotations = showAnnotations,
         noteDraftFor = noteDraftFor,
         settings = settings,
-        chapters = chapters,
+        tocEntries = tocEntries,
         currentChapterIndex = currentChapterIndex,
         bookmarks = bookmarks,
         highlights = highlights,
@@ -851,7 +860,7 @@ fun ReaderScreen(
             echoesState = echoesState,
             onCloseEchoes = onCloseEchoes,
             onOpenEcho = onOpenEcho,
-            chapters = chapters,
+            tocEntries = tocEntries,
             currentChapterIndex = currentChapterIndex,
             onChapterChange = { jumpToChapter(it) },
             onToggleToc = onToggleToc,

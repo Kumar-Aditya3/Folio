@@ -28,9 +28,18 @@ internal class ReaderLinks(
         val currentChapter = chapters.getOrNull(currentChapterIndex())
         val resolvedHref = resolveInternalHref(currentChapter?.href ?: "", href)
 
-        // Try to find the target chapter
+        // Match the target spine file. The href reaches here in several shapes depending on
+        // the surface: desktop passes the raw attribute ("chapter_2.xhtml"), the Android
+        // paged base yields a book-root path, and the continuous base yields a bare file
+        // name. Compare on the path without its fragment, and fall back to the file name so
+        // every shape resolves to the same chapter. The exact/suffix checks run first so the
+        // file-name fallback only settles genuinely ambiguous cases.
+        val targetPath = resolvedHref.substringBefore("#")
+        val targetFile = targetPath.substringAfterLast('/')
         val targetIndex = chapters.indexOfFirst { ch ->
-            ch.href == resolvedHref || ch.href.endsWith("/$resolvedHref") || resolvedHref.endsWith("/${ch.href}")
+            val chPath = ch.href.substringBefore("#")
+            chPath == targetPath || chPath.endsWith("/$targetPath") || targetPath.endsWith("/$chPath") ||
+                (targetFile.isNotEmpty() && chPath.substringAfterLast('/') == targetFile)
         }
 
         if (targetIndex >= 0) {

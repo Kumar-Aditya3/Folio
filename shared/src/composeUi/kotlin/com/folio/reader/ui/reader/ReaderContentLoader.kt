@@ -1,6 +1,7 @@
 package com.folio.reader.ui.reader
 
 import com.folio.reader.model.Chapter
+import com.folio.reader.ui.render.FixedLayoutDetector
 import com.folio.reader.ui.render.READER_WINDOW_MAX_SECTIONS
 import com.folio.reader.ui.render.READER_WINDOW_PRELOAD
 import com.folio.reader.ui.render.ReaderSection
@@ -104,7 +105,7 @@ internal class ReaderContentLoader(
             val to = (center + READER_WINDOW_PRELOAD).coerceAtMost(last)
             val sections = (from..to).map { i ->
                 val chapter = allChapters[i]
-                ReaderSection(chapter.spineIndex, chapter.id, chapter.href, loadHtml(bookId, chapter))
+                sectionOf(chapter, loadHtml(bookId, chapter))
             }
             windowSections.value = sections
             windowRange.value = from..to
@@ -131,20 +132,45 @@ internal class ReaderContentLoader(
     }
 
     /**
-     * Grows the window by one chapter in [forward] direction. The op is emitted
-     * for the surface to inject; the surface acknowledges it, and the next
-     * mutation waits for that ack — StateFlow conflates, so an op overwritten
-     * before it was applied would leave a permanent gap between sections.
+     * Grows the window in [forward] direction, filling the lead in one call.
+     *
+     * Fetching one chapter per edge event is what made artwork arrive a page at a time. The
+     * engine deliberately throttles its own requests — a 500 ms gate per direction, re-armed by
+     * every arrival, and never both directions at once — because before that it ping-ponged
+     * prepend/append every frame and threw the reader around. Those gates are right; the cost is
+     * that the pipeline caps out near two chapters a second, which a single flick outruns in a
+     * book that is one full-page figure per chapter. Filling [READER_WINDOW_PRELOAD] chapters
+     * per request lifts the cap without touching the anti-thrash logic.
+     *
+     * Ops are still emitted and awaited one at a time: `windowOp` is a conflated StateFlow, so
+     * an op overwritten before the surface applied it would leave a chapter counted in the
+     * window but permanently missing from the document.
      */
     suspend fun extendWindow(forward: Boolean) {
-        val bookId = currentBookId() ?: return
+        var added = false
+        for (i in 0 until READER_WINDOW_PRELOAD) {
+            if (!extendOne(forward)) break
+            added = true
+        }
+        // Once for the whole batch: a trim emitted between two appends can be conflated away
+        // with one of them.
+        if (added) trimAfter(forward, chapters())
+    }
+
+    /** Adds the next chapter in [forward] direction. False when the window has nothing left to add. */
+    private suspend fun extendOne(forward: Boolean): Boolean {
+        val bookId = currentBookId() ?: return false
         val allChapters = chapters()
-        val range = windowRange.value ?: return
-        if (forward && range.last + 1 > allChapters.lastIndex) return
-        if (!forward && range.first - 1 < 1) return
+        val range = windowRange.value ?: return false
         val nextIndex = if (forward) range.last + 1 else range.first - 1
-        val chapter = allChapters.getOrNull(nextIndex) ?: return
-        val section = ReaderSection(chapter.spineIndex, chapter.id, chapter.href, loadHtml(bookId, chapter))
+        if (forward && nextIndex > allChapters.lastIndex) return false
+        if (!forward && nextIndex < 1) return false
+        val chapter = allChapters.getOrNull(nextIndex) ?: return false
+        // Defensive: never emit an op for a spine already in the window. Even with the
+        // caller serialised, a stale range read could otherwise re-add a section and the
+        // surface would render it twice, corrupting scroll geometry.
+        if (windowSections.value.any { it.spineIndex == chapter.spineIndex }) return false
+        val section = sectionOf(chapter, loadHtml(bookId, chapter))
         windowNonce++
         val nonce = windowNonce
         windowOp.value = if (forward) {
@@ -158,12 +184,11 @@ internal class ReaderContentLoader(
         } else {
             listOf(section) + windowSections.value
         }
-        // Let the surface apply the extension before trimming, so the two ops
-        // cannot conflate into just the trim.
+        // Wait for this chapter to reach the document before the next op overwrites it.
         kotlinx.coroutines.withTimeoutOrNull(2500) {
             windowOpAck.first { it >= nonce }
         }
-        trimAfter(forward, allChapters)
+        return true
     }
 
     /** Drops the far end once the window passes [READER_WINDOW_MAX_SECTIONS]. */
@@ -193,6 +218,24 @@ internal class ReaderContentLoader(
     /** True when an extension op is still waiting to be applied on screen. */
     fun hasPendingWindowOp(): Boolean =
         (windowOp.value?.nonce ?: 0L) > windowOpAck.value
+
+    /**
+     * Builds a [ReaderSection] for [chapter], tagging fixed-layout (pre-paginated)
+     * pages and their pixel size from the chapter HTML so the render layer can
+     * scale rather than reflow them.
+     */
+    private fun sectionOf(chapter: Chapter, html: String): ReaderSection {
+        val fxl = FixedLayoutDetector.detect(html)
+        return ReaderSection(
+            spineIndex = chapter.spineIndex,
+            chapterId = chapter.id,
+            href = chapter.href,
+            html = html,
+            isFixedLayout = fxl.isFixedLayout,
+            fxlWidth = fxl.width,
+            fxlHeight = fxl.height,
+        )
+    }
 
     private suspend fun loadHtml(bookId: String, chapter: Chapter): String {
         val key = "$bookId:${chapter.href}"

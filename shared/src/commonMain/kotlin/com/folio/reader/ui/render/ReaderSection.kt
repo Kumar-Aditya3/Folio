@@ -14,6 +14,18 @@ data class ReaderSection(
     val chapterId: String,
     val href: String,
     val html: String,
+    /**
+     * Fixed-layout (pre-paginated) marker. When true the section is a rigid page
+     * (a Calibre/Kobo/EPUB3 `rendition:layout` pre-paginated page) that must be
+     * scaled to fit rather than reflowed. The assembler emits this as
+     * `data-folio-fxl` on the `<section>` so the rendering JS can size the page.
+     * Defaults keep every existing constructor and reflowable path unchanged.
+     */
+    val isFixedLayout: Boolean = false,
+    /** Intrinsic page width in CSS pixels from the chapter viewport meta; 0 when unknown. */
+    val fxlWidth: Int = 0,
+    /** Intrinsic page height in CSS pixels from the chapter viewport meta; 0 when unknown. */
+    val fxlHeight: Int = 0,
 )
 
 /**
@@ -32,7 +44,7 @@ sealed interface WindowOp {
 }
 
 /** How many chapters may be on screen at once before the far end is trimmed. */
-const val READER_WINDOW_MAX_SECTIONS: Int = 7
+const val READER_WINDOW_MAX_SECTIONS: Int = 11
 
 /** How many chapters load around the anchor when a window is (re)built. */
-const val READER_WINDOW_PRELOAD: Int = 1
+const val READER_WINDOW_PRELOAD: Int = 3

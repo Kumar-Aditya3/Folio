@@ -1,5 +1,7 @@
 package com.folio.reader.nav
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.folio.reader.AppGraph
 import com.folio.reader.epub.repairStoredChapterTitles
@@ -130,6 +133,9 @@ private fun ReaderRouteContent(
             noteRepository = graph.noteRepository,
             settingsRepository = graph.settingsRepository,
             chapterContentProvider = { id, href -> graph.contentProvider.getHtml(id, href) },
+            bookTocProvider = { id, chs ->
+                graph.epubParser.parseBookToc(graph.platform.fileSystem.getBookEpubPath(id), chs)
+            },
             syncEngine = graph.syncEngine,
             quoteRepository = graph.quoteRepository,
             revisitRepository = graph.revisitRepository,
@@ -138,6 +144,7 @@ private fun ReaderRouteContent(
     }
 
     val chapters by viewModel.chapters.collectAsState(initial = emptyList())
+    val bookToc by viewModel.bookToc.collectAsState()
     val chapterIndex by viewModel.currentChapterIndex.collectAsState(initial = 0)
     // Both are StateFlows, so these calls resolve to the no-`initial` overload and
     // read the current value on the first frame. Passing `initial` here was the
@@ -153,6 +160,7 @@ private fun ReaderRouteContent(
     val showControls by viewModel.showControls.collectAsState(initial = true)
     val showToc by viewModel.showToc.collectAsState(initial = false)
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
+    val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
     val showEchoes by viewModel.showEchoes.collectAsState(initial = false)
     val echoesState by viewModel.echoes.collectAsState(initial = com.folio.reader.ui.reader.EchoesState.Idle)
     // Whether there is an index to echo against. Resolved once; the action stays dark until it is
@@ -200,6 +208,35 @@ private fun ReaderRouteContent(
         onDispose { viewModel.closeBook() }
     }
 
+    val linkContext = LocalContext.current
+    // The desktop route has had this collector from the start; without it Android simply
+    // dropped every link a chapter body emitted.
+    LaunchedEffect(linkResult) {
+        when (val r = linkResult) {
+            is com.folio.reader.ui.render.LinkClickResult.InternalChapter ->
+                viewModel.goToChapter(r.chapterIndex)
+
+            is com.folio.reader.ui.render.LinkClickResult.ExternalUrl -> runCatching {
+                linkContext.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(r.url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+
+            is com.folio.reader.ui.render.LinkClickResult.InlineContent -> {
+                // Lands on the target chapter's top, not the exact anchor: the paged
+                // engine cannot scroll to an arbitrary id yet.
+                val idx = chapters.indexOfFirst {
+                    it.href.substringBefore("#") == r.resolvedHref.substringBefore("#")
+                }
+                if (idx >= 0) viewModel.goToChapter(idx)
+            }
+
+            null -> {}
+        }
+        if (linkResult != null) viewModel.clearLinkClickResult()
+    }
+
     // Stable resolver lambdas: the reader route recomposes on every ~0.5% scroll tick, and
     // unremembered lambdas here were re-created each time, restarting the WebView's resource
     // LaunchedEffect (main-thread disk reads + regex) on every tick. book.id and graph are stable.
@@ -222,6 +259,7 @@ private fun ReaderRouteContent(
     ReaderScreen(
         bookTitle = book.title,
         chapters = chapters,
+        bookToc = bookToc,
         currentChapterIndex = chapterIndex,
         chapterHtml = html,
         isLoadingContent = loadingContent,

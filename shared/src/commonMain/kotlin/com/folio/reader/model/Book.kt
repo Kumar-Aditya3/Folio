@@ -199,6 +199,17 @@ data class EpubTocItem(
     val level: Int = 0
 )
 
+/**
+ * One Contents row: the book's own navigation label aimed at an index into the
+ * spine-derived chapter list. A book that splits each chapter across several
+ * spine files has far more chapters than Contents entries, so the index is part
+ * of the row rather than assumed to be the row position.
+ */
+data class BookTocRow(
+    val title: String,
+    val chapterIndex: Int
+)
+
 @Serializable
 data class ParsedEpub(
     val metadata: EpubMetadata,

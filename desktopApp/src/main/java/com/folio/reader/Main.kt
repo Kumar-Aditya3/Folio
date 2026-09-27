@@ -1927,11 +1927,15 @@ private fun ReaderRoute(
             noteRepository = deps.noteRepository,
             settingsRepository = deps.settingsRepository,
             chapterContentProvider = { bookId, href -> deps.contentProvider.getHtml(bookId, href) },
+            bookTocProvider = { bookId, chs ->
+                deps.epubParser.parseBookToc(deps.platform.fileSystem.getBookEpubPath(bookId), chs)
+            },
             syncEngine = deps.syncEngine
         )
     }
 
     val chapters by viewModel.chapters.collectAsState(initial = emptyList())
+    val bookToc by viewModel.bookToc.collectAsState()
     val position by viewModel.position.collectAsState(initial = null)
     val chapterIndex by viewModel.currentChapterIndex.collectAsState(initial = 0)
     val html by viewModel.chapterHtml.collectAsState(initial = "")
@@ -2001,6 +2005,7 @@ private fun ReaderRoute(
     ReaderScreen(
         bookTitle = book.title,
         chapters = chapters,
+        bookToc = bookToc,
         currentChapterIndex = chapterIndex,
         chapterHtml = html,
         isLoadingContent = loadingContent,

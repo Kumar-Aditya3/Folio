@@ -341,12 +341,17 @@ fun ChapterContent(
                 }
                 com.folio.reader.ui.render.HtmlContentSurface(
                     sections = if (windowed) documentSections else listOf(
-                        com.folio.reader.ui.render.ReaderSection(
-                            spineIndex = -1,
-                            chapterId = chapter.id,
-                            href = chapter.href,
-                            html = html
-                        )
+                        com.folio.reader.ui.render.FixedLayoutDetector.detect(html).let { fxl ->
+                            com.folio.reader.ui.render.ReaderSection(
+                                spineIndex = -1,
+                                chapterId = chapter.id,
+                                href = chapter.href,
+                                html = html,
+                                isFixedLayout = fxl.isFixedLayout,
+                                fxlWidth = fxl.width,
+                                fxlHeight = fxl.height,
+                            )
+                        }
                     ),
                     windowed = windowed,
                     anchorChapterId = chapter.id,

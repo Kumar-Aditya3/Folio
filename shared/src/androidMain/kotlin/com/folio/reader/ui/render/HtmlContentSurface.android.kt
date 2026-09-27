@@ -34,10 +34,16 @@ private val HTML_LINK_SUFFIX = Regex("""\.x?html?(#.*)?$""", RegexOption.IGNORE_
 private val CSS_URL_REF = Regex("""url\(\s*["']?([^)"']+)["']?\s*\)""", RegexOption.IGNORE_CASE)
 private val HEAD_CLOSE = Regex("(?i)</head>")
 
+// The synthetic base every chapter/window loads under, and its per-load token query. A tapped
+// in-content link arrives resolved against this base; stripping both recovers the epub-relative
+// href the shared link handler matches against the chapter list.
+private const val FOLIO_BASE = "file:///folio/"
+private val RE_FOLIO_LOAD = Regex("""[?&]folio-load=\d+""")
+
 // Reader WebView diagnostics. The onReceivedTitle/onConsoleMessage callbacks fire on essentially
 // every scroll frame, so their logging + string work must not run in shipped builds. The shared
 // module has no BuildConfig, so this is a compile-time flag a developer flips locally.
-private const val READER_DEBUG_LOG = false
+private const val READER_DEBUG_LOG = true
 
 @Composable
 actual fun HtmlContentSurface(
@@ -69,6 +75,16 @@ actual fun HtmlContentSurface(
     onContentReady: () -> Unit
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
+    // Paged mode emits its own centre-tap (folio-tap) from inside the iframe, so the
+    // native centre-tap detector below must stand down there or the two would toggle
+    // the chrome twice (a net no-op). Continuous mode has no in-page tap detector on
+    // Android, so it still relies on the native one.
+    val pagedModeState = rememberUpdatedState(
+        PageEngine.colsFor(
+            if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
+                com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
+        ) > 0
+    )
     val latestContentReady by rememberUpdatedState(onContentReady)
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
     val latestSelection by rememberUpdatedState(onSelectionChanged)
@@ -148,12 +164,17 @@ actual fun HtmlContentSurface(
         ),
     ) {
         if (windowed) {
-            val rewritten = sections.map { section ->
-                section.copy(html = rewriteToCanonicalUrls(section.html, section.href))
-            }
-            injectReaderCss(ReaderWindowAssembler.assemble(rewritten), settings)
+            injectReaderCss(
+                ReaderWindowAssembler.assemble(sections.map { it.copy(html = canonicalSection(it)) }, shadow = false),
+                settings
+            )
         } else {
-            injectReaderCss(sections.firstOrNull()?.html.orEmpty(), settings)
+            // Paged attribute refs already resolve through the chapter's own base URL, so only
+            // the CSS ones — which do not — are made absolute here.
+            val only = sections.firstOrNull()
+            injectReaderCss(
+                if (only == null) "" else rewriteCssUrls(only.html, only.href), settings
+            )
         }
     }
     // Live stylesheet swap: a theme or typography change rewrites the baked
@@ -163,14 +184,20 @@ actual fun HtmlContentSurface(
     LaunchedEffect(settings, content, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val css = readerStyleSheet(settings)
+        val shadowCss = ReaderCss.shadowStyleSheet(settings)
         wv.evaluateJavascript(
-            "(function(){if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) + ");}" +
+            "(function(){if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) + "," + jsLiteral(shadowCss) + ");}" +
                 "else{var s=document.getElementById('folio-reader-style');" +
                 "if(s)s.textContent=" + jsLiteral(css) + ";}})();",
             null
         )
     }
     val resourceCache = remember { ConcurrentHashMap<String, File>() }
+    // Intrinsic image sizes (canonical epub path -> pixels), parsed header-only
+    // during resource resolution and stamped onto <img> before layout so the
+    // browser reserves the box (see ImageReserve) — kills text-over-image and
+    // the decode reflow in both paged and continuous modes.
+    val imageDims = remember { ConcurrentHashMap<String, com.folio.reader.epub.ImageDimensions.Size>() }
     var resourcesReady by remember(loadKey) { mutableStateOf(false) }
     suspend fun resolveSectionSources(section: ReaderSection) {
         val pending = ArrayDeque<Pair<String, String>>()
@@ -184,6 +211,10 @@ actual fun HtmlContentSurface(
                 val file = File(path)
                 if (file.isFile) {
                     resourceCache[canonical] = file
+                    val ext = file.extension.lowercase()
+                    if (ext in IMAGE_DIM_EXTS) {
+                        com.folio.reader.epub.ImageDimensions.read(file)?.let { imageDims[canonical] = it }
+                    }
                     // EPUB stylesheets commonly reference fonts/images through
                     // url(); preload those too because WebView requests are
                     // normalized and cannot call a suspend resolver.
@@ -213,7 +244,8 @@ actual fun HtmlContentSurface(
             is WindowOp.Append -> {
                 resolveSectionSources(op.section)
                 val fragment = ReaderWindowAssembler.sectionFragment(
-                    op.section.copy(html = rewriteToCanonicalUrls(op.section.html, op.section.href))
+                    op.section.copy(html = canonicalSection(op.section)),
+                    shadow = false
                 )
                 wv.evaluateJavascript(
                     "window.__folioAppend&&window.__folioAppend(${op.section.spineIndex}," +
@@ -227,7 +259,8 @@ actual fun HtmlContentSurface(
             is WindowOp.Prepend -> {
                 resolveSectionSources(op.section)
                 val fragment = ReaderWindowAssembler.sectionFragment(
-                    op.section.copy(html = rewriteToCanonicalUrls(op.section.html, op.section.href))
+                    op.section.copy(html = canonicalSection(op.section)),
+                    shadow = false
                 )
                 wv.evaluateJavascript(
                     "window.__folioPrepend&&window.__folioPrepend(${op.section.spineIndex}," +
@@ -249,6 +282,11 @@ actual fun HtmlContentSurface(
             }
         }
         val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        // A chapter injected mid-read brings new images; reserve their boxes too.
+        val dimsJson = buildDimsJson(imageDims)
+        if (dimsJson.length > 2) {
+            wv.evaluateJavascript("window.__folioStampImgs&&window.__folioStampImgs($dimsJson);", null)
+        }
         wv.evaluateJavascript(HighlightPaint.applyJs(highlights, theme), null)
         onWindowOpApplied(op.nonce)
     }
@@ -283,7 +321,16 @@ actual fun HtmlContentSurface(
                 resourceResponse(request.url.toString(), resourceCache)
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                onLinkClick?.invoke(request.url.toString())
+                // Content is loaded under a synthetic base (file:///folio/…?folio-load=N),
+                // so the WebView hands us a fully-resolved file URL. The shared link
+                // handler expects the epub-relative href the desktop surface passes, so
+                // strip the base and the load token first; otherwise every in-content link
+                // read as an unmatchable absolute path and silently did nothing.
+                val raw = request.url.toString()
+                val href = if (raw.startsWith(FOLIO_BASE))
+                    raw.removePrefix(FOLIO_BASE).replace(RE_FOLIO_LOAD, "")
+                else raw
+                onLinkClick?.invoke(href)
                 return true
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
@@ -452,7 +499,7 @@ actual fun HtmlContentSurface(
                             val moved = kotlin.math.hypot(event.x - downX, event.y - downY)
                             val center = downX > view.width * .3f && downX < view.width * .7f &&
                                 downY > view.height * .25f && downY < view.height * .75f
-                            if (center && moved < 24f &&
+                            if (!pagedModeState.value && center && moved < 24f &&
                                 android.os.SystemClock.uptimeMillis() - downAt < 350L
                             ) currentTapHandler.value()
                         }
@@ -485,17 +532,6 @@ actual fun HtmlContentSurface(
                 val androidLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
                     com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
                 val pagedCols = PageEngine.colsFor(androidLayoutMode)
-                // Paged modes run the shared book engine (discrete pages + leaf
-                // flip); continuous runs the section-aware bridge — one
-                // implementation for windows and plain single-section documents.
-                val baseJs = if (pagedCols > 0) {
-                    PageEngine.js(fraction.toFloat(), pagedCols, settings.margins.left, PageEngine.measurePx(settings.textWidth), desktopEvents = false)
-                } else {
-                    val seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
-                        ?: sections.firstOrNull()?.spineIndex
-                        ?: -1
-                    ContinuousEngine.js(seedSpine, fraction.toFloat(), desktopEvents = false)
-                }
                 val theme = settings.customTheme
                     ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
                 // Paint the view with the reader's own paper before the document
@@ -504,7 +540,38 @@ actual fun HtmlContentSurface(
                 // Applied here rather than at construction so a theme change while
                 // a chapter is up re-papers the view as well.
                 webView.applyReaderPaper(theme.background)
-                val js = baseJs + HighlightPaint.js(highlights, theme)
+                // Reserve image boxes before layout so text never lands on top of
+                // an image and the page count is stable once art arrives.
+                val dimsJson = buildDimsJson(imageDims)
+                val stampJs = if (dimsJson.length > 2) ImageReserve.stampJs(dimsJson) else ""
+                val js = if (pagedCols > 0) {
+                    // Paged: chapter rendered inside its own iframe with CSS
+                    // multi-column (MulticolEngine) so the browser breaks pages
+                    // instead of the old hand-slicer. Image reservation and
+                    // highlight painting run INSIDE the iframe; the bootstrap
+                    // installs top-window proxies so the Kotlin bridge, highlight
+                    // and restyle call sites stay unchanged.
+                    val inner = MulticolEngine.innerJs(
+                        fraction.toFloat(),
+                        settings.margins.top,
+                        settings.margins.bottom,
+                        settings.margins.left,
+                        settings.margins.right,
+                        PageEngine.measurePx(settings.textWidth),
+                        diag = READER_DEBUG_LOG
+                    ) + ImageReserve.stampJs(dimsJson) + HighlightPaint.js(highlights, theme)
+                    MulticolEngine.bootstrapJs(inner)
+                } else {
+                    val seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
+                        ?: sections.firstOrNull()?.spineIndex
+                        ?: -1
+                    stampJs +
+                        ContinuousEngine.js(
+                            seedSpine, fraction.toFloat(), desktopEvents = false, diag = READER_DEBUG_LOG,
+                            shadow = false, shadowCss = ReaderCss.shadowStyleSheet(settings)
+                        ) +
+                        HighlightPaint.js(highlights, theme)
+                }
                 val token = loadNonce + 1
                 loadNonce = token
                 pendingJs = token to js
@@ -553,12 +620,38 @@ actual fun HtmlContentSurface(
 /** Embeds a string as a JSON literal for evaluateJavascript. */
 private fun jsLiteral(s: String): String = ReaderWindowAssembler.jsStringLiteral(s)
 
-/** Relative src/href attribute values of a chapter document, deduplicated. */
+/** Extensions worth a header-only intrinsic-size probe (see ImageDimensions). */
+private val IMAGE_DIM_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg")
+
+/** JS object literal `{ "path":[w,h] }` of parsed intrinsic image sizes, consumed by ImageReserve. */
+private fun buildDimsJson(dims: Map<String, com.folio.reader.epub.ImageDimensions.Size>): String =
+    if (dims.isEmpty()) "{}"
+    else dims.entries.joinToString(prefix = "{", postfix = "}") { (k, v) ->
+        jsLiteral(k) + ":[" + v.width + "," + v.height + "]"
+    }
+
+/**
+ * Relative resource references of a chapter document, deduplicated.
+ *
+ * Attribute refs alone are not enough: `url()` inside a chapter's own inlined `<style>` or
+ * `style=` attribute is rewritten to a canonical file URL the interceptor must answer, and an
+ * entry that was never resolved is a guaranteed 404 on that artwork or face. (Refs inside a
+ * separate `.css` file are picked up by the walk in [resolveSectionSources].)
+ */
 private fun sourcesOf(html: String): List<String> =
-    SRC_HREF_VALUE
-        .findAll(html).map { it.groupValues[1] }
-        .filter { !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") }
+    (SRC_HREF_VALUE.findAll(html).map { it.groupValues[1] } +
+        CSS_URL_REF.findAll(html).map { it.groupValues[1] })
+        .filter { !it.startsWith("#") && !it.startsWith("http") && !it.startsWith("data:") &&
+            !it.startsWith("file:") }
         .distinct().toList()
+
+/**
+ * A section's HTML with every resource reference made absolute — attribute `src`/`href` and CSS
+ * `url()` alike. Used for the window document and for sections injected later by append/prepend,
+ * so a chapter entering mid-read cannot wear different resource URLs from the ones loaded with it.
+ */
+private fun canonicalSection(section: ReaderSection): String =
+    rewriteCssUrls(rewriteToCanonicalUrls(section.html, section.href), section.href)
 
 /**
  * Rewrites a section's resource references to the canonical file:// URLs the
@@ -575,7 +668,34 @@ private fun rewriteToCanonicalUrls(html: String, href: String): String =
             src.startsWith("file:") ||
             (attr.startsWith("href") && HTML_LINK_SUFFIX.containsMatchIn(src))
         if (keep) m.value
-        else m.groupValues[1] + quote + "file:///folio/" + canonicalEpubPath(href, src) + quote
+        else m.groupValues[1] + quote + FOLIO_BASE + canonicalEpubPath(href, src) + quote
+    }
+
+/**
+ * Rewrites CSS `url()` references — in inlined `<style>` blocks and `style=` attributes — to the
+ * canonical file URL the interceptor serves.
+ *
+ * Inlined stylesheets arrive with their `url()` refs already rebased to EPUB-root-relative paths
+ * (see `JvmChapterContentProvider.withStylesheets`), but a relative reference still resolves
+ * against *this document's* base URL, and the two layout modes load under different bases: a
+ * window at `file:///folio/`, a single chapter at `file:///folio/<chapterHref>`. Under the chapter
+ * base `url('Oebina/Images/a.png')` becomes `…/Oebina/Content/Oebina/Images/a.png`, so every font
+ * and background that comes from CSS rather than an attribute 404s in paged mode while working in
+ * scroll. Writing the absolute URL drops the base dependence entirely.
+ */
+private fun rewriteCssUrls(html: String, href: String): String =
+    CSS_URL_REF.replace(html) { m ->
+        val ref = m.groupValues[1]
+        val keep = ref.startsWith("#") || ref.startsWith("data:") || ref.startsWith("file:") ||
+            ref.startsWith("http:") || ref.startsWith("https:") || ref.startsWith("//")
+        if (keep) m.value
+        else {
+            // A url() into an SVG sprite or a font with a query survives as a suffix: canonicalEpubPath
+            // strips both, and dropping them here would break the reference it just fixed.
+            val path = ref.substringBefore('#').substringBefore('?')
+            if (path.isBlank()) m.value
+            else "url('" + FOLIO_BASE + canonicalEpubPath(href, path) + ref.removePrefix(path) + "')"
+        }
     }
 
 /**
@@ -666,23 +786,89 @@ private fun resourceResponse(
     url: String,
     resourceCache: Map<String, File>
 ): WebResourceResponse? {
-    val normalizedPath = url.substringAfter("file:///folio/", "").substringBefore("?")
-    if (normalizedPath.isBlank() || normalizedPath == url) return null
-    val file = resourceCache["/$normalizedPath"] ?: resourceCache[normalizedPath]
-        ?: resourceCache.entries.firstOrNull { it.key.endsWith("/$normalizedPath") }?.value
+    val requestPath = url.substringAfter(FOLIO_BASE, "").substringBefore("?")
+    if (requestPath.isBlank() || requestPath == url) return null
+    // The WebView hands back the request URL percent-encoded, but the cache is keyed on the
+    // EPUB's own path — so "plate 1.png" is looked up as "plate%201.png" and misses. The
+    // interceptor then answers null, the WebView tries the literal file:///folio path that does
+    // not exist, and the artwork is simply absent with no error anywhere. Try the raw form
+    // first, then the decoded one.
+    val file = cachedResource(resourceCache, requestPath)
+        ?: cachedResource(resourceCache, decodePath(requestPath))
         ?: return null
     if (!file.isFile) return null
     val mime = when (file.extension.lowercase()) {
         "css" -> "text/css"
         "png" -> "image/png"
         "jpg", "jpeg" -> "image/jpeg"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "bmp" -> "image/bmp"
+        "avif" -> "image/avif"
         "svg" -> "image/svg+xml"
-        "woff", "woff2" -> "font/woff"
+        "woff" -> "font/woff"
+        "woff2" -> "font/woff2"
+        "ttf" -> "font/ttf"
+        "otf" -> "font/otf"
         else -> "application/octet-stream"
     }
 
+    // Images are downscaled to a screen-sane size so a multi-thousand-pixel
+    // publisher plate does not stall on a slow main-thread decode ("long image
+    // loading"). This runs on the WebView's background request thread.
+    if (mime.startsWith("image/")) return downscaledImageResponse(file, mime)
     return WebResourceResponse(mime, "UTF-8", file.inputStream())
 }
+
+/** Longest edge (px) any served image is decoded down to; a phone never needs more. */
+private const val MAX_IMAGE_DIM = 1600
+
+/**
+ * Returns [file] as an image response, downsampling raster formats whose longest
+ * edge exceeds [MAX_IMAGE_DIM]. Aspect ratio is preserved (so the intrinsic
+ * dimensions stamped by [ImageReserve] still match), and anything that cannot be
+ * decoded falls back to the original bytes. SVG/GIF/AVIF pass through untouched
+ * (vector, animated, or not universally re-encodable).
+ */
+private fun downscaledImageResponse(file: File, mime: String): WebResourceResponse {
+    val raster = mime == "image/jpeg" || mime == "image/png" || mime == "image/webp" || mime == "image/bmp"
+    if (!raster) return WebResourceResponse(mime, null, file.inputStream())
+    return runCatching {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        val longest = maxOf(w, h)
+        if (w <= 0 || h <= 0 || longest <= MAX_IMAGE_DIM) {
+            return WebResourceResponse(mime, null, file.inputStream())
+        }
+        var sample = 1
+        while (longest / (sample * 2) >= MAX_IMAGE_DIM) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
+            ?: return WebResourceResponse(mime, null, file.inputStream())
+        val hasAlpha = bmp.hasAlpha()
+        val fmt = if (hasAlpha) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
+        val outMime = if (hasAlpha) "image/png" else "image/jpeg"
+        val baos = java.io.ByteArrayOutputStream()
+        bmp.compress(fmt, 85, baos)
+        bmp.recycle()
+        WebResourceResponse(outMime, null, java.io.ByteArrayInputStream(baos.toByteArray()))
+    }.getOrElse { WebResourceResponse(mime, null, file.inputStream()) }
+}
+
+private fun cachedResource(cache: Map<String, File>, path: String): File? =
+    cache["/$path"] ?: cache[path] ?: cache.entries.firstOrNull { it.key.endsWith("/$path") }?.value
+
+/**
+ * Percent-decodes a request path back to the EPUB's own naming. `+` is escaped first because
+ * [java.net.URLDecoder] maps it to a space, and a malformed escape must not take the request down.
+ */
+private fun decodePath(path: String): String =
+    if (!path.contains('%')) path
+    else runCatching {
+        java.net.URLDecoder.decode(path.replace("+", "%2B"), "UTF-8")
+    }.getOrDefault(path)
 
 private fun canonicalEpubPath(baseHref: String, src: String): String {
     val clean = src.substringBefore("#").substringBefore("?")
@@ -717,7 +903,10 @@ private fun readerStyleSheet(settings: ReaderSettings): String {
         fontStack = { "'$it',serif" },
         // Scrolling mode: publisher height rules otherwise clamp the document
         // box and the page cannot grow.
-        continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}"
+        continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}",
+        // Android paged renders inside an iframe (MulticolEngine); the top
+        // document only needs a neutral box, layout happens in the iframe.
+        pagedCss = MulticolEngine::frameCss
     )
 }
 

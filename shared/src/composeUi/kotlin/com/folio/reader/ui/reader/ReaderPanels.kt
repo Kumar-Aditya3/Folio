@@ -50,7 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Bookmark
-import com.folio.reader.model.Chapter
+import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
@@ -80,7 +80,7 @@ internal fun readerOverlayHtml(
     showAnnotations: Boolean,
     noteDraftFor: String?,
     settings: ReaderSettings,
-    chapters: List<Chapter>,
+    tocEntries: List<BookTocRow>,
     currentChapterIndex: Int,
     bookmarks: List<Bookmark>,
     highlights: List<Highlight>,
@@ -112,7 +112,7 @@ internal fun readerOverlayHtml(
         c = overlayColors
     )
     showToc -> com.folio.reader.ui.render.OverlayUi.toc(
-        chapters = chapters.map { it.title },
+        entries = tocEntries,
         current = currentChapterIndex,
         c = overlayColors
     )
@@ -151,7 +151,7 @@ internal fun readerOverlayHtml(
 
 @Composable
 fun TOCSidebar(
-    chapters: List<Chapter>,
+    entries: List<BookTocRow>,
     currentIndex: Int,
     onChapterClick: (Int) -> Unit,
     onDismiss: () -> Unit
@@ -195,18 +195,22 @@ fun TOCSidebar(
             }
             HorizontalDivider(color = FolioTheme.colors.outlineVariant)
 
-            val initialScrollIndex = (currentIndex - 1).coerceAtLeast(0)
+            // The row that contains a chapter. Navigation names only some of the spine
+            // files, so the active row is the last one that starts at or before the
+            // chapter on screen — that is what stays lit while reading a split chapter.
+            val activeRow = entries.indexOfLast { it.chapterIndex <= currentIndex }
+            val initialScrollIndex = (activeRow - 1).coerceAtLeast(0)
             // Positioned on open only. While the panel stays open the list belongs
             // to the user — re-scrolling on chapter changes is what made it jump.
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
 
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                itemsIndexed(chapters, key = { _, chapter -> "${chapter.bookId}:${chapter.id}" }) { index, chapter ->
-                    val isCurrent = index == currentIndex
+                itemsIndexed(entries, key = { _, row -> "${row.chapterIndex}:${row.title}" }) { index, row ->
+                    val isCurrent = index == activeRow
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onChapterClick(index) }
+                            .clickable { onChapterClick(row.chapterIndex) }
                             // The current row gets a wash of its own so the state is
                             // visible without relying on the 3dp marker alone.
                             .background(
@@ -226,7 +230,7 @@ fun TOCSidebar(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            text = chapter.title,
+                            text = row.title,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = FolioTheme.typography.bodySmall.copy(

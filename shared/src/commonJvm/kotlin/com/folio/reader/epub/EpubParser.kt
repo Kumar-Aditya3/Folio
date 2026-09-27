@@ -70,6 +70,39 @@ class EpubParser(
         }
     }
 
+    /**
+     * The book's own navigation entries as Contents rows, aimed at positions in [chapters].
+     *
+     * Reads only container.xml, the OPF and the nav document — no chapter content — so this is
+     * cheap enough to run every time a book opens. A book that splits each chapter over several
+     * spine files otherwise lists every fragment, and names the ones it has no label for.
+     *
+     * Returns empty when the book has no usable nav, so the caller falls back to chapter titles.
+     */
+    suspend fun parseBookToc(filePath: String, chapters: List<Chapter>): List<BookTocRow> =
+        withContext(Dispatchers.IO) {
+            val toc = runCatching {
+                ZipFile(filePath).use { zip ->
+                    val opfPath = findOpfPath(zip)
+                    if (opfPath == null) emptyList<EpubTocItem>()
+                    else {
+                        val (_, manifest, _) = parseOpf(readZipEntry(zip, opfPath), opfPath)
+                        parseToc(zip, manifest, opfPath)
+                    }
+                }
+            }.getOrDefault(emptyList())
+            if (toc.isEmpty()) return@withContext emptyList()
+
+            val rows = mutableListOf<BookTocRow>()
+            val emitted = mutableSetOf<EpubTocItem>()
+            chapters.forEachIndexed { index, chapter ->
+                val match = findTocMatch(chapter.href, toc)
+                    ?.takeIf { it.label.isNotBlank() && emitted.add(it) } ?: return@forEachIndexed
+                rows += BookTocRow(match.label.trim(), index)
+            }
+            rows
+        }
+
     private fun findOpfPath(zipFile: ZipFile): String? {
         val containerEntry = zipFile.getEntry("META-INF/container.xml")
             ?: return null
@@ -237,12 +270,26 @@ class EpubParser(
         val stack = mutableListOf<MutableList<EpubTocItem>>()
         stack.add(toc)
         var depth = 0
+        // An EPUB3 nav document holds several <nav> lists: the reading-order `toc`, plus
+        // `page-list` (one entry per PRINT PAGE, labelled with the page number) and
+        // `landmarks` (cover/toc/bodymatter anchors). Collecting every <a> — as this used
+        // to — folded the page-list's bare "20", "29"… numbers into the Contents, so an
+        // illustration spine file whose only nav reference is its page number was named
+        // after that number. Only the `toc` nav is the Contents; skip the others.
+        var skipNav = false
 
         var eventType = parser.eventType
         while (eventType != XmlPullParser.END_DOCUMENT) {
             when (eventType) {
                 XmlPullParser.START_TAG -> {
                     when (parser.name) {
+                        "nav" -> {
+                            val navType = (parser.getAttributeValue(NS_OPS, "type")
+                                ?: parser.getAttributeValue(null, "type"))?.trim()?.lowercase()
+                            val role = parser.getAttributeValue(null, "role")?.trim()?.lowercase()
+                            skipNav = navType == "page-list" || navType == "landmarks" ||
+                                role == "doc-pagelist"
+                        }
                         "ol", "ul" -> {
                             depth++
                             stack.add(mutableListOf())
@@ -250,7 +297,7 @@ class EpubParser(
                         "a" -> {
                             val href = parser.getAttributeValue(null, "href") ?: ""
                             val title = runCatching { parser.nextText().trim() }.getOrDefault("")
-                            if (title.isNotEmpty() && href.isNotEmpty()) {
+                            if (!skipNav && title.isNotEmpty() && href.isNotEmpty()) {
                                 val parent = stack.lastOrNull() ?: toc
                                 parent.add(EpubTocItem(label = title, href = href, level = (depth - 1).coerceAtLeast(0)))
                             }
@@ -259,6 +306,7 @@ class EpubParser(
                 }
                 XmlPullParser.END_TAG -> {
                     when (parser.name) {
+                        "nav" -> skipNav = false
                         "ol", "ul" -> {
                             depth--
                             if (stack.size > 1) {
@@ -407,6 +455,11 @@ class EpubParser(
         val chapters = mutableListOf<Chapter>()
         var charOffset = 0L
         var spineIndex = 0
+        // Chapter numbers for otherwise-unlabeled prose pages come from their position in the
+        // book's CONTENT sequence, not the raw spine index: covers, the TOC page, colour plates
+        // and other non-prose leaves must not inflate the number (that produced "Chapter 13" for
+        // the 13th file). Only pages that actually carry prose advance this count.
+        var contentChapterNo = 0
 
         for (spineItem in spine) {
             val manifestItem = manifestMap[spineItem.idref]
@@ -418,13 +471,15 @@ class EpubParser(
             val html = htmlContent[manifestItem.href] ?: ""
             val (text, wordCount) = extractText(html)
             val charCount = text.length.toLong()
+            val isBody = wordCount >= FrontMatterLabels.MIN_BODY_WORDS
+            if (isBody) contentChapterNo++
 
             val tocMatch = findTocMatch(manifestItem.href, toc)
             // Ignore generic toc labels that equal the book title (common in NCX fallback)
             val tocLabel = tocMatch?.label?.takeIf { it.trim() != metadata.title.trim() && it.isNotBlank() }
             val title = tocLabel ?: extractTitle(html, metadata.title)
                 ?: FrontMatterLabels.label(html, manifestItem.href, metadata.title)
-                ?: unlabeledTitle(wordCount, spineIndex)
+                ?: if (isBody) "Chapter $contentChapterNo" else "Untitled"
 
             val chapter = Chapter(
                 id = manifestItem.id,
@@ -447,14 +502,6 @@ class EpubParser(
         // Build hierarchy from TOC
         return buildChapterHierarchy(chapters, toc)
     }
-
-    /**
-     * A spine position is not a chapter number. Numbering every unnamed page from it put
-     * "Chapter 10" between "Acknowledgments" and "Dramatis Personae", so only pages that carry
-     * prose get the number; covers, flaps and blank leaves get a neutral label instead.
-     */
-    private fun unlabeledTitle(wordCount: Long, spineIndex: Int): String =
-        if (wordCount >= FrontMatterLabels.MIN_BODY_WORDS) "Chapter ${spineIndex + 1}" else "Untitled"
 
     private fun extractText(html: String): Pair<String, Long> {
         // Simple HTML text extraction - in production use a proper HTML parser
@@ -503,8 +550,12 @@ class EpubParser(
                     val candidate = sb.toString().trim().replace(RE_WS, " ")
                     val candidateNorm = candidate.lowercase()
                     
-                    // Skip if empty or exactly the book title
-                    if (candidate.isNotEmpty() && candidateNorm != bookTitleNorm) {
+                    // Skip if empty, exactly the book title, or has no letters at all:
+                    // publisher markup puts bare page numbers ("8") and printer's
+                    // marks in headings, and those are not chapter titles.
+                    if (candidate.isNotEmpty() && candidateNorm != bookTitleNorm &&
+                        candidate.any { it.isLetter() }
+                    ) {
                         candidates.add(candidate)
                     }
                     
@@ -625,6 +676,8 @@ private val RE_TAG = Regex("<[^>]+>")
 private val RE_WS = Regex("\\s+")
 private val RE_TITLE_PART = Regex(".*\\b(part|book|section)\\s+\\d+.*", RegexOption.IGNORE_CASE)
 private val RE_TITLE_NUM = Regex("\\d+[.:)].*")
+/** EPUB Open Packaging namespace, the binding for the `epub:type` attribute on nav lists. */
+private const val NS_OPS = "http://www.idpf.org/2007/ops"
 private val RE_DOT_SEG = Regex("/\\./")
 private val RE_DOTDOT_SEG = Regex("([^/])/\\.\\./")
 private val RE_CHARSET_ENCODING = Regex("encoding\\s*=\\s*[\"']([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE)

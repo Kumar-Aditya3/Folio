@@ -66,12 +66,17 @@ object HighlightPaint {
                 // newline that the document itself never contains, so any space-aware
                 // comparison silently fails on exactly the highlights readers make most.
                 "function norm(s){return s.replace(/\\s+/g,'');}\n" +
+                // In continuous mode each `<section data-folio-spine>` hosts an open
+                // Shadow DOM and the chapter text lives inside `section.shadowRoot`, out
+                // of reach of a `document.body` walk. Return every shadow root when any
+                // exist, otherwise fall back to `[document.body]` for paged / non-shadow.
+                "function folioRoots(){var out=[],s=document.querySelectorAll('section[data-folio-spine]'),i,any=false;for(i=0;i<s.length;i++){if(s[i].shadowRoot){out.push(s[i].shadowRoot);any=true;}}return any?out:[document.body?document.body:document];}\n" +
                 // One walk per match: wrapping splits text nodes, so the offset map
                 // must always describe the document as it currently is.
-                "function collect(){\n" +
+                "function collect(root){\n" +
                 "  var n=[],o=[],txt=[];\n" +
-                "  if(!document.body)return{full:'',n:n,o:o};\n" +
-                "  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);\n" +
+                "  if(!root)return{full:'',n:n,o:o};\n" +
+                "  var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null,false);\n" +
                 "  while(w.nextNode()){\n" +
                 "    var node=w.currentNode,v=node.nodeValue||'',p=node.parentNode;\n" +
                 "    if(!p)continue;\n" +
@@ -88,11 +93,15 @@ object HighlightPaint {
                 "  return{full:txt.join(''),n:n,o:o};\n" +
                 "}\n" +
                 "function unwrap(){\n" +
-                "  var all=document.getElementsByTagName('mark'),found=[],i,m,par;\n" +
-                "  for(i=0;i<all.length;i++){if(all[i].className.indexOf('folio-hl')>=0)found.push(all[i]);}\n" +
-                "  for(i=0;i<found.length;i++){m=found[i];par=m.parentNode;if(!par)continue;" +
-                "    while(m.firstChild)par.insertBefore(m.firstChild,m);par.removeChild(m);}\n" +
-                "  if(document.body&&document.body.normalize)document.body.normalize();\n" +
+                "  var roots=folioRoots(),ri;\n" +
+                "  for(ri=0;ri<roots.length;ri++){\n" +
+                "    var root=roots[ri];if(!root||!root.querySelectorAll)continue;\n" +
+                "    var all=root.querySelectorAll('mark'),found=[],i,m,par;\n" +
+                "    for(i=0;i<all.length;i++){if(all[i].className.indexOf('folio-hl')>=0)found.push(all[i]);}\n" +
+                "    for(i=0;i<found.length;i++){m=found[i];par=m.parentNode;if(!par)continue;" +
+                "      while(m.firstChild)par.insertBefore(m.firstChild,m);par.removeChild(m);}\n" +
+                "    if(root.normalize)root.normalize();\n" +
+                "  }\n" +
                 "}\n" +
                 // Map offsets skip whitespace, so a run inside one node is contiguous
                 // even when its raw indexes are not: the gap between them is all
@@ -121,20 +130,25 @@ object HighlightPaint {
                 "}\n" +
                 "window.__folioPaintHighlights=function(items){\n" +
                 "  unwrap();\n" +
+                // A highlight always lives within one chapter, so match per root: iterate
+                // every shadow root (or `[document.body]` when paged / non-shadow) and run
+                // the collect→match→wrap loop over THAT root's text.
                 // `full` (whitespace-stripped text) is stable across wraps — surroundContents only
-                // splits nodes, it never removes characters — so collect once and refresh the
-                // node/offset map only after a wrap actually mutates the DOM, instead of rebuilding
-                // the whole-document map at the top of every guard iteration and every item.
-                "  var c=collect();\n" +
-                "  for(var k=0;k<items.length;k++){\n" +
-                "    var it=items[k],needle=norm(it.t||'');\n" +
-                "    if(!needle)continue;\n" +
-                "    var pos=0,guard=0;\n" +
-                "    while(guard++<40){\n" +
-                "      var hit=c.full.indexOf(needle,pos);\n" +
-                "      if(hit<0||!wrap(c,hit,needle.length,it.b,it.u,it.i))break;\n" +
-                "      pos=hit+needle.length;\n" +
-                "      c=collect();\n" +
+                // splits nodes, it never removes characters — so collect once per root and refresh the
+                // node/offset map only after a wrap actually mutates the DOM.
+                "  var roots=folioRoots(),ri;\n" +
+                "  for(ri=0;ri<roots.length;ri++){\n" +
+                "    var root=roots[ri],c=collect(root);\n" +
+                "    for(var k=0;k<items.length;k++){\n" +
+                "      var it=items[k],needle=norm(it.t||'');\n" +
+                "      if(!needle)continue;\n" +
+                "      var pos=0,guard=0;\n" +
+                "      while(guard++<40){\n" +
+                "        var hit=c.full.indexOf(needle,pos);\n" +
+                "        if(hit<0||!wrap(c,hit,needle.length,it.b,it.u,it.i))break;\n" +
+                "        pos=hit+needle.length;\n" +
+                "        c=collect(root);\n" +
+                "      }\n" +
                 "    }\n" +
                 "  }\n" +
                 "  if(window.__folioRelayout)window.__folioRelayout();\n" +

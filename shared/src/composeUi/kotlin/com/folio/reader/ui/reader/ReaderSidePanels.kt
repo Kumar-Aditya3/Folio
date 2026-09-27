@@ -12,7 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import com.folio.reader.model.Bookmark
-import com.folio.reader.model.Chapter
+import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
@@ -35,7 +35,7 @@ internal fun BoxScope.ReaderSidePanels(
     echoesState: EchoesState = EchoesState.Idle,
     onCloseEchoes: () -> Unit = {},
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
-    chapters: List<Chapter>,
+    tocEntries: List<BookTocRow>,
     currentChapterIndex: Int,
     onChapterChange: (Int) -> Unit,
     onToggleToc: () -> Unit,
@@ -103,7 +103,7 @@ internal fun BoxScope.ReaderSidePanels(
     ) {
         Box(Modifier.folioSheetDragToDismiss(onToggleToc)) {
             TOCSidebar(
-                chapters = chapters,
+                entries = tocEntries,
                 currentIndex = currentChapterIndex,
                 onChapterClick = { index ->
                     onChapterChange(index)

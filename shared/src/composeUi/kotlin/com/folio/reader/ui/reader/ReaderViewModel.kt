@@ -51,10 +51,17 @@ class ReaderViewModel(
      * means the action never lights and no panel opens. Reused from the app graph, so it shares
      * the one embedder session the search stack already holds.
      */
-    private val discoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository? = null
+    private val discoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository? = null,
+    /**
+     * The book's own nav/NCX Contents rows, read from the archive on open. Defaults to none so
+     * a caller that has no parser wired simply gets the chapter titles in Contents.
+     */
+    private val bookTocProvider: suspend (bookId: String, chapters: List<Chapter>) -> List<com.folio.reader.model.BookTocRow> =
+        { _, _ -> emptyList() }
 ) {
     private val _book = MutableStateFlow<Book?>(null)
     private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
+    private val _bookToc = MutableStateFlow<List<com.folio.reader.model.BookTocRow>>(emptyList())
     private val _currentChapterIndex = MutableStateFlow(0)
     private val _position = MutableStateFlow<ReadingPosition?>(null)
     private val _session = MutableStateFlow<ReadingSession?>(null)
@@ -151,6 +158,8 @@ class ReaderViewModel(
 
     val book: Flow<Book?> = _book
     val chapters: Flow<List<Chapter>> = _chapters
+    /** Declared StateFlow for the same reason as [chapterHtml]: the first frame must read the truth. */
+    val bookToc: kotlinx.coroutines.flow.StateFlow<List<com.folio.reader.model.BookTocRow>> = _bookToc
     val currentChapter: Flow<Chapter?> = combine(_chapters, _currentChapterIndex) { chapters, index ->
         chapters.getOrNull(index)
     }
@@ -195,6 +204,20 @@ class ReaderViewModel(
     val windowLoad: kotlinx.coroutines.flow.StateFlow<List<com.folio.reader.ui.render.ReaderSection>> =
         contentLoader.windowLoad
 
+    /**
+     * The loaded chapter window, but only while the reader is actually scrolling it.
+     *
+     * [windowRange] outlives a switch to Page mode: the loader consults the layout mode only
+     * when it *builds* a window. Every behavioural read below treats a non-null range as "the
+     * engine flows chapters by itself, so an edge means the book ended" — which is what
+     * discarded the last-page swipe in paged mode, and what made a chapter jump landing inside
+     * the stale range reload nothing at all.
+     */
+    private fun liveWindowRange(): IntRange? =
+        if (effective().layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS)
+            contentLoader.windowRange.value
+        else null
+
     fun openBook(bookId: String, deviceId: String, initialSettings: ReaderSettings = ReaderSettings(), startChapterOverride: Int? = null) {
         this.deviceId = deviceId
         currentBookId = bookId
@@ -214,6 +237,15 @@ class ReaderViewModel(
             // Load chapters persisted at import time
             val chapters = bookRepository.getChaptersForBook(bookId)
             _chapters.value = chapters
+
+            // Contents comes from the book's own navigation rather than one row per spine
+            // file. Cleared first so a previous book's rows can't show, and read in a side
+            // coroutine because it opens the archive — never on the first-paint path.
+            _bookToc.value = emptyList()
+            launch {
+                _bookToc.value =
+                    runCatching { bookTocProvider(bookId, chapters) }.getOrDefault(emptyList())
+            }
 
             val startIndex = positionStore.restorePosition(bookId, deviceId, chapters, startChapterOverride, loadedBook)
 
@@ -296,7 +328,7 @@ class ReaderViewModel(
         sessionTracker.markChapterEntry(_position.value?.normalizedProgress ?: 0.0)
         // A windowed jump to a chapter already on screen reloads nothing: the
         // document holds it and the jump's seek scrolls to the target.
-        val range = contentLoader.windowRange.value
+        val range = liveWindowRange()
         if (range != null && range.contains(_currentChapterIndex.value)) return
         viewModelScope.launch { loadChapterHtml() }
     }
@@ -321,7 +353,7 @@ class ReaderViewModel(
     fun onChapterStart() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
         if (_currentChapterIndex.value <= 0) return
-        val range = contentLoader.windowRange.value
+        val range = liveWindowRange()
         if (range != null && range.first > 1) return
         if (!sessionTracker.chapterStartGuard.accept(chapter.id)) return
         previousChapter(openAtEnd = true)
@@ -335,7 +367,7 @@ class ReaderViewModel(
      */
     fun onChapterEnd() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
-        val range = contentLoader.windowRange.value
+        val range = liveWindowRange()
         if (range != null) {
             if (range.last < _chapters.value.lastIndex) return
             if (!sessionTracker.chapterEndGuard.accept(chapter.id)) return
@@ -361,7 +393,7 @@ class ReaderViewModel(
         if (chaptersList.isEmpty()) return
         val index = chaptersList.indexOfFirst { it.spineIndex == spineIndex }
         if (index < 0 || index == _currentChapterIndex.value) return
-        val range = contentLoader.windowRange.value ?: return
+        val range = liveWindowRange() ?: return
         if (!range.contains(index)) return
         sessionTracker.markReadingActivity()
         positionStore.flushProgress()
@@ -375,23 +407,35 @@ class ReaderViewModel(
         }
         _currentChapterIndex.value = index
         val chapter = chaptersList[index]
+        // The visible-section change fires immediately after the progress report for
+        // this same section, which already set chapterProgress/scrollOffset to the
+        // correct section-local fraction. Pinning them to 0.0 here put the recorded
+        // place at the chapter TOP whenever the reader scrolled UP into a chapter's
+        // end (the fast-scroll "jump to the beginning" — and a resume/reseed then
+        // landed at the top too). Repoint the chapter identity only and keep the
+        // reported fraction.
         _position.value = _position.value?.copy(
             chapterId = chapter.id,
-            spineIndex = chapter.spineIndex,
-            chapterProgress = 0.0,
-            scrollOffset = 0.0
+            spineIndex = chapter.spineIndex
         )
-        sessionTracker.markChapterEntry(0.0)
+        sessionTracker.markChapterEntry(_position.value?.normalizedProgress ?: 0.0)
     }
 
     /** The engine hit a window edge: grow the window that way. */
     fun extendWindow(forward: Boolean) {
-        // One extension at a time: an op that has not been applied on screen yet
-        // must not be overwritten — StateFlow conflates, and a lost append leaves
-        // a permanent gap between sections.
-        if (contentLoader.hasPendingWindowOp()) return
-        viewModelScope.launch { contentLoader.extendWindow(forward) }
+        // One extension at a time. `hasPendingWindowOp()` alone is racy: the edge event
+        // can fire again while the coroutine below is still suspended in loadHtml, before
+        // it has set windowOp — so two launches both passed the check and prepended the
+        // SAME chapter, duplicating sections and corrupting the scroll geometry. This flag
+        // is flipped synchronously, before the suspend, so the second call is dropped.
+        if (extending.getAndSet(true)) return
+        if (contentLoader.hasPendingWindowOp()) { extending.set(false); return }
+        viewModelScope.launch {
+            try { contentLoader.extendWindow(forward) } finally { extending.set(false) }
+        }
     }
+
+    private val extending = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Surfaces acknowledge each window mutation they applied. */
     fun onWindowOpApplied(nonce: Long) = contentLoader.onWindowOpApplied(nonce)

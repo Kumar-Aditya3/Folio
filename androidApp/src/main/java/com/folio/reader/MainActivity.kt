@@ -854,14 +854,35 @@ class MainActivity : ComponentActivity() {
 
     private data class ShareableFile(val file: File, val mimeType: String)
 
-    private fun shareBooks(bookIds: Set<String>) {
+    /**
+     * The importer stores every book as `<bookDir>/original.epub`, so sharing that file directly
+     * makes the receiver see "original.epub". Copy it into the cache dir under the book title
+     * first; `file_paths.xml` already exposes the cache root to the FileProvider.
+     */
+    private suspend fun namedEpubCopy(bookId: String): ShareableFile? {
         val graph = (application as FolioApplication).graph
-        val files = bookIds.mapNotNull { id ->
-            File(graph.platform.fileSystem.getBookEpubPath(id))
-                .takeIf(File::isFile)
-                ?.let { ShareableFile(it, "application/epub+zip") }
+        val source = File(graph.platform.fileSystem.getBookEpubPath(bookId)).takeIf(File::isFile)
+            ?: return null
+        val title = runCatching { graph.bookRepository.getBook(bookId)?.title }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: "book"
+        val named = File(cacheDir, "${sanitizeFileName(title)}.epub")
+        runCatching { source.copyTo(named, overwrite = true) }.getOrNull() ?: return null
+        return ShareableFile(named, "application/epub+zip")
+    }
+
+    /** Only the characters a filesystem rejects: international titles must survive intact. */
+    private fun sanitizeFileName(title: String): String = title
+        .replace(Regex("""[\\/:*?"<>|\s*\x00-\x1F]"""), " ")
+        .trim()
+        .trimEnd('.')
+        .take(120)
+        .ifBlank { "book" }
+
+    private fun shareBooks(bookIds: Set<String>) {
+        appScope.launch(Dispatchers.IO) {
+            val files = bookIds.mapNotNull { namedEpubCopy(it) }
+            withContext(Dispatchers.Main) { shareFiles(files) }
         }
-        shareFiles(files)
     }
 
     private fun shareDocuments(documentIds: Set<String>) {
@@ -910,21 +931,13 @@ class MainActivity : ComponentActivity() {
 
     /** Shares the imported EPUB using the app's existing FileProvider grant. */
     fun shareEpub(bookId: String) {
-        val graph = (application as FolioApplication).graph
-        val epub = File(graph.platform.fileSystem.getBookEpubPath(bookId))
-        if (!epub.isFile) {
-            importStatus = "EPUB file is unavailable"
-            return
+        appScope.launch(Dispatchers.IO) {
+            val item = namedEpubCopy(bookId)
+            withContext(Dispatchers.Main) {
+                if (item == null) importStatus = "EPUB file is unavailable"
+                else shareFiles(listOf(item))
+            }
         }
-
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", epub)
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/epub+zip"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newRawUri("EPUB", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(shareIntent, "Share EPUB"))
     }
 }
 

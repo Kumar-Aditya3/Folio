@@ -1,5 +1,7 @@
 package com.folio.reader.ui.render
 
+import com.folio.reader.model.BookTocRow
+
 /**
  * Glass overlay panels (contents, annotations, reading settings) rendered INSIDE
  * the page surface. On desktop the embedded browser is a heavyweight window that
@@ -65,13 +67,16 @@ object OverlayUi {
     private val itemCss = "all:unset;cursor:pointer;display:block;width:100%;box-sizing:border-box;" +
             "padding:10px 12px;border-radius:10px;"
 
-    fun toc(chapters: List<String>, current: Int, c: OverlayColors): String {
-        val rows = chapters.mapIndexed { i, title ->
-            val active = i == current
+    fun toc(entries: List<BookTocRow>, current: Int, c: OverlayColors): String {
+        // Navigation names only some of the spine files, so the lit row is the last
+        // one that starts at or before the chapter on screen (see TOCSidebar).
+        val activeIndex = entries.lastOrNull { it.chapterIndex <= current }?.chapterIndex
+        val rows = entries.map { row ->
+            val active = row.chapterIndex == activeIndex
             val style = if (active) "$itemCss background:${c.accent}22;color:${c.accent};font-weight:600;" else
                 "$itemCss color:${c.fg};"
             val cls = if (active) " class=\"ovl-active\"" else ""
-            "<button$cls data-act=\"toc:$i\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(title)}</button>"
+            "<button$cls data-act=\"toc:${row.chapterIndex}\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(row.title)}</button>"
         }.joinToString("")
         return shell("Contents", rows, c, width = 280, kind = "toc")
     }
