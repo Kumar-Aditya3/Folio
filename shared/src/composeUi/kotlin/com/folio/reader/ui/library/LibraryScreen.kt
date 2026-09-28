@@ -383,6 +383,12 @@ fun LibraryScreen(
     )
     val shelfFlow = remember(viewModel, shelfState) { viewModel.filteredBooks(shelfState) }
     val books by shelfFlow.collectAsState(initial = booksInitial)
+    // Gates the books shelf on a fresh start: the remembered collection is restored
+    // from a suspend settings read, so until it lands the shelf would paint the
+    // unfiltered library and then snap to the remembered collection — the "category
+    // bleed". Retained across warm re-entry, so it only holds the skeleton on the
+    // genuine cold read. See LibraryViewModel.shelfReady.
+    val shelfReady by viewModel.shelfReady.collectAsState()
 
     val documentState by remember(documentLibraryViewModel) {
         documentLibraryViewModel?.state ?: kotlinx.coroutines.flow.MutableStateFlow(DocumentLibraryState())
@@ -1299,13 +1305,21 @@ fun LibraryScreen(
                                     }
                                 } else {
                                     val queryText = if (bookSearchActive) controller?.query?.trim().orEmpty() else ""
+                                    // Cold-start category-bleed guard: hold the measured skeleton
+                                    // (books == null feeds LibraryContent's loading branch) until the
+                                    // remembered collection's membership has resolved, instead of
+                                    // flashing the unfiltered library and then snapping to the shelf.
+                                    // Selection mode and an active Titles search carry their own list
+                                    // semantics and are exempt; a retained view model keeps shelfReady
+                                    // already true on warm re-entry, so this only bites the cold read.
+                                    val gatedBooks = if (shelfReady || isSelectionMode || queryText.isNotEmpty()) books else null
                                     val displayed = if (queryText.isNotEmpty()) {
-                                        books?.filter {
+                                        gatedBooks?.filter {
                                             it.title.contains(queryText, ignoreCase = true) ||
                                                 it.displayAuthor.contains(queryText, ignoreCase = true)
                                         }
                                     } else {
-                                        books
+                                        gatedBooks
                                     }
                                     if (displayed != null && displayed.isEmpty() && queryText.isNotEmpty()) {
                                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

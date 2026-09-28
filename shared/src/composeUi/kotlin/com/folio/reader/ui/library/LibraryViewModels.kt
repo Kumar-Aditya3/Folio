@@ -81,16 +81,39 @@ class LibraryViewModel(
     /** The selected shelf's collection id; null while no selection has landed. */
     val selectedCollectionId = MutableStateFlow<String?>(null)
 
+    private data class ShelfMembership(val collectionId: String, val ids: Set<String>)
+
     /**
-     * Live membership of the selected collection. A stale snapshot here is what
-     * made freshly shelved manga invisible until the library was re-entered.
+     * Live membership of the selected shelf, tagged with the collection id it was
+     * computed for. The tag lets [filteredBooks] and [shelfReady] tell "the current
+     * shelf's membership" apart from a set still left over from the previous shelf
+     * mid-switch — showing another collection's books before the real set arrives is
+     * the "category bleed on a fresh start" report. A stale snapshot here is also what
+     * made freshly shelved books invisible until the library was re-entered.
      */
-    val shelfBookIds: StateFlow<Set<String>?> = selectedCollectionId
+    private val shelfMembership: StateFlow<ShelfMembership?> = selectedCollectionId
         .flatMapLatest { id ->
-            if (id == null) flowOf<Set<String>?>(null)
-            else collectionRepository.observeBookIdsInCollection(id).map { ids -> ids as Set<String>? }
+            if (id == null) flowOf<ShelfMembership?>(null)
+            else collectionRepository.observeBookIdsInCollection(id).map { ids -> ShelfMembership(id, ids) }
         }
         .stateIn(scope, SharingStarted.Lazily, null)
+
+    /**
+     * False until the shelf's collection selection has settled AND that collection's
+     * membership has actually resolved.
+     *
+     * The remembered collection (`KEY_BOOKS_COLLECTION`) is restored from a *suspend*
+     * settings read, so at construction `selectedCollectionId == null` and no membership
+     * is known. On a fresh start the shelf would otherwise render the *unfiltered*
+     * library — every collection's books — and then snap to the remembered shelf: the
+     * "category bleed". Gating the shelf on this closes that window. "No collection to
+     * select" (an empty list) stays a stable first-frame answer so a library with no
+     * collections does not hang on the skeleton. Mirrors the manga shelf's `categoryReady`.
+     */
+    val shelfReady: StateFlow<Boolean> =
+        combine(selectedCollectionId, collections, shelfMembership) { selected, list, membership ->
+            (selected != null && membership != null && membership.collectionId == selected) || list.isEmpty()
+        }.stateIn(scope, SharingStarted.Lazily, false)
 
     /** No virtual All bucket: the shelf always shows one real collection. */
     fun selectCollection(collectionId: String) {
@@ -297,7 +320,19 @@ class LibraryViewModel(
             else -> allBooks()
         }
 
-        return combine(baseFlow, shelfBookIds) { books, shelfIds ->
+        return combine(baseFlow, selectedCollectionId, shelfMembership) { books, selectedCollection, membership ->
+            // Effective shelf id-filter for the CURRENT selection:
+            //  - no collection selected (only the pre-select first frame, which the
+            //    host gates on shelfReady) → the whole library
+            //  - membership resolved for exactly this collection → that set
+            //  - a collection is selected but its membership has not landed yet, or the
+            //    set still belongs to the previous shelf mid-switch → empty, so another
+            //    collection's books never bleed through before the real set arrives.
+            val shelfIds: Set<String>? = when {
+                selectedCollection == null -> null
+                membership != null && membership.collectionId == selectedCollection -> membership.ids
+                else -> emptySet()
+            }
             books.filter { book ->
                 (shelfIds == null || book.id in shelfIds) && applyFilters(book, state.filter)
             }.sortedWith(compareBooks(state.sortBy, state.sortAscending))
