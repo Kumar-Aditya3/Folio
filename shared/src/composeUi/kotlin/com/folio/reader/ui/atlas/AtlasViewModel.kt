@@ -30,32 +30,48 @@ class AtlasViewModel(
     private val _exemplarTexts = MutableStateFlow<Map<String, String>>(emptyMap())
     val exemplarTexts: StateFlow<Map<String, String>> = _exemplarTexts.asStateFlow()
 
-    // Stage-2 refined labels, keyed by cluster exemplarChunkId, filled lazily per book on zoom-in.
+    // Stage-2 refined labels, keyed by cluster exemplarChunkId, filled by theme assignment.
     private val _refinedLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     val refinedLabels: StateFlow<Map<String, String>> = _refinedLabels.asStateFlow()
     private val refinedBooks = HashSet<String>()
+    // Guards the eager, whole-library theme pass so it runs once per distinct model instance.
+    private var themedModel: AtlasModel? = null
 
     fun load() {
-        _state.value = AtlasUiState.Loading
         scope.launch {
+            // Instant open: show the last computed map (in-memory or on disk) on the first frame,
+            // even if a book was added/removed since, so opening the Atlas never blocks behind the
+            // multi-second roll-up. Only fall back to the skeleton when nothing has ever been
+            // computed. The fresh map is then reconciled in below and swapped in when ready.
+            val stale = runCatching { discovery.lastComputedAtlas() }.getOrNull()
+            val haveStale = stale != null && stale.books.isNotEmpty()
+            if (haveStale) {
+                _state.value = AtlasUiState.Map(stale!!, forming = false, fraction = 1f)
+                assignThemes(stale)
+            } else {
+                _state.value = AtlasUiState.Loading
+            }
+
             when (val readiness = runCatching { discovery.atlasReadiness() }.getOrDefault(AtlasReadiness.Unavailable)) {
-                is AtlasReadiness.Unavailable -> _state.value = AtlasUiState.Unavailable
-                is AtlasReadiness.TooFewBooks -> _state.value = AtlasUiState.TooFewBooks(readiness.count, readiness.threshold)
+                is AtlasReadiness.Unavailable -> if (!haveStale) _state.value = AtlasUiState.Unavailable
+                is AtlasReadiness.TooFewBooks -> if (!haveStale) _state.value = AtlasUiState.TooFewBooks(readiness.count, readiness.threshold)
                 is AtlasReadiness.Forming -> {
                     // Below the threshold and still filling: map what exists, and say it is forming.
                     val model = runCatching { discovery.atlas() }.getOrNull()
-                    _state.value = if (model == null || model.books.isEmpty()) {
-                        AtlasUiState.Forming(readiness.fraction)
-                    } else {
-                        AtlasUiState.Map(model, forming = true, fraction = readiness.fraction)
+                    if (model != null && model.books.isNotEmpty()) {
+                        _state.value = AtlasUiState.Map(model, forming = true, fraction = readiness.fraction)
+                        assignThemes(model)
+                    } else if (!haveStale) {
+                        _state.value = AtlasUiState.Forming(readiness.fraction)
                     }
                 }
                 is AtlasReadiness.Ready -> {
                     val model = runCatching { discovery.atlas() }.getOrNull()
-                    _state.value = if (model == null || model.books.isEmpty()) {
-                        AtlasUiState.Unavailable
-                    } else {
-                        AtlasUiState.Map(model, forming = readiness.forming, fraction = readiness.fraction)
+                    if (model != null && model.books.isNotEmpty()) {
+                        _state.value = AtlasUiState.Map(model, forming = readiness.forming, fraction = readiness.fraction)
+                        assignThemes(model)
+                    } else if (!haveStale) {
+                        _state.value = AtlasUiState.Unavailable
                     }
                 }
             }
@@ -63,18 +79,32 @@ class AtlasViewModel(
     }
 
     /**
-     * Stage-2 label re-rank for the books currently in view, done lazily (once per book) so the
-     * embedder is only touched when the reader zooms in, never during the roll-up. Merges refined
-     * labels into [refinedLabels]; failures leave the c-TF-IDF labels in place.
+     * Eagerly labels every cluster of every book with a theme from the fixed vocabulary (once per
+     * model), feeding the result into [refinedLabels] so the legend, region headings and sheet read
+     * as shared concepts ("Coming of Age") rather than the c-TF-IDF proper nouns ("Molly") they did
+     * before. Runs off the roll-up on the embedder; failures leave the c-TF-IDF fallbacks in place.
+     */
+    private fun assignThemes(model: AtlasModel) {
+        if (themedModel === model) return
+        themedModel = model
+        scope.launch {
+            val themes = runCatching { discovery.assignThemes(model.books) }.getOrDefault(emptyMap())
+            if (themes.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + themes
+        }
+    }
+
+    /**
+     * Retries theme labelling for the books currently in view — a safety net for when the eager
+     * whole-library pass in [load] could not embed yet (cold embedder). Once-per-book; merges into
+     * [refinedLabels] and never overwrites with weaker labels.
      */
     fun refineVisibleBooks(books: List<com.folio.reader.ml.AtlasBook>) {
-        val todo = books.filter { refinedBooks.add(it.bookId) }
+        val todo = books.filter { it.bookId !in refinedBooks && it.clusters.any { c -> c.exemplarChunkId !in _refinedLabels.value } }
         if (todo.isEmpty()) return
+        todo.forEach { refinedBooks.add(it.bookId) }
         scope.launch {
-            todo.forEach { book ->
-                val refined = runCatching { discovery.refineBookLabels(book) }.getOrDefault(emptyMap())
-                if (refined.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + refined
-            }
+            val themes = runCatching { discovery.assignThemes(todo) }.getOrDefault(emptyMap())
+            if (themes.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + themes
         }
     }
 

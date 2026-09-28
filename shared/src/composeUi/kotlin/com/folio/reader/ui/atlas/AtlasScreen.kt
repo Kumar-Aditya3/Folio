@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.ml.AtlasBook
+import com.folio.reader.ml.AtlasCommunity
 import com.folio.reader.ml.AtlasEdge
 import com.folio.reader.ml.AtlasModel
 import com.folio.reader.ui.components.FolioBackHandler
@@ -142,6 +144,118 @@ private data class RegionInfo(
     val color: Color,
     val size: Int,
 )
+
+/**
+ * One row of the map's legend / key, and simultaneously one selectable "lens".
+ *
+ * The legend is deliberately generic — a colour, a label, a share and the exact set of books it
+ * covers — so the lens (tap to dim everything else) works the same whether a row represents an
+ * emergent community (the usual case) or a broad genre (the fallback). Basing it on the set of
+ * [bookIds] is what let the old genre-string lens generalise without a second code path, and it
+ * fixes the "one genre · 100%" legend: the rows now come from the nebulae actually on the map, so
+ * there are always several, each its own colour.
+ */
+private data class LegendEntry(
+    val id: String,
+    val label: String,
+    val color: Color,
+    val fraction: Float,
+    val bookIds: Set<String>,
+    /** Layout-space centroid of this row's books, so an empty-space tap can focus the group. */
+    val cx: Float,
+    val cy: Float,
+)
+
+/**
+ * Builds the legend from the map's emergent communities (the coloured nebulae). Each row is labelled
+ * by the community's dominant **theme** (from [themesByCluster], the fixed-vocabulary assignment) so
+ * it reads as "Coming of Age" rather than a c-TF-IDF proper noun, coloured to match its stars, and
+ * de-duplicated so two nebulae never carry the same label. Falls back to broad-genre shares when the
+ * communities are degenerate, and to nothing when neither is informative (the help text then shows).
+ */
+private fun buildLegend(
+    model: AtlasModel,
+    nodeById: Map<String, AtlasGalaxy.BookNode>,
+    themesByCluster: Map<String, String>,
+): List<LegendEntry> {
+    val total = model.books.size
+    if (total == 0) return emptyList()
+
+    fun centroidOf(bookIds: Collection<String>): Pair<Float, Float> {
+        var cx = 0f; var cy = 0f; var n = 0
+        bookIds.forEach { id -> nodeById[id]?.let { cx += it.x; cy += it.y; n++ } }
+        return if (n > 0) (cx / n) to (cy / n) else 0f to 0f
+    }
+    // A row's colour is a representative member's actual star colour, so the key matches the map.
+    fun colorOf(bookIds: Collection<String>, fallback: Color): Color =
+        bookIds.firstNotNullOfOrNull { nodeById[it]?.color } ?: fallback
+
+    val communities = model.communities.filter { it.memberBookIds.isNotEmpty() }
+    if (communities.size >= 2) {
+        val labels = communityThemeLabels(model, communities, themesByCluster)
+        return communities.sortedByDescending { it.size }.map { c ->
+            val (cx, cy) = centroidOf(c.memberBookIds)
+            LegendEntry(
+                id = "c${c.id}",
+                label = labels[c.id]?.takeIf { it.isNotBlank() } ?: c.genreLabel,
+                color = colorOf(c.memberBookIds, AtlasGalaxy.communityColor(c.id)),
+                fraction = c.size.toFloat() / total,
+                bookIds = c.memberBookIds.toHashSet(),
+                cx = cx, cy = cy,
+            )
+        }
+    }
+
+    // Fallback: broad-genre shares, over classified books so the shares are sensible.
+    val byGenre = model.books.filter { !it.genre.isNullOrBlank() }.groupBy { it.genre!! }
+    if (byGenre.size >= 2) {
+        val classified = byGenre.values.sumOf { it.size }.coerceAtLeast(1)
+        return byGenre.entries.sortedByDescending { it.value.size }.map { (genre, books) ->
+            val ids = books.map { it.bookId }
+            val (cx, cy) = centroidOf(ids)
+            LegendEntry(
+                id = "g$genre",
+                label = genre,
+                color = colorOf(ids, AtlasGalaxy.genreColor(genre)),
+                fraction = books.size.toFloat() / classified,
+                bookIds = ids.toHashSet(),
+                cx = cx, cy = cy,
+            )
+        }
+    }
+    return emptyList()
+}
+
+/**
+ * A de-duplicated **theme** label per community: the most common theme (from the fixed-vocabulary
+ * [themesByCluster] assignment) among the community's clusters, assigning larger communities first
+ * and falling to a community's next theme when its first is already taken, so no two nebulae share a
+ * label. Falls back to the community's plurality-genre name when it has no assigned theme yet.
+ */
+private fun communityThemeLabels(
+    model: AtlasModel,
+    communities: List<AtlasCommunity>,
+    themesByCluster: Map<String, String>,
+): Map<Int, String> {
+    val booksById = model.books.associateBy { it.bookId }
+    // Ranked theme votes per community (most-voted first, deterministic on ties).
+    val votesByCommunity = communities.associate { c ->
+        c.id to c.memberBookIds.flatMap { booksById[it]?.clusters ?: emptyList() }
+            .mapNotNull { themesByCluster[it.exemplarChunkId] }
+            .groupingBy { it }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .map { it.key }
+    }
+    val used = HashSet<String>()
+    val out = HashMap<Int, String>()
+    // Largest communities pick first so the dominant nebula keeps its strongest theme.
+    communities.sortedByDescending { it.size }.forEach { c ->
+        val ranked = votesByCommunity[c.id].orEmpty()
+        val pick = ranked.firstOrNull { it !in used } ?: ranked.firstOrNull()
+        if (pick != null) { used.add(pick); out[c.id] = pick } else out[c.id] = c.genreLabel
+    }
+    return out
+}
 
 /** A four-point star marker with a soft glow — the map's "book" / region glyph. */
 private fun DrawScope.drawSparkle(c: Offset, r: Float, color: Color, alpha: Float) {
@@ -361,13 +475,16 @@ private fun AtlasGalaxyMap(
         out
     }
 
-    // The library's genre composition (largest share first) — drives the legend + the genre lens.
-    val composition = remember(model) { model.composition }
+    // The map's legend / key — the coloured nebulae (or a broad-genre fallback), largest share
+    // first. Built from the emergent communities so it is always multi-entry and its dot colours
+    // match the stars, instead of the old single "100% <genre>" readout when the classifier
+    // collapsed the whole library onto one broad shelf.
+    val legend = remember(model, nodeById, refinedLabels) { buildLegend(model, nodeById, refinedLabels) }
 
-    // Genre lens: tapping a legend/lens chip dims everything not of that genre (alpha only, one
-    // render path). Null = no lens. A book's genre is resolved through its community's label.
-    var lensGenre by remember(model) { mutableStateOf<String?>(null) }
-    val genreByBook = remember(model) { model.books.associate { it.bookId to it.genre } }
+    // Lens: tapping a legend row dims every star not in that row's book set (alpha only, one render
+    // path). Null = no lens. Generic over communities/genres because each row carries its own set.
+    var lensId by remember(model) { mutableStateOf<String?>(null) }
+    val lensBooks = legend.firstOrNull { it.id == lensId }?.bookIds
 
     // Nebula bitmap — reused from a single-entry cache when the map is unchanged (so a repeat open
     // shows the gas on the first frame), otherwise baked off the main thread. The reveal below holds
@@ -429,14 +546,14 @@ private fun AtlasGalaxyMap(
     // `enabled` only flips when the boolean actually changes, not on every animation tick.
     val canUnwind by remember(model) {
         derivedStateOf {
-            selectedId != null || lensGenre != null ||
+            selectedId != null || lensId != null ||
                 scaleAnim.value > 1.02f || panAnim.value != Offset.Zero
         }
     }
     FolioBackHandler(enabled = canUnwind) {
         when {
             selectedId != null -> recenter()
-            lensGenre != null -> lensGenre = null
+            lensId != null -> lensId = null
             scaleAnim.value > 1.02f || panAnim.value != Offset.Zero -> recenter()
             else -> {}
         }
@@ -513,12 +630,9 @@ private fun AtlasGalaxyMap(
                         primary, regionStyle, overflow = TextOverflow.Ellipsis, maxLines = 1,
                         constraints = Constraints(maxWidth = regionMax),
                     )
-                    val desc = cl.candidates.take(3).joinToString("  ·  ").uppercase()
-                    val dRes = if (desc.isNotBlank()) textMeasurer.measure(
-                        desc, descStyle, overflow = TextOverflow.Ellipsis, maxLines = 1,
-                        constraints = Constraints(maxWidth = regionMax),
-                    ) else null
-                    put(cl.chunkId, res to dRes)
+                    // No secondary line: the old c-TF-IDF phrase strip surfaced proper nouns
+                    // ("MOLLY · CONSTELLATIONS"). The theme [primary] carries the meaning on its own.
+                    put(cl.chunkId, res to null)
                 }
             }
         }
@@ -670,7 +784,7 @@ private fun AtlasGalaxyMap(
                 .pointerInput(model, wPx, hPx) {
                     detectTapGestures(
                         onDoubleTap = {
-                            lensGenre = null
+                            lensId = null
                             recenter()
                         },
                         onTap = { tap ->
@@ -688,23 +802,21 @@ private fun AtlasGalaxyMap(
                                 select(best!!)
                             } else {
                                 // No star under the finger — did they tap a nebula? Focus the nearest
-                                // community's genre: toggle the lens onto it and ease the camera in.
-                                var bestRegion: RegionInfo? = null
+                                // legend group: toggle its lens on and ease the camera into it.
+                                var target: LegendEntry? = null
                                 var bestRegionD = Float.MAX_VALUE
-                                for (r in regions) {
-                                    if (r.label.isBlank()) continue
-                                    val p = project(r.x, r.y, sc, pn)
+                                for (r in legend) {
+                                    val p = project(r.cx, r.cy, sc, pn)
                                     val d = hypot(tap.x - p.x, tap.y - p.y)
-                                    if (d < bestRegionD) { bestRegionD = d; bestRegion = r }
+                                    if (d < bestRegionD) { bestRegionD = d; target = r }
                                 }
                                 val regionThreshold = with(density) { 120.dp.toPx() }
-                                val target = bestRegion
                                 if (target != null && bestRegionD <= regionThreshold) {
                                     selectedId = null
-                                    val focusing = lensGenre != target.label
-                                    lensGenre = if (focusing) target.label else null
+                                    val focusing = lensId != target!!.id
+                                    lensId = if (focusing) target!!.id else null
                                     if (focusing) {
-                                        val rp = project(target.x, target.y, sc, pn)
+                                        val rp = project(target!!.cx, target!!.cy, sc, pn)
                                         val panTo = pn + Offset(cx - rp.x, cy - rp.y)
                                         scope.launch { panAnim.animateTo(clampPan(panTo, sc.coerceAtLeast(1.7f)), tween(380)) }
                                         scope.launch { scaleAnim.animateTo(sc.coerceAtLeast(1.7f), tween(380)) }
@@ -778,7 +890,7 @@ private fun AtlasGalaxyMap(
                     else -> 0.4f
                 }
                 // Genre lens: everything not of the focused genre fades back (alpha only).
-                val lensDim = if (lensGenre == null || genreByBook[n.bookId] == lensGenre) 1f else 0.16f
+                val lensDim = if (lensId == null || lensBooks?.contains(n.bookId) == true) 1f else 0.16f
                 // Even an unread book is a bright star; reading only pushes it brighter still.
                 val bright = (0.64f + 0.36f * n.readFraction) * dim * lensDim * starReveal
                 val coreR = coreRadiusOf(n.sizeScale, isSel)
@@ -875,7 +987,9 @@ private fun AtlasGalaxyMap(
                     if (!onScreen(p, 20f)) continue
                     scanned++
                     val res = genreRegionLayouts[r.id] ?: continue
-                    val lensA = if (lensGenre == null || lensGenre == r.label) 1f else 0.14f
+                    // While a legend lens is focused, the genre overview headings recede so the
+                    // focused nebula reads clearly (the lens groups by community, not by this label).
+                    val lensA = if (lensId == null) 1f else 0.2f
                     val a = regionAlpha * lensA
                     if (a <= 0.02f) continue
                     val w = res.size.width.toFloat()
@@ -947,8 +1061,9 @@ private fun AtlasGalaxyMap(
         }
 
         // Legend — the map's key. Hidden while a book is selected (the sheet takes the stage).
-        // When genres are known it doubles as the genre lens: a colour swatch + share per genre,
-        // and tapping one focuses that genre (dims the rest). "Colours = genres" is now literally true.
+        // Each row is one coloured nebula (an emergent community; genres are the fallback), and
+        // tapping one focuses it (dims the rest). The colours match the stars, so the key and the
+        // map always agree — no more single "100% <genre>" readout.
         if (selectedId == null) {
             Column(
                 Modifier
@@ -960,33 +1075,36 @@ private fun AtlasGalaxyMap(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (composition.isEmpty()) {
+                if (legend.isEmpty()) {
                     LegendRow("Each dot is a book", Color(0xFFDDE0F4))
                     LegendRow("Closer = more similar", Color(0xFF8FA6E6))
                     LegendRow("Pinch to explore", Color(0xFF7FC7C0))
                 } else {
                     Text(
-                        if (lensGenre == null) "Genres · tap to focus" else "Tap again to clear",
+                        if (lensId == null) "Regions · tap to focus" else "Tap again to clear",
                         style = FolioTheme.typography.labelSmall,
                         color = COSMIC_MUTED,
                     )
-                    composition.take(6).forEach { share ->
-                        val pct = (share.fraction * 100f).roundToInt()
-                        val active = lensGenre == share.genre
+                    legend.take(6).forEach { entry ->
+                        val pct = (entry.fraction * 100f).roundToInt()
+                        val active = lensId == entry.id
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(7.dp))
-                                .clickable { lensGenre = if (active) null else share.genre }
+                                .clickable { lensId = if (active) null else entry.id }
                                 .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
                                 .padding(horizontal = 4.dp, vertical = 1.dp),
                         ) {
-                            Box(Modifier.size(8.dp).clip(CircleShape).background(AtlasGalaxy.genreColor(share.genre)))
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(entry.color))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "$pct%  ${share.genre}",
+                                "$pct%  ${entry.label}",
                                 style = FolioTheme.typography.labelSmall,
                                 color = if (active) Color(0xFFF4F2FF) else COSMIC_MUTED,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 190.dp),
                             )
                         }
                     }
@@ -1025,16 +1143,31 @@ private fun AtlasGalaxyMap(
         val selBook = selectedId?.let { bookById[it] }
         val selNode = selectedId?.let { nodeById[it] }
         val accent = selNode?.color?.let { lerp(it, Color.White, 0.18f) } ?: Color(0xFF8AA0FF)
-        val related = remember(selectedId, model) {
+        val related = remember(selectedId, model, refinedLabels) {
             val id = selectedId ?: return@remember emptyList<AtlasRelated>()
+            // Each neighbour says *why* it sits nearby — a shared theme when there is one, else a
+            // shared genre, else what it is about — from the fixed-vocabulary theme labels, so the
+            // reason reads as a concept ("Coming of Age") rather than a shared proper noun.
+            fun themesOf(book: AtlasBook): List<String> =
+                book.clusters.mapNotNull { c -> refinedLabels[c.exemplarChunkId]?.takeIf { it.isNotBlank() } }.distinct()
+            val selThemes = bookById[id]?.let { themesOf(it) }?.toHashSet() ?: hashSetOf()
+            val selGenre = bookById[id]?.genre
             (neighbors[id] ?: emptyList()).take(10).mapNotNull { (nid, _) ->
                 val b = bookById[nid] ?: return@mapNotNull null
+                val bThemes = themesOf(b)
+                val shared = bThemes.filter { it in selThemes }.take(2)
+                val why = when {
+                    shared.isNotEmpty() -> "Shared: " + shared.joinToString(" · ")
+                    !selGenre.isNullOrBlank() && b.genre == selGenre -> "Also ${b.genre}"
+                    else -> bThemes.firstOrNull()?.let { "About: $it" }
+                }
                 AtlasRelated(
                     id = nid,
                     title = b.title,
                     author = authorByBook[nid].orEmpty(),
                     coverPath = b.coverPath,
                     accent = nodeById[nid]?.color ?: accent,
+                    subtitle = why,
                 )
             }
         }

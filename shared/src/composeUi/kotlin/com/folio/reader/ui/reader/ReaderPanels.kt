@@ -53,6 +53,7 @@ import com.folio.reader.model.Bookmark
 import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
+import com.folio.reader.model.activeTocIndex
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioSharedKeys
@@ -82,6 +83,7 @@ internal fun readerOverlayHtml(
     settings: ReaderSettings,
     tocEntries: List<BookTocRow>,
     currentChapterIndex: Int,
+    currentFraction: Float,
     bookmarks: List<Bookmark>,
     highlights: List<Highlight>,
     notes: List<Note>,
@@ -114,6 +116,7 @@ internal fun readerOverlayHtml(
     showToc -> com.folio.reader.ui.render.OverlayUi.toc(
         entries = tocEntries,
         current = currentChapterIndex,
+        currentFraction = currentFraction,
         c = overlayColors
     )
     noteDraftFor != null -> {
@@ -153,7 +156,8 @@ internal fun readerOverlayHtml(
 fun TOCSidebar(
     entries: List<BookTocRow>,
     currentIndex: Int,
-    onChapterClick: (Int) -> Unit,
+    currentFraction: Float,
+    onChapterClick: (BookTocRow) -> Unit,
     onDismiss: () -> Unit
 ) {
     // Glass, because it sits over the page. A 26dp leading sweep so the panel
@@ -197,20 +201,21 @@ fun TOCSidebar(
 
             // The row that contains a chapter. Navigation names only some of the spine
             // files, so the active row is the last one that starts at or before the
-            // chapter on screen — that is what stays lit while reading a split chapter.
-            val activeRow = entries.indexOfLast { it.chapterIndex <= currentIndex }
+            // position on screen — for heading-less books several rows share one spine
+            // file, so the within-chapter fraction breaks the tie (see activeTocIndex).
+            val activeRow = entries.activeTocIndex(currentIndex, currentFraction)
             val initialScrollIndex = (activeRow - 1).coerceAtLeast(0)
             // Positioned on open only. While the panel stays open the list belongs
             // to the user — re-scrolling on chapter changes is what made it jump.
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
 
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                itemsIndexed(entries, key = { _, row -> "${row.chapterIndex}:${row.title}" }) { index, row ->
+                itemsIndexed(entries, key = { _, row -> "${row.chapterIndex}:${row.paragraph}:${row.title}" }) { index, row ->
                     val isCurrent = index == activeRow
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onChapterClick(row.chapterIndex) }
+                            .clickable { onChapterClick(row) }
                             // The current row gets a wash of its own so the state is
                             // visible without relying on the 3dp marker alone.
                             .background(

@@ -91,7 +91,7 @@ internal fun handleReaderOverlayAction(
     highlights: List<Highlight>,
     onClose: () -> Unit,
     onOpenAllSettings: () -> Unit,
-    onChapterChange: (Int) -> Unit,
+    onChapterChange: (index: Int, paragraph: Int) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit,
     onSaveNote: (highlightId: String, text: String) -> Unit,
     onComposeNote: (highlightId: String) -> Unit,
@@ -106,10 +106,14 @@ internal fun handleReaderOverlayAction(
         a == "allsettings" -> onOpenAllSettings()
 
         a.startsWith("toc:") -> {
-            val i = a.substringAfter(':').toIntOrNull() ?: return
+            // "toc:<chapterIndex>[:<paragraph>]" — the optional paragraph seeks within a spine
+            // file that holds several chapters (heading-less pdftohtml books).
+            val rest = a.substringAfter("toc:")
+            val i = rest.substringBefore(':').toIntOrNull() ?: return
+            val p = rest.substringAfter(':', "").toIntOrNull() ?: 0
             // Stay open: the reader re-syncs the highlight in place and the
             // TOC only closes when the user taps the backdrop or X.
-            onChapterChange(i)
+            onChapterChange(i, p)
         }
 
         a.startsWith("set:size:") -> onSettingsChange(

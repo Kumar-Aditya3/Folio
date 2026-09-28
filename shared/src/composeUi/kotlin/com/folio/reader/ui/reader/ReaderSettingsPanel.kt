@@ -356,9 +356,14 @@ fun ReaderSettingsPanel(
                 },
             )
 
-            // Margins
+            // Side margins — the distance from the screen edge to the text, written to
+            // both left and right as one symmetric control. Applies in BOTH layouts:
+            // continuous insets via the body's inline padding, and paged has the
+            // MulticolEngine inset the page by ML/MR (insetScroller). A margin change
+            // re-keys the surface load (HtmlContentSurface contentKey) so the paged
+            // engine re-injects with the new insets. Shown in every layout mode.
             LabeledSlider(
-                label = "Margins",
+                label = "Side margins",
                 valueLabel = "${settings.margins.left.toInt()} px",
                 overridden = "margins" in overriddenFields,
                 value = settings.margins.left,

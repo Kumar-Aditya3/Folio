@@ -37,6 +37,16 @@ sealed class IncomingContentResult {
     data class IoError(val reason: String, val cause: Throwable? = null) : IncomingContentResult()
 }
 
+/** True when the item was already in the library — not a new import, should open directly. */
+val IncomingContentResult.isAlreadyInLibrary: Boolean
+    get() = this is IncomingContentResult.DuplicateBook ||
+        this is IncomingContentResult.DuplicateDocument
+
+/** True when the item was freshly imported (not a duplicate, not an error). */
+val IncomingContentResult.isNewImport: Boolean
+    get() = this is IncomingContentResult.ImportedBook ||
+        this is IncomingContentResult.ImportedDocument
+
 typealias ImportResult = IncomingContentResult
 
 internal open class ImportFailure(message: String) : Exception(message)

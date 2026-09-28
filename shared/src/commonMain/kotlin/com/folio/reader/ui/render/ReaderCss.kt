@@ -125,6 +125,27 @@ object ReaderCss {
                         "$inkElements{$forceFamily}" +
                                 (if (publisherFonts) "" else "body h1,body h2,body h3,body h4,body h5,body h6{font-family:$family !important;}")) +
                     (if (original) "" else "body,body p,body div,body li,body blockquote{text-indent:0 !important;}")
+        // Publisher side-margin neutraliser — the fix for "the EPUB column is too thin /
+        // the side margins are too thick on some books". Many EPUBs set a PAGE-LEVEL
+        // horizontal margin (or padding) on their own wrapper containers — a top-level
+        // `<div>`/`<section>`, Calibre's `div.calibre`, `body{margin:5%}` remapped onto a
+        // wrapper once the publisher CSS is applied inside the reader. That inset STACKS
+        // on top of the reader's own side padding (the user's Margins setting), so the
+        // reading column shrinks by an amount the reader setting can neither see nor
+        // override. Zeroing the wrapper's HORIZONTAL margin (any depth) and the OUTERMOST
+        // wrapper's horizontal padding leaves the reader's `body` padding as the single
+        // authority for the side inset — exactly what the Margins slider expects to be.
+        //
+        // Scoped on purpose: only div/section/article/main are touched, never blockquote,
+        // ul, ol, li, dd, figure, table, img or p — so blockquote/list indentation,
+        // figure/image centring and paragraph rhythm are left intact. Horizontal only, so
+        // vertical block rhythm is untouched. Non-ORIGINAL only: ORIGINAL keeps the
+        // publisher's page furniture exactly as authored (the `imp` contract).
+        val publisherInsetReset = if (original) "" else
+            "body div,body section,body article,body main" +
+                    "{margin-left:0 !important;margin-right:0 !important;}" +
+                    "body>div,body>section,body>article,body>main,body div.calibre" +
+                    "{padding-left:0 !important;padding-right:0 !important;}"
         // Secondary ink: figcaptions and small print sit back from body text.
         val secondaryInkCss =
             "body figcaption,body small,body dt,body caption{color:#${theme.secondaryText.rgb()} !important;}"
@@ -154,8 +175,16 @@ object ReaderCss {
         // Paged modes cap the measure per column inside the engine, and need body
         // exactly 100vw wide for its page steps to line up.
         val capPx = if (pagedCols == 0) PageEngine.measurePx(settings.textWidth) else 0
+        // Continuous-mode readable-measure cap, expressed as min(cap,100%) rather than a
+        // bare max-width. Written this way the cap can only ever NARROW a viewport that is
+        // wider than the measure — it can never pull the column below the width actually
+        // available: on a phone (layout viewport < cap) the column fills the screen, and a
+        // viewport that somehow ended up wider than device-width (a publisher chapter
+        // carrying its own <meta viewport> under Android's useWideViewPort) still cannot
+        // shrink the text below what fits. The cap CONSTANT is unchanged (see
+        // PageEngine.measurePx); this only makes its intent explicit and viewport-safe.
         val widthCss = if (capPx > 0)
-            "body{max-width:${capPx}px !important;margin-left:auto !important;margin-right:auto !important;}"
+            "body{max-width:min(${capPx}px,100%) !important;margin-left:auto !important;margin-right:auto !important;}"
         else ""
         // Spread mode (two-page side-by-side): a hairline centre rule gives each
         // page its own visual frame without stealing reading space. The rule sits
@@ -192,6 +221,7 @@ object ReaderCss {
                 normalizedExtra +
                 alignForce +
                 elementForceCss +
+                publisherInsetReset +
                 secondaryInkCss +
                 dividerCss +
                 surfaceCss +
@@ -256,6 +286,17 @@ object ReaderCss {
                     (if (original) "" else "p,div,li,blockquote{text-indent:0 !important;}")
         val alignForce = if (original) "" else
             "p,li,blockquote,dd{text-align:$align !important;}"
+        // Publisher side-margin neutraliser inside the chapter Shadow DOM (continuous
+        // mode promotes the book's own <style> live into each shadow root, so its wrapper
+        // side margins/padding come back and stack on the reader's inset — the same
+        // "column too thin / side margins too thick" defect as the light-DOM path). No
+        // <body> exists here, so the wrapper containers are the shadow root's own top-level
+        // nodes: `:host > div|section|…`. Horizontal only, container elements only (never
+        // blockquote/list/dd/figure/table/img/p), non-ORIGINAL only — mirrors [styleSheet].
+        val publisherInsetReset = if (original) "" else
+            "div,section,article,main{margin-left:0 !important;margin-right:0 !important;}" +
+                    ":host>div,:host>section,:host>article,:host>main,div.calibre" +
+                    "{padding-left:0 !important;padding-right:0 !important;}"
         val paragraphCss = if (original) "" else
             "p{margin-top:0 !important;margin-bottom:${settings.paragraphSpacing}em !important;}"
         val themeBgCss =
@@ -281,6 +322,7 @@ object ReaderCss {
                 normalizedExtra +
                 alignForce +
                 elementForceCss +
+                publisherInsetReset +
                 secondaryInkCss +
                 dividerCss +
                 surfaceCss +

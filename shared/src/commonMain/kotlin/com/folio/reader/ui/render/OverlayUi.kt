@@ -1,6 +1,7 @@
 package com.folio.reader.ui.render
 
 import com.folio.reader.model.BookTocRow
+import com.folio.reader.model.activeTocIndex
 
 /**
  * Glass overlay panels (contents, annotations, reading settings) rendered INSIDE
@@ -67,16 +68,17 @@ object OverlayUi {
     private val itemCss = "all:unset;cursor:pointer;display:block;width:100%;box-sizing:border-box;" +
             "padding:10px 12px;border-radius:10px;"
 
-    fun toc(entries: List<BookTocRow>, current: Int, c: OverlayColors): String {
-        // Navigation names only some of the spine files, so the lit row is the last
-        // one that starts at or before the chapter on screen (see TOCSidebar).
-        val activeIndex = entries.lastOrNull { it.chapterIndex <= current }?.chapterIndex
-        val rows = entries.map { row ->
-            val active = row.chapterIndex == activeIndex
+    fun toc(entries: List<BookTocRow>, current: Int, currentFraction: Float, c: OverlayColors): String {
+        // Navigation names only some of the spine files, so the lit row is the last one that
+        // starts at or before the position on screen; for heading-less books several rows share
+        // one spine file, so the within-chapter fraction breaks the tie (see TOCSidebar).
+        val activeRow = entries.activeTocIndex(current, currentFraction)
+        val rows = entries.mapIndexed { index, row ->
+            val active = index == activeRow
             val style = if (active) "$itemCss background:${c.accent}22;color:${c.accent};font-weight:600;" else
                 "$itemCss color:${c.fg};"
             val cls = if (active) " class=\"ovl-active\"" else ""
-            "<button$cls data-act=\"toc:${row.chapterIndex}\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(row.title)}</button>"
+            "<button$cls data-act=\"toc:${row.chapterIndex}:${row.paragraph}\" style=\"$style\" onmouseover=\"this.style.background='${if (c.isDark) "rgba(255,255,255,0.08)" else "rgba(0,0,0,0.06)"}'\" onmouseout=\"this.style.background='${if (active) c.accent + "22" else "transparent"}'\">${esc(row.title)}</button>"
         }.joinToString("")
         return shell("Contents", rows, c, width = 280, kind = "toc")
     }

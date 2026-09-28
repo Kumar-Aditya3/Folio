@@ -56,6 +56,8 @@ internal data class AtlasRelated(
     val author: String,
     val coverPath: String?,
     val accent: Color,
+    /** Why this book sits nearby — a shared theme, shared genre, or what it is about. */
+    val subtitle: String? = null,
 )
 
 private val SHEET_INK = Color(0xFFF1F0FA)
@@ -423,6 +425,17 @@ private fun RelatedCard(r: AtlasRelated, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 72.dp),
         )
+        if (!r.subtitle.isNullOrBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = r.subtitle,
+                style = FolioTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.sp),
+                color = lerp(r.accent, Color.White, 0.45f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 72.dp),
+            )
+        }
     }
 }
 

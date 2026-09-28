@@ -32,6 +32,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.folio.reader.importer.IncomingContent
 import com.folio.reader.importer.IncomingContentResult
+import com.folio.reader.importer.isAlreadyInLibrary
+import com.folio.reader.importer.isNewImport
 import com.folio.reader.nav.FolioDestination
 import com.folio.reader.nav.FolioNavCallbacks
 import com.folio.reader.nav.FolioNavHost
@@ -551,22 +553,20 @@ class MainActivity : ComponentActivity() {
                 }
                 val results = graph.incomingContentCoordinator.importMany(incoming)
                 var restored = 0
-                val importedBooks = mutableListOf<com.folio.reader.model.Book>()
-                results.forEach { result ->
-                    val book = when (result) {
-                        is IncomingContentResult.ImportedBook -> result.book
-                        is IncomingContentResult.DuplicateBook -> result.book
-                        else -> null
-                    }
-                    if (book != null) {
-                        importedBooks += book
-                        restored += runCatching {
-                            graph.syncEngine?.adoptCloudProgressForBook(
-                                book.id,
-                                book.epubHash
-                            ) ?: 0
-                        }.getOrDefault(0)
-                    }
+                // Only genuinely new books earn the import handling — adopting cloud progress,
+                // kicking the embedding backfill, and asking which shelf to file them on. An
+                // already-imported book has all three already, so it just opens.
+                val importedBooks = results.mapNotNull {
+                    (it as? IncomingContentResult.ImportedBook)?.book
+                }
+                val duplicates = results.count { it.isAlreadyInLibrary }
+                importedBooks.forEach { book ->
+                    restored += runCatching {
+                        graph.syncEngine?.adoptCloudProgressForBook(
+                            book.id,
+                            book.epubHash
+                        ) ?: 0
+                    }.getOrDefault(0)
                 }
                 if (importedBooks.isNotEmpty()) {
                     // Import no longer embeds inline (see FolioApplication's BookImporter wiring).
@@ -574,13 +574,19 @@ class MainActivity : ComponentActivity() {
                     // background now, rather than only on the next app launch's scheduled run.
                     com.folio.reader.work.EmbeddingBackfillScheduler.schedule(applicationContext)
                 }
-                val successful = results.count { it.openRoute() != null }
-                val firstRoute = results.firstNotNullOfOrNull { it.openRoute() }
+                val successful = results.count { it.isNewImport }
+                // Open what was just added; otherwise fall back to the existing item.
+                val firstRoute = results.firstNotNullOfOrNull { it.freshRoute() }
+                    ?: results.firstNotNullOfOrNull { it.openRoute() }
                 val failure = results.firstNotNullOfOrNull { it.failureReason() }
                 withContext(Dispatchers.Main) {
                     importStatus = when {
+                        successful > 0 && duplicates > 0 ->
+                            "Imported $successful of ${uris.size} file(s) • " +
+                                "$duplicates already in library"
                         successful > 0 ->
                             "Imported $successful of ${uris.size} file(s)"
+                        duplicates > 0 -> "Already in library"
                         failure != null -> "Import failed: $failure"
                         else -> "No supported files were imported"
                     }
@@ -678,6 +684,14 @@ class MainActivity : ComponentActivity() {
         is IncomingContentResult.ImportedDocument ->
             FolioDestination.documentReader(document.id)
         is IncomingContentResult.DuplicateDocument ->
+            FolioDestination.documentReader(document.id)
+        else -> null
+    }
+
+    /** Route for a file this batch actually added — opened in preference to an existing item. */
+    private fun IncomingContentResult.freshRoute(): String? = when (this) {
+        is IncomingContentResult.ImportedBook -> FolioDestination.reader(book.id)
+        is IncomingContentResult.ImportedDocument ->
             FolioDestination.documentReader(document.id)
         else -> null
     }

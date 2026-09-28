@@ -110,13 +110,28 @@ internal object AtlasGalaxy {
     }
 
     /**
-     * A book's star/nebula colour: its **genre**'s colour when classified, otherwise a stable colour
-     * from its emergent **community**. The community fallback (rather than one flat grey) is what
-     * keeps the galaxy colourful before genres are classified, or when the classifier leaves a book
-     * unclassified — a uniformly grey map was the regression when colouring moved genre-first.
+     * A book's star/nebula colour: its **genre**'s hue, nudged in brightness by its emergent
+     * community so a genre-dominant library is a spread of shades rather than one flat wash.
+     *
+     * The reader asked to keep colour meaning genre ("themes name the regions, genres tint them"),
+     * but pure genre colour paints a single-genre library one colour. The per-community brightness
+     * step keeps the genre's hue identity (a fantasy library still reads as its fantasy hue) while
+     * separating its nebulae, and books with no resolved genre fall back to a distinct per-community
+     * hue so the map is never grey. The legend tints its dots the same way, so key and map agree.
      */
-    fun bookColor(book: AtlasBook): Color =
-        if (!book.genre.isNullOrBlank()) genreColor(book.genre) else communityColor(book.communityId)
+    fun bookColor(book: AtlasBook): Color {
+        val base = if (!book.genre.isNullOrBlank()) genreColor(book.genre) else communityColor(book.communityId)
+        return tintByCommunity(base, book.communityId)
+    }
+
+    /** Brightness variants around a hue, so same-genre nebulae in different communities stay distinct. */
+    private val TINT_STEPS = floatArrayOf(1f, 1.16f, 0.86f, 1.30f, 0.74f, 1.08f, 0.92f)
+
+    private fun tintByCommunity(c: Color, communityId: Int): Color {
+        val f = TINT_STEPS[((communityId % TINT_STEPS.size) + TINT_STEPS.size) % TINT_STEPS.size]
+        // valMul only: keep the hue, move the lightness so the genre stays recognisable.
+        return saturate(c, 1f, f)
+    }
 
     /** Map of communityId → colour for a model, so stars and nebulae share one source of truth. */
     fun communityColors(model: AtlasModel): Map<Int, Color> =

@@ -123,6 +123,7 @@ function fw(n){return function(){try{var f=frame.contentWindow&&frame.contentWin
 window.__folioSeek=fw('__folioSeek');window.__folioSeekTo=fw('__folioSeekTo');window.__folioSeekPara=fw('__folioSeekPara');
 window.__folioRestyle=fw('__folioRestyle');window.__folioClearSel=fw('__folioClearSel');window.__folioStampImgs=fw('__folioStampImgs');
 window.__folioPaintHighlights=fw('__folioPaintHighlights');window.__folioRelayout=fw('__folioRelayout');
+window.__folioSetInsets=fw('__folioSetInsets');
 body.style.opacity='1';
 }catch(e){try{document.body.style.opacity='1';document.title='folio-engdiag:bootthrow:'+String((e&&e.message)||e).replace(/[:]/g,' ').slice(0,90)+':1';}catch(e2){}}
 })();
@@ -283,6 +284,11 @@ function goTo(p,instant){
 }
 function relayout(){if(dirty)measure();page=Math.max(0,Math.min(maxPage(),Math.round(posFrac*maxPage())));diag('relayout');if(!revealed){if(fontsReady){revealIn();}else{apply(false);}}else{apply(false);root.style.opacity='1';}report_();}
 window.__folioRelayout=function(){dirty=true;relayout();};
+// Live side-margin update (paged): the host pushes new left/right insets when the
+// reader's "Side margins" slider moves, so paged side margins are affectable WITHOUT a
+// full document reload (a reload would reseed the page from posFrac and flash). Just
+// updates ML/MR and re-measures at the new page width; posFrac holds the current page.
+window.__folioSetInsets=function(ml,mr){if(ml!=null)ML=ml;if(mr!=null)MR=mr;dirty=true;relayout();};
 window.__folioSeek=function(f){if(DIAG)try{console.log('FOLIO-SEEK v='+f);}catch(e){}var v=Math.min(1,Math.max(0,f||0));posFrac=v;if(dirty)measure();page=Math.round(v*maxPage());apply(false);root.style.opacity='1';revealed=true;report_();};
 // The iframe is never internally scrolled (the container scrolls), so an
 // element's content-space x is just its bounding-rect left.

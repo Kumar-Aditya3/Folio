@@ -43,6 +43,7 @@ import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.LocalTabMorphActive
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
@@ -74,8 +75,15 @@ fun BookList(
             }
         }
     }
+    // §17 tab-morph crash guard: during a Home↔Library tab dissolve these rows are the live
+    // shared-element source/target. Scrolling now disposes the cells hosting the in-flight
+    // sharedElement nodes and tears them down mid-flight — the scroll-during-morph crash. The
+    // dissolve is ~300ms, so freezing the list for that window is imperceptible and removes the
+    // trigger. False when no provider is present (desktop), so scrolling is unaffected there.
+    val tabMorphActive = LocalTabMorphActive.current
     LazyColumn(
         state = listScroll,
+        userScrollEnabled = !tabMorphActive,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = com.folio.reader.ui.theme.FolioTokens.space2 +
@@ -243,8 +251,13 @@ fun BookCompactList(
             }
         }
     }
+    // §17 tab-morph crash guard: same as BookList — a Home↔Library dissolve keeps these rows as
+    // the live shared-element source/target, and scrolling would dispose the in-flight cells and
+    // crash. Frozen for the ~300ms dissolve; false (unrestricted) off Android / desktop.
+    val tabMorphActive = LocalTabMorphActive.current
     LazyColumn(
         state = listScroll,
+        userScrollEnabled = !tabMorphActive,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = com.folio.reader.ui.theme.FolioTokens.space2 +

@@ -23,8 +23,12 @@ import com.folio.reader.ui.statistics.StatisticsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -311,6 +315,37 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         // frame. Left cold, the grid composes mid-morph. See [libraryBooks].
         libraryBooks
         statisticsVM
+        warmAtlas()
+    }
+
+    /**
+     * Keeps the Atlas roll-up warm **in the background**, so opening the Atlas is instant instead of
+     * blocking behind the multi-second recompute the reader complained about after every add/remove.
+     *
+     * The roll-up's cache is keyed by a fingerprint of the library (chunk/book/genre counts), so an
+     * add or remove invalidates it and the next open used to recompute on the open path. Here we
+     * watch the library size and, once it settles, recompute the map off-screen ([prewarm] no-ops
+     * when nothing changed). Combined with the Atlas screen showing the last computed map on the
+     * first frame, an open never waits: it shows the previous map immediately and swaps in the fresh
+     * one when this background pass (or the screen's own reconcile) finishes.
+     */
+    private var atlasWarmed = false
+    private fun warmAtlas() {
+        if (atlasWarmed) return
+        atlasWarmed = true
+        activity.appScope.launch(Dispatchers.Default) {
+            libraryBooks
+                .map { it.size }
+                .distinctUntilChanged()
+                // collectLatest cancels the pending prewarm when the size changes again, so a burst
+                // of imports/deletes coalesces into a single recompute once the library settles.
+                .collectLatest { count ->
+                    if (!globalSettings.semanticDiscovery) return@collectLatest
+                    if (count < com.folio.reader.ml.SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD) return@collectLatest
+                    delay(2_000)
+                    runCatching { graph.semanticDiscoveryRepository.prewarm() }
+                }
+        }
     }
     val sourceBrowseVmCache = mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
     val searchUiState = SearchUiState()

@@ -61,10 +61,17 @@ class SemanticDiscoveryRepository(
     // add/remove/reindex silently invalidates it and it is recomputed. Within a session the
     // in-memory copy short-circuits even the disk read.
     private val atlasMutex = Mutex()
-    private var cachedFingerprint: String? = null
-    private var cachedAtlas: AtlasModel? = null
+    // @Volatile so the mutex-free [lastComputedAtlas] fast path can read the latest reference from
+    // another coroutine without tearing — it must never block behind an in-flight [atlas] compute,
+    // which holds [atlasMutex] for the whole multi-second roll-up.
+    @Volatile private var cachedFingerprint: String? = null
+    @Volatile private var cachedAtlas: AtlasModel? = null
     private val cacheJson = Json { ignoreUnknownKeys = true }
 
+    // Prototype vectors for the theme vocabulary, embedded once per model (the ≈40 themes × a few
+    // phrases each) and reused for every theme assignment. Raw model space, so a cluster's raw
+    // centroid can be ranked against them directly. Null until first embedded (or if no model).
+    @Volatile private var cachedThemeVectors: Map<NarrativeTheme, FloatArray>? = null
     // ---- Echoes --------------------------------------------------------------------------
 
     /** True when there is a model and vectors to answer from — the same gate search uses. */
@@ -286,6 +293,38 @@ class SemanticDiscoveryRepository(
     }
 
     /**
+     * The last computed map, for an **instant** open — the in-memory session copy if present, else
+     * whatever was last persisted to [cacheDir], *regardless of whether the library has changed
+     * since*. Deliberately takes no lock and never recomputes: opening the Atlas can show this last
+     * map on the first frame while a fresh [atlas] recomputes in the background and swaps in when
+     * ready, so an add/remove never leaves the reader staring at a "Charting your universe…"
+     * skeleton. Null only when nothing has ever been computed on this device.
+     */
+    suspend fun lastComputedAtlas(): AtlasModel? {
+        cachedAtlas?.let { return it }
+        val envelope = readDiskEnvelopeAny() ?: return null
+        // Seed the session cache from disk so an *unchanged* library's next [atlas] returns this
+        // very instance instead of re-deserialising a fresh one (which would needlessly re-derive
+        // and re-bake the whole map). Safe: [atlas] still re-checks the live [fingerprint], so a
+        // library that changed since this was written recomputes rather than serving this stale map.
+        if (cachedAtlas == null) {
+            cachedAtlas = envelope.model
+            cachedFingerprint = envelope.fingerprint
+        }
+        return cachedAtlas ?: envelope.model
+    }
+
+    /**
+     * Computes (and caches) the map in the background so the next Atlas open is instant. Idempotent
+     * and cheap when nothing changed: [atlas] short-circuits on the fingerprint, so calling this
+     * after a book add/remove is what moves the multi-second roll-up *off* the open path and into
+     * the background. Best-effort — a failure just means the next open recomputes as before.
+     */
+    suspend fun prewarm() {
+        runCatching { atlas() }
+    }
+
+    /**
      * Rolls each emergent community up to a display genre and colour.
      *
      * The name is the **plurality broad genre** among the community's member books (metadata- or
@@ -406,6 +445,21 @@ class SemanticDiscoveryRepository(
     }
 
     /**
+     * Reads the last persisted envelope from [cacheDir] **ignoring the fingerprint** — the possibly-
+     * stale map from before the most recent add/remove/reindex, together with the fingerprint it was
+     * computed for. Backs [lastComputedAtlas]'s instant open. Best-effort: any IO/parse failure → null.
+     */
+    private suspend fun readDiskEnvelopeAny(): AtlasCacheEnvelope? {
+        val file = cacheDir?.let { File(it, ATLAS_CACHE_FILE) } ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (!file.exists()) return@runCatching null
+                cacheJson.decodeFromString(AtlasCacheEnvelope.serializer(), file.readText())
+            }.getOrNull()
+        }
+    }
+
+    /**
      * Persists [model] under [fingerprint] to [cacheDir] for the next cold start. Written to a temp
      * file then renamed so a kill mid-write cannot leave a half-written cache — and even if it did,
      * [readDiskCache] swallows a parse failure and recomputes. Best-effort: a failure just means the
@@ -477,6 +531,91 @@ class SemanticDiscoveryRepository(
         for (i in 0 until n) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
         val denom = kotlin.math.sqrt(na) * kotlin.math.sqrt(nb)
         return if (denom > 1e-9) dot / denom else 0.0
+    }
+
+    /**
+     * Labels each cluster of every book with a **theme** from the fixed [ThemeTaxonomy], keyed by
+     * `exemplarChunkId` (the same key [refineBookLabels] uses, so the map drops straight into the
+     * screen's `refinedLabels`).
+     *
+     * This is the "different philosophy" the reader asked for: instead of c-TF-IDF, which surfaces a
+     * cluster's most *distinctive* word (a character name like "Molly", a lone motif like
+     * "constellations"), each cluster is **projected onto the theme vocabulary** — the theme whose
+     * prototype phrases sit nearest its raw centroid. The label space is designed and shared across
+     * books, so regions read as "Coming of Age" or "Political Intrigue", never a proper noun.
+     *
+     * Runs on the embedder dispatcher off the roll-up (like [refineBookLabels]): it embeds the ≈40
+     * theme prototypes once (cached), then it is pure cosine over the roll-up's stored raw centroids
+     * — no chunk reload, no per-book re-embedding. Calibrated (each theme's library-wide mean cosine
+     * is subtracted) so a theme generically close to everything cannot always win, then centred per
+     * cluster so the pick is a real argmax. Best-effort: any failure returns empty and the caller
+     * keeps whatever labels it had.
+     */
+    suspend fun assignThemes(books: List<AtlasBook>): Map<String, String> = withContext(dispatcher) {
+        val clusters = books.flatMap { b -> b.clusters.filter { it.rawCentroid.isNotEmpty() } }
+        if (clusters.isEmpty()) return@withContext emptyMap()
+        val themeVecs = themeVectors() ?: return@withContext emptyMap()
+        val themes = themeVecs.keys.toList()
+
+        // Calibration: each theme's mean cosine across every cluster. Subtracting it cancels the
+        // embedder anisotropy that makes some themes score high against *everything*.
+        val bias = HashMap<NarrativeTheme, Double>(themes.size)
+        for (t in themes) {
+            val tv = themeVecs.getValue(t)
+            var s = 0.0
+            for (c in clusters) s += cosine(c.rawCentroid, tv)
+            bias[t] = s / clusters.size
+        }
+
+        val out = HashMap<String, String>(clusters.size)
+        for (c in clusters) {
+            val adjusted = themes.map { t -> t to (cosine(c.rawCentroid, themeVecs.getValue(t)) - (bias[t] ?: 0.0)) }
+            val mean = adjusted.map { it.second }.average()
+            // Centre per cluster, then take the clear argmax (deterministic on ties by taxonomy order).
+            val best = adjusted
+                .map { it.first to (it.second - mean) }
+                .sortedWith(compareByDescending<Pair<NarrativeTheme, Double>> { it.second }.thenBy { it.first.ordinal })
+                .firstOrNull()?.first
+            if (best != null) out[c.exemplarChunkId] = best.displayName
+        }
+        out
+    }
+
+    /**
+     * Embeds the theme vocabulary's prototype phrases once (as queries, into raw model space so they
+     * match the stored raw centroids), averages each theme's phrases into a unit prototype, and
+     * caches the result for the model in force. Null when no model is available to embed with.
+     */
+    private suspend fun themeVectors(): Map<NarrativeTheme, FloatArray>? {
+        cachedThemeVectors?.let { return it }
+        val themes = ThemeTaxonomy.all
+        val phrasesPer = themes.map { it.prototypePhrases }
+        val flat = phrasesPer.flatten()
+        val vecs = runCatching { semanticSearch.embedTexts(flat) }.getOrNull() ?: return null
+        var idx = 0
+        val map = LinkedHashMap<NarrativeTheme, FloatArray>()
+        themes.forEachIndexed { i, t ->
+            val count = phrasesPer[i].size
+            val slice = ArrayList<FloatArray>(count)
+            for (k in 0 until count) vecs.getOrNull(idx + k)?.let { slice.add(it) }
+            idx += count
+            meanNormalize(slice)?.let { map[t] = it }
+        }
+        return if (map.isNotEmpty()) map.also { cachedThemeVectors = it } else null
+    }
+
+    /** Mean of a set of vectors, L2-normalised to a unit prototype. Null when empty/degenerate. */
+    private fun meanNormalize(vecs: List<FloatArray>): FloatArray? {
+        if (vecs.isEmpty()) return null
+        val dims = vecs.first().size
+        val out = FloatArray(dims)
+        for (v in vecs) if (v.size == dims) for (i in out.indices) out[i] += v[i]
+        var norm = 0.0
+        for (x in out) norm += x.toDouble() * x
+        norm = kotlin.math.sqrt(norm)
+        if (norm <= 1e-9) return null
+        for (i in out.indices) out[i] = (out[i] / norm).toFloat()
+        return out
     }
 
     /**

@@ -204,11 +204,36 @@ data class EpubTocItem(
  * spine-derived chapter list. A book that splits each chapter across several
  * spine files has far more chapters than Contents entries, so the index is part
  * of the row rather than assumed to be the row position.
+ *
+ * [paragraph] is a sub-position within that chapter, expressed as a 0-based ordinal
+ * into the chapter's `<p>` elements (the same grammar the reader's `p:<n>` seek uses).
+ * 0 means the chapter top. It is only non-zero for books with no real per-chapter
+ * files, where several chapters share one spine document and the Contents is
+ * recovered by scanning that document's own chapter headings.
  */
 data class BookTocRow(
     val title: String,
-    val chapterIndex: Int
+    val chapterIndex: Int,
+    val paragraph: Int = 0,
+    /**
+     * Start of this row within its chapter as a 0..1 fraction, used only to light the current row
+     * as you read. It matches the reader's chapter-progress fraction, so when several rows share
+     * one spine file (heading-less books) the right one stays lit. 0 for an ordinary one-row chapter.
+     */
+    val fraction: Float = 0f
 )
+
+/**
+ * Index of the Contents row the reader is currently within, or -1 when the position is ahead of
+ * every row. Position-aware: for an ordinary Contents (one row per chapter, [BookTocRow.fraction]
+ * 0) it reduces to "the current chapter's row"; when several rows share one spine file it advances
+ * row-by-row as [fraction] within that chapter grows.
+ */
+fun List<BookTocRow>.activeTocIndex(chapterIndex: Int, fraction: Float): Int =
+    indexOfLast {
+        it.chapterIndex < chapterIndex ||
+            (it.chapterIndex == chapterIndex && it.fraction <= fraction + 1e-3f)
+    }
 
 @Serializable
 data class ParsedEpub(

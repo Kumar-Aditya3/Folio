@@ -139,17 +139,24 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             // Atlas hero gating: the app-level flag plus a map-ready library (≥ threshold embedded
             // books). Resolved off the main thread; the hero simply does not appear until true.
             var atlasReady by remember { mutableStateOf(navModel.atlasEligible == true) }
-            LaunchedEffect(navModel.globalSettings.semanticDiscovery) {
+            // A cheap, reactive gate on the *total* library size (the hot shelf read): below the
+            // threshold the hero can't qualify, and crossing it re-fires the resolve below so the
+            // hero appears without an app restart.
+            val mapReadySize = navModel.libraryBooks.collectAsState().value.size >=
+                com.folio.reader.ml.SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD
+            LaunchedEffect(navModel.globalSettings.semanticDiscovery, mapReadySize) {
                 if (!navModel.globalSettings.semanticDiscovery) { atlasReady = false; return@LaunchedEffect }
-                // Use the session-cached answer immediately if we have it (revisits are instant);
-                // otherwise resolve it once here, but AFTER a short beat so the COUNT(DISTINCT) does
-                // not contend with Home's own startup queries on the single serialized DB connection
-                // — that contention is what made the screen janky on launch. The card fades/expands
-                // in when the answer lands (see HomeScreen's AnimatedVisibility), so the deferral
-                // reads as a gentle arrival rather than a pop. Cached in the nav model thereafter.
-                navModel.atlasEligible?.let { atlasReady = it; return@LaunchedEffect }
-                kotlinx.coroutines.delay(700)
-                val eligible = runCatching { graph.semanticDiscoveryRepository.atlasHeroEligible() }.getOrDefault(false)
+                // Show the session-cached answer immediately so a revisit never flickers, then ALWAYS
+                // re-resolve the cheap COUNT(DISTINCT). The old code short-circuited on the cache and
+                // never re-checked, so a hero that first resolved false — because the embedding
+                // backfill had not caught up yet — stayed hidden for the whole session, and on tab
+                // re-entry the keyless remember re-read that frozen false. Re-resolving here (the
+                // effect also re-runs when Home recomposes after a tab switch, and when the library
+                // crosses the threshold) is what lets the hero reliably (re)appear once eligible.
+                navModel.atlasEligible?.let { atlasReady = it }
+                kotlinx.coroutines.delay(500)
+                val eligible = runCatching { graph.semanticDiscoveryRepository.atlasHeroEligible() }
+                    .getOrDefault(navModel.atlasEligible ?: false)
                 navModel.atlasEligible = eligible
                 atlasReady = eligible
             }

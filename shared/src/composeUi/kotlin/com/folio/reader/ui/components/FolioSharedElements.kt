@@ -354,6 +354,18 @@ fun Modifier.sharedElementOrNoop(
     // clip below can be remembered without a conditional `remember`.
     val topPx = with(LocalDensity.current) { LocalFolioTopInset.current.toPx() }
     val tabClip = remember(topPx) { BelowMastheadOverlayClip(topPx) }
+    // Secondary tab-morph fix (deliberately NOT taken — see the crash guard in BookGrid/BookList/
+    // BookCompactList instead). Freezing this branch to the value captured at the node's *first*
+    // composition would break the shelf→detail push: a cover cell that first composes while a
+    // Home↔Library dissolve is live would capture `tabMorph = true` and then keep reusing the
+    // tab-morph spec (folioTabMorphBounds + BelowMastheadOverlayClip) for the later push *into*
+    // that book — a slower, unclipped morph that push is meant to have. A cover node outlives any
+    // single morph and takes part in several of different kinds, so the branch must track the morph
+    // currently in flight, which is exactly what LocalTabMorphActive reports. The true→false flip
+    // read here each recomposition is the normal, non-crashing *end* of every tab morph: both
+    // branches call the same `sharedElement` modifier element, so a flip updates its params in
+    // place rather than re-creating the node. The crash came from disposing these cells while
+    // scrolling mid-flight, which `userScrollEnabled = !tabMorphActive` on the shelves now prevents.
     val tabMorph = LocalTabMorphActive.current
     return with(scopes.sharedTransitionScope) {
         val state = rememberSharedContentState(key)

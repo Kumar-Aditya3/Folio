@@ -28,11 +28,12 @@ object ContinuousEngine {
      *   browser component, so the engine provides pointer/click handlers there;
      *   Android already intercepts those natively and would double-report.
      */
-    fun js(seedSpine: Int, seedFraction: Float, desktopEvents: Boolean, diag: Boolean = false, shadow: Boolean = true, shadowCss: String = ""): String = """
+    fun js(seedSpine: Int, seedFraction: Float, desktopEvents: Boolean, diag: Boolean = false, shadow: Boolean = true, shadowCss: String = "", signalPaint: Boolean = false): String = """
 (function(){
 if(window.__folioBridgeInstalled)return;window.__folioBridgeInstalled=true;
 var SEED_SPINE=$seedSpine,SEED_FRAC=$seedFraction,DESKTOP=$desktopEvents,DIAG=$diag;
 var SHADOW=$shadow;
+var SIGNAL_PAINT=$signalPaint;
 var SHADOW_CSS=${jsStr(shadowCss)};
 var nonce=0,restorePending=SEED_FRAC>0.001;
 try{console.log('FOLIO-BUILD continuous v9 seed='+SEED_SPINE+'/'+SEED_FRAC);}catch(e){}
@@ -547,6 +548,15 @@ noAnchor();initShadowSheet();shadowifyAll();
 // stamping (de-layer) + section repair now, and again as fonts/images settle.
 function folioPostShadow(){try{if(window.__folioStampImgs)window.__folioStampImgs();secs().forEach(repairSection);}catch(e){}}
 folioPostShadow();restore();schedule();setTimeout(function(){folioPostShadow();schedule();},150);setTimeout(function(){window.__folioFxlRescale();schedule();},250);setTimeout(function(){folioPostShadow();schedule();},700);setTimeout(schedule,1500);
+// Reflowable-document first-paint signal. A non-windowed document (DOCX/HTML) keeps its
+// host cover held until the text is genuinely stable. restore() has already revealed the
+// body, but it does so UNDER the opaque host cover, so the raw fallback-font frame and the
+// web-font swap reflow are both hidden; only once document.fonts.ready has settled do we
+// tell the host to dissolve the cover — onto final, non-reflowing text. Sent through the
+// same document.title channel as every other signal, with a timeout backstop in case
+// fonts.ready never resolves (a document with no web font). Windowed EPUB leaves
+// SIGNAL_PAINT off and keeps paint-on-finish.
+if(SIGNAL_PAINT){var __folioPainted=function(){try{document.title='folio-painted:'+(++nonce);}catch(e){}};if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){requestAnimationFrame(__folioPainted);});}else{requestAnimationFrame(__folioPainted);}setTimeout(__folioPainted,1500);}
 if(DIAG){setTimeout(function(){folioDiag('t300');},300);setTimeout(function(){folioDiag('t1500');},1500);setTimeout(function(){folioDiag('t3000');},3000);}
 })();
 """

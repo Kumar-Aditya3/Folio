@@ -77,31 +77,70 @@ class EpubParser(
      * cheap enough to run every time a book opens. A book that splits each chapter over several
      * spine files otherwise lists every fragment, and names the ones it has no label for.
      *
+     * When the book's own nav is degenerate — most often an EPUB2 NCX stubbed down to a single
+     * "Start" navPoint — two fallbacks recover a real Contents: the full HTML Contents page linked
+     * from the OPF <guide>, and, failing that, the chapter headings scanned out of the spine
+     * documents themselves (for pdftohtml/Calibre conversions that carry no structured nav at all).
+     *
      * Returns empty when the book has no usable nav, so the caller falls back to chapter titles.
      */
     suspend fun parseBookToc(filePath: String, chapters: List<Chapter>): List<BookTocRow> =
         withContext(Dispatchers.IO) {
-            val toc = runCatching {
+            runCatching {
                 ZipFile(filePath).use { zip ->
-                    val opfPath = findOpfPath(zip)
-                    if (opfPath == null) emptyList<EpubTocItem>()
-                    else {
-                        val (_, manifest, _) = parseOpf(readZipEntry(zip, opfPath), opfPath)
-                        parseToc(zip, manifest, opfPath)
-                    }
+                    val opfPath = findOpfPath(zip) ?: return@use emptyList<BookTocRow>()
+                    val opfData = readZipEntry(zip, opfPath)
+                    val (_, manifest, _) = parseOpf(opfData, opfPath)
+
+                    val primaryRows = projectTocRows(parseToc(zip, manifest, opfPath), chapters)
+                    // A healthy nav names the whole book; keep it untouched. Only a degenerate nav
+                    // (0–1 usable rows, e.g. a stub NCX pointing only at the cover) is worth the
+                    // extra work of looking for a better Contents source.
+                    if (primaryRows.size > 1) return@use primaryRows
+
+                    // 1) The full HTML Contents page the OPF <guide> points at (EPUB2 publishers
+                    //    often ship one even when the NCX is a stub).
+                    val guideRows = runCatching {
+                        val guideHref = findGuideTocHref(opfData)
+                            ?.substringBefore("#")?.substringBefore("?")
+                            ?: return@runCatching emptyList<BookTocRow>()
+                        val entry = findZipEntry(zip, opfPath, guideHref)
+                            ?: return@runCatching emptyList<BookTocRow>()
+                        projectTocRows(parseHtmlToc(zip, readZipEntry(zip, entry), opfPath), chapters)
+                    }.getOrDefault(emptyList())
+                    if (guideRows.size > 1) return@use guideRows
+
+                    // 2) No structured Contents anywhere (stub NCX, empty guide) — the common shape
+                    //    of a pdftohtml/Calibre conversion where the whole book is a handful of
+                    //    oversized spine files and the chapter headings survive only as styled
+                    //    paragraphs. Recover the Contents by scanning those headings, each aimed at
+                    //    its own paragraph so navigation still lands on the chapter.
+                    val contentRows = runCatching { scanContentToc(zip, opfPath, chapters) }
+                        .getOrDefault(emptyList())
+                    if (contentRows.size > 1 && contentRows.size > primaryRows.size) return@use contentRows
+
+                    if (guideRows.size > primaryRows.size) guideRows else primaryRows
                 }
             }.getOrDefault(emptyList())
-            if (toc.isEmpty()) return@withContext emptyList()
-
-            val rows = mutableListOf<BookTocRow>()
-            val emitted = mutableSetOf<EpubTocItem>()
-            chapters.forEachIndexed { index, chapter ->
-                val match = findTocMatch(chapter.href, toc)
-                    ?.takeIf { it.label.isNotBlank() && emitted.add(it) } ?: return@forEachIndexed
-                rows += BookTocRow(match.label.trim(), index)
-            }
-            rows
         }
+
+    /**
+     * Projects a parsed TOC onto spine positions: one clean-labelled row per chapter it names,
+     * de-duplicated (an entry reached by several fragments emits once), spine files it never names
+     * dropped, and nesting flattened. This is the shared "optimised" Contents shape; both the
+     * book's own nav and the guide-HTML fallback pass through it identically.
+     */
+    private fun projectTocRows(toc: List<EpubTocItem>, chapters: List<Chapter>): List<BookTocRow> {
+        if (toc.isEmpty()) return emptyList()
+        val rows = mutableListOf<BookTocRow>()
+        val emitted = mutableSetOf<EpubTocItem>()
+        chapters.forEachIndexed { index, chapter ->
+            val match = findTocMatch(chapter.href, toc)
+                ?.takeIf { it.label.isNotBlank() && emitted.add(it) } ?: return@forEachIndexed
+            rows += BookTocRow(match.label.trim(), index)
+        }
+        return rows
+    }
 
     private fun findOpfPath(zipFile: ZipFile): String? {
         val containerEntry = zipFile.getEntry("META-INF/container.xml")
@@ -259,6 +298,137 @@ class EpubParser(
             parseNav(navData)
         } else {
             parseNcx(navData)
+        }
+    }
+
+    /**
+     * The href of the human-readable Contents page an EPUB2 OPF <guide> points at
+     * (<reference type="toc" .../>), or null. Used only as a fallback when the machine nav
+     * (NCX/EPUB3 nav) is degenerate; many EPUB2 books ship a stub NCX yet a complete HTML TOC.
+     */
+    private fun findGuideTocHref(opfData: ByteArray): String? {
+        val parser = xmlFactory.newPullParser()
+        parser.setInput(ByteArrayInputStream(bomFree(opfData)), declaredCharset(opfData) ?: "UTF-8")
+        var inGuide = false
+        var eventType = parser.eventType
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            when (eventType) {
+                XmlPullParser.START_TAG -> when (parser.name) {
+                    "guide" -> inGuide = true
+                    "reference" -> if (inGuide) {
+                        val type = parser.getAttributeValue(null, "type")?.trim()?.lowercase()
+                        if (type == "toc") {
+                            val href = parser.getAttributeValue(null, "href")
+                            if (!href.isNullOrBlank()) return href
+                        }
+                    }
+                }
+                XmlPullParser.END_TAG -> if (parser.name == "guide") inGuide = false
+            }
+            eventType = parser.next()
+        }
+        return null
+    }
+
+    /**
+     * Reads a human-readable HTML Contents page into TOC entries: every <a href> with real text,
+     * in document order. Anchor hrefs are relative to the Contents page, so each is resolved to its
+     * actual zip entry (matching the resolved form of chapter hrefs) before matching. Nesting is
+     * left flat — [projectTocRows] flattens anyway.
+     */
+    private fun parseHtmlToc(zipFile: ZipFile, htmlData: ByteArray, opfPath: String): List<EpubTocItem> {
+        val parser = xmlFactory.newPullParser()
+        parser.setInput(ByteArrayInputStream(bomFree(htmlData)), declaredCharset(htmlData) ?: "UTF-8")
+        val toc = mutableListOf<EpubTocItem>()
+        var eventType = parser.eventType
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && parser.name == "a") {
+                val rawHref = parser.getAttributeValue(null, "href") ?: ""
+                // Accumulate the anchor's full text, including nested markup (e.g. <a>Preview of
+                // <em>Ship of Magic</em></a>), by walking to the matching </a>.
+                val sb = StringBuilder()
+                var depth = 1
+                eventType = parser.next()
+                while (eventType != XmlPullParser.END_DOCUMENT && depth > 0) {
+                    when (eventType) {
+                        XmlPullParser.TEXT -> sb.append(parser.text).append(" ")
+                        XmlPullParser.START_TAG -> depth++
+                        XmlPullParser.END_TAG -> {
+                            depth--
+                            if (depth == 0) break
+                        }
+                    }
+                    if (depth > 0) eventType = parser.next() else break
+                }
+                val title = sb.toString().trim().replace(RE_WS, " ")
+                if (title.isNotEmpty() && rawHref.isNotEmpty() && !rawHref.startsWith("#")) {
+                    val clean = rawHref.substringBefore("#").substringBefore("?")
+                    val resolved = findZipEntry(zipFile, opfPath, clean) ?: clean
+                    toc.add(EpubTocItem(label = title, href = resolved))
+                }
+                eventType = if (eventType == XmlPullParser.END_DOCUMENT) eventType else parser.next()
+                continue
+            }
+            eventType = parser.next()
+        }
+        return toc
+    }
+
+    /**
+     * Last-resort Contents for books with no structured nav (stub NCX, empty guide): scan each
+     * spine document for chapter headings that survive only as styled paragraphs — the hallmark of
+     * a pdftohtml/Calibre conversion where the whole book is a few oversized files and the print
+     * chapter breaks were never turned into markup.
+     *
+     * Each recovered row is aimed at the paragraph its heading sits on, as a 0-based ordinal into
+     * the document's `<p>` elements. That is the exact grammar the reader's `p:<n>` seek uses, so a
+     * tap lands on the chapter even though several chapters share one spine file. A heading is taken
+     * only when its paragraph is upper-case (a real heading style like "CHAPTER ONE - OF PRIESTS…"),
+     * which is what separates it from Title-Case front matter ("Book design by …").
+     */
+    private fun scanContentToc(
+        zipFile: ZipFile,
+        opfPath: String,
+        chapters: List<Chapter>
+    ): List<BookTocRow> {
+        val rows = mutableListOf<BookTocRow>()
+        chapters.forEachIndexed { index, chapter ->
+            val entry = findZipEntry(zipFile, opfPath, chapter.href) ?: return@forEachIndexed
+            val html = runCatching { decodeEpubBytes(readZipEntry(zipFile, entry)) }.getOrNull()
+                ?: return@forEachIndexed
+            val paragraphs = RE_P_BLOCK.findAll(html).toList()
+            val total = paragraphs.size.coerceAtLeast(1)
+            paragraphs.forEachIndexed { ordinal, m ->
+                val text = m.groupValues[1].replace(RE_TAG, " ").replace(RE_WS, " ").trim()
+                if (isChapterHeadingParagraph(text)) {
+                    rows += BookTocRow(
+                        title = chapterHeadingLabel(text),
+                        chapterIndex = index,
+                        paragraph = ordinal,
+                        fraction = ordinal.toFloat() / total
+                    )
+                }
+            }
+        }
+        return rows
+    }
+
+    /** An all-caps paragraph that opens like a chapter heading, short enough to be one. */
+    private fun isChapterHeadingParagraph(text: String): Boolean {
+        if (text.length !in 3..79) return false
+        if (!RE_CHAPTER_MARKER.containsMatchIn(text)) return false
+        // Upper-case heading style: at least one letter, and no lower-case letters. Title-case
+        // front matter ("Book One of the Liveship Traders Trilogy") is rejected here.
+        return text.any { it.isLetter() } && text.none { it.isLowerCase() }
+    }
+
+    /** "PROLOGUE - THE TANGLE" -> "Prologue"; "CHAPTER TWENTY-ONE - VISITORS" -> "Chapter Twenty-One". */
+    private fun chapterHeadingLabel(text: String): String {
+        val designator = text.split(RE_HEADING_SEP, limit = 2).first().trim()
+        return designator.lowercase().split(' ').joinToString(" ") { word ->
+            word.split('-').joinToString("-") { part ->
+                part.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
         }
     }
 
@@ -676,6 +846,12 @@ private val RE_TAG = Regex("<[^>]+>")
 private val RE_WS = Regex("\\s+")
 private val RE_TITLE_PART = Regex(".*\\b(part|book|section)\\s+\\d+.*", RegexOption.IGNORE_CASE)
 private val RE_TITLE_NUM = Regex("\\d+[.:)].*")
+/** A `<p>...</p>` block, used to walk a heading-less chapter's paragraphs in document order. */
+private val RE_P_BLOCK = Regex("(?is)<p\\b[^>]*>(.*?)</p>")
+/** Opening of a chapter heading rendered as a paragraph in a heading-less (pdftohtml) book. */
+private val RE_CHAPTER_MARKER = Regex("^(chapter|prologue|epilogue|part|book)\\b", RegexOption.IGNORE_CASE)
+/** Separator between a chapter designator and its subtitle: " - ", " – ", " — ". */
+private val RE_HEADING_SEP = Regex("\\s[-–—]\\s")
 /** EPUB Open Packaging namespace, the binding for the `epub:type` attribute on nav lists. */
 private const val NS_OPS = "http://www.idpf.org/2007/ops"
 private val RE_DOT_SEG = Regex("/\\./")

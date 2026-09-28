@@ -52,6 +52,7 @@ import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.LocalTabMorphActive
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioEyebrow
@@ -119,8 +120,16 @@ fun BookGrid(
             }
         }
     }
+    // §17 tab-morph crash guard: while a Home↔Library tab dissolve is in flight, these cover
+    // cells ARE the live shared-element source/target. Scrolling the grid now would dispose the
+    // cells hosting the in-flight sharedElement nodes and tear them down mid-flight — the
+    // scroll-during-morph crash. The dissolve is ~300ms, so freezing the shelf for that window is
+    // imperceptible and removes the trigger outright. Reads false when no provider is present
+    // (desktop), so scrolling is unaffected there.
+    val tabMorphActive = LocalTabMorphActive.current
     LazyVerticalGrid(
         state = gridScroll,
+        userScrollEnabled = !tabMorphActive,
         columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
         contentPadding = PaddingValues(
             start = FolioTokens.gutter,

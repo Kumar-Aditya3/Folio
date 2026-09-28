@@ -52,6 +52,8 @@ import com.folio.reader.importer.DocumentImporter
 import com.folio.reader.importer.IncomingContent
 import com.folio.reader.importer.IncomingContentCoordinator
 import com.folio.reader.importer.IncomingContentResult
+import com.folio.reader.importer.isAlreadyInLibrary
+import com.folio.reader.importer.isNewImport
 import com.folio.reader.importer.SearchIndexer
 import com.folio.reader.model.Book
 import com.folio.reader.model.CloudState
@@ -561,11 +563,15 @@ private fun IncomingContentResult.openScreen(): Screen? = when (this) {
     else -> null
 }
 
-private fun IncomingContentResult.importedBook(): Book? = when (this) {
-    is IncomingContentResult.ImportedBook -> book
-    is IncomingContentResult.DuplicateBook -> book
+private fun IncomingContentResult.freshScreen(): Screen? = when (this) {
+    is IncomingContentResult.ImportedBook -> Screen.Reader(book)
+    is IncomingContentResult.ImportedDocument -> Screen.DocumentReader(document.id)
     else -> null
 }
+
+/** The book this batch actually added; null for a duplicate, which needs no import handling. */
+private fun IncomingContentResult.importedBook(): Book? =
+    (this as? IncomingContentResult.ImportedBook)?.book
 
 private fun IncomingContentResult.failureReason(): String? = when (this) {
     is IncomingContentResult.Unsupported -> reason
@@ -802,14 +808,21 @@ fun main(args: Array<String>) {
                     }
                 )
                 val importedBooks = results.mapNotNull { it.importedBook() }
+                val duplicates = results.count { it.isAlreadyInLibrary }
                 importedBooks.forEach(::adoptBookProgress)
-                val firstScreen = results.firstNotNullOfOrNull { it.openScreen() }
-                val imported = results.count { it.openScreen() != null }
+                // Open what was just added; otherwise fall back to the existing item.
+                val firstScreen = results.firstNotNullOfOrNull { it.freshScreen() }
+                    ?: results.firstNotNullOfOrNull { it.openScreen() }
+                val imported = results.count { it.isNewImport }
                 val failure = results.firstNotNullOfOrNull { it.failureReason() }
                 withContext(Dispatchers.Main) {
                     documentLibraryVM.setImporting(false)
                     importStatus = when {
+                        imported > 0 && duplicates > 0 ->
+                            "Imported $imported of ${files.size} file(s) • " +
+                                "$duplicates already in library"
                         imported > 0 -> "Imported $imported of ${files.size} file(s)"
+                        duplicates > 0 -> "Already in library"
                         failure != null -> "Import failed: $failure"
                         else -> "No supported files were imported"
                     }

@@ -396,11 +396,23 @@ fun ReaderScreen(
      * A Contents tap or chapter turn aimed at a neighbour already inside the loaded window
      * changes no document, so `setChapter` returns without reloading and the reader never
      * moves. The move is a seek, and `pendingJump` is the only thing that issues one —
-     * annotation jumps already route through it, so chapter taps do too. The "p:0" target is
-     * scoped to the target's own section by the surface, landing the reader at its top.
+     * annotation jumps already route through it, so chapter taps do too. The seek target is
+     * scoped to the target's own section by the surface, landing the reader at that paragraph.
+     *
+     * [seekParagraph] is a 0-based `<p>` ordinal within the target chapter (the `p:<n>` seek
+     * grammar). It is non-zero only for heading-less books whose Contents was recovered by
+     * scanning several chapters out of one spine file; 0 is the chapter top for every normal jump.
+     * When the target is the chapter already on screen a pendingJump would never fire (the index
+     * does not change), so that case issues the seek directly.
      */
-    fun jumpToChapter(index: Int) {
-        if (index != currentChapterIndex) pendingJump = Triple(index, "p:0", null)
+    fun jumpToChapter(index: Int, seekParagraph: Int = 0) {
+        val target = "p:$seekParagraph"
+        if (index != currentChapterIndex) {
+            pendingJump = Triple(index, target, null)
+        } else if (seekParagraph > 0) {
+            seekNonce++
+            seekTargetReq = target to seekNonce
+        }
         onChapterChange(index)
     }
 
@@ -441,6 +453,7 @@ fun ReaderScreen(
         settings = settings,
         tocEntries = tocEntries,
         currentChapterIndex = currentChapterIndex,
+        currentFraction = chapterFrac.toFloat(),
         bookmarks = bookmarks,
         highlights = highlights,
         notes = notes,
@@ -552,7 +565,7 @@ fun ReaderScreen(
                     showReaderPanel = false
                     onSettingsClick()
                 },
-                onChapterChange = { jumpToChapter(it) },
+                onChapterChange = { i, p -> jumpToChapter(i, p) },
                 onSettingsChange = onSettingsChange,
                 onSaveNote = { id, text ->
                     if (text.isNotBlank()) onSetHighlightNote(id, text)
@@ -876,7 +889,8 @@ fun ReaderScreen(
             onOpenEcho = onOpenEcho,
             tocEntries = tocEntries,
             currentChapterIndex = currentChapterIndex,
-            onChapterChange = { jumpToChapter(it) },
+            currentFraction = chapterFrac.toFloat(),
+            onTocRowClick = { row -> jumpToChapter(row.chapterIndex, row.paragraph) },
             onToggleToc = onToggleToc,
             onToggleAnnotations = onToggleAnnotations,
             bookmarks = bookmarks,

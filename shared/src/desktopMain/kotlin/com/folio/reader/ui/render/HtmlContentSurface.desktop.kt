@@ -925,7 +925,20 @@ private fun readerBridgeJs(fraction: Float): String = """
   var nonce=0;
   var scroller=document.scrollingElement||document.documentElement;
   scroller.scrollTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight)*$fraction;
-  document.body.style.opacity='1';
+  // Reveal only after web-fonts resolve and a layout frame, not immediately: the
+  // reader sheet gates the body at opacity:0, and showing the raw markup before the
+  // real face loads makes it paint in a fallback font and then reflow when the face
+  // swaps in (font-display:swap) — the DOCX "text hard-cuts in and reflows" flash.
+  // The html paper (ReaderCss sets the paper colour on html as well as body) shows
+  // through the hidden body, so there is no white flash meanwhile. The timeout is a
+  // backstop so a blocked or absent font can never leave the page hidden. The inline
+  // opacity set here outranks the stylesheet's opacity:0, so a later in-place
+  // restyle cannot re-blank the page.
+  var __folioShown=false;
+  function __folioReveal(){if(__folioShown)return;__folioShown=true;if(document.body)document.body.style.opacity='1';schedule();}
+  if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){requestAnimationFrame(__folioReveal);});}
+  else{requestAnimationFrame(__folioReveal);}
+  setTimeout(__folioReveal,400);
   window.__folioSeek=function(f){var s=document.scrollingElement||document.documentElement;var range=Math.max(0,s.scrollHeight-s.clientHeight);s.scrollTop=range*Math.min(1,Math.max(0,f||0));restorePending=false;schedule();};
   window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
   window.__folioSeekTo=function(t){var parts=String(t).split(':'),el=null;

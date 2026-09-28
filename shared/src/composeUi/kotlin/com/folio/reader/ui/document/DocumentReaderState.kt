@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import com.folio.reader.model.Document
 import com.folio.reader.model.DocumentBookmark
 import com.folio.reader.model.DocumentLocator
+import com.folio.reader.ui.render.ReaderSection
+import com.folio.reader.ui.render.WindowOp
 
 enum class DocumentReaderMode { SINGLE_PAGE, CONTINUOUS }
 
@@ -47,6 +49,19 @@ data class DocumentReaderState(
     val rotationDegrees: Int = 0,
     val normalizedProgress: Double = 0.0,
     val reflowableLocator: DocumentLocator.Reflowable? = null,
+    /**
+     * Reflowable windowing (continuous layout only), mirroring the EPUB reader's
+     * chapter window. [reflowableWindow] is the STABLE window "as loaded" fed to
+     * the surface as its `sections`; it never changes per extension (that would
+     * force a full reload and scroll-jump), so the window grows/trims only via
+     * [reflowableWindowOp]. [reflowableAnchorChapterId] is the scroll seed and
+     * must equal one window section's chapterId; [reflowableScrollOffset] is the
+     * section-local fraction (0..1) within that anchor chunk.
+     */
+    val reflowableWindow: List<ReaderSection> = emptyList(),
+    val reflowableAnchorChapterId: String? = null,
+    val reflowableWindowOp: WindowOp? = null,
+    val reflowableScrollOffset: Float = 0f,
     val controlsVisible: Boolean = true
 ) {
     val isCurrentPositionBookmarked: Boolean

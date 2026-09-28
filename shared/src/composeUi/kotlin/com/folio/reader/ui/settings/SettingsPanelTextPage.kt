@@ -213,14 +213,28 @@ fun TextAndPageSettingsPanel(
             }
         )
 
+        // Side margin = the distance from the screen edge to the text. Writing both
+        // left and right keeps it a single symmetric "distance from the edge" control.
+        // The reader now zeroes the EPUB's own wrapper side margins (see ReaderCss
+        // publisherInsetReset), so this value is authoritative in every layout mode —
+        // raising or lowering it actually moves the text edge even on books whose own
+        // CSS used to force a thick margin the reader could not override.
         FolioSliderRow(
-            label = "Margins",
+            label = "Side margins",
             valueLabel = "${settings.margins.left.roundToInt()} dp",
             value = settings.margins.left,
             onValueChange = {
                 onSettingsChange(settings.copy(margins = settings.margins.copy(left = it, right = it)))
             },
             valueRange = 0f..64f
+        )
+
+        Text(
+            "Distance from the edge of the screen to the text. This overrides an EPUB's " +
+                "own side margins, so lower it if a book's built-in margins make the column " +
+                "too narrow, or raise it for more breathing room.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant
         )
 
         // ── Formatting ──────────────────────────────────────────

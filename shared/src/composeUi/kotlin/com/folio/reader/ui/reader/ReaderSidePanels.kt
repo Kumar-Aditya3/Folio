@@ -37,7 +37,8 @@ internal fun BoxScope.ReaderSidePanels(
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
     tocEntries: List<BookTocRow>,
     currentChapterIndex: Int,
-    onChapterChange: (Int) -> Unit,
+    currentFraction: Float,
+    onTocRowClick: (BookTocRow) -> Unit,
     onToggleToc: () -> Unit,
     onToggleAnnotations: () -> Unit,
     bookmarks: List<Bookmark>,
@@ -105,8 +106,9 @@ internal fun BoxScope.ReaderSidePanels(
             TOCSidebar(
                 entries = tocEntries,
                 currentIndex = currentChapterIndex,
-                onChapterClick = { index ->
-                    onChapterChange(index)
+                currentFraction = currentFraction,
+                onChapterClick = { row ->
+                    onTocRowClick(row)
                 },
                 onDismiss = onToggleToc
             )

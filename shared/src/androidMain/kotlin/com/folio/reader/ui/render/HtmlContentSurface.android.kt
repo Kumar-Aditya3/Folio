@@ -197,7 +197,12 @@ actual fun HtmlContentSurface(
             // the CSS ones — which do not — are made absolute here.
             val only = sections.firstOrNull()
             injectReaderCss(
-                if (only == null) "" else rewriteCssUrls(only.html, only.href), settings
+                if (only == null) "" else rewriteCssUrls(only.html, only.href), settings,
+                // A single non-windowed reflowable doc (DOCX/HTML) hides its body
+                // until first paint so the raw markup does not paint in a fallback
+                // font and then reflow — see [readerStyleSheet]. EPUB is always
+                // windowed here, so this reveal gate never touches it.
+                revealGate = true,
             )
         }
     }
@@ -221,6 +226,17 @@ actual fun HtmlContentSurface(
             "(function(){if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) + "," + jsLiteral(shadowCss) + ");}" +
                 "else{var s=document.getElementById('folio-reader-style');" +
                 "if(s)s.textContent=" + jsLiteral(css) + ";}})();",
+            null
+        )
+        // Paged side margins are NOT carried in the reader CSS (ReaderCss emits body
+        // left/right padding 0 in paged; the MulticolEngine insets the page instead), so a
+        // side-margin change never alters `content` and would not reload. Push the new
+        // left/right insets straight to the paged engine so the "Side margins" slider is
+        // affectable in paged mode too. No-op in continuous — ContinuousEngine defines no
+        // __folioSetInsets, and continuous already applies margins through the CSS above.
+        wv.evaluateJavascript(
+            "(function(){if(window.__folioSetInsets){window.__folioSetInsets(" +
+                "${settings.margins.left},${settings.margins.right});}})();",
             null
         )
     }
@@ -389,7 +405,16 @@ actual fun HtmlContentSurface(
                 // morph cover plate can dissolve on real paint instead of on the
                 // HTML *string* being ready (which left a blank-paper flash). Posted
                 // to the main thread since onPageFinished can arrive off it.
-                mainHandler.post { pageReadyTick++; latestContentReady() }
+                //
+                // A non-windowed reflowable document in continuous mode DEFERS this
+                // signal: onPageFinished fires before the web fonts have swapped in, so
+                // dissolving here would reveal a fallback-font frame that then reflows
+                // (the residual "docs still flicker"). Its ContinuousEngine bootstrap
+                // re-emits the signal as `folio-painted` once document.fonts.ready has
+                // settled, so the cover instead dissolves onto stable text. Windowed
+                // EPUB and paged documents (MulticolEngine reveal) still signal here.
+                val deferPaint = !windowed && !pagedModeState.value
+                mainHandler.post { pageReadyTick++; if (!deferPaint) latestContentReady() }
             }
         }
     }
@@ -447,6 +472,12 @@ actual fun HtmlContentSurface(
                     }
 
                     t.startsWith("folio-tap:") -> mainHandler.post { currentTapHandler.value() }
+
+                    // Deferred first-paint for a non-windowed reflowable document:
+                    // ContinuousEngine emits this once document.fonts.ready has settled
+                    // (see its SIGNAL_PAINT block and onPageFinished's deferPaint), so the
+                    // host cover dissolves onto stable, non-reflowing text.
+                    t.startsWith("folio-painted:") -> mainHandler.post { pageReadyTick++; latestContentReady() }
 
                     t.startsWith("folio-edge:end:") -> mainHandler.post { latestEnd() }
 
@@ -601,7 +632,12 @@ actual fun HtmlContentSurface(
                     stampJs +
                         ContinuousEngine.js(
                             seedSpine, fraction.toFloat(), desktopEvents = false, diag = READER_DEBUG_LOG,
-                            shadow = false, shadowCss = ReaderCss.shadowStyleSheet(settings)
+                            shadow = false, shadowCss = ReaderCss.shadowStyleSheet(settings),
+                            // A non-windowed reflowable document (DOCX/HTML) defers its
+                            // first-paint signal to document.fonts.ready (emitted as the
+                            // `folio-painted` title) so the host cover holds through the
+                            // web-font swap; windowed EPUB keeps paint-on-page-finished.
+                            signalPaint = !windowed,
                         ) +
                         HighlightPaint.js(highlights, theme)
                 }
@@ -642,6 +678,11 @@ actual fun HtmlContentSurface(
                         // Paged documents arrive hidden until the bootstrap reveals them; with no
                         // bootstrap coming, show the raw chapter rather than a blank page.
                         webView.evaluateJavascript("if(document.body)document.body.style.opacity='1'", null)
+                        // The content is now visible (revealed above), so the paint
+                        // signal must still fire — otherwise a first-paint cover gate
+                        // (document morph plate / EPUB morph plate) would hold over a
+                        // page that is actually on screen and never dissolve.
+                        mainHandler.post { pageReadyTick++; latestContentReady() }
                     }
                 }
                 webView.postDelayed({ tryInject(0) }, 400)
@@ -929,26 +970,46 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
  * ([injectReaderCss]) and the live theme swap write exactly this, so the two
  * cannot drift.
  */
-private fun readerStyleSheet(settings: ReaderSettings): String {
+private fun readerStyleSheet(settings: ReaderSettings, revealGate: Boolean = false): String {
     // Coerce SPREAD → PAGINATED on Android: spread is desktop-only.
     val safeLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
         com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
+    // Reflowable-DOCUMENT load: NO body-level rendering guard is emitted here, on
+    // purpose. Two earlier guards were tried and removed:
+    //  • body{opacity:0;transition:opacity} — an opacity < 1 plus a transition on the
+    //    whole (large) document body promoted it to a single composited layer that had
+    //    to be rasterised in FULL, overrunning the WebView's GPU tile budget ("tile
+    //    memory limits exceeded, some content may not draw"). Chromium then endlessly
+    //    dropped and redrew tiles, so the page DIMMED and UN-DIMMED — the "bad bulb".
+    //  • content-visibility:auto on every block — that bounded the tiled area and
+    //    killed the thrash, but its per-block intrinsic-size estimates made scrolling
+    //    JUMP (worst around images), and it re-evaluates/repaints on every viewport
+    //    change, so toggling the reader chrome (which insets → resizes this surface,
+    //    see DocumentReaderScreen topInset/bottomInset) FLICKERED the page.
+    // With neither, the body stays in the root layer and the WebView virtualises tiles
+    // normally (only the interest area around the viewport is rasterised): no full-page
+    // layer to thrash, no size guessing to jump, and a chrome-toggle reflow is as cheap
+    // as EPUB's. The open-time reveal is still gated — the Compose cover holds until the
+    // fonts settle via the folio-painted signal (onPageFinished deferPaint) — so the raw
+    // first frame and the web-font swap stay hidden. `revealGate` is kept as the
+    // document-path marker for any future, layout-neutral guard.
+    val revealGateCss = if (revealGate) "" else ""
     return ReaderCss.styleSheet(
         settings,
         PageEngine.colsFor(safeLayoutMode),
         fontStack = { "'$it',serif" },
         // Scrolling mode: publisher height rules otherwise clamp the document
         // box and the page cannot grow.
-        continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}",
+        continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}" + revealGateCss,
         // Android paged renders inside an iframe (MulticolEngine); the top
         // document only needs a neutral box, layout happens in the iframe.
         pagedCss = MulticolEngine::frameCss
     )
 }
 
-private fun injectReaderCss(rawHtml: String, settings: ReaderSettings): String {
+private fun injectReaderCss(rawHtml: String, settings: ReaderSettings, revealGate: Boolean = false): String {
     val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
-            readerStyleSheet(settings) + "</style>"
+            readerStyleSheet(settings, revealGate) + "</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(HEAD_CLOSE, "$css</head>") else "$css$html"
 }
