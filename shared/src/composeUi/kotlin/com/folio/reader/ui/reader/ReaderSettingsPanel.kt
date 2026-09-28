@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -382,9 +383,28 @@ fun ReaderSettingsPanel(
                 LaunchedEffect(selectedThemeId) {
                     listState.scrollToItem(index = selectedIndex)
                 }
+                // Keep the theme list's scroll to itself: at its top/bottom the leftover
+                // used to bubble up and scroll the whole settings panel. Consume the
+                // remainder so the panel stays put; the list then shows its own edge
+                // overscroll stretch — a clear "nothing more above/below" cue.
+                val themeScrollTrap = remember {
+                    object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                        override fun onPostScroll(
+                            consumed: androidx.compose.ui.geometry.Offset,
+                            available: androidx.compose.ui.geometry.Offset,
+                            source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+                        ): androidx.compose.ui.geometry.Offset = available
+                        override suspend fun onPostFling(
+                            consumed: androidx.compose.ui.unit.Velocity,
+                            available: androidx.compose.ui.unit.Velocity
+                        ): androidx.compose.ui.unit.Velocity = available
+                    }
+                }
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.heightIn(max = 236.dp),
+                    modifier = Modifier
+                        .heightIn(max = 236.dp)
+                        .nestedScroll(themeScrollTrap),
                     verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 1.dp)
                 ) {

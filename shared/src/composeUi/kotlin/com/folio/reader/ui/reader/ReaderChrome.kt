@@ -297,31 +297,8 @@ internal fun ReaderFloatingRail(
             IconButton(onClick = onOpenAnnotations) {
                 Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
             }
-            val bookmarkMotion = rememberMotionEnabled()
-            val bookmarkHaptics = rememberFolioHaptics()
-            IconButton(onClick = {
-                bookmarkHaptics.play(FolioHaptic.Confirm)
-                onBookmarkClick()
-            }) {
-                AnimatedContent(
-                    targetState = isBookmarked,
-                    transitionSpec = {
-                        if (bookmarkMotion) {
-                            fadeIn(tween(FolioTokens.motionStandard.toInt())) togetherWith
-                                fadeOut(tween(FolioTokens.motionStandard.toInt()))
-                        } else {
-                            EnterTransition.None togetherWith ExitTransition.None
-                        }
-                    },
-                    label = "bookmark-glyph",
-                ) { bookmarked ->
-                    Icon(
-                        imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                        contentDescription = if (bookmarked) "Remove bookmark" else "Bookmark this spot",
-                        tint = if (bookmarked) bookmarkColor else FolioTheme.colors.onSurface
-                    )
-                }
-            }
+            // Bookmark intentionally omitted from the left rail — it lives in the top
+            // bar; a second copy here was redundant.
         }
     }
 }

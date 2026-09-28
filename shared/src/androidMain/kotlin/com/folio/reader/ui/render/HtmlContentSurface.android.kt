@@ -15,6 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.folio.reader.model.Highlight
@@ -75,6 +78,14 @@ actual fun HtmlContentSurface(
     onContentReady: () -> Unit
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
+    // Display-cutout inset (CSS px == dp in the WebView). The reader draws edge-to-edge
+    // (enableEdgeToEdge) so a paged page sat UNDER the top notch: the text was vertically
+    // centred in the full screen, but the notch ate into the top margin so the block read
+    // as leaning up. Fold the cutout into the paged top/bottom margins so the text clears
+    // the notch with the same visible margin top and bottom. Sides stay as-is (0 here).
+    val folioCutoutPad = WindowInsets.displayCutout.asPaddingValues()
+    val safeTopDp = folioCutoutPad.calculateTopPadding().value
+    val safeBottomDp = folioCutoutPad.calculateBottomPadding().value
     // Paged mode emits its own centre-tap (folio-tap) from inside the iframe, so the
     // native centre-tap detector below must stand down there or the two would toggle
     // the chrome twice (a net no-op). Continuous mode has no in-page tap detector on
@@ -115,14 +126,27 @@ actual fun HtmlContentSurface(
     // highlight marks resolve inside the right chapter.
     fun scopedTarget(target: String): String =
         if (windowed && anchorChapterId != null) "c:$anchorChapterId|$target" else target
+    // A seek request must fire ONCE, for the nonce it carries. The effects also key on
+    // webViewRef, which changes when a chapter reload swaps the WebView — without this
+    // guard the previous request (e.g. the book-open "p:0" jump) re-ran against the new
+    // chapter, seeking it to its start. That is what dragged a "back to previous
+    // chapter" (seeded at its END, fraction 1.0) onto the previous chapter's page 1.
+    var lastSeekNonce by remember(loadKey) { mutableStateOf(Long.MIN_VALUE) }
+    var lastTargetNonce by remember(loadKey) { mutableStateOf(Long.MIN_VALUE) }
     LaunchedEffect(seekRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
+        if (req.second == lastSeekNonce) return@LaunchedEffect
+        lastSeekNonce = req.second
+        if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "HOST seekFraction=${req.first} nonce=${req.second}")
         pageState.seekFraction(req.first.coerceIn(0f, 1f), wv, loadKey)
     }
     LaunchedEffect(seekTargetRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekTargetRequest ?: return@LaunchedEffect
+        if (req.second == lastTargetNonce) return@LaunchedEffect
+        lastTargetNonce = req.second
+        if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "HOST seekTo=${req.first} nonce=${req.second}")
         pageState.seekTo(scopedTarget(req.first), wv, loadKey)
     }
     LaunchedEffect(clearSelectionRequest, webViewRef) {
@@ -535,6 +559,7 @@ actual fun HtmlContentSurface(
                     "@font-face{font-family:'${font.familyName}';src:url('$url') format('truetype');font-weight:$weight;font-style:normal;font-display:swap;}"
                 }
                 val fraction = position?.scrollOffset ?: 0.0
+                if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "PAGED-RELOAD frac=$fraction spine=${position?.spineIndex} chapter=${position?.chapterId}")
                 // Android never offers spread; coerce to single-page paginated if a
                 // synced/stored setting lands here with SPREAD selected.
                 val androidLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
@@ -561,8 +586,8 @@ actual fun HtmlContentSurface(
                     // and restyle call sites stay unchanged.
                     val inner = MulticolEngine.innerJs(
                         fraction.toFloat(),
-                        settings.margins.top,
-                        settings.margins.bottom,
+                        settings.margins.top + safeTopDp,
+                        settings.margins.bottom + safeBottomDp,
                         settings.margins.left,
                         settings.margins.right,
                         PageEngine.measurePx(settings.textWidth),
@@ -614,6 +639,9 @@ actual fun HtmlContentSurface(
                         webView.postDelayed({ tryInject(attempt + 1) }, 200)
                     } else {
                         if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "fallback gave up token=$token committed=$committed")
+                        // Paged documents arrive hidden until the bootstrap reveals them; with no
+                        // bootstrap coming, show the raw chapter rather than a blank page.
+                        webView.evaluateJavascript("if(document.body)document.body.style.opacity='1'", null)
                     }
                 }
                 webView.postDelayed({ tryInject(0) }, 400)

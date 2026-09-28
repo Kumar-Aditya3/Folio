@@ -277,6 +277,20 @@ fun ReaderScreen(
         seekReq = fraction.coerceIn(0f, 1f) to seekNonce
     }
 
+    // A page-turn that crosses a chapter boundary (onChapterStart/onChapterEnd → the
+    // view model reloads the neighbour) changes currentChapterIndex WITHOUT a
+    // pendingJump. A seek request left over from an earlier Contents / ▲▼ jump would
+    // otherwise re-fire against the freshly loaded chapter when its WebView is swapped
+    // in — seeking it to "p:0" and stomping the end-seed that "back from a chapter's
+    // start" depends on (the intermittent land-on-first-page). Clear stale requests on
+    // such a navigation; a real jump sets pendingJump first, so it is preserved.
+    LaunchedEffect(currentChapterIndex) {
+        if (pendingJump == null) {
+            seekReq = null
+            seekTargetReq = null
+        }
+    }
+
     // ── The page block (diegetic progress) ──────────────────────────────────────
     // Chapter ends along the block, word-weighted so a long chapter takes the length
     // of block it is worth. The block is whole-book on purpose: one that emptied at

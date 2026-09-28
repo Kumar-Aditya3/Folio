@@ -201,7 +201,10 @@ object ReaderCss {
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
-                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
+                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}" +
+                (if (original) "" else
+                    "p::first-letter{font-size:inherit !important;line-height:inherit !important;" +
+                            "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}")
     }
 
     /**
@@ -287,7 +290,10 @@ object ReaderCss {
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
-                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
+                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}" +
+                (if (original) "" else
+                    "p::first-letter{font-size:inherit !important;line-height:inherit !important;" +
+                            "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}")
     }
 
     // The shadow sheet is generated without the surface's font-stack resolver, so it

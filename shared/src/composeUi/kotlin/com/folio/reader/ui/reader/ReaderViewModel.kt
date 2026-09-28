@@ -291,8 +291,15 @@ class ReaderViewModel(
 
     fun reloadChapter() = contentLoader.reloadChapter()
 
-    fun updateScrollProgress(scrollFraction: Float, characterOffsetEstimate: Int = 0) =
+    fun updateScrollProgress(scrollFraction: Float, characterOffsetEstimate: Int = 0) {
+        // While a chapter change is loading, ignore progress reports. The outgoing
+        // chapter (still on screen at page 0) keeps reporting fraction ~0, which used
+        // to overwrite the resume fraction setChapter just wrote (1.0 for "open at
+        // end") before the new chapter's surface read it — so going back from a
+        // chapter's start landed on the previous chapter's START instead of its END.
+        if (chapterLoadPending) return
         positionStore.updateScrollProgress(scrollFraction, characterOffsetEstimate)
+    }
 
     fun updatePosition(newPosition: ReadingPosition) = positionStore.updatePosition(newPosition)
 
@@ -301,6 +308,9 @@ class ReaderViewModel(
     fun turnPage(forward: Boolean) {
         if (forward) nextChapter() else previousChapter()
     }
+
+    /** True while a chapter reload is in flight; gates stray progress writes. */
+    private var chapterLoadPending = false
 
     /**
      * Moves to [index] and sets the fraction the new chapter should open at, both
@@ -330,7 +340,18 @@ class ReaderViewModel(
         // document holds it and the jump's seek scrolls to the target.
         val range = liveWindowRange()
         if (range != null && range.contains(_currentChapterIndex.value)) return
-        viewModelScope.launch { loadChapterHtml() }
+        println("FOLIONAV setChapter idx=$index resume=$resumeFraction range=$range willReload=true")
+        // Reload the chapter. Suppress progress reports (see updateScrollProgress)
+        // until the new HTML is in, so the outgoing chapter cannot clobber the
+        // resume fraction before the new surface seeds from it.
+        chapterLoadPending = true
+        viewModelScope.launch {
+            try {
+                loadChapterHtml()
+            } finally {
+                chapterLoadPending = false
+            }
+        }
     }
 
     fun nextChapter() = setChapter(_currentChapterIndex.value + 1, 0.0)
@@ -352,6 +373,7 @@ class ReaderViewModel(
      */
     fun onChapterStart() {
         val chapter = _chapters.value.getOrNull(_currentChapterIndex.value) ?: return
+        println("FOLIONAV onChapterStart cur=${_currentChapterIndex.value} range=${liveWindowRange()}")
         if (_currentChapterIndex.value <= 0) return
         val range = liveWindowRange()
         if (range != null && range.first > 1) return

@@ -22,7 +22,7 @@ data class ReaderSettings(
     val paragraphSpacing: Float = 1.0f,
     val margins: Margins = Margins(),
     val textWidth: TextWidth = TextWidth.MEDIUM,
-    val alignment: TextAlignment = TextAlignment.LEFT,
+    val alignment: TextAlignment = TextAlignment.JUSTIFIED,
     val hyphenation: Boolean = true,
     val themeId: String = "paper",
     val layoutMode: LayoutMode = LayoutMode.CONTINUOUS,
