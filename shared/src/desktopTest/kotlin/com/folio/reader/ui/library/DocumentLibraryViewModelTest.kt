@@ -221,6 +221,34 @@ class DocumentLibraryViewModelTest {
         }
     }
 
+    @Test
+    fun documentsViewModeSurvivesARelaunch() = runBlocking {
+        withFixture { documents, categories, settings ->
+            categories.ensureSeeded()
+            val first = DocumentLibraryViewModel(
+                documents, categories, settings, Dispatchers.Default, fileExists = { true }
+            )
+            try {
+                await { first.selectedCategoryId.value == DocumentCategory.MAIN_ID }
+                assertEquals(DocumentViewMode.GRID, first.viewMode.value)
+
+                first.setViewMode(DocumentViewMode.LIST)
+                await { settings.values["document.library.viewMode"] == "LIST" }
+            } finally {
+                first.close()
+            }
+
+            val reopened = DocumentLibraryViewModel(
+                documents, categories, settings, Dispatchers.Default, fileExists = { true }
+            )
+            try {
+                await { reopened.viewMode.value == DocumentViewMode.LIST }
+            } finally {
+                reopened.close()
+            }
+        }
+    }
+
     private suspend fun await(condition: suspend () -> Boolean) {
         withTimeout(5_000) {
             while (!condition()) {

@@ -62,6 +62,7 @@ private data class DocumentDisplaySettings(
 )
 
 private const val KEY_LIBRARY_CATEGORY = "document.library.category"
+private const val KEY_LIBRARY_VIEW_MODE = "document.library.viewMode"
 
 class DocumentLibraryViewModel(
     private val repository: DocumentRepository,
@@ -178,6 +179,13 @@ class DocumentLibraryViewModel(
                 }
             }
         }
+        scope.launch {
+            // compareAndSet, not a plain assign: the read is async, and a grid/list tap landed
+            // while it is in flight must win over the value from the last launch.
+            val remembered = runCatching { settingsRepository.getRaw(KEY_LIBRARY_VIEW_MODE) }.getOrNull()
+            DocumentViewMode.entries.firstOrNull { it.name == remembered }
+                ?.let { viewMode.compareAndSet(DocumentViewMode.GRID, it) }
+        }
     }
 
     fun selectCategory(categoryId: String) {
@@ -257,6 +265,7 @@ class DocumentLibraryViewModel(
 
     fun setViewMode(value: DocumentViewMode) {
         viewMode.value = value
+        scope.launch { settingsRepository.setRaw(KEY_LIBRARY_VIEW_MODE, value.name) }
     }
 
     fun setSort(value: DocumentSortBy) {
