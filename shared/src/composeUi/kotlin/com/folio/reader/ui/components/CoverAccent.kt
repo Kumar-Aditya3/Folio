@@ -192,16 +192,39 @@ private fun sampleFromBitmap(bitmap: ImageBitmap): Color? {
     val w = bitmap.width
     val h = bitmap.height
     if (w <= 0 || h <= 0) return null
-    // Stride-sample ~1024 points straight off the cached bitmap's pixel map —
-    // the 32×32-class downsample of §13.3 without any second decode or huge
-    // canvas allocation (the v1.0.24 crash class).
     val stride = max(1, kotlin.math.sqrt(w.toDouble() * h / (32 * 32)).toInt())
+    return sampleCoverAccent(sampleCoverGrid(bitmap, w, h, stride))
+}
+
+/**
+ * The §13.3 sampling grid: every [stride]-th pixel of every [stride]-th row, row-major, as opaque
+ * ARGB. Same points, same packing as the original read — only the way they are fetched changes.
+ *
+ * The shared implementation behind this had to copy the whole bitmap (`ImageBitmap.toPixelMap()`)
+ * to answer ~1024 reads: ~21 MB per cover at the 2048 decode cap, and a shelf finishes a dozen
+ * decodes inside the same frames, so the copies land together. Android reads one row at a time
+ * into a reusable buffer instead.
+ */
+internal expect fun sampleCoverGrid(
+    bitmap: ImageBitmap,
+    width: Int,
+    height: Int,
+    stride: Int,
+): IntArray
+
+/** The whole-bitmap read, kept as the fallback and the desktop implementation. */
+internal fun coverGridFromPixelMap(
+    bitmap: ImageBitmap,
+    width: Int,
+    height: Int,
+    stride: Int,
+): IntArray {
     val pixelMap = bitmap.toPixelMap()
     val pixels = ArrayList<Int>(1024)
     var y = 0
-    while (y < h) {
+    while (y < height) {
         var x = 0
-        while (x < w) {
+        while (x < width) {
             val c = pixelMap[x, y]
             pixels.add(
                 (255 shl 24) or
@@ -213,5 +236,5 @@ private fun sampleFromBitmap(bitmap: ImageBitmap): Color? {
         }
         y += stride
     }
-    return sampleCoverAccent(pixels.toIntArray())
+    return pixels.toIntArray()
 }

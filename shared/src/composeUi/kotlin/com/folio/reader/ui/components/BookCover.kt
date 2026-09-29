@@ -201,7 +201,7 @@ fun BookCover(
         val decoded = withContext(Dispatchers.IO) {
             runCatching {
                 val file = File(path)
-                if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes()) else null
+                if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) else null
             }.getOrNull()
         }
         if (decoded != null) {
