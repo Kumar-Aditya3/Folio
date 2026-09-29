@@ -30,12 +30,12 @@ class AtlasViewModel(
     private val _exemplarTexts = MutableStateFlow<Map<String, String>>(emptyMap())
     val exemplarTexts: StateFlow<Map<String, String>> = _exemplarTexts.asStateFlow()
 
-    // Stage-2 refined labels, keyed by cluster exemplarChunkId, filled by theme assignment.
+    // Per-cluster display labels, keyed by exemplarChunkId. Baked synchronously from the model's
+    // per-book theme/genre when a map is shown, so headings render right the first time instead of
+    // flashing older labels while an async pass catches up.
     private val _refinedLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     val refinedLabels: StateFlow<Map<String, String>> = _refinedLabels.asStateFlow()
-    private val refinedBooks = HashSet<String>()
-    // Guards the eager, whole-library theme pass so it runs once per distinct model instance.
-    private var themedModel: AtlasModel? = null
+    private var labeledModel: AtlasModel? = null
 
     fun load() {
         scope.launch {
@@ -46,8 +46,8 @@ class AtlasViewModel(
             val stale = runCatching { discovery.lastComputedAtlas() }.getOrNull()
             val haveStale = stale != null && stale.books.isNotEmpty()
             if (haveStale) {
-                _state.value = AtlasUiState.Map(stale!!, forming = false, fraction = 1f)
-                assignThemes(stale)
+                bakeLabels(stale!!)
+                _state.value = AtlasUiState.Map(stale, forming = false, fraction = 1f)
             } else {
                 _state.value = AtlasUiState.Loading
             }
@@ -59,8 +59,8 @@ class AtlasViewModel(
                     // Below the threshold and still filling: map what exists, and say it is forming.
                     val model = runCatching { discovery.atlas() }.getOrNull()
                     if (model != null && model.books.isNotEmpty()) {
+                        bakeLabels(model)
                         _state.value = AtlasUiState.Map(model, forming = true, fraction = readiness.fraction)
-                        assignThemes(model)
                     } else if (!haveStale) {
                         _state.value = AtlasUiState.Forming(readiness.fraction)
                     }
@@ -68,8 +68,8 @@ class AtlasViewModel(
                 is AtlasReadiness.Ready -> {
                     val model = runCatching { discovery.atlas() }.getOrNull()
                     if (model != null && model.books.isNotEmpty()) {
+                        bakeLabels(model)
                         _state.value = AtlasUiState.Map(model, forming = readiness.forming, fraction = readiness.fraction)
-                        assignThemes(model)
                     } else if (!haveStale) {
                         _state.value = AtlasUiState.Unavailable
                     }
@@ -79,34 +79,24 @@ class AtlasViewModel(
     }
 
     /**
-     * Eagerly labels every cluster of every book with a theme from the fixed vocabulary (once per
-     * model), feeding the result into [refinedLabels] so the legend, region headings and sheet read
-     * as shared concepts ("Coming of Age") rather than the c-TF-IDF proper nouns ("Molly") they did
-     * before. Runs off the roll-up on the embedder; failures leave the c-TF-IDF fallbacks in place.
+     * Fills [refinedLabels] from the map's **baked** per-book labels (dominant theme, else broad
+     * genre), synchronously, once per model instance. Because the labels already live on the model
+     * — computed in the roll-up / classification pass, not here — there is no async pass to flash a
+     * stale set first, which is exactly the "flash of old categories" this replaced.
      */
-    private fun assignThemes(model: AtlasModel) {
-        if (themedModel === model) return
-        themedModel = model
-        scope.launch {
-            val themes = runCatching { discovery.assignThemes(model.books) }.getOrDefault(emptyMap())
-            if (themes.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + themes
+    private fun bakeLabels(model: AtlasModel) {
+        if (labeledModel === model) return
+        labeledModel = model
+        _refinedLabels.value = buildMap {
+            model.books.forEach { b ->
+                val label = b.theme?.takeIf { it.isNotBlank() } ?: b.genre?.takeIf { it.isNotBlank() }
+                if (label != null) b.clusters.forEach { put(it.exemplarChunkId, label) }
+            }
         }
     }
 
-    /**
-     * Retries theme labelling for the books currently in view — a safety net for when the eager
-     * whole-library pass in [load] could not embed yet (cold embedder). Once-per-book; merges into
-     * [refinedLabels] and never overwrites with weaker labels.
-     */
-    fun refineVisibleBooks(books: List<com.folio.reader.ml.AtlasBook>) {
-        val todo = books.filter { it.bookId !in refinedBooks && it.clusters.any { c -> c.exemplarChunkId !in _refinedLabels.value } }
-        if (todo.isEmpty()) return
-        todo.forEach { refinedBooks.add(it.bookId) }
-        scope.launch {
-            val themes = runCatching { discovery.assignThemes(todo) }.getOrDefault(emptyMap())
-            if (themes.isNotEmpty()) _refinedLabels.value = _refinedLabels.value + themes
-        }
-    }
+    /** No-op: cluster labels are baked into the model now, so there is nothing to refine on zoom. */
+    fun refineVisibleBooks(books: List<com.folio.reader.ml.AtlasBook>) = Unit
 
     /** Loads exemplar passage text for the clusters of one book, when the reader zooms into it. */
     fun loadExemplars(chunkIds: Collection<String>) {

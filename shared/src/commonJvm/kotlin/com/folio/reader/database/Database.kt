@@ -806,6 +806,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 confidence REAL NOT NULL DEFAULT 0,
                 source TEXT NOT NULL,
                 updated_at INTEGER NOT NULL DEFAULT 0,
+                themes TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (book_id, model_id)
             )
             """.trimIndent()
@@ -813,6 +814,13 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
         conn.createStatementExec(
             "CREATE INDEX IF NOT EXISTS idx_book_genre_model ON book_genre(model_id)"
         )
+        // Migration: add the themes column on databases created before it existed. Same probe-then-
+        // ALTER contract as the other additive migrations here (SQLite has no ADD COLUMN IF NOT EXISTS).
+        runCatching {
+            conn.createStatement().executeQuery("SELECT themes FROM book_genre LIMIT 0").close()
+        }.onFailure {
+            conn.createStatementExec("ALTER TABLE book_genre ADD COLUMN themes TEXT NOT NULL DEFAULT ''")
+        }
 
         // Parsed OPF <dc:subject> strings per book, captured at import so the metadata-first genre
         // path has something to canonicalize. Not on the `books` row: subjects were never persisted

@@ -18,6 +18,12 @@ data class StoredGenre(
     val source: String,
     val modelId: String,
     val updatedAt: Long,
+    /**
+     * Ordered dominant narrative themes (display names, strongest first), derived alongside the
+     * genre from the book's blurb/text. Drives the Atlas's finer region labels; empty when the book
+     * has no confident theme or predates the themes column.
+     */
+    val themes: List<String> = emptyList(),
 )
 
 /**
@@ -67,13 +73,18 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Themes are packed into one column with a unit-separator join (never appears in a label). */
+    private fun encodeThemes(themes: List<String>): String = themes.joinToString("\u001F")
+    private fun decodeThemes(raw: String?): List<String> =
+        raw?.split('\u001F')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+
     override suspend fun upsertGenre(genre: StoredGenre) {
         db.withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO book_genre
-                    (book_id, model_id, genre, confidence, source, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (book_id, model_id, genre, confidence, source, updated_at, themes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, genre.bookId)
@@ -82,6 +93,7 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
                 stmt.setDouble(4, genre.confidence.toDouble())
                 stmt.setString(5, genre.source)
                 stmt.setLong(6, genre.updatedAt)
+                stmt.setString(7, encodeThemes(genre.themes))
                 stmt.executeUpdate()
             }
         }
@@ -90,7 +102,7 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
     override suspend fun genresForModel(modelId: String): Map<String, StoredGenre> =
         db.withConnection { conn ->
             conn.prepareStatement(
-                "SELECT book_id, genre, confidence, source, updated_at FROM book_genre WHERE model_id = ?"
+                "SELECT book_id, genre, confidence, source, updated_at, themes FROM book_genre WHERE model_id = ?"
             ).use { stmt ->
                 stmt.setString(1, modelId)
                 stmt.executeQuery().use { rs ->
@@ -104,6 +116,7 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
                             source = rs.getString("source"),
                             modelId = modelId,
                             updatedAt = rs.getLong("updated_at"),
+                            themes = decodeThemes(rs.getString("themes")),
                         )
                     }
                     out
@@ -114,7 +127,7 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
     override suspend fun genreFor(bookId: String, modelId: String): StoredGenre? =
         db.withConnection { conn ->
             conn.prepareStatement(
-                "SELECT genre, confidence, source, updated_at FROM book_genre WHERE book_id = ? AND model_id = ?"
+                "SELECT genre, confidence, source, updated_at, themes FROM book_genre WHERE book_id = ? AND model_id = ?"
             ).use { stmt ->
                 stmt.setString(1, bookId)
                 stmt.setString(2, modelId)
@@ -126,6 +139,7 @@ class JdbcGenreRepository(private val db: Database) : GenreRepository {
                         source = rs.getString("source"),
                         modelId = modelId,
                         updatedAt = rs.getLong("updated_at"),
+                        themes = decodeThemes(rs.getString("themes")),
                     ) else null
                 }
             }

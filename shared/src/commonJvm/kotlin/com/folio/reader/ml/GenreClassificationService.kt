@@ -1,32 +1,47 @@
 package com.folio.reader.ml
 
+import com.folio.reader.database.BookRepository
 import com.folio.reader.database.ChunkRepository
 import com.folio.reader.database.GenreRepository
 import com.folio.reader.database.StoredGenre
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 
+/** One book gathered for a classification pass: its metadata genre (if any), vector and blurb. */
+private data class BookEntry(
+    val bookId: String,
+    val metadataGenre: BroadGenre?,
+    val vector: FloatArray?,
+    val description: String?,
+)
+
 /**
- * Classifies embedded books into a [BroadGenre] and persists the result, so the Atlas roll-up can
- * name its communities without ever opening an ONNX session itself.
+ * Classifies embedded books into a [BroadGenre] **and** their dominant [NarrativeTheme]s, persisting
+ * both, so the Atlas roll-up can name and colour its communities without ever opening an ONNX
+ * session itself.
  *
  * This is the genre counterpart of [AutoTaggerService]: the pure ranking lives in [GenreClassifier]
- * and this half knows where the inputs come from and where the answer goes. Two decisions matter:
+ * / [ThemeClassifier] and this half knows where the inputs come from and where the answer goes. Two
+ * decisions matter:
  *
- * - **The book vector is the mean of its already-stored chunk vectors**, not a fresh embedding of
- *   its chapters. The backfill has embedded every chunk; re-embedding whole books for genre would
- *   be a second full pass and a second peak-memory event. Only the ≈20 fixed taxonomy labels are
- *   embedded (once, cached in the classifier). The stored vectors and the taxonomy vectors are both
- *   raw model space, so the cosine is meaningful.
- * - **A book that cannot be classified now is marked resolved-as-unknown**, not left missing. Left
- *   missing, an unclassifiable book would be selected first on every backfill and block the books
- *   behind it — the same trap an unchunkable chapter once was. A [SOURCE_NONE] row keeps the pass
- *   moving; the community simply falls back to a c-TF-IDF phrase or "Mixed".
+ * - **The genre book vector is the mean of a book's already-stored chunk vectors**, not a fresh
+ *   embedding of its chapters — the backfill has embedded every chunk, so re-embedding whole books
+ *   for genre would be a second full pass and a second peak-memory event. Only the fixed prototypes
+ *   are embedded (once, cached).
+ * - **Themes prefer the book's blurb.** A description ("a tale of court intrigue and betrayal") sits
+ *   far closer to a theme phrase than the mean of the book's narrative prose does, so themes are
+ *   ranked from the embedded description where one exists, falling back to the chunk-mean vector
+ *   otherwise. The blurbs of one backfill batch are embedded together, once.
+ *
+ * A book that cannot be classified is marked resolved-as-unknown rather than left missing, so an
+ * unclassifiable book cannot block the work list forever.
  */
 class GenreClassificationService(
     private val classifier: GenreClassifier,
     private val chunkRepository: ChunkRepository,
     private val genreRepository: GenreRepository,
+    private val bookRepository: BookRepository,
+    private val themeClassifier: ThemeClassifier? = null,
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
 ) {
     val model: EmbeddingModel get() = classifier.model
@@ -35,63 +50,84 @@ class GenreClassificationService(
     suspend fun isAvailable(): Boolean = classifier.isAvailable()
 
     /**
-     * Classifies and stores one book's genre if it can, returning the assignment (or null). Used by
-     * the import path so a freshly imported, freshly embedded book gets a genre immediately.
+     * Classifies and stores one book's genre + themes if it can, returning the genre assignment (or
+     * null). Used by the import path so a freshly imported, freshly embedded book is decorated
+     * immediately.
      */
     suspend fun classifyBook(bookId: String): GenreAssignment? = withContext(dispatcher) {
         val subjects = runCatching { genreRepository.subjectsFor(bookId) }.getOrDefault(emptyList())
-        classifier.canonicalize(subjects)?.let { genre ->
-            val assignment = GenreAssignment(genre, 1f, GenreSource.METADATA)
-            store(bookId, assignment)
+        val metadata = classifier.canonicalize(subjects)
+        val description = runCatching { bookRepository.getBook(bookId)?.description }.getOrNull()
+        val needVector = metadata == null || description.isNullOrBlank()
+        val vector = if (needVector) bookVector(bookId) else null
+
+        val themes = runCatching { themesFor(listOf(BookEntry(bookId, metadata, vector, description))) }
+            .getOrDefault(emptyMap())[bookId].orEmpty()
+
+        if (metadata != null) {
+            val assignment = GenreAssignment(metadata, 1f, GenreSource.METADATA)
+            store(bookId, assignment, themes)
             return@withContext assignment
         }
         val taxonomy = classifier.taxonomyVectors() ?: return@withContext null // no model → retry later
-        val vector = bookVector(bookId) ?: return@withContext null            // not embedded → retry later
-        val inferred = classifier.rank(vector, taxonomy)
+        val v = vector ?: return@withContext null                              // not embedded → retry later
+        val inferred = classifier.rank(v, taxonomy)
         if (inferred == null) {
-            storeUnresolved(bookId) // attempted, genuinely below threshold — don't retry forever
+            storeUnresolved(bookId, themes) // attempted, genuinely below threshold — don't retry forever
             return@withContext null
         }
-        store(bookId, inferred)
+        store(bookId, inferred, themes)
         inferred
     }
 
     /**
-     * Classifies up to [limit] embedded books that have no genre row for the current model, and
-     * returns how many rows it wrote (including resolved-as-unknown). The backfill worker calls this
-     * after its embedding pass; it is resumable and idempotent, like the embedding backfill itself.
+     * Classifies up to [limit] embedded books that have no genre row for the current model, writing
+     * genre + themes, and returns how many rows it wrote. The backfill worker calls this after its
+     * embedding pass; it is resumable and idempotent, like the embedding backfill itself.
      *
-     * Metadata-resolvable books are stored immediately. The rest are gathered with their book
-     * vectors so a single **calibration** pass over this batch can de-bias each genre's cosines
-     * (see [GenreClassifier.calibrationBias]) before the margin-gated rank — that calibration is the
-     * accuracy win, and computing it from the run's own book vectors keeps it model-agnostic.
+     * Gathers each book's vector and blurb first so one **calibration** pass over the batch can
+     * de-bias genre *and* theme cosines before the margin-gated rank — that calibration is the
+     * accuracy win, and computing it from the run's own vectors keeps it model-agnostic.
      */
     suspend fun backfillMissing(limit: Int = DEFAULT_BACKFILL_LIMIT): Int = withContext(dispatcher) {
         val ids = runCatching { genreRepository.booksMissingGenre(model.id, limit) }.getOrDefault(emptyList())
         if (ids.isEmpty()) return@withContext 0
-        var taxonomy: Map<BroadGenre, FloatArray>? = null
-        var written = 0
-        val needInference = ArrayList<Pair<String, FloatArray>>()
-        for (bookId in ids) {
+
+        // Phase 1 — gather: metadata genre, blurb, and the chunk-mean vector where it is needed
+        // (for genre inference, or as the theme fallback when there is no blurb).
+        val entries = ids.map { bookId ->
             val subjects = runCatching { genreRepository.subjectsFor(bookId) }.getOrDefault(emptyList())
             val metadata = classifier.canonicalize(subjects)
-            if (metadata != null) {
-                store(bookId, GenreAssignment(metadata, 1f, GenreSource.METADATA))
-                written++
-                continue
-            }
-            if (taxonomy == null) taxonomy = classifier.taxonomyVectors()
-            if (taxonomy == null) break // no model on disk — nothing more we can do this run
-            val vector = bookVector(bookId) ?: continue // not embedded yet — retry a later run
-            needInference.add(bookId to vector)
+            val description = runCatching { bookRepository.getBook(bookId)?.description }.getOrNull()
+            val needVector = metadata == null || description.isNullOrBlank()
+            BookEntry(bookId, metadata, if (needVector) bookVector(bookId) else null, description)
         }
-        val tax = taxonomy
-        if (tax != null && needInference.isNotEmpty()) {
-            val bias = classifier.calibrationBias(needInference.map { it.second }, tax)
-            for ((bookId, vector) in needInference) {
-                val inferred = classifier.rank(vector, tax, bias)
-                if (inferred != null) store(bookId, inferred) else storeUnresolved(bookId)
-                written++
+
+        // Phase 2 — themes for the whole batch (blurb-embedded where possible), calibrated together.
+        val themesByBook = runCatching { themesFor(entries) }.getOrDefault(emptyMap())
+
+        // Phase 3 — genre: calibrate over the books that need inference, then rank + store each.
+        val needInference = entries.filter { it.metadataGenre == null && it.vector != null }
+        val taxonomy = if (needInference.isNotEmpty()) classifier.taxonomyVectors() else null
+        val bias = if (taxonomy != null && needInference.isNotEmpty()) {
+            classifier.calibrationBias(needInference.map { it.vector!! }, taxonomy)
+        } else null
+
+        var written = 0
+        for (e in entries) {
+            val themes = themesByBook[e.bookId].orEmpty()
+            when {
+                e.metadataGenre != null -> {
+                    store(e.bookId, GenreAssignment(e.metadataGenre, 1f, GenreSource.METADATA), themes)
+                    written++
+                }
+                e.vector == null -> Unit // not embedded yet — retry a later run
+                taxonomy == null -> Unit // no model on disk — nothing more we can do this run
+                else -> {
+                    val inferred = classifier.rank(e.vector, taxonomy, bias)
+                    if (inferred != null) store(e.bookId, inferred, themes) else storeUnresolved(e.bookId, themes)
+                    written++
+                }
             }
         }
         written
@@ -100,6 +136,34 @@ class GenreClassificationService(
     /** Clears every stored genre for the current model — used to force a re-derivation. */
     suspend fun clearForModel(): Int =
         runCatching { genreRepository.clearForModel(model.id) }.getOrDefault(0)
+
+    /**
+     * Dominant themes (display names, strongest first) per book, from the blurb where present else
+     * the chunk-mean vector. Blurbs are embedded in one batch and the whole set is calibrated
+     * together, so a theme that is generically close to everything cannot always win. Empty when
+     * there is no theme classifier or no model on disk.
+     */
+    private suspend fun themesFor(entries: List<BookEntry>): Map<String, List<String>> {
+        val tc = themeClassifier ?: return emptyMap()
+        val themeTax = tc.themeVectors() ?: return emptyMap()
+
+        val described = entries.filter { !it.description.isNullOrBlank() }
+        val descVecs = if (described.isNotEmpty()) {
+            tc.embed(described.map { it.description!!.take(MAX_BLURB_CHARS) })
+        } else emptyList()
+        val descVecById = HashMap<String, FloatArray>(described.size)
+        described.forEachIndexed { i, e -> descVecs.getOrNull(i)?.let { descVecById[e.bookId] = it } }
+
+        val themeVecById = LinkedHashMap<String, FloatArray>(entries.size)
+        for (e in entries) {
+            val v = descVecById[e.bookId] ?: e.vector ?: continue
+            themeVecById[e.bookId] = v
+        }
+        if (themeVecById.isEmpty()) return emptyMap()
+
+        val bias = tc.calibrationBias(themeVecById.values.toList(), themeTax)
+        return themeVecById.mapValues { (_, v) -> tc.rankTop(v, themeTax, bias).map { it.displayName } }
+    }
 
     /**
      * Mean of a book's stored chunk vectors (raw model space), re-normalised, as a **trimmed** mean:
@@ -114,8 +178,6 @@ class GenreClassificationService(
         if (vecs.isEmpty()) return null
         val kept = if (vecs.size >= 5) {
             val raw = meanOf(vecs)
-            // Closest-to-mean first; keep the inner ~80% so outliers don't dominate. Stable sort ⇒
-            // deterministic on ties.
             vecs.sortedByDescending { cosineSimilarity(it, raw) }
                 .take((vecs.size * 0.8f).toInt().coerceAtLeast(1))
         } else {
@@ -133,7 +195,7 @@ class GenreClassificationService(
         return out
     }
 
-    private suspend fun store(bookId: String, assignment: GenreAssignment) {
+    private suspend fun store(bookId: String, assignment: GenreAssignment, themes: List<String>) {
         runCatching {
             genreRepository.upsertGenre(
                 StoredGenre(
@@ -143,12 +205,13 @@ class GenreClassificationService(
                     source = assignment.source.name,
                     modelId = model.id,
                     updatedAt = System.currentTimeMillis(),
+                    themes = themes,
                 )
             )
         }
     }
 
-    private suspend fun storeUnresolved(bookId: String) {
+    private suspend fun storeUnresolved(bookId: String, themes: List<String>) {
         runCatching {
             genreRepository.upsertGenre(
                 StoredGenre(
@@ -158,6 +221,7 @@ class GenreClassificationService(
                     source = SOURCE_NONE,
                     modelId = model.id,
                     updatedAt = System.currentTimeMillis(),
+                    themes = themes,
                 )
             )
         }
@@ -170,13 +234,15 @@ class GenreClassificationService(
         /** How many books one genre backfill pass classifies before yielding. */
         const val DEFAULT_BACKFILL_LIMIT = 200
 
+        /** Blurbs are truncated before embedding — the first paragraph carries the themes. */
+        const val MAX_BLURB_CHARS = 1200
+
         /**
-         * Bumped whenever the classifier's *algorithm* changes (multi-prompt prototypes, calibration,
-         * margin gating), so the backfill worker can clear and re-derive stored genres once — rows
-         * are keyed by model, not algorithm, so without a version they would otherwise persist from
-         * the old classifier. v2 introduced calibrated multi-prompt prototypes + relative-margin
-         * gating (replacing the flat-threshold single-label argmax).
+         * Bumped whenever the classifier's *algorithm* changes, so the backfill worker can clear and
+         * re-derive stored rows once — rows are keyed by model, not algorithm. v2 introduced
+         * calibrated multi-prompt prototypes + relative-margin gating; v3 adds per-book theme
+         * classification (blurb-first) alongside the genre.
          */
-        const val CLASSIFIER_VERSION = 2
+        const val CLASSIFIER_VERSION = 3
     }
 }

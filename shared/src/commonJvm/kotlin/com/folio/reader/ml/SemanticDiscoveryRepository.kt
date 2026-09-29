@@ -67,11 +67,6 @@ class SemanticDiscoveryRepository(
     @Volatile private var cachedFingerprint: String? = null
     @Volatile private var cachedAtlas: AtlasModel? = null
     private val cacheJson = Json { ignoreUnknownKeys = true }
-
-    // Prototype vectors for the theme vocabulary, embedded once per model (the ≈40 themes × a few
-    // phrases each) and reused for every theme assignment. Raw model space, so a cluster's raw
-    // centroid can be ranked against them directly. Null until first embedded (or if no model).
-    @Volatile private var cachedThemeVectors: Map<NarrativeTheme, FloatArray>? = null
     // ---- Echoes --------------------------------------------------------------------------
 
     /** True when there is a model and vectors to answer from — the same gate search uses. */
@@ -200,9 +195,15 @@ class SemanticDiscoveryRepository(
         // force-directed layout can apply a mild same-genre attraction (books of a genre drift into
         // one cloud), and reused below to colour + label the map by genre. Never *computed* here —
         // that would open ONNX during the roll-up, the documented OOM path.
-        val genresByBook: Map<String, String> = runCatching {
-            genreRepository?.genresForModel(model.id)?.mapValues { it.value.genre } ?: emptyMap()
+        val storedGenres = runCatching {
+            genreRepository?.genresForModel(model.id) ?: emptyMap()
         }.getOrDefault(emptyMap())
+        val genresByBook: Map<String, String> = storedGenres.mapValues { it.value.genre }
+
+        // Per-book dominant themes (display names), written by the same backfill pass. Used to name
+        // communities that don't share an author, and to label a book's clusters at deep zoom.
+        // Read-only here for the same reason as genres — computing them would open ONNX in the roll-up.
+        val themesByBook: Map<String, List<String>> = storedGenres.mapValues { it.value.themes }
 
         // Cooperative cancellation: the roll-up is a multi-second CPU loop with no suspension
         // points, so without this it would run to completion (burning battery, holding the mutex)
@@ -261,6 +262,8 @@ class SemanticDiscoveryRepository(
                 y = g.y,
                 communityId = g.communityId,
                 genre = genreName?.let { GenreTaxonomy.byName(it)?.displayName ?: it },
+                author = book?.displayAuthor?.takeIf { it.isNotBlank() } ?: "",
+                theme = themesByBook[g.bookId]?.firstOrNull()?.takeIf { it.isNotBlank() },
                 clusters = g.clusters.map { c ->
                     val meta = metaById[c.exemplarChunkId]
                     val phrases = candidates.getOrElse(flat) { emptyList() }
@@ -303,6 +306,10 @@ class SemanticDiscoveryRepository(
     suspend fun lastComputedAtlas(): AtlasModel? {
         cachedAtlas?.let { return it }
         val envelope = readDiskEnvelopeAny() ?: return null
+        // Don't serve a map built by an older algorithm version: its labels/layout are structurally
+        // different, so showing it and then swapping in the recomputed one is exactly the "flash of
+        // old categories" to avoid. A cross-version cache falls through to a fresh compute instead.
+        if (!envelope.fingerprint.endsWith(":$ATLAS_ALGO_VERSION")) return null
         // Seed the session cache from disk so an *unchanged* library's next [atlas] returns this
         // very instance instead of re-deserialising a fresh one (which would needlessly re-derive
         // and re-bake the whole map). Safe: [atlas] still re-checks the live [fingerprint], so a
@@ -325,13 +332,16 @@ class SemanticDiscoveryRepository(
     }
 
     /**
-     * Rolls each emergent community up to a display genre and colour.
+     * Rolls each emergent community up to a display label and colour — the **hybrid** scheme: label
+     * by the library's real structure first, fall back to a theme, then a genre.
      *
-     * The name is the **plurality broad genre** among the community's member books (metadata- or
-     * inference-derived, whichever the backfill stored). When no member has a genre, it falls back
-     * to the most common c-TF-IDF phrase across the community's clusters, and finally to "Mixed" —
-     * never inventing a confident label. Colour is the genre's stable hue slot, or a
-     * community-derived slot past the genre range when there is no genre.
+     * Label priority, per community: a **shared author** (when a clear majority of the members are by
+     * one author — the accurate, never-wrong name for the series/author clusters that dominate a real
+     * library) → the community's **dominant theme** (from the persisted, blurb-derived themes) → the
+     * plurality **broad genre** → "Mixed". Labels are de-duplicated across communities (largest picks
+     * first, others fall to their next option) so no two nebulae read the same. **Colour stays genre**
+     * — [colorHueId] is the plurality genre's hue (or a community slot when there is no genre) — so
+     * "themes name the regions, genres tint them", per the chosen design.
      */
     private fun rollUpCommunities(
         geometry: List<AtlasBookGeometry>,
@@ -339,32 +349,44 @@ class SemanticDiscoveryRepository(
         genresByBook: Map<String, String>,
     ): List<AtlasCommunity> {
         val geomById = geometry.associateBy { it.bookId }
-        return books.groupBy { it.communityId }.entries.sortedBy { it.key }.map { (cid, members) ->
-            // Plurality broad genre by enum name, deterministic on ties (taxonomy order).
-            val genreVotes = members.mapNotNull { genresByBook[it.bookId] }
-                .groupingBy { it }.eachCount()
-            val pluralityGenre = genreVotes.entries
+        val byCommunity = books.groupBy { it.communityId }
+
+        // Per-community candidates, computed once.
+        data class Candidates(val author: String?, val theme: String?, val genre: BroadGenre?)
+        val candidates = byCommunity.mapValues { (_, members) ->
+            // Shared author only when a clear majority share one (else it is not really "their" author).
+            val authorVotes = members.map { it.author }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+            val topAuthor = authorVotes.entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                .firstOrNull()
+            val sharedAuthor = topAuthor?.takeIf { it.value >= (members.size * AUTHOR_SHARE_MIN) }?.key
+
+            val theme = members.mapNotNull { it.theme }.groupingBy { it }.eachCount().entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                .firstOrNull()?.key
+
+            val pluralityGenre = members.mapNotNull { genresByBook[it.bookId] }.groupingBy { it }.eachCount().entries
                 .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }
                     .thenBy { GenreTaxonomy.byName(it.key)?.ordinal ?: Int.MAX_VALUE })
-                .firstOrNull()?.key
-                ?.let { GenreTaxonomy.byName(it) }
+                .firstOrNull()?.key?.let { GenreTaxonomy.byName(it) }
 
-            val label: String
-            val hue: Int
-            if (pluralityGenre != null) {
-                label = pluralityGenre.displayName
-                hue = pluralityGenre.hueId
-            } else {
-                // Fallback: the most common distinctive phrase across the community's clusters.
-                val phraseVotes = members.flatMap { it.clusters }.flatMap { it.labelCandidates }
-                    .groupingBy { it }.eachCount()
-                val topPhrase = phraseVotes.entries
-                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-                    .firstOrNull()?.key
-                label = topPhrase?.let { ClusterLabeler.display(listOf(it)) }?.takeIf { it.isNotBlank() } ?: "Mixed"
-                hue = BroadGenre.entries.size + cid
-            }
+            Candidates(sharedAuthor, theme, pluralityGenre)
+        }
 
+        // Assign labels largest-community-first, de-duplicating so two nebulae never share a label.
+        val used = HashSet<String>()
+        val labelByCommunity = HashMap<Int, String>()
+        byCommunity.entries.sortedByDescending { it.value.size }.forEach { (cid, _) ->
+            val c = candidates.getValue(cid)
+            val ordered = listOfNotNull(c.author, c.theme, c.genre?.displayName)
+            val pick = ordered.firstOrNull { it !in used } ?: ordered.firstOrNull() ?: "Mixed"
+            used.add(pick)
+            labelByCommunity[cid] = pick
+        }
+
+        return byCommunity.entries.sortedBy { it.key }.map { (cid, members) ->
+            val genre = candidates.getValue(cid).genre
+            val hue = genre?.hueId ?: (BroadGenre.entries.size + cid)
             var cx = 0f; var cy = 0f
             members.forEach { cx += it.x; cy += it.y }
             val n = members.size.coerceAtLeast(1)
@@ -373,7 +395,7 @@ class SemanticDiscoveryRepository(
 
             AtlasCommunity(
                 id = cid,
-                genreLabel = label,
+                genreLabel = labelByCommunity[cid] ?: "Mixed",
                 colorHueId = hue,
                 memberBookIds = members.map { it.bookId },
                 centroidX = cx / n,
@@ -534,91 +556,6 @@ class SemanticDiscoveryRepository(
     }
 
     /**
-     * Labels each cluster of every book with a **theme** from the fixed [ThemeTaxonomy], keyed by
-     * `exemplarChunkId` (the same key [refineBookLabels] uses, so the map drops straight into the
-     * screen's `refinedLabels`).
-     *
-     * This is the "different philosophy" the reader asked for: instead of c-TF-IDF, which surfaces a
-     * cluster's most *distinctive* word (a character name like "Molly", a lone motif like
-     * "constellations"), each cluster is **projected onto the theme vocabulary** — the theme whose
-     * prototype phrases sit nearest its raw centroid. The label space is designed and shared across
-     * books, so regions read as "Coming of Age" or "Political Intrigue", never a proper noun.
-     *
-     * Runs on the embedder dispatcher off the roll-up (like [refineBookLabels]): it embeds the ≈40
-     * theme prototypes once (cached), then it is pure cosine over the roll-up's stored raw centroids
-     * — no chunk reload, no per-book re-embedding. Calibrated (each theme's library-wide mean cosine
-     * is subtracted) so a theme generically close to everything cannot always win, then centred per
-     * cluster so the pick is a real argmax. Best-effort: any failure returns empty and the caller
-     * keeps whatever labels it had.
-     */
-    suspend fun assignThemes(books: List<AtlasBook>): Map<String, String> = withContext(dispatcher) {
-        val clusters = books.flatMap { b -> b.clusters.filter { it.rawCentroid.isNotEmpty() } }
-        if (clusters.isEmpty()) return@withContext emptyMap()
-        val themeVecs = themeVectors() ?: return@withContext emptyMap()
-        val themes = themeVecs.keys.toList()
-
-        // Calibration: each theme's mean cosine across every cluster. Subtracting it cancels the
-        // embedder anisotropy that makes some themes score high against *everything*.
-        val bias = HashMap<NarrativeTheme, Double>(themes.size)
-        for (t in themes) {
-            val tv = themeVecs.getValue(t)
-            var s = 0.0
-            for (c in clusters) s += cosine(c.rawCentroid, tv)
-            bias[t] = s / clusters.size
-        }
-
-        val out = HashMap<String, String>(clusters.size)
-        for (c in clusters) {
-            val adjusted = themes.map { t -> t to (cosine(c.rawCentroid, themeVecs.getValue(t)) - (bias[t] ?: 0.0)) }
-            val mean = adjusted.map { it.second }.average()
-            // Centre per cluster, then take the clear argmax (deterministic on ties by taxonomy order).
-            val best = adjusted
-                .map { it.first to (it.second - mean) }
-                .sortedWith(compareByDescending<Pair<NarrativeTheme, Double>> { it.second }.thenBy { it.first.ordinal })
-                .firstOrNull()?.first
-            if (best != null) out[c.exemplarChunkId] = best.displayName
-        }
-        out
-    }
-
-    /**
-     * Embeds the theme vocabulary's prototype phrases once (as queries, into raw model space so they
-     * match the stored raw centroids), averages each theme's phrases into a unit prototype, and
-     * caches the result for the model in force. Null when no model is available to embed with.
-     */
-    private suspend fun themeVectors(): Map<NarrativeTheme, FloatArray>? {
-        cachedThemeVectors?.let { return it }
-        val themes = ThemeTaxonomy.all
-        val phrasesPer = themes.map { it.prototypePhrases }
-        val flat = phrasesPer.flatten()
-        val vecs = runCatching { semanticSearch.embedTexts(flat) }.getOrNull() ?: return null
-        var idx = 0
-        val map = LinkedHashMap<NarrativeTheme, FloatArray>()
-        themes.forEachIndexed { i, t ->
-            val count = phrasesPer[i].size
-            val slice = ArrayList<FloatArray>(count)
-            for (k in 0 until count) vecs.getOrNull(idx + k)?.let { slice.add(it) }
-            idx += count
-            meanNormalize(slice)?.let { map[t] = it }
-        }
-        return if (map.isNotEmpty()) map.also { cachedThemeVectors = it } else null
-    }
-
-    /** Mean of a set of vectors, L2-normalised to a unit prototype. Null when empty/degenerate. */
-    private fun meanNormalize(vecs: List<FloatArray>): FloatArray? {
-        if (vecs.isEmpty()) return null
-        val dims = vecs.first().size
-        val out = FloatArray(dims)
-        for (v in vecs) if (v.size == dims) for (i in out.indices) out[i] += v[i]
-        var norm = 0.0
-        for (x in out) norm += x.toDouble() * x
-        norm = kotlin.math.sqrt(norm)
-        if (norm <= 1e-9) return null
-        for (i in out.indices) out[i] = (out[i] / norm).toFloat()
-        return out
-    }
-
-    /**
      * Warms the shared embedder session and preloads the resident index so the first Echoes tap
      * pays for neither a cold ONNX session nor an index build. Safe to call repeatedly (both are
      * cached) and never throws — a missing model just leaves the session null. Called when the
@@ -670,9 +607,13 @@ class SemanticDiscoveryRepository(
          * older algorithm is discarded via [fingerprint] rather than reused. v2 introduced the robust
          * similarity graph, force-directed layout, emergent communities and broad-genre labelling; v3
          * moved overview labelling to genre-first regions (one per genre, no c-TF-IDF fallback) and
-         * added same-genre attraction to the layout.
+         * added same-genre attraction to the layout; v4 labels communities by the hybrid scheme
+         * (shared author → dominant theme → genre) baked in, replacing the c-TF-IDF fallback.
          */
-        const val ATLAS_ALGO_VERSION = 3
+        const val ATLAS_ALGO_VERSION = 4
+
+        /** Fraction of a community's books that must share one author before it is labelled by them. */
+        const val AUTHOR_SHARE_MIN = 0.6f
 
         /** Fewest confident books of one genre before it earns a labelled region on the overview. */
         const val MIN_REGION_BOOKS = 2
@@ -791,6 +732,10 @@ data class AtlasBook(
     val communityId: Int = 0,
     /** Broad genre display name (e.g. "Science Fiction"), or null when unclassified. */
     val genre: String? = null,
+    /** Display author ("Robin Hobb"), for structural (author/series) region labels. Empty if unknown. */
+    val author: String = "",
+    /** Dominant narrative theme display name ("Coming of Age"), or null when none was confident. */
+    val theme: String? = null,
     val clusters: List<AtlasCluster>,
 )
 

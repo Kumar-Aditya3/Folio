@@ -74,6 +74,7 @@ class EmbeddingModelSelection(
     private var _tagger: ZeroShotTagger? = null
     private var _discovery: SemanticDiscoveryRepository? = null
     private var _genreClassifier: GenreClassifier? = null
+    private var _themeClassifier: ThemeClassifier? = null
     private var _genreClassification: GenreClassificationService? = null
 
     val embedderFactory: OnnxEmbedderFactory get() = _embedderFactory
@@ -109,14 +110,23 @@ class EmbeddingModelSelection(
     val genreClassifier: GenreClassifier
         get() = _genreClassifier ?: GenreClassifier(_embedderFactory).also { _genreClassifier = it }
 
+    /** Theme inference engine (fixed theme vocabulary + zero-shot), rebuilt on a model swap. */
+    val themeClassifier: ThemeClassifier
+        get() = _themeClassifier ?: ThemeClassifier(_embedderFactory).also { _themeClassifier = it }
+
     /**
      * The backfill/import genre pass. Null when no [genreRepository] was supplied (there is nowhere
      * to persist), so callers no-op rather than classify into the void.
      */
     val genreClassification: GenreClassificationService?
         get() = genreRepository?.let { repo ->
-            _genreClassification ?: GenreClassificationService(genreClassifier, chunkRepository, repo)
-                .also { _genreClassification = it }
+            _genreClassification ?: GenreClassificationService(
+                classifier = genreClassifier,
+                chunkRepository = chunkRepository,
+                genreRepository = repo,
+                bookRepository = bookRepository,
+                themeClassifier = themeClassifier,
+            ).also { _genreClassification = it }
         }
 
     /**
@@ -160,6 +170,7 @@ class EmbeddingModelSelection(
         _tagger = null
         _discovery = null
         _genreClassifier = null
+        _themeClassifier = null
         _genreClassification = null
         return model
     }

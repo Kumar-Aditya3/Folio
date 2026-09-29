@@ -71,7 +71,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.ml.AtlasBook
-import com.folio.reader.ml.AtlasCommunity
 import com.folio.reader.ml.AtlasEdge
 import com.folio.reader.ml.AtlasModel
 import com.folio.reader.ui.components.FolioBackHandler
@@ -176,7 +175,6 @@ private data class LegendEntry(
 private fun buildLegend(
     model: AtlasModel,
     nodeById: Map<String, AtlasGalaxy.BookNode>,
-    themesByCluster: Map<String, String>,
 ): List<LegendEntry> {
     val total = model.books.size
     if (total == 0) return emptyList()
@@ -192,12 +190,11 @@ private fun buildLegend(
 
     val communities = model.communities.filter { it.memberBookIds.isNotEmpty() }
     if (communities.size >= 2) {
-        val labels = communityThemeLabels(model, communities, themesByCluster)
         return communities.sortedByDescending { it.size }.map { c ->
             val (cx, cy) = centroidOf(c.memberBookIds)
             LegendEntry(
                 id = "c${c.id}",
-                label = labels[c.id]?.takeIf { it.isNotBlank() } ?: c.genreLabel,
+                label = c.genreLabel,
                 color = colorOf(c.memberBookIds, AtlasGalaxy.communityColor(c.id)),
                 fraction = c.size.toFloat() / total,
                 bookIds = c.memberBookIds.toHashSet(),
@@ -224,37 +221,6 @@ private fun buildLegend(
         }
     }
     return emptyList()
-}
-
-/**
- * A de-duplicated **theme** label per community: the most common theme (from the fixed-vocabulary
- * [themesByCluster] assignment) among the community's clusters, assigning larger communities first
- * and falling to a community's next theme when its first is already taken, so no two nebulae share a
- * label. Falls back to the community's plurality-genre name when it has no assigned theme yet.
- */
-private fun communityThemeLabels(
-    model: AtlasModel,
-    communities: List<AtlasCommunity>,
-    themesByCluster: Map<String, String>,
-): Map<Int, String> {
-    val booksById = model.books.associateBy { it.bookId }
-    // Ranked theme votes per community (most-voted first, deterministic on ties).
-    val votesByCommunity = communities.associate { c ->
-        c.id to c.memberBookIds.flatMap { booksById[it]?.clusters ?: emptyList() }
-            .mapNotNull { themesByCluster[it.exemplarChunkId] }
-            .groupingBy { it }.eachCount().entries
-            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-            .map { it.key }
-    }
-    val used = HashSet<String>()
-    val out = HashMap<Int, String>()
-    // Largest communities pick first so the dominant nebula keeps its strongest theme.
-    communities.sortedByDescending { it.size }.forEach { c ->
-        val ranked = votesByCommunity[c.id].orEmpty()
-        val pick = ranked.firstOrNull { it !in used } ?: ranked.firstOrNull()
-        if (pick != null) { used.add(pick); out[c.id] = pick } else out[c.id] = c.genreLabel
-    }
-    return out
 }
 
 /** A four-point star marker with a soft glow — the map's "book" / region glyph. */
@@ -479,7 +445,7 @@ private fun AtlasGalaxyMap(
     // first. Built from the emergent communities so it is always multi-entry and its dot colours
     // match the stars, instead of the old single "100% <genre>" readout when the classifier
     // collapsed the whole library onto one broad shelf.
-    val legend = remember(model, nodeById, refinedLabels) { buildLegend(model, nodeById, refinedLabels) }
+    val legend = remember(model, nodeById) { buildLegend(model, nodeById) }
 
     // Lens: tapping a legend row dims every star not in that row's book set (alpha only, one render
     // path). Null = no lens. Generic over communities/genres because each row carries its own set.
@@ -623,9 +589,10 @@ private fun AtlasGalaxyMap(
             val regionMax = (labelMaxPx * 1.4f).toInt()
             HashMap<String, Pair<TextLayoutResult, TextLayoutResult?>>().apply {
                 clusters.forEach { cl ->
-                    val primary = (refinedLabels[cl.chunkId]?.takeIf { it.isNotBlank() } ?: cl.label)
-                        .ifBlank { cl.candidates.firstOrNull().orEmpty() }
-                    if (primary.isBlank()) return@forEach
+                    // Only the baked label (theme, else genre). No c-TF-IDF fallback: cl.label /
+                    // cl.candidates are the proper nouns ("Molly") this whole change removes, so an
+                    // unlabelled cluster simply shows no heading rather than a character name.
+                    val primary = refinedLabels[cl.chunkId]?.takeIf { it.isNotBlank() } ?: return@forEach
                     val res = textMeasurer.measure(
                         primary, regionStyle, overflow = TextOverflow.Ellipsis, maxLines = 1,
                         constraints = Constraints(maxWidth = regionMax),
@@ -1143,23 +1110,23 @@ private fun AtlasGalaxyMap(
         val selBook = selectedId?.let { bookById[it] }
         val selNode = selectedId?.let { nodeById[it] }
         val accent = selNode?.color?.let { lerp(it, Color.White, 0.18f) } ?: Color(0xFF8AA0FF)
-        val related = remember(selectedId, model, refinedLabels) {
+        val related = remember(selectedId, model) {
             val id = selectedId ?: return@remember emptyList<AtlasRelated>()
-            // Each neighbour says *why* it sits nearby — a shared theme when there is one, else a
-            // shared genre, else what it is about — from the fixed-vocabulary theme labels, so the
-            // reason reads as a concept ("Coming of Age") rather than a shared proper noun.
-            fun themesOf(book: AtlasBook): List<String> =
-                book.clusters.mapNotNull { c -> refinedLabels[c.exemplarChunkId]?.takeIf { it.isNotBlank() } }.distinct()
-            val selThemes = bookById[id]?.let { themesOf(it) }?.toHashSet() ?: hashSetOf()
-            val selGenre = bookById[id]?.genre
+            // Each neighbour says *why* it sits nearby, from the book's baked structure/theme fields:
+            // a shared theme, else a shared author, else a shared genre, else what it is about — a
+            // concept or a real name, never an unexplained cover under "NEARBY IN YOUR UNIVERSE".
+            val sel = bookById[id]
+            val selTheme = sel?.theme?.takeIf { it.isNotBlank() }
+            val selAuthor = sel?.author.orEmpty()
+            val selGenre = sel?.genre
             (neighbors[id] ?: emptyList()).take(10).mapNotNull { (nid, _) ->
                 val b = bookById[nid] ?: return@mapNotNull null
-                val bThemes = themesOf(b)
-                val shared = bThemes.filter { it in selThemes }.take(2)
                 val why = when {
-                    shared.isNotEmpty() -> "Shared: " + shared.joinToString(" · ")
+                    selTheme != null && b.theme == selTheme -> "Shared: $selTheme"
+                    selAuthor.isNotBlank() && b.author == selAuthor -> "Also ${b.author}"
                     !selGenre.isNullOrBlank() && b.genre == selGenre -> "Also ${b.genre}"
-                    else -> bThemes.firstOrNull()?.let { "About: $it" }
+                    !b.theme.isNullOrBlank() -> "About: ${b.theme}"
+                    else -> null
                 }
                 AtlasRelated(
                     id = nid,
@@ -1171,12 +1138,10 @@ private fun AtlasGalaxyMap(
                 )
             }
         }
-        val themes = remember(selectedId, refinedLabels) {
+        val themes = remember(selectedId) {
             val b = selBook ?: return@remember emptyList<String>()
-            b.clusters.sortedByDescending { it.mass }
-                .map { c -> (refinedLabels[c.exemplarChunkId]?.takeIf { it.isNotBlank() } ?: c.label) }
-                .filter { it.isNotBlank() }
-                .distinct()
+            // The book's baked theme and genre, as chips — never the c-TF-IDF proper nouns.
+            listOfNotNull(b.theme?.takeIf { it.isNotBlank() }, b.genre?.takeIf { it.isNotBlank() }).distinct()
         }
         val passage = selBook?.clusters?.sortedByDescending { it.mass }
             ?.firstNotNullOfOrNull { c -> exemplarTexts[c.exemplarChunkId]?.takeIf { it.isNotBlank() } }
