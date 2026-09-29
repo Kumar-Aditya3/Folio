@@ -222,7 +222,7 @@ class DocumentLibraryViewModelTest {
     }
 
     @Test
-    fun documentsViewModeSurvivesARelaunch() = runBlocking {
+    fun documentsDisplayChoicesSurviveARelaunch() = runBlocking {
         withFixture { documents, categories, settings ->
             categories.ensureSeeded()
             val first = DocumentLibraryViewModel(
@@ -231,9 +231,20 @@ class DocumentLibraryViewModelTest {
             try {
                 await { first.selectedCategoryId.value == DocumentCategory.MAIN_ID }
                 assertEquals(DocumentViewMode.GRID, first.viewMode.value)
+                assertEquals(DocumentSortBy.LAST_OPENED, first.sortBy.value)
+                assertFalse(first.sortAscending.value)
+                assertNull(first.formatFilter.value)
 
                 first.setViewMode(DocumentViewMode.LIST)
-                await { settings.values["document.library.viewMode"] == "LIST" }
+                first.setSort(DocumentSortBy.TITLE)
+                first.toggleSortDirection()
+                first.setFormatFilter(DocumentFormat.PDF)
+                await {
+                    settings.values["document.library.viewMode"] == "LIST" &&
+                        settings.values["document.library.sortBy"] == "TITLE" &&
+                        settings.values["document.library.sortAscending"] == "true" &&
+                        settings.values["document.library.formatFilter"] == "PDF"
+                }
             } finally {
                 first.close()
             }
@@ -242,9 +253,37 @@ class DocumentLibraryViewModelTest {
                 documents, categories, settings, Dispatchers.Default, fileExists = { true }
             )
             try {
-                await { reopened.viewMode.value == DocumentViewMode.LIST }
+                await {
+                    reopened.viewMode.value == DocumentViewMode.LIST &&
+                        reopened.sortBy.value == DocumentSortBy.TITLE &&
+                        reopened.sortAscending.value &&
+                        reopened.formatFilter.value == DocumentFormat.PDF
+                }
             } finally {
                 reopened.close()
+            }
+        }
+    }
+
+    @Test
+    fun clearedFormatFilterOverwritesTheStoredFormat() = runBlocking {
+        withFixture { documents, categories, settings ->
+            categories.ensureSeeded()
+            val viewModel = DocumentLibraryViewModel(
+                documents, categories, settings, Dispatchers.Default, fileExists = { true }
+            )
+            try {
+                await { viewModel.selectedCategoryId.value == DocumentCategory.MAIN_ID }
+                viewModel.setFormatFilter(DocumentFormat.PDF)
+                await { settings.values["document.library.formatFilter"] == "PDF" }
+
+                viewModel.setFormatFilter(null)
+                // A stored "NONE" is what keeps the next launch from restoring PDF. Reopening to
+                // assert null here would prove nothing: the field's default already is null, so a
+                // restore and a skip are indistinguishable from the outside.
+                await { settings.values["document.library.formatFilter"] == "NONE" }
+            } finally {
+                viewModel.close()
             }
         }
     }

@@ -63,6 +63,12 @@ private data class DocumentDisplaySettings(
 
 private const val KEY_LIBRARY_CATEGORY = "document.library.category"
 private const val KEY_LIBRARY_VIEW_MODE = "document.library.viewMode"
+private const val KEY_LIBRARY_SORT = "document.library.sortBy"
+private const val KEY_LIBRARY_SORT_ASCENDING = "document.library.sortAscending"
+private const val KEY_LIBRARY_FORMAT_FILTER = "document.library.formatFilter"
+
+/** Stored when the reader clears the format filter, so a cleared filter stays cleared. */
+private const val NO_FORMAT_FILTER = "NONE"
 
 class DocumentLibraryViewModel(
     private val repository: DocumentRepository,
@@ -186,11 +192,17 @@ class DocumentLibraryViewModel(
             }
         }
         scope.launch {
-            // compareAndSet, not a plain assign: the read is async, and a grid/list tap landed
-            // while it is in flight must win over the value from the last launch.
-            val remembered = runCatching { settingsRepository.getRaw(KEY_LIBRARY_VIEW_MODE) }.getOrNull()
-            DocumentViewMode.entries.firstOrNull { it.name == remembered }
-                ?.let { viewMode.compareAndSet(DocumentViewMode.GRID, it) }
+            restoreChoice(KEY_LIBRARY_VIEW_MODE, viewMode) { name ->
+                DocumentViewMode.entries.firstOrNull { it.name == name }
+            }
+            restoreChoice(KEY_LIBRARY_SORT, sortBy) { name ->
+                DocumentSortBy.entries.firstOrNull { it.name == name }
+            }
+            restoreChoice(KEY_LIBRARY_SORT_ASCENDING, sortAscending) { it.toBooleanStrictOrNull() }
+            restoreChoice(KEY_LIBRARY_FORMAT_FILTER, formatFilter) { name ->
+                if (name == NO_FORMAT_FILTER) null
+                else DocumentFormat.entries.firstOrNull { it.name == name }
+            }
         }
     }
 
@@ -271,23 +283,28 @@ class DocumentLibraryViewModel(
 
     fun setViewMode(value: DocumentViewMode) {
         viewMode.value = value
-        scope.launch { settingsRepository.setRaw(KEY_LIBRARY_VIEW_MODE, value.name) }
+        persistChoice(KEY_LIBRARY_VIEW_MODE, value.name)
     }
 
     fun setSort(value: DocumentSortBy) {
         sortBy.value = value
+        persistChoice(KEY_LIBRARY_SORT, value.name)
     }
 
     fun setSortAscending(value: Boolean) {
         sortAscending.value = value
+        persistChoice(KEY_LIBRARY_SORT_ASCENDING, value.toString())
     }
 
     fun toggleSortDirection() {
-        sortAscending.value = !sortAscending.value
+        setSortAscending(!sortAscending.value)
     }
 
     fun setFormatFilter(value: DocumentFormat?) {
         formatFilter.value = value
+        // Cleared has to be written, not skipped: otherwise the next launch restores the filter
+        // this reader deliberately removed.
+        persistChoice(KEY_LIBRARY_FORMAT_FILTER, value?.name ?: NO_FORMAT_FILTER)
     }
 
     fun setImporting(value: Boolean) {
@@ -303,6 +320,25 @@ class DocumentLibraryViewModel(
         if (trimmed.isNotEmpty() && trimmed != document.title) {
             repository.upsertDocument(document.copy(title = trimmed))
         }
+    }
+
+    private fun persistChoice(key: String, value: String) {
+        scope.launch { settingsRepository.setRaw(key, value) }
+    }
+
+    /**
+     * Restores one persisted choice without clobbering a tap that lands first: the flow is compared
+     * against the value it held *before* the read, so a change the reader made while these were in
+     * flight wins over the last launch's value. A string that does not parse leaves the field alone.
+     */
+    private suspend fun <T> restoreChoice(
+        key: String,
+        into: MutableStateFlow<T>,
+        parse: (String) -> T?,
+    ) {
+        val before = into.value
+        val raw = runCatching { settingsRepository.getRaw(key) }.getOrNull() ?: return
+        parse(raw)?.let { into.compareAndSet(before, it) }
     }
 
     override fun close() {
