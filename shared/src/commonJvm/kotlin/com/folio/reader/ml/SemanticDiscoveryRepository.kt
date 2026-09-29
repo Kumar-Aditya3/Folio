@@ -42,7 +42,7 @@ class SemanticDiscoveryRepository(
      * *computes* genre — that would open ONNX during the roll-up, which is the documented OOM path.
      */
     private val genreRepository: com.folio.reader.database.GenreRepository? = null,
-    /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [Dispatchers.Default]. */
+    /** [MlDispatchers.inference] for the embed/scan; the roll-up runs on [MlDispatchers.rollupDispatcher]. */
     private val dispatcher: CoroutineDispatcher = MlDispatchers.inference,
     /**
      * Where the computed map is persisted so a cold app start does not recompute the multi-second
@@ -153,13 +153,16 @@ class SemanticDiscoveryRepository(
     }
 
     /**
-     * The library's topic map. Computed on [Dispatchers.Default] (the roll-up is CPU-bound and
-     * must not sit on the latency-sensitive inference pool), cached in memory for the session and
-     * persisted to [cacheDir] so a cold start reuses it. Recomputed only when the index fingerprint
-     * — model id, chunk count, embedded-book count — changes. A partially backfilled library maps
-     * whatever is embedded so far.
+     * The library's topic map. The roll-up's CPU cost is set by [lane] — [RollupLane.Interactive]
+     * (the default, and what the Atlas screen uses) takes `Dispatchers.Default` and the whole scan
+     * pool because the reader is waiting; [RollupLane.Background] narrows the same pass to one
+     * lowest-priority worker so an unattended prewarm cannot starve the first frame or an EPUB open.
+     * A lane changes the budget only: the map is identical either way. Cached in memory for the
+     * session and persisted to [cacheDir] so a cold start reuses it. Recomputed only when the index
+     * fingerprint — model id, chunk count, embedded-book count — changes. A partially backfilled
+     * library maps whatever is embedded so far.
      */
-    suspend fun atlas(): AtlasModel = atlasMutex.withLock {
+    suspend fun atlas(lane: RollupLane = RollupLane.Interactive): AtlasModel = atlasMutex.withLock {
         val fingerprint = fingerprint()
         cachedAtlas?.let { if (fingerprint == cachedFingerprint) return it }
 
@@ -210,8 +213,13 @@ class SemanticDiscoveryRepository(
         // even after the reader left the Atlas mid-load. The lambda lets the pure code bail at
         // loop boundaries when this coroutine is cancelled.
         val job = currentCoroutineContext()[Job]
-        val geometry = withContext(Dispatchers.Default) {
-            AtlasRollup.compute(entries, bookGenre = genresByBook, shouldCancel = { job?.isActive == false })
+        val geometry = withContext(MlDispatchers.rollupDispatcher(lane)) {
+            AtlasRollup.compute(
+                entries,
+                bookGenre = genresByBook,
+                shouldCancel = { job?.isActive == false },
+                scanWorkers = MlDispatchers.rollupScanWorkers(lane),
+            )
         }
 
         // Index the loaded metadata so each cluster's exemplar can be turned into a reader
@@ -240,7 +248,7 @@ class SemanticDiscoveryRepository(
             runCatching { chunkRepository.chunkTexts(neededTexts) }.getOrDefault(emptyMap())
         }
         val docs = clusterMembers.map { ids -> ids.mapNotNull { textById[it] } }
-        val candidates = withContext(Dispatchers.Default) { ClusterLabeler.label(docs) }
+        val candidates = withContext(MlDispatchers.rollupDispatcher(lane)) { ClusterLabeler.label(docs) }
         // NOTE: stage-2 embedding re-rank is intentionally NOT run here. Opening the ONNX session
         // during the roll-up — on top of the sampled vectors and the terrain bitmap already in
         // memory — pushed native memory over the edge and the OS hard-killed the app with no Java
@@ -326,9 +334,16 @@ class SemanticDiscoveryRepository(
      * and cheap when nothing changed: [atlas] short-circuits on the fingerprint, so calling this
      * after a book add/remove is what moves the multi-second roll-up *off* the open path and into
      * the background. Best-effort — a failure just means the next open recomputes as before.
+     *
+     * Defaults to [RollupLane.Background]: this pass has nobody waiting on it, so it takes one
+     * lowest-priority core rather than the machine. That is what stops a startup or post-import
+     * recompute from making Home, the shelf and an EPUB open crawl. A roll-up holds [atlasMutex]
+     * while it runs, so an Atlas opened mid-prewarm shows [lastComputedAtlas] on its first frame as
+     * ever and picks up the fresh map the moment this pass writes it — later than an interactive
+     * compute would, and never blank.
      */
-    suspend fun prewarm() {
-        runCatching { atlas() }
+    suspend fun prewarm(lane: RollupLane = RollupLane.Background) {
+        runCatching { atlas(lane) }
     }
 
     /**

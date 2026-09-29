@@ -140,6 +140,13 @@ object AtlasRollup {
          * it to completion. Aborting throws [RollupCancelledException].
          */
         shouldCancel: () -> Boolean = { false },
+        /**
+         * How many cross-book scan threads stage 3 may use — the roll-up's CPU budget. An
+         * unattended prewarm passes 1 (see [MlDispatchers.rollupScanWorkers]) so it cannot take the
+         * scan pool from an interactive search; 1 also runs the scan inline on the calling thread.
+         * Shard count never moves the result: the accumulators are order-independent Long sums.
+         */
+        scanWorkers: Int = ScanPool.parallelism,
     ): AtlasGeometry {
         if (entries.isEmpty()) return AtlasGeometry(emptyList(), emptyList())
         val dims = entries.first().second.size
@@ -169,7 +176,7 @@ object AtlasRollup {
         // 3. Book-to-book edges from a robust, hub-down-weighted, sparsified similarity graph.
         //    This is what "closer = more similar" and the communities below both stand on, so it
         //    is built before the layout rather than as an afterthought.
-        val edges = adjacency(entries, whitened, shouldCancel)
+        val edges = adjacency(entries, whitened, shouldCancel, scanWorkers)
 
         // 4. A deterministic macro layout of the *books* on the robust graph, seeded by a sign-fixed
         //    PCA of each book's own mean centroid so an unchanged library lays out identically each
@@ -571,6 +578,12 @@ object AtlasRollup {
         entries: List<Pair<ChunkMeta, FloatArray>>,
         whitened: Array<FloatArray>,
         shouldCancel: () -> Boolean = { false },
+        /**
+         * Threads the shard scan may occupy. Below 2 shards the work stays inline on the calling
+         * thread, which is what lets an unattended prewarm run the whole scan on its single
+         * low-priority worker instead of borrowing [ScanPool] at normal priority.
+         */
+        scanWorkers: Int = ScanPool.parallelism,
     ): List<AtlasEdge> {
         val n = entries.size
         if (n < 2) return emptyList()
@@ -668,7 +681,7 @@ object AtlasRollup {
         }
 
         val total = srcRows.size
-        val workers = ScanPool.parallelism
+        val workers = scanWorkers.coerceAtLeast(1)
         val pairSum: HashMap<Long, Long>
         if (workers <= 1 || total < 2 * workers) {
             if (shouldCancel()) throw RollupCancelledException()

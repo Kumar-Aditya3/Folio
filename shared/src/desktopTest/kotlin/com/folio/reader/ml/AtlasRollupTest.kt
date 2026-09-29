@@ -324,4 +324,38 @@ class AtlasRollupTest {
         val result = AtlasRollup.compute(emptyList())
         assertTrue(result.books.isEmpty() && result.edges.isEmpty())
     }
+
+    /**
+     * The whole reason an unattended prewarm may be narrowed to one core: shard count is a
+     * scheduling choice, not an input. If this ever goes red, a throttled roll-up is quietly
+     * drawing a different galaxy than the reader would have seen at full speed.
+     */
+    @Test
+    fun `narrowing the scan leaves the map identical`() {
+        val dims = 16
+        val rng = Random(11)
+        val entries = ArrayList<Pair<ChunkMeta, FloatArray>>()
+        // Six books, each mostly its own topic but sharing a tenth of its chunks with the next
+        // book — that overlap is what makes adjacency emit real edges to compare. Enough sampled
+        // rows per book that the scan genuinely forks across shards at machine width.
+        for (b in 0 until 6) {
+            val own = b * 2 % dims
+            val shared = (b * 2 + 2) % dims
+            repeat(30) { i -> entries.add(meta("own$b-$i", "B$b") to unit(dims, own to 3f, (own + 1) % dims to rng.nextFloat())) }
+            repeat(10) { i -> entries.add(meta("link$b-$i", "B$b") to unit(dims, shared to 3f, (shared + 1) % dims to rng.nextFloat())) }
+        }
+
+        val wide = AtlasRollup.compute(entries, scanWorkers = ScanPool.parallelism)
+        val narrow = AtlasRollup.compute(entries, scanWorkers = 1)
+
+        assertTrue(wide.edges.isNotEmpty(), "the fixture must produce cross-book edges, else this compares nothing")
+        assertEquals(wide.withoutCentroidVectors(), narrow.withoutCentroidVectors())
+    }
+
+    /** [AtlasClusterGeometry.rawCentroid] is an array, so data-class equality compares it by identity. */
+    private val NO_VECTORS = FloatArray(0)
+
+    private fun AtlasGeometry.withoutCentroidVectors() = copy(
+        books = books.map { b -> b.copy(clusters = b.clusters.map { it.copy(rawCentroid = NO_VECTORS) }) },
+    )
 }

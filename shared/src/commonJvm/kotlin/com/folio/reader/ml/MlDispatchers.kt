@@ -8,6 +8,21 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
+ * Who is waiting on an Atlas roll-up, and so how much of the machine it may take.
+ *
+ * The roll-up is the one piece of CPU work in the app that runs unattended: [Background] is the
+ * startup / library-change prewarm nobody is watching, [Interactive] is the Atlas screen the reader
+ * has opened and is staring at. Before the lanes existed both fanned across `Dispatchers.Default`
+ * plus the whole [ScanPool] identically, which is what made Home, the shelf and an EPUB open crawl
+ * behind a prewarm.
+ *
+ * A lane changes the budget and nothing else. The map a roll-up produces is byte-identical either
+ * way, because the roll-up's accumulators are order-independent — so throttling can never make the
+ * reader's galaxy look different from the one they would have waited for.
+ */
+enum class RollupLane { Interactive, Background }
+
+/**
  * Where ML inference runs.
  *
  * **Not `Dispatchers.Default`.** That pool is sized `availableProcessors` and is the same pool
@@ -58,6 +73,44 @@ object MlDispatchers {
             Dispatchers.Default
         }
     }
+
+    /**
+     * One worker for an unattended Atlas roll-up.
+     *
+     * `Dispatchers.Default` is the pool the Home, Library and Stats view models all share, so a
+     * multi-second roll-up running there does not merely add load — it competes directly with the
+     * reads behind the first frame the reader is waiting on. The prewarm gets a single
+     * [Thread.MIN_PRIORITY] worker instead: it loses every tie for a core, and the multi-threaded
+     * stage of the roll-up is capped to one shard as well (see [rollupScanWorkers]), so the whole
+     * pass costs one core at the machine's lowest scheduling priority.
+     */
+    val rollupPrewarm: CoroutineDispatcher by lazy {
+        runCatching {
+            Executors.newSingleThreadExecutor { runnable ->
+                Thread(runnable, "folio-atlas-prewarm").apply {
+                    priority = Thread.MIN_PRIORITY
+                    isDaemon = true
+                }
+            }.asCoroutineDispatcher()
+        }.getOrElse {
+            // A missing pool must not be the reason the Atlas stops warming.
+            Dispatchers.Default
+        }
+    }
+
+    /** The pool a roll-up's CPU stages run on for [lane]. */
+    fun rollupDispatcher(lane: RollupLane): CoroutineDispatcher =
+        if (lane == RollupLane.Background) rollupPrewarm else Dispatchers.Default
+
+    /**
+     * Cross-book scan threads a roll-up may use for [lane].
+     *
+     * One for a prewarm, which also makes [com.folio.reader.ml.AtlasRollup.adjacency] run its scan
+     * inline on [rollupPrewarm] instead of handing work to [ScanPool] at all — leaving every scan
+     * thread free for an interactive search. The interactive lane keeps the whole pool.
+     */
+    fun rollupScanWorkers(lane: RollupLane): Int =
+        if (lane == RollupLane.Background) 1 else ScanPool.parallelism
 
     /**
      * Intra-op threads for an *interactive* session — a search query, a chapter tag.

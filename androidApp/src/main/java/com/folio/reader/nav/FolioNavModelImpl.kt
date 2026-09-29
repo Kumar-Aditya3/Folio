@@ -328,6 +328,10 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
      * when nothing changed). Combined with the Atlas screen showing the last computed map on the
      * first frame, an open never waits: it shows the previous map immediately and swaps in the fresh
      * one when this background pass (or the screen's own reconcile) finishes.
+     *
+     * [prewarm] defaults to the narrow `RollupLane.Background` budget — one lowest-priority core,
+     * not the machine — because this pass runs unattended on startup and after every add/remove,
+     * and at full width it starved Home, the shelf and an EPUB opened alongside it.
      */
     private var atlasWarmed = false
     private fun warmAtlas() {
