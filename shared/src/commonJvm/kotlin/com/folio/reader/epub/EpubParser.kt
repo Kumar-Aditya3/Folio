@@ -92,7 +92,26 @@ class EpubParser(
                     val opfData = readZipEntry(zip, opfPath)
                     val (_, manifest, _) = parseOpf(opfData, opfPath)
 
-                    val primaryRows = projectTocRows(parseToc(zip, manifest, opfPath), chapters)
+                    // A spine file with almost no words carries no chapter text: converters that
+                    // split a print book by page leave a stub holding only the running title, and
+                    // point the nav entry at THAT, with the prose in the neighbouring file. Land
+                    // the row where the text is, but only when the neighbour's own opening heading
+                    // says so — otherwise the publication's pointer is kept untouched.
+                    fun chapterAnchor(label: String, index: Int): Int {
+                        val chapter = chapters.getOrNull(index) ?: return index
+                        if (chapter.wordCount >= STUB_CHAPTER_WORDS) return index
+                        val wanted = headingWords(label)
+                        if (wanted.size < 2) return index
+                        for (j in intArrayOf(index - 1, index + 1)) {
+                            val neighbour = chapters.getOrNull(j) ?: continue
+                            if (openingHeadingWords(zip, opfPath, neighbour) == wanted) return j
+                        }
+                        return index
+                    }
+
+                    val primaryRows = projectTocRows(parseToc(zip, manifest, opfPath), chapters) { label, index ->
+                        chapterAnchor(label, index)
+                    }
                     // A healthy nav names the whole book; keep it untouched. Only a degenerate nav
                     // (0–1 usable rows, e.g. a stub NCX pointing only at the cover) is worth the
                     // extra work of looking for a better Contents source.
@@ -106,7 +125,9 @@ class EpubParser(
                             ?: return@runCatching emptyList<BookTocRow>()
                         val entry = findZipEntry(zip, opfPath, guideHref)
                             ?: return@runCatching emptyList<BookTocRow>()
-                        projectTocRows(parseHtmlToc(zip, readZipEntry(zip, entry), opfPath), chapters)
+                        projectTocRows(parseHtmlToc(zip, readZipEntry(zip, entry), opfPath), chapters) { label, index ->
+                            chapterAnchor(label, index)
+                        }
                     }.getOrDefault(emptyList())
                     if (guideRows.size > 1) return@use guideRows
 
@@ -130,14 +151,18 @@ class EpubParser(
      * dropped, and nesting flattened. This is the shared "optimised" Contents shape; both the
      * book's own nav and the guide-HTML fallback pass through it identically.
      */
-    private fun projectTocRows(toc: List<EpubTocItem>, chapters: List<Chapter>): List<BookTocRow> {
+    private fun projectTocRows(
+        toc: List<EpubTocItem>,
+        chapters: List<Chapter>,
+        anchorOf: (label: String, matchedIndex: Int) -> Int = { _, index -> index },
+    ): List<BookTocRow> {
         if (toc.isEmpty()) return emptyList()
         val rows = mutableListOf<BookTocRow>()
         val emitted = mutableSetOf<EpubTocItem>()
         chapters.forEachIndexed { index, chapter ->
             val match = findTocMatch(chapter.href, toc)
                 ?.takeIf { it.label.isNotBlank() && emitted.add(it) } ?: return@forEachIndexed
-            rows += BookTocRow(match.label.trim(), index)
+            rows += BookTocRow(match.label.trim(), anchorOf(match.label, index))
         }
         return rows
     }
@@ -420,6 +445,28 @@ class EpubParser(
         // Upper-case heading style: at least one letter, and no lower-case letters. Title-case
         // front matter ("Book One of the Liveship Traders Trilogy") is rejected here.
         return text.any { it.isLetter() } && text.none { it.isLowerCase() }
+    }
+
+    /**
+     * The words that identify a chapter, out of a heading or a Contents label:
+     * "CHAPTER TEN - CONFRONTATIONS" and a truncated "CHAPTER TEN - CONFRONTAT…" both give
+     * `[chapter, ten]`. The subtitle is dropped because nav labels are shortened by converters.
+     */
+    private fun headingWords(text: String): List<String> =
+        text.split(RE_HEADING_SEP, limit = 2).first()
+            .replace(Regex("[….]+"), " ")
+            .lowercase()
+            .replace(Regex("[^a-z0-9 ]"), " ")
+            .split(' ')
+            .filter { it.isNotBlank() }
+
+    /** The words of a chapter file's FIRST heading — what proves a file really is that chapter. */
+    private fun openingHeadingWords(zipFile: ZipFile, opfPath: String, chapter: Chapter): List<String> {
+        val entry = findZipEntry(zipFile, opfPath, chapter.href) ?: return emptyList()
+        val html = runCatching { decodeEpubBytes(readZipEntry(zipFile, entry)) }.getOrNull()
+            ?: return emptyList()
+        val heading = RE_FIRST_HEADING.find(html)?.groupValues?.get(1) ?: return emptyList()
+        return headingWords(heading.replace(RE_TAG, " ").replace(RE_WS, " "))
     }
 
     /** "PROLOGUE - THE TANGLE" -> "Prologue"; "CHAPTER TWENTY-ONE - VISITORS" -> "Chapter Twenty-One". */
@@ -848,6 +895,10 @@ private val RE_TITLE_PART = Regex(".*\\b(part|book|section)\\s+\\d+.*", RegexOpt
 private val RE_TITLE_NUM = Regex("\\d+[.:)].*")
 /** A `<p>...</p>` block, used to walk a heading-less chapter's paragraphs in document order. */
 private val RE_P_BLOCK = Regex("(?is)<p\\b[^>]*>(.*?)</p>")
+/** A chapter file's first heading — the proof of what that file actually contains. */
+private val RE_FIRST_HEADING = Regex("(?is)<h[1-6][^>]*>(.*?)</h[1-6]>")
+/** Below this a spine file holds no chapter text, only a page-break stub (observed: 14 words). */
+private const val STUB_CHAPTER_WORDS = 60L
 /** Opening of a chapter heading rendered as a paragraph in a heading-less (pdftohtml) book. */
 private val RE_CHAPTER_MARKER = Regex("^(chapter|prologue|epilogue|part|book)\\b", RegexOption.IGNORE_CASE)
 /** Separator between a chapter designator and its subtitle: " - ", " – ", " — ". */

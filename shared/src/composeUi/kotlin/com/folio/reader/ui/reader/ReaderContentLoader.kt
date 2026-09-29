@@ -93,15 +93,19 @@ internal class ReaderContentLoader(
 
     /**
      * Builds the window [READER_WINDOW_PRELOAD] chapters either side of [center]
-     * (clamped to the book). The cover chapter renders through the app's cover
-     * screen, so it never joins a window; chapter 1 is the first section.
+     * (clamped to the book).
+     *
+     * Every chapter can join a window, chapter 0 included. The floor used to be 1 on the
+     * assumption that the first spine item is the cover page, but books whose first file
+     * carries prose (a pdftohtml/Calibre conversion opening with the Prologue) then had
+     * Contents rows pointing at a chapter no window could ever contain.
      */
     private suspend fun loadWindow(bookId: String, allChapters: List<Chapter>, center: Int) {
         isLoadingContentState.value = true
         loadErrorState.value = null
         try {
             val last = allChapters.lastIndex
-            val from = (center - READER_WINDOW_PRELOAD).coerceAtLeast(1)
+            val from = (center - READER_WINDOW_PRELOAD).coerceAtLeast(0)
             val to = (center + READER_WINDOW_PRELOAD).coerceAtMost(last)
             val sections = (from..to).map { i ->
                 val chapter = allChapters[i]
@@ -164,7 +168,7 @@ internal class ReaderContentLoader(
         val range = windowRange.value ?: return false
         val nextIndex = if (forward) range.last + 1 else range.first - 1
         if (forward && nextIndex > allChapters.lastIndex) return false
-        if (!forward && nextIndex < 1) return false
+        if (!forward && nextIndex < 0) return false
         val chapter = allChapters.getOrNull(nextIndex) ?: return false
         // Defensive: never emit an op for a spine already in the window. Even with the
         // caller serialised, a stale range read could otherwise re-add a section and the

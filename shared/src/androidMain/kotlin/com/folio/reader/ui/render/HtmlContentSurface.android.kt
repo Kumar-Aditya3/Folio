@@ -46,7 +46,7 @@ private val RE_FOLIO_LOAD = Regex("""[?&]folio-load=\d+""")
 // Reader WebView diagnostics. The onReceivedTitle/onConsoleMessage callbacks fire on essentially
 // every scroll frame, so their logging + string work must not run in shipped builds. The shared
 // module has no BuildConfig, so this is a compile-time flag a developer flips locally.
-private const val READER_DEBUG_LOG = true
+private const val READER_DEBUG_LOG = false
 
 @Composable
 actual fun HtmlContentSurface(
@@ -133,6 +133,12 @@ actual fun HtmlContentSurface(
     // chapter" (seeded at its END, fraction 1.0) onto the previous chapter's page 1.
     var lastSeekNonce by remember(loadKey) { mutableStateOf(Long.MIN_VALUE) }
     var lastTargetNonce by remember(loadKey) { mutableStateOf(Long.MIN_VALUE) }
+    // True once THIS load key's document has committed and its engine JS has run — the point
+    // at which a seek can reach the page it was requested for (see the target-seek effect).
+    var docCommitted by remember(loadKey) { mutableStateOf(false) }
+    // A window append/prepend adds a section to the live DOM without rebuilding the document,
+    // so a held seek needs this tick to know its chapter has just arrived.
+    var windowOpTick by remember { mutableStateOf(0) }
     LaunchedEffect(seekRequest, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
@@ -141,10 +147,15 @@ actual fun HtmlContentSurface(
         if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "HOST seekFraction=${req.first} nonce=${req.second}")
         pageState.seekFraction(req.first.coerceIn(0f, 1f), wv, loadKey)
     }
-    LaunchedEffect(seekTargetRequest, webViewRef) {
+    LaunchedEffect(seekTargetRequest, webViewRef, docCommitted, anchorChapterId, sections, windowOpTick) {
         val wv = webViewRef ?: return@LaunchedEffect
         val req = seekTargetRequest ?: return@LaunchedEffect
         if (req.second == lastTargetNonce) return@LaunchedEffect
+        // Wait for the document this seek belongs to; do NOT consume the request.
+        if (!docCommitted) return@LaunchedEffect
+        if (windowed && anchorChapterId != null &&
+            liveSectionsState.value.none { it.chapterId == anchorChapterId }
+        ) return@LaunchedEffect
         lastTargetNonce = req.second
         if (READER_DEBUG_LOG) android.util.Log.i("FolioLoad", "HOST seekTo=${req.first} nonce=${req.second}")
         pageState.seekTo(scopedTarget(req.first), wv, loadKey)
@@ -336,6 +347,7 @@ actual fun HtmlContentSurface(
             wv.evaluateJavascript("window.__folioStampImgs&&window.__folioStampImgs($dimsJson);", null)
         }
         wv.evaluateJavascript(HighlightPaint.applyJs(highlights, theme), null)
+        windowOpTick++
         onWindowOpApplied(op.nonce)
     }
     // Hold pending JS so onPageFinished can inject after layout. This fixes the 1/1
@@ -414,7 +426,7 @@ actual fun HtmlContentSurface(
                 // settled, so the cover instead dissolves onto stable text. Windowed
                 // EPUB and paged documents (MulticolEngine reveal) still signal here.
                 val deferPaint = !windowed && !pagedModeState.value
-                mainHandler.post { pageReadyTick++; if (!deferPaint) latestContentReady() }
+                mainHandler.post { docCommitted = true; pageReadyTick++; if (!deferPaint) latestContentReady() }
             }
         }
     }
@@ -477,7 +489,7 @@ actual fun HtmlContentSurface(
                     // ContinuousEngine emits this once document.fonts.ready has settled
                     // (see its SIGNAL_PAINT block and onPageFinished's deferPaint), so the
                     // host cover dissolves onto stable, non-reflowing text.
-                    t.startsWith("folio-painted:") -> mainHandler.post { pageReadyTick++; latestContentReady() }
+                    t.startsWith("folio-painted:") -> mainHandler.post { docCommitted = true; pageReadyTick++; latestContentReady() }
 
                     t.startsWith("folio-edge:end:") -> mainHandler.post { latestEnd() }
 
@@ -512,6 +524,11 @@ actual fun HtmlContentSurface(
                             )
                         }
                     }
+
+                    // Exceptional (one per unresolved tap, never per frame), so it stays on
+                    // even when the noisy per-frame diagnostics below are switched off.
+                    t.startsWith("folio-seekmiss:") ->
+                        android.util.Log.w("FolioPage", "seek miss: ${t.removePrefix("folio-seekmiss:").take(140)}")
 
                     t.startsWith("folio-engdiag:") ->
                         if (READER_DEBUG_LOG) android.util.Log.i("FolioPage", "engine report: ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
@@ -670,7 +687,7 @@ actual fun HtmlContentSurface(
                         pageState.markReady(webView)
                         // Same first-paint signal as onPageFinished, for the WebView
                         // whose onPageFinished never fires (see tryInject above).
-                        mainHandler.post { pageReadyTick++; latestContentReady() }
+                        mainHandler.post { docCommitted = true; pageReadyTick++; latestContentReady() }
                     } else if (attempt < 10) {
                         webView.postDelayed({ tryInject(attempt + 1) }, 200)
                     } else {
@@ -682,7 +699,7 @@ actual fun HtmlContentSurface(
                         // signal must still fire — otherwise a first-paint cover gate
                         // (document morph plate / EPUB morph plate) would hold over a
                         // page that is actually on screen and never dissolve.
-                        mainHandler.post { pageReadyTick++; latestContentReady() }
+                        mainHandler.post { docCommitted = true; pageReadyTick++; latestContentReady() }
                     }
                 }
                 webView.postDelayed({ tryInject(0) }, 400)

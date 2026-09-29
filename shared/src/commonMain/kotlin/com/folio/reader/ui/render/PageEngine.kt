@@ -495,8 +495,11 @@ function folioLandEl(el){
   posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
 }
 window.__folioSeekTo=function(t){
-  var parts=String(t).split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
-  var el=folioTargetEl(t);
+  // A paged document holds exactly one chapter, so the host's "c:<chapterId>|" scope carries
+  // no information here — and left on the string it parses as the paragraph number.
+  var str=String(t);if(str.indexOf('c:')===0){var bar=str.indexOf('|');if(bar>0)str=str.substring(bar+1);}
+  var parts=str.split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
+  var el=folioTargetEl(str);
   if(el){folioLandEl(el);return;}
   if(!isNaN(f))window.__folioSeek(f);
 };

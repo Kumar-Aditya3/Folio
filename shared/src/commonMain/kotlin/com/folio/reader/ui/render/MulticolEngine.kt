@@ -144,16 +144,22 @@ body.style.opacity='1';
 if(window.__folioInner)return;window.__folioInner=true;
 var MT=$marginTop,MB=$marginBottom,ML=$marginLeft,MR=$marginRight,MEASURE=$measure,posFrac=$fraction,DIAG=$diag,nonce=0;
 var doc=document,root=doc.documentElement,bodyEl=doc.body;
-try{console.log('FOLIO-BUILD paged v21 frac='+posFrac);}catch(e){}
+try{console.log('FOLIO-BUILD paged v23 frac='+posFrac);}catch(e){}
 root.style.opacity='0';
 var total=1,page=0,dirty=true,animating=false,revealed=false,fontsReady=false,vShift=0;
+// The jump's target element, held while the layout settles. A page turn is a page NUMBER,
+// and a reflow moves the content under it, so a landing held only as a fraction of
+// `maxPage()` drifts: a web font swapping in or an image decoding threw a measured jump
+// 74 pages off its heading, permanently. `stickUntil`/`stickTries` bound the hold so a
+// layout that keeps wobbling expires instead of fighting the reader.
+var stickEl=null,stickTarget='',stickUntil=0,stickTries=0,stickStable=0,stickTimer=null;
 function scroller(){return parent.document.getElementById('folio-scroller');}
 function frameEl(){return parent.document.getElementById('folio-frame');}
 function report(s){try{parent.document.title=s;}catch(e){}}
 // Diagnostic: dumps the metrics that would move if the chapter is being resized after
 // paint (font-size = boosting, pw/ph = viewport, sw/total = column measure). Surfaces in
 // logcat under FolioPage via onConsoleMessage when READER_DEBUG_LOG is on.
-function diag(w){try{var H=pageH(),x0=page*pitch(),x1=x0+pageW();var els=bodyEl.querySelectorAll('p,h1,h2,h3,h4,h5,h6,blockquote,li,figure,figcaption,img,pre,table,dd,dt,hr');var top=1e9,bot=-1e9,i,r,cx;for(i=0;i<els.length;i++){r=els[i].getBoundingClientRect();if(r.width<=0||r.height<=0)continue;cx=r.left;if(cx>=x0-1&&cx<x1-1){if(r.top<top)top=r.top;if(r.bottom>bot)bot=r.bottom;}}var cT=(top>1e8?-1:Math.round(top)),cB=(bot<0?-1:Math.round(bot)),raw=(bot<0||top>1e8)?0:Math.round((H-top-bot)/2);console.log('FOLIO-DIAG '+w+' ih='+window.innerHeight+' MT='+MT+' MB='+MB+' pw='+pageW()+' ph='+H+' cT='+cT+' cB='+cB+' raw='+raw+' vs='+vShift+' total='+total+' page='+page+' rev='+revealed);}catch(e){}}
+function diag(w){try{var H=pageH(),x0=page*pitch(),x1=x0+pageW();var els=bodyEl.querySelectorAll('p,h1,h2,h3,h4,h5,h6,blockquote,li,figure,figcaption,img,pre,table,dd,dt,hr');var top=1e9,bot=-1e9,i,r,cx;for(i=0;i<els.length;i++){r=els[i].getBoundingClientRect();if(r.width<=0||r.height<=0)continue;cx=r.left;if(cx>=x0-1&&cx<x1-1){if(r.top<top)top=r.top;if(r.bottom>bot)bot=r.bottom;}}var cT=(top>1e8?-1:Math.round(top)),cB=(bot<0?-1:Math.round(bot)),raw=(bot<0||top>1e8)?0:Math.round((H-top-bot)/2);console.log('FOLIO-DIAG '+w+' ih='+window.innerHeight+' MT='+MT+' MB='+MB+' pw='+pageW()+' ph='+H+' cT='+cT+' cB='+cB+' raw='+raw+' vs='+vShift+' total='+total+' page='+page+' rev='+revealed+' pr='+Math.round(paintedRight())+' pin='+root.style.width);}catch(e){}}
 function pageW(){var sc=scroller();return Math.max(1,(sc&&sc.clientWidth)||window.innerWidth);}
 // Inter-page gutter. Pages step by a PITCH of one viewport + this gap, so at rest
 // a page still fills the viewport exactly (the gap sits just off the right edge),
@@ -208,11 +214,25 @@ function applyCols(){
   gutters(padPx());
   capMedia(H);
 }
+// The right edge of the painted strip. The column breaker fragments `body` into exactly one
+// box per USED column, so its union rect ends at `(n-1)*P + W` and the rounding below
+// recovers n exactly — and unlike `root.scrollWidth` it cannot be inflated by the width this
+// function pins.
+function paintedRight(){
+  var b=bodyEl.getBoundingClientRect();
+  if(b.width>0&&b.right>0)return b.right;
+  return root.scrollWidth;
+}
 function measure(){
   insetScroller();
   applyCols();
   var W=pageW(),G=gap(),P=W+G;
-  total=Math.max(1,Math.round((root.scrollWidth+G)/P));
+  // Never read root.scrollWidth for the count: root AND the iframe element are both pinned
+  // to the previous total at the bottom of this function, so that read is a feedback loop
+  // and the count can only ever grow. Measured on a real book: 216 pages of text pinned as
+  // 1123 after one reflow, and still 1123 when the text shrank back — 907 blank pages
+  // reachable past the end of the chapter.
+  total=Math.max(1,Math.round((paintedRight()+G)/P));
   // Size to exactly N columns of W at pitch P: the browser then makes N columns each
   // exactly W wide (no leftover space to stretch into), preserving exact pitch.
   var expanded=total*P-G;
@@ -273,6 +293,7 @@ var lastEdge=0;function edge(w){var n=Date.now();if(n-lastEdge<600)return;lastEd
   setTimeout(function(){var f2=frameEl();if(f2){f2.style.transition='transform .2s ease-out';f2.style.transform='translate3d('+cur+'px,'+vy+'px,0)';}},900);
 }
 function goTo(p,instant){
+  clearStick();
   if(p<0&&page<=0){edge('start');return;}
   if(p>maxPage()&&page>=maxPage()){edge('end');return;}
   p=Math.max(0,Math.min(maxPage(),p));
@@ -282,30 +303,66 @@ function goTo(p,instant){
   var reduce=false;try{reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){}
   apply(!instant&&!reduce);settle();report_();
 }
-function relayout(){if(dirty)measure();page=Math.max(0,Math.min(maxPage(),Math.round(posFrac*maxPage())));diag('relayout');if(!revealed){if(fontsReady){revealIn();}else{apply(false);}}else{apply(false);root.style.opacity='1';}report_();}
+function relayout(){
+  if(dirty)measure();
+  if(stickEl&&stickEl.isConnected){page=pageForEl(stickEl);posFrac=maxPage()>0?page/maxPage():0;}
+  else page=Math.max(0,Math.min(maxPage(),Math.round(posFrac*maxPage())));
+  diag('relayout');if(!revealed){if(fontsReady){revealIn();}else{apply(false);}}else{apply(false);root.style.opacity='1';}report_();
+}
 window.__folioRelayout=function(){dirty=true;relayout();};
 // Live side-margin update (paged): the host pushes new left/right insets when the
 // reader's "Side margins" slider moves, so paged side margins are affectable WITHOUT a
 // full document reload (a reload would reseed the page from posFrac and flash). Just
 // updates ML/MR and re-measures at the new page width; posFrac holds the current page.
 window.__folioSetInsets=function(ml,mr){if(ml!=null)ML=ml;if(mr!=null)MR=mr;dirty=true;relayout();};
-window.__folioSeek=function(f){if(DIAG)try{console.log('FOLIO-SEEK v='+f);}catch(e){}var v=Math.min(1,Math.max(0,f||0));posFrac=v;if(dirty)measure();page=Math.round(v*maxPage());apply(false);root.style.opacity='1';revealed=true;report_();};
+window.__folioSeek=function(f){clearStick();if(DIAG)try{console.log('FOLIO-SEEK v='+f);}catch(e){}var v=Math.min(1,Math.max(0,f||0));posFrac=v;if(dirty)measure();page=Math.round(v*maxPage());apply(false);root.style.opacity='1';revealed=true;report_();};
 // The iframe is never internally scrolled (the container scrolls), so an
 // element's content-space x is just its bounding-rect left.
 function absLeft(el){return el.getBoundingClientRect().left;}
+function pageForEl(el){return Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));}
+function miss(t){try{report('folio-seekmiss:'+(++nonce)+':'+encodeURIComponent(String(t||'')));}catch(e){}}
+function clearStick(){stickEl=null;stickTarget='';stickStable=0;if(stickTimer){clearTimeout(stickTimer);stickTimer=null;}}
+function setStick(el,target){clearStick();if(!el)return;stickEl=el;stickTarget=target||'';stickUntil=Date.now()+2200;stickTries=0;stickStable=0;armStick(90);}
+function armStick(d){if(stickTimer)clearTimeout(stickTimer);stickTimer=setTimeout(stickTick,d);}
+function stickTick(){
+  stickTimer=null;
+  if(!stickEl||Date.now()>stickUntil){clearStick();return;}
+  if(!stickEl.isConnected){
+    stickEl=stickTarget?targetEl(stickTarget):null;
+    if(!stickEl){miss(stickTarget);clearStick();return;}
+  }
+  if(stickTries++>=6){clearStick();return;}
+  var beforePage=page,beforeTotal=total;
+  dirty=true;relayout();
+  if(page===beforePage&&total===beforeTotal)stickStable++;else stickStable=0;
+  if(stickStable>=2){clearStick();return;}
+  armStick(320);
+}
 function targetEl(t){
   var parts=String(t).split(':'),isH=parts[0]==='h',el=null,id=isH?(parts[1]||''):'';
   if(id){try{el=doc.querySelector('[data-folio-hl="'+id+'"]');}catch(e){el=null;}}
   if(!el){var pi=isH?parts[2]:parts[1];if(pi===undefined||pi==='')return null;var i=parseInt(pi,10);if(isNaN(i))return null;var ps=doc.querySelectorAll('p');if(!ps.length)return null;el=ps[Math.min(Math.max(0,i),ps.length-1)];}
   return el;
 }
-function land(el){if(dirty)measure();var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';revealed=true;report_();}
-window.__folioSeekTo=function(t){if(DIAG)try{console.log('FOLIO-SEEKTO t='+t);}catch(e){}var parts=String(t).split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);var el=targetEl(t);if(el){land(el);return;}if(!isNaN(f))window.__folioSeek(f);};
+function land(el,target){if(dirty)measure();page=pageForEl(el);posFrac=maxPage()>0?page/maxPage():0;apply(false);root.style.opacity='1';revealed=true;setStick(el,target);report_();}
+window.__folioSeekTo=function(t){
+  // The host scopes a windowed seek as "c:<chapterId>|<target>". A paged document holds
+  // exactly one chapter, so the scope carries no information here — but leaving it on the
+  // string made parts[1] parse as NaN and the jump silently did nothing.
+  var raw=String(t);if(raw.indexOf('c:')===0){var bar=raw.indexOf('|');if(bar>0)raw=raw.substring(bar+1);}
+  if(DIAG)try{console.log('FOLIO-SEEKTO t='+raw);}catch(e){}
+  var parts=raw.split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
+  var ps=doc.querySelectorAll('p'),pi=parseInt(isH?parts[2]:parts[1],10);
+  if(!isNaN(pi)&&ps.length&&pi>=ps.length)miss(raw);
+  var el=targetEl(raw);
+  if(el){land(el,raw);return;}
+  if(!isNaN(f))window.__folioSeek(f);
+};
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 window.__folioAnchorSave=function(){var lo=page*pitch(),i,el,r,l,w;var list=doc.querySelectorAll('p,div,section,blockquote,h1,h2,h3,img,figure');for(i=0;i<list.length;i++){el=list[i];r=el.getBoundingClientRect();w=r.width;l=r.left;
   // A block the column breaker fragmented across columns reports a UNION rect spanning the whole strip, so the chapter wrapper — first in document order — always "intersects" the current page at left 0, and restoring to it lands on page 1. Only a block that fits one page may anchor.
   if(w>0&&w<=pageW()+1&&l+w>lo+2&&l<lo+pageW()-2){el.setAttribute('data-folio-anchor','1');return 'a';}}return '';};
-window.__folioAnchorRestore=function(a){if(dirty)measure();var el=doc.querySelector('[data-folio-anchor="1"]');if(!el)return;el.removeAttribute('data-folio-anchor');var tt=Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));posFrac=maxPage()>0?tt/maxPage():0;page=tt;apply(false);root.style.opacity='1';revealed=true;report_();};
+window.__folioAnchorRestore=function(a){if(dirty)measure();var el=doc.querySelector('[data-folio-anchor="1"]');if(!el)return;el.removeAttribute('data-folio-anchor');page=pageForEl(el);posFrac=maxPage()>0?page/maxPage():0;apply(false);root.style.opacity='1';revealed=true;report_();};
 window.__folioRestyle=function(fc,sc){
   var f=doc.getElementById('folio-fonts'),st=doc.getElementById('folio-reader-style');
   var fontsOn=!!(f&&fc&&f.textContent!==fc),styleOn=!!(st&&sc&&st.textContent!==sc);
@@ -313,10 +370,14 @@ window.__folioRestyle=function(fc,sc){
   // that push would reflow and run the anchor dance, which moves the reader off the
   // page the document was just seeded to.
   if(!fontsOn&&!styleOn)return;
-  var a=window.__folioAnchorSave();
+  var held=stickEl;
+  var a=held?'':window.__folioAnchorSave();
   if(fontsOn)f.textContent=fc;
   if(styleOn)st.textContent=sc;
   dirty=true;measure();
+  // A live jump target owns the page: re-arm the hold rather than running the anchor dance,
+  // or the two fight over the page during a settings change mid-settle.
+  if(held){setStick(held,stickTarget);return;}
   setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},80);
   setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},400);
 };
@@ -339,7 +400,13 @@ doc.querySelectorAll('p,div,section,blockquote').forEach(function(el){if(!el.que
 window.addEventListener('wheel',function(e){e.preventDefault();var d=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY;if(!animating)goTo(page+(d>0?1:-1));},{passive:false});
 doc.addEventListener('keydown',function(e){var k=e.key;if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='ArrowDown'){e.preventDefault();goTo(page+1);}else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();goTo(page-1);}},true);
 var tX=0,tY=0,tT=0,tsX=0,dragging=false,dragMoved=false,startScroll=0,dragTargetX=0,dragRAF=0;
-doc.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY=t.clientY;tsX=t.screenX;tT=Date.now();if(animating){dragging=false;return;}dragging=true;dragMoved=false;startScroll=page*pitch();},{passive:true});
+doc.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY=t.clientY;tsX=t.screenX;tT=Date.now();
+  // A gesture that arrives mid-turn must take over, not be discarded: dropping it here used to
+  // lose the drag origin, so the first swipe after a turn registered nothing at all. Settling
+  // the animation to its target first means the strip follows the finger from where the page
+  // now actually rests instead of snapping back under it.
+  if(animating){if(settleT){clearTimeout(settleT);settleT=null;}animating=false;apply(false);}
+  dragging=true;dragMoved=false;startScroll=page*pitch();},{passive:true});
 // Drag-to-turn: the strip follows the finger 1:1 (a page sliding under the thumb),
 // then snaps or flicks on release. The drag delta uses SCREEN x, not the iframe's
 // clientX: moving the frame shifts the iframe's own client coordinate space, so a
@@ -356,7 +423,7 @@ doc.addEventListener('touchmove',function(e){if(!dragging)return;var t=e.touches
 // measured against what is actually on screen. Centre-tap is emitted from the
 // engine itself (like PageEngine); the host's native centre-tap detector stands
 // down in paged mode so the two cannot double-toggle.
-doc.addEventListener('touchend',function(e){var t=e.changedTouches[0];var dx=t.clientX-tX,dy=t.clientY-tY;var sdx=t.screenX-tsX;var ms=Date.now()-tT;var wasDrag=dragging&&dragMoved;dragging=false;if(dragRAF){cancelAnimationFrame(dragRAF);dragRAF=0;}if(wasDrag){var th=pageW()*0.18;var quick=ms<260&&Math.abs(sdx)>pageW()*0.06;if(sdx<=-th||(quick&&sdx<0)){goTo(page+1);}else if(sdx>=th||(quick&&sdx>0)){goTo(page-1);}else{animating=true;apply(true);settle();}return;}var moved=Math.hypot(dx,dy);var el=doc.elementFromPoint(t.clientX,t.clientY);var a=el&&el.closest?el.closest('a[href]'):null;if(a){var href=a.getAttribute('href')||'';if(href&&href.charAt(0)!=='#')report('folio-link:'+(++nonce)+':'+encodeURIComponent(href));return;}if(moved>24||ms>350)return;var w=pageW();var rel=t.clientX-page*pitch();if(DIAG)console.log('FOLIO-TAP cx='+Math.round(t.clientX)+' page='+page+' w='+Math.round(w)+' rel='+Math.round(rel)+' zone='+(rel>w*0.66?'next':(rel<w*0.33?'prev':'tap')));if(rel>w*0.66)goTo(page+1);else if(rel<w*0.33)goTo(page-1);else report('folio-tap:'+(++nonce));},{passive:true});
+doc.addEventListener('touchend',function(e){var t=e.changedTouches[0];var dx=t.clientX-tX,dy=t.clientY-tY;var sdx=t.screenX-tsX;var ms=Date.now()-tT;var wasDrag=dragging&&dragMoved;dragging=false;if(dragRAF){cancelAnimationFrame(dragRAF);dragRAF=0;}if(wasDrag){var th=pageW()*0.18;var quick=ms<260&&Math.abs(sdx)>pageW()*0.06;if(sdx<=-th||(quick&&sdx<0)){goTo(page+1);}else if(sdx>=th||(quick&&sdx>0)){goTo(page-1);}else if(Math.abs(sdx)>24){animating=false;goTo(page+(sdx<0?1:-1));}else{animating=true;apply(true);settle();}return;}var moved=Math.hypot(dx,dy);var el=doc.elementFromPoint(t.clientX,t.clientY);var a=el&&el.closest?el.closest('a[href]'):null;if(a){var href=a.getAttribute('href')||'';if(href&&href.charAt(0)!=='#')report('folio-link:'+(++nonce)+':'+encodeURIComponent(href));return;}if(moved>24||ms>350)return;var w=pageW();var rel=t.clientX-page*pitch();if(DIAG)console.log('FOLIO-TAP cx='+Math.round(t.clientX)+' page='+page+' w='+Math.round(w)+' rel='+Math.round(rel)+' zone='+(rel>w*0.66?'next':(rel<w*0.33?'prev':'tap')));if(rel>w*0.66)goTo(page+1);else if(rel<w*0.33)goTo(page-1);else report('folio-tap:'+(++nonce));},{passive:true});
 doc.addEventListener('click',function(ev){var a=ev.target&&ev.target.closest?ev.target.closest('a[href]'):null;if(a){var h=a.getAttribute('href')||'';if(h&&h.charAt(0)!=='#')ev.preventDefault();}},true);
 window.addEventListener('resize',function(){dirty=true;relayout();});
 // The scroller has overflow:hidden and is only ever moved programmatically by
