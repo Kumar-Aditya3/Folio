@@ -68,7 +68,13 @@ class DocumentLibraryViewModel(
     private val repository: DocumentRepository,
     private val categoryRepository: DocumentCategoryRepository,
     private val settingsRepository: SettingsRepository,
-    dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    /**
+     * `Dispatchers.Default`, matching [LibraryViewModel]'s scope and `mangaVmScope()`. Not Main:
+     * the `state` combine stats every document's file and re-sorts the whole table, so on the UI
+     * thread those microseconds land in the frame budget — and `LibraryScreen` collects this model
+     * whatever shelf is showing, so a large documents shelf slowed the Books and Manga grids too.
+     */
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val fileExists: (String) -> Boolean = { File(it).isFile }
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
