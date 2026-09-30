@@ -60,6 +60,7 @@ import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberFolioInteraction
@@ -208,6 +209,10 @@ private fun FeaturedShelfEntry(
                 // which is also rememberCoverAccent's own fallback, so a book with no
                 // usable cover accent would have edged in blue at both ends.
                 counterAccent = FolioTheme.colors.accentStreak,
+                velocity = LocalFolioScrollVelocity.current,
+                // The light rests where the reader stopped. Same number the progress
+                // seam below draws, so the two can never disagree.
+                parkedAt = book.normalizedProgress.toFloat(),
             )
             .combinedClickable(
                 interactionSource = interaction,

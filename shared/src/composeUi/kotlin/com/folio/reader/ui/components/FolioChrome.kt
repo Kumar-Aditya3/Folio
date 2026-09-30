@@ -24,10 +24,14 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -89,6 +93,36 @@ import kotlin.math.sin
  */
 
 /**
+ * One scroll container's motion, published for effects that must read it in the
+ * **draw** phase rather than in composition.
+ *
+ * Two numbers, deliberately not one decayed value: [speed] is the level the most
+ * recent scroll event reached and never falls on its own, while [stamp] says how
+ * long ago that was — so the settle is a pure function of age
+ * ([com.folio.reader.ui.components.rimVelocityLevel]) rather than a coroutine that
+ * has to outlive the thing drawing it. That distinction is load-bearing here: the
+ * consumers are featured cells of a `LazyVerticalGrid`, which *disposes* them on
+ * scroll-out, and any settle scheduled inside one dies with it — leaving the effect
+ * stuck at full strength. A stale [speed] self-corrects on the next read.
+ *
+ * Never expose this as a plain `Float` property: `collapse` below is the cautionary
+ * tale, read in composition by four shelf call sites and a route, so every scroll
+ * event recomposes what reads it.
+ */
+@Stable
+class FolioScrollVelocity internal constructor(
+    val speed: MutableFloatState,
+    val stamp: MutableLongState,
+)
+
+/**
+ * The shelf's motion as effects see it. Un-provided is the *resting* value, which is
+ * why desktop — which never installs one — draws byte-for-byte today's rim, and why
+ * no new `expect`/`actual` pair is needed for the same guarantee.
+ */
+val LocalFolioScrollVelocity = compositionLocalOf<FolioScrollVelocity?> { null }
+
+/**
  * Scroll-linked collapse for a screen's masthead.
  *
  * [collapse] runs 0 (at rest) to 1 (fully collapsed) over the range passed to
@@ -97,28 +131,53 @@ import kotlin.math.sin
  * what made a plain `firstVisibleItemScrollOffset` reading jitter on bounce.
  *
  * Frozen at 0 under reduce-motion: this is scroll-linked animation, and §13.9
- * already holds Home's hero to the same rule.
+ * already holds Home's hero to the same rule. [velocity] is unreachable for the
+ * same reason — the write sits behind the same `enabled` gate, so a reduce-motion
+ * reader flinging the shelf cannot light a rim.
  */
 @Stable
 class FolioHeaderState internal constructor(
     private val rangePx: Float,
     private val enabled: Boolean,
     private val offsetState: MutableFloatState,
+    private val speedState: MutableFloatState,
+    private val stampState: MutableLongState,
 ) {
     private var offset by offsetState
 
-    /** 0 at rest, 1 fully collapsed. */
+    /**
+     * 0 at rest, 1 fully collapsed. Derived rather than computed per read, so a
+     * reader in composition is only invalidated when the *fraction* actually moves:
+     * at rest, and once the bar has saturated at the end of a long fling, nothing
+     * recomposes. What this does **not** buy is silence while the bar travels its
+     * range — there the value genuinely changes every frame, and only moving the
+     * masthead's reads into the draw phase would fix that.
+     */
+    private val collapseState = derivedStateOf {
+        if (!enabled || rangePx <= 0f) 0f else (offset / rangePx).coerceIn(0f, 1f)
+    }
+
     val collapse: Float
-        get() = if (!enabled || rangePx <= 0f) 0f else (offset / rangePx).coerceIn(0f, 1f)
+        get() = collapseState.value
+
+    /** Null when motion is off, so a consumer cannot accidentally opt in. */
+    val velocity: FolioScrollVelocity? =
+        if (enabled) FolioScrollVelocity(speedState, stampState) else null
 
     /**
      * Snap back to the at-rest, expanded state. The offset is otherwise a sticky
      * accumulator with no reset path, so a screen that swaps the scrollable beneath
      * the bar (Library's Books/Manga shelves) inherits the old shelf's collapse and
      * arrives with its rail still folded away.
+     *
+     * Motion settles with it. [LibraryScreen] calls this on entry and on a search
+     * swap, which is the one moment a rim caught mid-fling would otherwise have to
+     * decay on its own.
      */
     fun reset() {
         offset = 0f
+        speedState.floatValue = 0f
+        stampState.longValue = 0L
     }
 
     /**
@@ -128,6 +187,10 @@ class FolioHeaderState internal constructor(
      * here. Storing it in this state rather than a loose float is what lets Home's
      * masthead be restored with the page like every other one, and the same
      * reduce-motion freeze applies — with motion off the bar never collapses.
+     *
+     * Deliberately writes no velocity: Home's hero is driven by a list offset, not by
+     * consumed scroll deltas, so a rate derived here would be a rate of something
+     * else. The Home rim passes no source and rests at its own progress.
      */
     fun setProgress(fraction: Float) {
         if (enabled) offset = fraction.coerceIn(0f, 1f) * rangePx
@@ -140,7 +203,14 @@ class FolioHeaderState internal constructor(
             available: Offset,
             source: NestedScrollSource,
         ): Offset {
-            if (enabled) offset = (offset - consumed.y).coerceIn(0f, rangePx)
+            if (enabled) {
+                val dy = consumed.y
+                offset = (offset - dy).coerceIn(0f, rangePx)
+                val now = System.nanoTime()
+                val gapNanos = if (stampState.longValue == 0L) 0L else now - stampState.longValue
+                stampState.longValue = now
+                speedState.floatValue = rimSpeedLevel(dy, gapNanos)
+            }
             return Offset.Zero
         }
     }
@@ -157,7 +227,14 @@ fun rememberFolioHeaderState(range: Dp = 56.dp): FolioHeaderState {
     // bottom-bar tabs navigate with saveState/restoreState, so each destination's
     // registry survives the switch and this restores with it.
     val offset = rememberSaveable { mutableFloatStateOf(0f) }
-    return remember(rangePx, motion, offset) { FolioHeaderState(rangePx, motion, offset) }
+    // A scroll *rate* from a previous session is not worth restoring, and a restored
+    // stamp would be arbitrarily old — so neither is saveable. The decay envelope
+    // makes any stale level read as rest on the first frame regardless.
+    val speed = remember { mutableFloatStateOf(0f) }
+    val stamp = remember { mutableLongStateOf(0L) }
+    return remember(rangePx, motion, offset, speed, stamp) {
+        FolioHeaderState(rangePx, motion, offset, speed, stamp)
+    }
 }
 
 /**

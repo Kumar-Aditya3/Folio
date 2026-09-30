@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.TWO_PI
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
@@ -81,11 +82,52 @@ internal const val RIM_PERIOD_MS = 24_000L
  */
 private const val RIM_TICK_MS = 33L
 
-/** The lit arc's angular width as a fraction of a full turn. */
-private const val RIM_BEAM_SPAN = 0.30f
+/** The lit arc's angular width as a fraction of a full turn, at rest. */
+internal const val RIM_BEAM_SPAN = 0.30f
 
 /** Peak alpha at the centre of the arc; it ramps to nothing at both ends across [RIM_BEAM_SPAN]. */
-private const val RIM_HEAD_ALPHA = 0.80f
+internal const val RIM_HEAD_ALPHA = 0.80f
+
+/**
+ * How much a fling may widen the beam, as a fraction of [RIM_BEAM_SPAN].
+ *
+ * Width is the primary lever and brightness only a follower, for the reason the
+ * file's own doctrine gives: the beam is parameterised by `along = behind / span`,
+ * so widening it rescales the *same* light and changes nothing else — same envelope,
+ * same hue mix, no new element. Alpha is the axis the design already rations
+ * (`DAYLIGHT_WASH_ALPHA_MAX`), and it raises the crisp `Stroke(width * 2)` ring
+ * alongside the bloom; past a small lift the edge stops reading as light and starts
+ * reading as a border, which is a second object on the plate.
+ */
+internal const val RIM_SPAN_GAIN = 0.25f
+
+/** How much a fling may lift the head's alpha, as a fraction of [RIM_HEAD_ALPHA]. */
+internal const val RIM_ALPHA_GAIN = 0.10f
+
+/**
+ * The travel that counts as full speed, in px/s. A finger drag lands around a
+ * quarter of this and a real fling at or past it, which is what makes the quadratic
+ * in [rimSpeedGain] able to hide during ordinary scrolling.
+ */
+private const val RIM_SPEED_REFERENCE_PX_PER_S = 6_000f
+
+/** One frame, for the first event of a gesture — which has no measured gap to divide by. */
+private const val DEFAULT_EVENT_GAP_NS = 16_666_667L
+
+/**
+ * How long after the last scroll event the rim is provably back at rest. The
+ * §17 specular band's own sweep: the same "a light catching glass" gesture, and the
+ * eye reads anything past this as a second, separate animation.
+ */
+internal val RIM_SETTLE_MS = FolioTokens.motionLiquidSweep
+
+/**
+ * How far reading progress may move the parked head, as a fraction of a turn.
+ *
+ * Half, so a book at 0% and one at 100% do not collide by wrapping: the light
+ * travels the top-left half of the outline and never crosses itself.
+ */
+private const val RIM_PROGRESS_SWING = 0.5f
 
 /**
  * How far the tail is pulled back toward the surface's own hue before it is used.
@@ -108,9 +150,72 @@ private const val RIM_STOP_COUNT = 64
  * leading top edge — where the room's light and every other material's highlight
  * already come from.
  */
-private const val RIM_PARKED_HEAD = 0.875f
+internal const val RIM_PARKED_HEAD = 0.875f
 
 private fun wrapToOne(x: Float): Float = x - floor(x)
+
+/**
+ * One scroll event's motion, as 0..1.
+ *
+ * Rate, not displacement: [consumedPx] alone would make a slow drag that happens to
+ * cover 60 px look like a fling that covered 60 px in a sixth of the time. Dividing
+ * by the measured gap between events is also what keeps the number honest when the
+ * platform delivers fewer, larger events on a busy frame.
+ */
+internal fun rimSpeedLevel(consumedPx: Float, gapNanos: Long): Float {
+    val px = if (consumedPx >= 0f) consumedPx else -consumedPx
+    if (px <= 0f) return 0f
+    val seconds = (if (gapNanos > 0L) gapNanos else DEFAULT_EVENT_GAP_NS) / 1_000_000_000f
+    return (px / seconds / RIM_SPEED_REFERENCE_PX_PER_S).coerceIn(0f, 1f)
+}
+
+/**
+ * The envelope: how strong a rim still looks [ageMs] after the shelf last moved.
+ *
+ * Deliberately a pure function of age rather than a scheduled animation. The
+ * consumers are cells of a `LazyVerticalGrid`, which disposes them on scroll-out — so
+ * a `LaunchedEffect` or an `Animatable` doing the decay dies with the cell and the
+ * rim stays lit. Riding the 30 Hz tick the beam *already* owns costs no frames, and
+ * returning exactly 0f past the window means the resting picture is the designed one
+ * rather than an asymptotic cousin of it.
+ */
+internal fun rimVelocityLevel(raw: Float, ageMs: Long): Float {
+    if (raw <= 0f) return 0f
+    if (ageMs >= RIM_SETTLE_MS) return 0f
+    return (raw * (1f - ageMs.toFloat() / RIM_SETTLE_MS.toFloat())).coerceIn(0f, 1f)
+}
+
+/**
+ * Gain applied to both budgets. Quadratic so a drag — the thing that happens most of
+ * the time — lands near zero, and only a fling reaches the caps. A linear map would
+ * switch this on during every scroll, and the state it puts the rim in would be one
+ * nobody has looked at.
+ */
+internal fun rimSpeedGain(level: Float): Float {
+    val l = level.coerceIn(0f, 1f)
+    return l * l
+}
+
+/**
+ * The beam's width and peak alpha at a given velocity level, in one place so the
+ * ceilings the tests assert are the ceilings the rim actually draws. Rest must return
+ * the two constants exactly, which is what makes an unmodulated rim byte-identical to
+ * the beam that shipped before speed existed.
+ */
+internal fun rimBeamShape(level: Float): Pair<Float, Float> {
+    val gain = rimSpeedGain(level)
+    return (RIM_BEAM_SPAN + RIM_BEAM_SPAN * RIM_SPAN_GAIN * gain) to
+        (RIM_HEAD_ALPHA * (1f + RIM_ALPHA_GAIN * gain))
+}
+
+/**
+ * Where the light parks for a surface at [progress] through the book.
+ *
+ * Null — or a book not started — is exactly [RIM_PARKED_HEAD], so the resting
+ * picture is the one that shipped before progress entered the maths.
+ */
+internal fun rimParkedHead(progress: Float?): Float =
+    wrapToOne(RIM_PARKED_HEAD + (progress ?: 0f).coerceIn(0f, 1f) * RIM_PROGRESS_SWING)
 
 /**
  * The beam sampled at [turn] around the plate, as evenly-spaced sweep stops.
@@ -123,8 +228,20 @@ private fun wrapToOne(x: Float): Float = x - floor(x)
  * frame and fatal in motion: the sample is *one* cyclic run (a second lit arc is the
  * doubling this design exists to avoid), no two neighbours differ enough to show as
  * a step, and it carries both theme hues without either reading as foreign.
+ *
+ * [span] and [headAlpha] exist so scroll speed can widen and lift the beam without
+ * touching a single colour: the mix curve below is untouched by them, so the hue set
+ * at rest and the hue set mid-fling are the same samples. That is the executable form
+ * of "a second hue may only arrive by fading out of this surface's own colour" — a
+ * moving light may get bigger and brighter, never get re-coloured.
  */
-internal fun rimBeamColors(turn: Float, accent: Color, counterAccent: Color): List<Color> {
+internal fun rimBeamColors(
+    turn: Float,
+    accent: Color,
+    counterAccent: Color,
+    span: Float = RIM_BEAM_SPAN,
+    headAlpha: Float = RIM_HEAD_ALPHA,
+): List<Color> {
     val tail = lerp(counterAccent, accent, RIM_TAIL_TOWARD_SURFACE)
     // The unlit region is the tail at zero alpha rather than Color.Transparent: a
     // gradient interpolates hue too, and Transparent is (0,0,0,0) — an undefined hue
@@ -132,22 +249,38 @@ internal fun rimBeamColors(turn: Float, accent: Color, counterAccent: Color): Li
     // the same gamma-toe artefact ShimmerTest documents, and it leaves through the
     // trail's own colour instead.
     val unlit = tail.copy(alpha = 0f)
-    val half = RIM_BEAM_SPAN / 2f
+    val half = span / 2f
     return List(RIM_STOP_COUNT) { index ->
         // Distance back from the leading tip, so the centre of the arc sits at turn.
         val behind = wrapToOne(turn + half - index / RIM_STOP_COUNT.toFloat())
-        if (behind >= RIM_BEAM_SPAN) {
+        if (behind >= span) {
             unlit
         } else {
-            val along = behind / RIM_BEAM_SPAN
+            val along = behind / span
             // Convex, so the accent holds the leading two-thirds and the trail's hue
             // only arrives where the light is already faint.
             lerp(accent, tail, along.pow(1.3f))
-                .copy(alpha = RIM_HEAD_ALPHA * sin(PI.toFloat() * along).pow(1.15f))
+                .copy(alpha = headAlpha * sin(PI.toFloat() * along).pow(1.15f))
         }
     }
 }
 
+/**
+ * The rim, optionally coupled to how fast its shelf is moving and parked at how far
+ * through the book the surface is.
+ *
+ * **Contract (Rule 19 — every effect declares its floor and its fallback):**
+ *
+ * | Condition | Result |
+ * |---|---|
+ * | Motion on, shelf scrolling | the same travelling beam, widened by up to [RIM_SPAN_GAIN] and lifted by up to [RIM_ALPHA_GAIN] as a function of scroll rate; period, hue and arc position unchanged |
+ * | Motion on, at rest (or [velocity] null) | today's rim exactly — `rimSpeedGain(0f) == 0f`, and the two budgets multiply constants rather than replacing them |
+ * | Reduce-motion | [animate] false ⇒ no clock, so no ticks and no gain to read; the head parks at [rimParkedHead] of [parkedAt], which is [RIM_PARKED_HEAD] exactly for a book not started |
+ * | Desktop / previews / unit tests | [LocalFolioScrollVelocity] is never provided ⇒ both draw-phase reads see null ⇒ receiver unchanged, byte-for-byte |
+ *
+ * There is no API floor here: this is Canvas-level drawing, so the effect's ceiling
+ * and its floor are the same picture on every device it runs on.
+ */
 @Composable
 fun Modifier.folioThemeRim(
     shape: Shape,
@@ -155,6 +288,11 @@ fun Modifier.folioThemeRim(
     counterAccent: Color,
     width: Dp = 1.5.dp,
     animate: Boolean = rememberMotionEnabled(),
+    /** The shelf's scroll motion. Null means "this surface has no scroll source",
+     *  which is what Home's hero and every desktop tree pass. */
+    velocity: FolioScrollVelocity? = null,
+    /** How far through the book this surface is, 0..1, or null for none. */
+    parkedAt: Float? = null,
 ): Modifier {
     val hairline = FolioTheme.atmosphere.hairline
     val phases: State<List<Float>>? =
@@ -170,13 +308,36 @@ fun Modifier.folioThemeRim(
         val edge = Stroke(2.dp.toPx())
         val ring = Stroke(width.toPx() * 2f)
         val bloom = Stroke(width.toPx() * 4.5f)
+        // The parked head is resolved once per cache pass, not per frame: progress
+        // changes when a book is read, not while a rim travels.
+        val parked = rimParkedHead(parkedAt)
         onDrawBehind {
+            // Both motion reads live here and nowhere else. Hoisting them into the
+            // cache block would make a plain captured value part of the cache's
+            // identity, and every frame of a fling would rebuild the path and the
+            // three strokes above.
+            val level = velocity?.let {
+                rimVelocityLevel(
+                    it.speed.floatValue,
+                    (System.nanoTime() - it.stamp.longValue) / 1_000_000L,
+                )
+            } ?: 0f
+            val (span, headAlpha) = rimBeamShape(level)
             val turn = phases?.value?.getOrNull(0)
             // The clock's phase runs 0..2π and the sweep takes a fraction of a
             // turn, so the wrap is exact: a full circuit lands precisely where it
-            // started and there is no restart to hide.
-            val head = if (turn == null) RIM_PARKED_HEAD else wrapToOne(turn / TWO_PI)
-            val beam = Brush.sweepGradient(rimBeamColors(head, accent, counterAccent), center)
+            // started and there is no restart to hide. Progress shifts where the
+            // circuit *begins*; it never touches the rate, so a book half-read does
+            // not travel any quicker — and a fling cannot, either.
+            val head = if (turn == null) {
+                parked
+            } else {
+                wrapToOne(turn / TWO_PI + (parkedAt ?: 0f).coerceIn(0f, 1f) * RIM_PROGRESS_SWING)
+            }
+            val beam = Brush.sweepGradient(
+                rimBeamColors(head, accent, counterAccent, span, headAlpha),
+                center,
+            )
             clipPath(path) {
                 drawPath(path, base, style = edge)
                 drawPath(path, beam, style = bloom)

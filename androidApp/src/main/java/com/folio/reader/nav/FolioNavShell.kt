@@ -384,6 +384,9 @@ private fun FolioNavItem(
     val colors = FolioTheme.colors
     val motion = rememberMotionEnabled()
     val interaction = rememberFolioInteraction()
+    // §16: the pill lights where the thumb lands rather than flashing its whole
+    // outline uniformly. Same interaction source the press and the tick already use.
+    val focal = com.folio.reader.ui.theme.rememberFolioPressFocal(interaction)
     val targetWidth = if (selected) 86.dp else 50.dp
     val width by animateDpAsState(
         targetValue = targetWidth,
@@ -467,7 +470,7 @@ private fun FolioNavItem(
                 .height(42.dp)
                 .clip(FolioShapes.pill)
                 .background(pillFill, FolioShapes.pill)
-                .folioGlassPress(interaction, FolioShapes.pill),
+                .folioGlassPress(interaction, FolioShapes.pill, focal),
             contentAlignment = Alignment.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {

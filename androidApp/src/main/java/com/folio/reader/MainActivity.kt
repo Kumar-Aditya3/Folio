@@ -340,6 +340,26 @@ class MainActivity : ComponentActivity() {
                     liquidGlassEffects = model.globalSettings.liquidGlassEffects,
                 )
             }
+            // Wide-gamut output. This is a platform switch, not a Compose one: raise
+            // it and a Display-P3-tagged cover is composited at the saturation it was
+            // authored with, instead of being mapped into sRGB by the window before it
+            // ever reaches the panel. `android:configChanges="colorMode"` keeps the
+            // change off the recreation path, so the preference lands on the next
+            // frame rather than through a relaunch. The display's own verdict is
+            // checked first because on a panel that cannot show more than sRGB the
+            // system remaps either way — the request would buy a configuration change
+            // and no picture.
+            LaunchedEffect(model.globalSettings.wideGamutColor) {
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return@LaunchedEffect
+                @Suppress("DEPRECATION")
+                val wide = model.globalSettings.wideGamutColor &&
+                    windowManager.defaultDisplay.isWideColorGamut
+                window.colorMode = if (wide) {
+                    android.content.pm.ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+                } else {
+                    android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
+                }
+            }
             // A source behind an interactive bot check needs a window with a finger in
             // it, which an OkHttp interceptor does not have. Registering the opener
             // here (and dropping it on dispose) is what lets shared browse code offer

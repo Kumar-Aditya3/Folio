@@ -3,6 +3,10 @@ package com.folio.reader.ui.render
 import com.folio.reader.model.FormattingMode
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
+import com.folio.reader.ui.theme.AppPalette
+import com.folio.reader.ui.theme.atmosphereFor
+import com.folio.reader.ui.theme.daylightAt
+import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -210,5 +214,116 @@ class ReaderCssThemeTest {
                 )
             }
         }
+    }
+
+    // ── §18 page light ──────────────────────────────────────────────────────────
+
+    private fun litSheet(settings: ReaderSettings, image: String) = ReaderCss.styleSheet(
+        settings = settings,
+        pagedCols = 0,
+        fontStack = { it },
+        continuousCss = "",
+        lightImage = image,
+    )
+
+    private val sampleLight =
+        "radial-gradient(115% 115% at 50% 0%,rgba(255,252,245,0.045) 0%,rgba(255,252,245,0) 46%)"
+
+    /**
+     * Rule 1, and the regression net for desktop: it passes no light, so its sheet
+     * must be the one it ships today, to the character.
+     */
+    @Test
+    fun noLightLeavesTheSheetExactlyAsItWas() {
+        val s = ReaderSettings()
+        assertTrue(sheet(s) == litSheet(s, ""), "an absent light perturbed the sheet")
+        assertTrue("background-image" !in sheet(s), "the plain sheet carries a light nobody asked for")
+        assertTrue("data-folio-frame" !in sheet(s), "the plain sheet reaches into the paged iframe")
+    }
+
+    /**
+     * The light is a longhand on the top document only, and says so about repeating.
+     *
+     * `background-repeat` defaults to `repeat`, so a vignette without it tiles four
+     * ways down a tall document — the one failure here that a flat colour could never
+     * have shown, because a repeated colour is still that colour.
+     */
+    @Test
+    fun theLightIsAnchoredToTheTopDocumentAndNeverRepeats() {
+        val css = litSheet(ReaderSettings(), sampleLight)
+        assertTrue(
+            "html:not([data-folio-frame]){background-image:$sampleLight !important;" in css,
+            "the light is not scoped to the document that never scrolls",
+        )
+        assertTrue(
+            "background-repeat:no-repeat !important;" in css,
+            "an unbounded repeat tiles the vignette down the page",
+        )
+        // The paper must never live in the light's own declaration: a browser that
+        // rejects a gradient function drops that declaration, and if it held the paper
+        // too the page would go white under the ink.
+        val lightRule = css.substringAfter("html:not([data-folio-frame]){")
+            .substringBefore("}")
+        assertTrue(
+            "background-color" !in lightRule && "background:#" !in lightRule,
+            "the light declaration can take the paper down with it",
+        )
+    }
+
+    /** The paged iframe's own paper is stripped, so the lit parent is the page. */
+    @Test
+    fun thePagedIframesPaperIsStrippedSoTheLitParentShowsThrough() {
+        val css = litSheet(ReaderSettings(), sampleLight)
+        assertTrue(
+            "html[data-folio-frame],html[data-folio-frame]>body" in css &&
+                "background-color:transparent !important;" in css,
+            "the iframe still paints its own unlit paper over the page's light",
+        )
+    }
+
+    /**
+     * The ink floor survives the light, on every reader theme, every app palette and
+     * through a whole day.
+     *
+     * Composed here rather than read back out of the emitted string: the guard has to
+     * be checked against a measurement taken independently of the code being checked.
+     */
+    @Test
+    fun noReaderThemeIsLitPastItsInkFloor() {
+        for (theme in Theme.PICKER) {
+            for (pack in AppPalette.entries) {
+                val atmos = atmosphereFor(pack.colors)
+                for (hour in listOf(0, 5, 8, 12, 16, 19, 22)) {
+                    val light = pageLightImage(
+                        daylightAt(hour, 30), atmos, theme.background, theme.primaryText,
+                    )
+                    if (light.isEmpty()) continue
+                    assertTrue("radial-gradient(" in light, "an empty stack was reported as a light")
+                    for ((veil, requested) in listOf(atmos.rimLight to 0.045f, atmos.rimShade to 0.055f)) {
+                        val alpha = inkFloorRespectingAlpha(
+                            argbColor(theme.background),
+                            argbColor(theme.primaryText),
+                            veil,
+                            requested,
+                        )
+                        if (alpha <= 0f) continue
+                        val lit = compositeOver(theme.background, veil, alpha)
+                        assertTrue(
+                            contrastRatio(lit, theme.primaryText) >= 7.0,
+                            "${theme.id} under ${pack.name} at $hour:00 drops ink to " +
+                                "${contrastRatio(lit, theme.primaryText)}:1 at alpha $alpha",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** `veil` at `alpha` over an opaque `paper`, as an ARGB int. */
+    private fun compositeOver(paper: Int, veil: androidx.compose.ui.graphics.Color, alpha: Float): Int {
+        fun ch(shift: Int, v: Float) = ((1f - alpha) * ((paper shr shift) and 0xFF) + alpha * (v * 255f))
+            .roundToInt().coerceIn(0, 255)
+        return ch(16, veil.red) shl 16 or (ch(8, veil.green) shl 8) or ch(0, veil.blue) or
+            (0xFF shl 24)
     }
 }

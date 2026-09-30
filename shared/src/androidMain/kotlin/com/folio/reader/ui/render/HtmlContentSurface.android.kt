@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.LocalFolioDaylight
+import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
@@ -204,6 +207,25 @@ actual fun HtmlContentSurface(
         fontFamily = "", fontSize = 0f, fontWeight = 0,
         lineHeight = 0f, letterSpacing = 0f, paragraphSpacing = 0f,
     )
+    // §18: the reading field's own light. Resolved here rather than in the builder
+    // below because the room's daylight and the atmosphere are composition values and
+    // the document build runs on a worker that can read neither.
+    //
+    // Deliberately NOT a key of the restyle effect: daylight ticks every minute, and a
+    // restyle re-columnises the chapter (`measure()` reads scrollWidth) and re-runs the
+    // page-anchor save/restore — so a per-minute light would move the reader off the
+    // page he is on. The light therefore refreshes with a chapter load or a theme
+    // change, both of which restyle anyway. Mid-session drift over ~2° of sun is not
+    // visible; a jumped page is.
+    val roomDaylight = LocalFolioDaylight.current
+    val roomAtmosphere = FolioTheme.atmosphere
+    val pageLight = remember(
+        roomDaylight, roomAtmosphere, settings.themeId, settings.customTheme,
+    ) {
+        val paper = settings.customTheme
+            ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        pageLightImage(roomDaylight, roomAtmosphere, paper.background, paper.primaryText)
+    }
     // Building the document is regex plus concatenation over the whole window — 119 ms measured for a
     // book of 200 KB chapters on a desktop CPU, and several times that on a phone. In remember{} that
     // work ran inside the composition a Contents jump is supposed to feel instant, freezing the frame
@@ -221,7 +243,8 @@ actual fun HtmlContentSurface(
                     ReaderWindowAssembler.assemble(
                         sections.map { it.copy(html = canonicalSection(it)) }, shadow = false
                     ),
-                    settings
+                    settings,
+                    lightImage = pageLight,
                 )
             } else {
                 // Paged attribute refs already resolve through the chapter's own base URL, so only
@@ -234,6 +257,7 @@ actual fun HtmlContentSurface(
                     // font and then reflow — see [readerStyleSheet]. EPUB is always
                     // windowed here, so this reveal gate never touches it.
                     revealGate = true,
+                    lightImage = pageLight,
                 )
             }
         }
@@ -252,12 +276,21 @@ actual fun HtmlContentSurface(
         // value within the window actually restyles; a real load re-keys via `content`
         // and eats just this short delay once.
         kotlinx.coroutines.delay(110)
-        val css = readerStyleSheet(settings)
+        val css = readerStyleSheet(settings, lightImage = pageLight)
         val shadowCss = ReaderCss.shadowStyleSheet(settings)
+        // The top document is written first, always. In paged mode `__folioRestyle` is
+        // a proxy onto the iframe's document, so the parent's own <style> has kept its
+        // load-time text since the chapter arrived — harmless while the iframe painted
+        // the paper over it, and not harmless any more: §18 makes the iframe's paper
+        // transparent so the parent's lit canvas *is* the page, which means a theme
+        // switch that left the parent stale would repaint the gutter in the old paper
+        // and hold the old light until the next chapter loaded. In continuous mode the
+        // proxy is absent and this write is the only one, exactly as before.
         wv.evaluateJavascript(
-            "(function(){if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) + "," + jsLiteral(shadowCss) + ");}" +
-                "else{var s=document.getElementById('folio-reader-style');" +
-                "if(s)s.textContent=" + jsLiteral(css) + ";}})();",
+            "(function(){var s=document.getElementById('folio-reader-style');" +
+                "if(s)s.textContent=" + jsLiteral(css) + ";" +
+                "if(window.__folioRestyle){window.__folioRestyle(''," + jsLiteral(css) +
+                "," + jsLiteral(shadowCss) + ");}})();",
             null
         )
         // Paged side margins are NOT carried in the reader CSS (ReaderCss emits body
@@ -1039,7 +1072,11 @@ private fun canonicalEpubPath(baseHref: String, src: String): String {
  * ([injectReaderCss]) and the live theme swap write exactly this, so the two
  * cannot drift.
  */
-private fun readerStyleSheet(settings: ReaderSettings, revealGate: Boolean = false): String {
+private fun readerStyleSheet(
+    settings: ReaderSettings,
+    revealGate: Boolean = false,
+    lightImage: String = "",
+): String {
     // Coerce SPREAD → PAGINATED on Android: spread is desktop-only.
     val safeLayoutMode = if (settings.layoutMode == com.folio.reader.settings.LayoutMode.SPREAD)
         com.folio.reader.settings.LayoutMode.PAGINATED else settings.layoutMode
@@ -1072,13 +1109,19 @@ private fun readerStyleSheet(settings: ReaderSettings, revealGate: Boolean = fal
         continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}" + revealGateCss,
         // Android paged renders inside an iframe (MulticolEngine); the top
         // document only needs a neutral box, layout happens in the iframe.
-        pagedCss = MulticolEngine::frameCss
+        pagedCss = MulticolEngine::frameCss,
+        lightImage = lightImage,
     )
 }
 
-private fun injectReaderCss(rawHtml: String, settings: ReaderSettings, revealGate: Boolean = false): String {
+private fun injectReaderCss(
+    rawHtml: String,
+    settings: ReaderSettings,
+    revealGate: Boolean = false,
+    lightImage: String = "",
+): String {
     val html = com.folio.reader.epub.ChapterSanitizer.sanitize(rawHtml)
     val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style id=\"folio-reader-style\">" +
-            readerStyleSheet(settings, revealGate) + "</style>"
+            readerStyleSheet(settings, revealGate, lightImage) + "</style>"
     return if (html.contains("</head>", ignoreCase = true)) html.replaceFirst(HEAD_CLOSE, "$css</head>") else "$css$html"
 }

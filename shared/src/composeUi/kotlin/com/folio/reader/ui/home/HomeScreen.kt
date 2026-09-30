@@ -111,6 +111,7 @@ import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.folioLiquidGlass
 import com.folio.reader.ui.theme.lightDirection
+import com.folio.reader.ui.theme.rememberFolioPressFocal
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -367,6 +368,9 @@ private fun ReadingNowAnchor(
     // on the same edge the raised rim catches.
     val heroLight = LocalFolioDaylight.current.lightDirection()
     val interaction = rememberFolioInteraction()
+    // Where the thumb lands on the hero. The AGSL film gathers its specular here; the
+    // raised sheen and the mesh under it are daylight-only, as they were.
+    val heroFocal = rememberFolioPressFocal(interaction)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -403,6 +407,7 @@ private fun ReadingNowAnchor(
                 lightX = heroLight.first,
                 lightY = heroLight.second,
                 enabled = LocalGlassCapabilities.current.specular,
+                focal = heroFocal,
             )
             // §13.4's drifting mesh, finally on the surface it was designed
             // for: three large low-alpha accent gradients breathing behind
@@ -432,6 +437,10 @@ private fun ReadingNowAnchor(
                 shape = FolioShapes.heroBleed,
                 accent = tint,
                 counterAccent = colors.accentDiscovery,
+                // No velocity: this hero's scroll is a list offset reported through
+                // `setProgress`, not consumed deltas, so a rate measured here would
+                // be a rate of something else. Progress still parks the light.
+                parkedAt = item.progress,
             )
             .clickable(interactionSource = interaction, indication = null) { onOpen(item) }
             .padding(

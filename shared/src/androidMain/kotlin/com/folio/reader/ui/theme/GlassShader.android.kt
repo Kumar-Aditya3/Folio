@@ -6,6 +6,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
 import kotlin.math.sqrt
@@ -28,11 +29,12 @@ actual fun Modifier.folioLiquidGlass(
     lightY: Float,
     intensity: Float,
     enabled: Boolean,
+    focal: FolioPressFocal?,
 ): Modifier {
     if (!enabled || intensity <= 0f || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         return this
     }
-    return liquidGlassLayer(accent, highlight, lightX, lightY, intensity)
+    return liquidGlassLayer(accent, highlight, lightX, lightY, intensity, focal)
 }
 
 /**
@@ -44,7 +46,12 @@ actual fun Modifier.folioLiquidGlass(
  *  - **specular**: a soft radial hot-spot placed on the sun-facing side, so the
  *    highlight sits where every other material's catch does;
  *  - **edge**: a rim term that brightens the sun-facing border and falls to
- *    nothing on the anti-sun side — lensing without a normal map.
+ *    nothing on the anti-sun side — lensing without a normal map;
+ *  - **focal**: the same specular hot-spot, moved under the finger while a press is
+ *    held. It is deliberately *not* gated on `facing` the way the daylight spot is:
+ *    `facing` is zero across the anti-sun half of the surface, so a thumb landing
+ *    there would catch nothing, and the whole point of the term is that the light
+ *    answers where the finger actually is.
  *
  * Output is premultiplied (Skia convention). All amplitudes are small: the film
  * tops out well under the fill it sits behind, so text drawn over the hero keeps
@@ -56,6 +63,8 @@ uniform float3 accent;
 uniform float3 highlight;
 uniform float2 light;
 uniform float intensity;
+uniform float2 focal;
+uniform float focalStrength;
 
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord / size;
@@ -83,13 +92,19 @@ half4 main(float2 fragCoord) {
     float border = max(max(uv.x, 1.0 - uv.x), max(uv.y, 1.0 - uv.y));
     float edge = smoothstep(0.86, 1.0, border) * facing;
 
-    // Compose the three contributions into a premultiplied colour.
+    // Press focal: the catch follows the finger. `focalStrength` is the press
+    // spring, so at rest this term is exactly zero and the film is the one that
+    // shipped before the finger existed.
+    float focus = smoothstep(0.34, 0.0, distance(uv, focal)) * focalStrength;
+
+    // Compose the contributions into a premultiplied colour.
     float bodyW = body * 0.06;
     float specW = spec * 0.22;
     float edgeW = edge * 0.30;
+    float focusW = focus * 0.24;
 
-    float3 rgb = accent * bodyW + highlight * (specW + edgeW);
-    float a = (bodyW + specW + edgeW) * intensity;
+    float3 rgb = accent * bodyW + highlight * (specW + edgeW + focusW);
+    float a = (bodyW + specW + edgeW + focusW) * intensity;
     rgb = rgb * intensity;
     return half4(half3(rgb), half(a));
 }
@@ -108,6 +123,7 @@ private fun Modifier.liquidGlassLayer(
     lightX: Float,
     lightY: Float,
     intensity: Float,
+    focal: FolioPressFocal?,
 ): Modifier {
     val shader = runCatching { RuntimeShader(LIQUID_GLASS_AGSL) }.getOrNull() ?: return this
     // Normalise the light vector defensively; a zero vector would divide by zero
@@ -120,8 +136,24 @@ private fun Modifier.liquidGlassLayer(
     shader.setFloatUniform("light", lx, ly)
     shader.setFloatUniform("intensity", intensity.coerceIn(0f, 1f))
     val brush = ShaderBrush(shader)
-    return this.drawWithCache {
+    val base = if (focal != null) this.folioPressFocalOrigin(focal) else this
+    return base.drawWithCache {
         shader.setFloatUniform("size", size.width, size.height)
-        onDrawBehind { drawRect(brush) }
+        onDrawBehind {
+            // Draw-phase only. Reading the press here rather than capturing it in the
+            // cache block keeps it out of the cache's identity, which would otherwise
+            // rebuild the brush and re-set all four colour uniforms on every frame of
+            // the settle spring. At rest the strength is 0, so this is exactly the
+            // film that shipped before the finger existed.
+            val uv = focal?.normalized(Offset(size.width, size.height))
+            if (uv == null) {
+                shader.setFloatUniform("focal", 0.5f, 0.5f)
+                shader.setFloatUniform("focalStrength", 0f)
+            } else {
+                shader.setFloatUniform("focal", uv.x, uv.y)
+                shader.setFloatUniform("focalStrength", focal.strength.value.coerceIn(0f, 1f))
+            }
+            drawRect(brush)
+        }
     }
 }

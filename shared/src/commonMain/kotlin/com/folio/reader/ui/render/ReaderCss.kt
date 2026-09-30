@@ -35,7 +35,12 @@ object ReaderCss {
         // Paged-mode layout CSS. Desktop uses [PageEngine.css] (hand-packed
         // columns); Android passes [MulticolEngine.frameCss] (neutral, because
         // the real layout runs inside the paged iframe).
-        pagedCss: (marginTop: Float, marginBottom: Float) -> String = PageEngine::css
+        pagedCss: (marginTop: Float, marginBottom: Float) -> String = PageEngine::css,
+        // §18 page light: the `background-image` stack
+        // ([com.folio.reader.ui.render.pageLightImage]) that lights the reading field
+        // under the ink. Empty means no light — the sheet ships byte-for-byte as it
+        // did before, which is what desktop and every test pass by default.
+        lightImage: String = "",
     ): String {
         val theme = settings.customTheme
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
@@ -234,8 +239,40 @@ object ReaderCss {
                 "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}" +
                 (if (original) "" else
                     "p::first-letter{font-size:inherit !important;line-height:inherit !important;" +
-                            "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}")
+                            "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}") +
+                pageLightCss(lightImage)
     }
+
+    /**
+     * The page light, as a rule on the root element only.
+     *
+     * Three things this shape is doing on purpose:
+     *
+     *  - **a longhand, never an extension of the `background:` shorthand above.** Paper
+     *    and ink are forced with `!important` because a plain rule loses to publisher
+     *    CSS; folding the light into that declaration would mean a browser that
+     *    rejects one gradient function throws the *paper* away with it, and ink on
+     *    white is a contrast failure rather than a missing decoration. Kept separate,
+     *    the light can only ever fail to appear.
+     *  - **`no-repeat`.** It is the default of nothing: `background-repeat` is
+     *    `repeat`, so a radial gradient with an alpha outer stop tiles four-way down a
+     *    tall document. Today's flat colour hides the fact, because a repeated colour
+     *    is still that colour.
+     *  - **`html:not([data-folio-frame])`.** This sheet is copied verbatim into the
+     *    paged iframe, whose root the engine pins to the *whole strip's* width — so a
+     *    light painted there is anchored to a viewport as wide as the chapter, its lamp
+     *    sitting somewhere around page 108 and sliding past the reader on every turn.
+     *    The parent document never scrolls (paging is a compositor transform on the
+     *    iframe element), so its root background is the only anchor pinned to the
+     *    window; the paired rule that strips the iframe's own paper makes the parent's
+     *    lit canvas the page beneath the chapter.
+     */
+    private fun pageLightCss(lightImage: String): String =
+        if (lightImage.isBlank()) "" else
+            "html:not([data-folio-frame]){background-image:$lightImage !important;" +
+                    "background-repeat:no-repeat !important;background-position:0 0 !important;}" +
+                    "html[data-folio-frame],html[data-folio-frame]>body," +
+                    "html[data-folio-frame]>body>section{background-color:transparent !important;}"
 
     /**
      * Reader/theme rules scoped for a per-chapter Shadow DOM (continuous mode).

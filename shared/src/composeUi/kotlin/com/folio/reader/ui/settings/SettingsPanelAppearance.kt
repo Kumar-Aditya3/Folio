@@ -477,6 +477,34 @@ fun TransparencySettingsPanel(
                 },
             )
         }
+        // Wide-gamut colour. It is not a filter or a tint: the same numbers are drawn,
+        // with a wider window to express them. Off maps everything into sRGB on the way
+        // to the panel, which is what silently desaturated any cover authored in P3.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Wide colour gamut",
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = "Let covers and page art keep the colour they were " +
+                        "authored in, on displays that can show it. Nothing changes " +
+                        "on a screen that cannot.",
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.wideGamutColor,
+                onCheckedChange = { on ->
+                    onSettingsChange(settings.copy(wideGamutColor = on))
+                },
+            )
+        }
         Text(
             text = "Drag a slider to highlight the surface it controls in the preview. " +
                 "Each value is the surface's own opacity: 100% is solid and nothing " +

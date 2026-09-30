@@ -33,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
@@ -56,6 +57,8 @@ import com.folio.reader.ui.theme.DAYLIGHT_RIM_TINT_MAX
 import com.folio.reader.ui.theme.DAYLIGHT_WASH_ALPHA_MAX
 import com.folio.reader.ui.theme.FolioAmbient
 import com.folio.reader.ui.theme.FolioAtmosphere
+import com.folio.reader.ui.theme.FolioPressFocal
+import com.folio.reader.ui.theme.folioPressFocalOrigin
 import com.folio.reader.ui.theme.FolioDaylight
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -672,23 +675,30 @@ fun Modifier.folioPressable(
 
 /**
  * §16 liquid press, for glass surfaces only — plain cards keep
- * [folioPressable]'s scale-only response. Two things happen while pressed:
+ * [folioPressable]'s scale-only response. Three things happen while pressed:
  *
  *  - the rim **flashes**: the outline brightens with the surface's own rim light
  *    toward ~1.5× the resting bevel and decays on release — the specular a
  *    finger pressing near a pane edge would catch;
+ *  - the surface **lights where the finger is** ([focal]): the same rim colour,
+ *    gathered into a bloom centred on the press rather than spread evenly round the
+ *    outline. This is the term that makes a glass surface answer *where* it was
+ *    touched, and it needs no shader, so it runs from API 24 up;
  *  - a **tick** lands on settle ([rememberGlassTick]; nav capsule and sheet
  *    handles only — nowhere else, or every press in the app becomes noise).
  *
- * The third term the design asked for — corner softening while pressed — needs
- * `GraphicsLayer.shape`, which the pinned Compose (1.7.3) does not expose; it is
- * deliberately not approximated with a recomposing clip. Honours reduce-motion:
- * every term collapses to identity.
+ * What is still missing is the fourth term the design asked for — corner softening
+ * while pressed — which needs `GraphicsLayer.shape`, and the pinned Compose (1.7.3)
+ * does not expose it. It is deliberately not approximated with a recomposing clip.
+ *
+ * Honours reduce-motion: every term collapses to identity, and so does the focal,
+ * whose strength never leaves 0 when motion is off.
  */
 @Composable
 fun Modifier.folioGlassPress(
     interactionSource: MutableInteractionSource,
     shape: Shape,
+    focal: FolioPressFocal? = null,
 ): Modifier {
     val pressed by interactionSource.collectIsPressedAsState()
     val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
@@ -701,6 +711,13 @@ fun Modifier.folioGlassPress(
     )
     val atmos = FolioTheme.atmosphere
     return this
+        .then(
+            if (caps.specular && focal != null) {
+                Modifier.folioPressFocalOrigin(focal)
+            } else {
+                Modifier
+            }
+        )
         .drawWithCache {
             if (!caps.specular) {
                 onDrawBehind { /* un-capable platforms keep today's press */ }
@@ -709,6 +726,25 @@ fun Modifier.folioGlassPress(
                 val rim = atmos.rimLight
                 onDrawBehind {
                     val fraction = if (motion) press else 0f
+                    // The bloom is clipped for the same reason the rim's bloom is in
+                    // FolioThemeRim: this surface is not necessarily clipped itself,
+                    // and a radial fill would leak onto its neighbours.
+                    val at = focal?.pixelPoint()
+                    if (at != null && fraction > 0.001f) {
+                        val radius = maxOf(size.width, size.height) * 0.62f
+                        clipPath(path) {
+                            drawCircle(
+                                Brush.radialGradient(
+                                    0f to rim.copy(alpha = rim.alpha * 0.42f * fraction),
+                                    1f to rim.copy(alpha = 0f),
+                                    center = at,
+                                    radius = radius,
+                                ),
+                                radius = radius,
+                                center = at,
+                            )
+                        }
+                    }
                     if (fraction > 0.001f) {
                         // 0.45 → ~0.68 alpha at full press: the resting bevel's
                         // sun-side rim, 1.5× brighter.

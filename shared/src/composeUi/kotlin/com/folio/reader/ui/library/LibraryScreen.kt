@@ -93,6 +93,7 @@ import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioFadeSwap
 import com.folio.reader.ui.components.folioSizeTransformEligible
 import com.folio.reader.ui.components.folioSwapSizeTransform
@@ -1198,7 +1199,16 @@ fun LibraryScreen(
             books?.size ?: 0,
             documentState.items.size,
         )
-        CompositionLocalProvider(LocalFolioTopInset provides shelfInset(libraryMode)) {
+        CompositionLocalProvider(
+            LocalFolioTopInset provides shelfInset(libraryMode),
+            // The rim's motion feed, published exactly where the connection that
+            // measures it is attached. Home's hero publishes nothing — its collapse
+            // comes from a list offset, not from consumed scroll deltas, so a rate
+            // derived there would be a rate of something else. Both platforms render
+            // this screen, so both couple identically; this is not a platform
+            // capability, and the rim already travels on desktop today.
+            LocalFolioScrollVelocity provides headerState.velocity,
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

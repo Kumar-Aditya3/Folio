@@ -82,6 +82,19 @@ data class ReaderSettings(
      */
     val liquidGlassEffects: Boolean = true,
     /**
+     * Render the app's window outside sRGB. Cover art, manga pages and inline EPUB
+     * art routinely carry a Display-P3 or Adobe-RGB profile: the decoder preserves
+     * it, and an sRGB window then colour-manages it *down* — the saturated reds the
+     * artist authored are clipped away before they reach the display. This raises
+     * the ceiling so that data survives to the panel.
+     *
+     * App-level rather than per-book, and it changes nothing about layout, motion or
+     * ink: the same numbers are drawn, with more of them representable. On a display
+     * with no wide gamut the system remaps transparently, so the picture is today's
+     * exactly — which is why this needs no fallback artwork.
+     */
+    val wideGamutColor: Boolean = true,
+    /**
      * §17 morph into the EPUB reader. Off by default, and app-level rather than
      * per-book on purpose.
      *

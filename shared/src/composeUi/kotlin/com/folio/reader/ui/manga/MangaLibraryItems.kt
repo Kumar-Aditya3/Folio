@@ -60,6 +60,7 @@ import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
@@ -145,6 +146,10 @@ fun FeaturedMangaShelfEntry(
                 shape = FolioShapes.card,
                 accent = accent,
                 counterAccent = FolioTheme.colors.accentDiscovery,
+                velocity = LocalFolioScrollVelocity.current,
+                // The same fraction `inProgress` above reads, so the light and the
+                // badge can never disagree about how far through this series he is.
+                parkedAt = progress,
             )
             .combinedClickable(
                 interactionSource = interaction,

@@ -54,7 +54,7 @@ class SettingsMergeTest {
         paragraphSpacing = 1.4f,
         margins = com.folio.reader.settings.Margins(left = 31f, right = 32f, top = 41f, bottom = 42f),
         textWidth = com.folio.reader.settings.TextWidth.WIDE,
-        alignment = com.folio.reader.settings.TextAlignment.JUSTIFIED,
+        alignment = com.folio.reader.settings.TextAlignment.LEFT,
         hyphenation = false,
         themeId = "dusk",
         layoutMode = com.folio.reader.settings.LayoutMode.PAGINATED,
@@ -101,6 +101,9 @@ class SettingsMergeTest {
         panelOpacity = 0.9f,
         readerChromeOpacity = 0.85f,
         liquidGlassEffects = false,
+        // wideGamutColor defaults to true, so the non-default fixture value is false —
+        // omitting it would fail the field-count guard below by one.
+        wideGamutColor = false,
         // morphIntoReader now defaults to true, so the non-default fixture value is
         // false (the fixture must set every field to a non-default so the field-count
         // guard in everyFieldIsDiffedAndApplied does not pass vacuously).
