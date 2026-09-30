@@ -387,7 +387,7 @@ fun FolioTopBar(
                         drawRect(
                             Brush.linearGradient(
                                 0f to Color.Transparent,
-                                0.62f to Color.Transparent,
+                                mastheadSheenStop(f) to Color.Transparent,
                                 1f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
                                 start = sheenStart,
                                 end = sheenEnd,
@@ -704,6 +704,24 @@ fun FolioSegmented(
         }
     }
 }
+
+/**
+ * Where the masthead's specular band begins, along the daylight axis, for a bar
+ * collapsed by [collapse] 0..1.
+ *
+ * §13.9's rule for anything the finger drives: 1:1, no spring, no settle. The bar has
+ * always moved its fill, its title and its rail off this one number, but its light was
+ * a constant — so a collapsing masthead read as a tint getting more opaque rather than
+ * as an object turning under the lamp. Pulling the highlight's start back as the bar
+ * collapses means the light travels while the finger travels and stops the instant the
+ * finger stops, which costs no animation, no ticks and no frames.
+ *
+ * At rest this returns exactly the stop the bar has always used, and the term stays
+ * purely additive over the veil: `barGlass` alpha is untouched, so the §15 glass
+ * window pinned by `DesignSystemTest.appBarsAreGlassNotLids` still holds.
+ */
+internal fun mastheadSheenStop(collapse: Float): Float =
+    0.62f - 0.44f * collapse.coerceIn(0f, 1f)
 
 /**
  * §17 liquid selection, geometry half: where the capsule's specular sweep band

@@ -8,6 +8,7 @@ import com.folio.reader.ui.theme.atmosphereFor
 import com.folio.reader.ui.theme.daylightAt
 import kotlin.math.roundToInt
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -299,7 +300,10 @@ class ReaderCssThemeTest {
                     )
                     if (light.isEmpty()) continue
                     assertTrue("radial-gradient(" in light, "an empty stack was reported as a light")
-                    for ((veil, requested) in listOf(atmos.rimLight to 0.045f, atmos.rimShade to 0.055f)) {
+                    for ((veil, requested) in listOf(
+                        atmos.rimLight to PAGE_LIGHT_LIFT_ALPHA,
+                        atmos.rimShade to PAGE_LIGHT_SHADE_ALPHA,
+                    )) {
                         val alpha = inkFloorRespectingAlpha(
                             argbColor(theme.background),
                             argbColor(theme.primaryText),
@@ -317,6 +321,45 @@ class ReaderCssThemeTest {
                 }
             }
         }
+    }
+
+    /**
+     * The ceilings must survive untouched on a page with room to spare.
+     *
+     * This is the measurement that tells us the light is authored too small rather than
+     * being strangled by the ink guard: on white paper over black ink the guard has
+     * nothing to protect, so if these alphas come back halved the bug is in the clamp.
+     */
+    @Test
+    fun theCeilingsReachAMaximumContrastPageUnclamped() {
+        val white = argbColor(0xFFFFFFFF.toInt())
+        val black = argbColor(0xFF000000.toInt())
+        val warm = argbColor(0xFFFFE9C8.toInt())
+        val cool = argbColor(0xFF3A2E1F.toInt())
+        assertEquals(
+            PAGE_LIGHT_LIFT_ALPHA,
+            inkFloorRespectingAlpha(white, black, warm, PAGE_LIGHT_LIFT_ALPHA),
+            "the ink guard cut the lift on a 21:1 page — the light can never be visible anywhere",
+        )
+        assertEquals(
+            PAGE_LIGHT_SHADE_ALPHA,
+            inkFloorRespectingAlpha(white, black, cool, PAGE_LIGHT_SHADE_ALPHA),
+            "the ink guard cut the shade on a 21:1 page",
+        )
+    }
+
+    /** A third of the shipped themes being clamped to no light at all is a design bug. */
+    @Test
+    fun mostShippedReaderThemesAreStillLit() {
+        val atmos = atmosphereFor(AppPalette.entries.first().colors)
+        val dark = Theme.PICKER.filter {
+            pageLightImage(daylightAt(12, 0), atmos, it.background, it.primaryText).isEmpty()
+        }
+        assertTrue(
+            dark.size <= Theme.PICKER.size / 3,
+            "${dark.size} of ${Theme.PICKER.size} reader themes get no light at all " +
+                "(${dark.joinToString { it.id }}) — the ceilings or the clamp are wrong",
+        )
     }
 
     /** `veil` at `alpha` over an opaque `paper`, as an ARGB int. */

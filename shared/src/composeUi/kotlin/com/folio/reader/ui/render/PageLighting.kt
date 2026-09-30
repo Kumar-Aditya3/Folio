@@ -43,8 +43,21 @@ import kotlin.math.roundToInt
  * timer, which is the exact cost the slow clock was invented to remove.
  */
 
-/** Ceiling for the sun-facing lift, before the ink floor pulls it down. */
-private const val PAGE_LIGHT_LIFT_ALPHA = 0.045f
+/**
+ * Ceiling for the sun-facing lift, before the ink floor pulls it down.
+ *
+ * The first cut of this carried 0.045, borrowed from `DAYLIGHT_WASH_ALPHA_MAX`, and the
+ * result was a light nobody could see. That doctrine was misapplied: colour is rationed
+ * because a second hue reads as foreign, but a *luminance* ramp on the page's own field
+ * has a measured limit instead, and there is a lot of room under it — a typical reader
+ * theme sits near 17:1, so taking the paper's luminance down by half at the extreme
+ * still clears §12.3's 7:1. The per-theme clamp, not this number, is what protects a
+ * low-contrast theme, and a theme with no room genuinely gets no light.
+ */
+internal const val PAGE_LIGHT_LIFT_ALPHA = 0.11f
+
+/** Ceiling for the outer shade, same reasoning. An edge that never darkens is a page. */
+internal const val PAGE_LIGHT_SHADE_ALPHA = 0.16f
 
 /** An ARGB int as a [Color]. The reader theme speaks in ints; the atmosphere does not. */
 internal fun argbColor(argb: Int): Color = Color(
@@ -52,9 +65,6 @@ internal fun argbColor(argb: Int): Color = Color(
     ((argb shr 8) and 0xFF) / 255f,
     (argb and 0xFF) / 255f,
 )
-
-/** Ceiling for the outer shade, same. */
-private const val PAGE_LIGHT_SHADE_ALPHA = 0.055f
 
 /** §12.3's ink floor. The light may not be the reason a page fails it. */
 private const val PAGE_LIGHT_INK_FLOOR = 7f

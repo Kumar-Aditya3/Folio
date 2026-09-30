@@ -4,11 +4,21 @@ import android.graphics.RuntimeShader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import com.folio.reader.ui.components.LocalGlassCapabilities
 import kotlin.math.sqrt
 
 /**
@@ -34,7 +44,79 @@ actual fun Modifier.folioLiquidGlass(
     if (!enabled || intensity <= 0f || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         return this
     }
-    return liquidGlassLayer(accent, highlight, lightX, lightY, intensity, focal)
+    val withFilm = liquidGlassLayer(accent, highlight, lightX, lightY, intensity, focal)
+    // `blur` is the app's existing verdict for "platform-composited and not a low-RAM
+    // device", which is exactly the budget a per-frame render effect needs: the layer
+    // re-runs the shader whenever anything in it redraws, and the hero's rim ticks at
+    // 30 Hz. Anything weaker keeps the additive film it has always had.
+    val caps = LocalGlassCapabilities.current
+    return if (caps.blur) {
+        val len = sqrt(lightX * lightX + lightY * lightY)
+        withFilm.liquidGel(
+            highlight = highlight,
+            lx = if (len < 1e-4f) 0f else lightX / len,
+            ly = if (len < 1e-4f) -1f else lightY / len,
+            intensity = intensity.coerceIn(0f, 1f),
+            focal = focal,
+        )
+    } else {
+        withFilm
+    }
+}
+
+/**
+ * The refractive layer. Binds [LIQUID_GEL_AGSL] to this node's own composited layer
+ * through `RenderEffect.createRuntimeShaderEffect`, so the surface bends what it
+ * contains at its rim — the one term that separates glass from a tinted panel.
+ *
+ * `size` and the focal arrive in the layer block, which is a render-phase read: a
+ * press invalidates this layer and nothing above it. Any device or driver that
+ * refuses the effect leaves the receiver untouched, which is today's look.
+ */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun Modifier.liquidGel(
+    highlight: Color,
+    lx: Float,
+    ly: Float,
+    intensity: Float,
+    focal: FolioPressFocal?,
+): Modifier {
+    val shader = runCatching { RuntimeShader(LIQUID_GEL_AGSL) }.getOrNull() ?: return this
+    shader.setFloatUniform("highlight", highlight.red, highlight.green, highlight.blue)
+    shader.setFloatUniform("light", lx, ly)
+    shader.setFloatUniform("intensity", intensity)
+    val effect: RenderEffect? = runCatching {
+        android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+            ?.asComposeRenderEffect()
+    }.getOrNull() ?: return this
+    var layerSize by remember { mutableStateOf(IntSize.Zero) }
+    return this
+        .onSizeChanged { layerSize = it }
+        .then(
+            if (focal != null) Modifier.folioPressFocalOrigin(focal) else Modifier
+        )
+        .graphicsLayer {
+            val w = layerSize.width
+            val h = layerSize.height
+            if (w <= 0 || h <= 0) {
+                renderEffect = null
+                return@graphicsLayer
+            }
+            shader.setFloatUniform("size", w.toFloat(), h.toFloat())
+            // An approximation of an asymmetric shape: the hero plate is 34/20/34/8 dp.
+            // The SDF only needs a plausible radius for the rim weight and normal.
+            shader.setFloatUniform("radius", minOf(w, h) * 0.12f)
+            val at = focal?.pixelPoint()
+            if (at == null) {
+                shader.setFloatUniform("focal", w * 0.5f, h * 0.5f)
+                shader.setFloatUniform("focalStrength", 0f)
+            } else {
+                shader.setFloatUniform("focal", at.x, at.y)
+                shader.setFloatUniform("focalStrength", focal.strength.value.coerceIn(0f, 1f))
+            }
+            renderEffect = effect
+        }
 }
 
 /**
@@ -107,6 +189,61 @@ half4 main(float2 fragCoord) {
     float a = (bodyW + specW + edgeW + focusW) * intensity;
     rgb = rgb * intensity;
     return half4(half3(rgb), half(a));
+}
+"""
+
+/**
+ * The gel: the surface's own layer, bent. Where [LIQUID_GLASS_AGSL] paints a film
+ * *behind* content, this is a [android.graphics.RenderEffect] child shader bound to
+ * the composited layer itself, so it can displace what it draws rather than add to it.
+ *
+ * - **lens** — a rounded-rect signed distance field gives the outward normal and the
+ *   rim weight; sample points move toward the centre near the edge, so the outline
+ *   rolls over like the lip of a thick pane instead of stopping.
+ * - **dispersion** — R, G and B are pulled at three different depths, which is the
+ *   single cue that separates a lens from a gradient.
+ * - **Fresnel** — the rim brightens where the edge faces away from the viewer and
+ *   toward the room's light, on the same `light` vector the film uses.
+ * - **gel highlight** — the press focal, now riding a refractive surface.
+ *
+ * Every term is gated on `step(d, 0.0)`, so nothing outside the shape is displaced or
+ * brightened and the layer cannot grow a fringe. Alpha is taken from the centre
+ * sample, so the effect preserves the layer's own silhouette.
+ */
+private const val LIQUID_GEL_AGSL = """
+uniform shader content;
+uniform float2 size;
+uniform float3 highlight;
+uniform float2 light;
+uniform float radius;
+uniform float intensity;
+uniform float2 focal;
+uniform float focalStrength;
+
+half4 main(float2 xy) {
+    float2 c = size * 0.5;
+    float2 v = xy - c;
+    float2 n = normalize(v + float2(0.0001, 0.0001));
+    float r = min(radius, min(c.x, c.y));
+    float2 q = abs(v) - (c - r);
+    float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+
+    // Rim weight: 1 at the edge, 0 `band` inside, 0 outside the shape.
+    float band = min(size.x, size.y) * 0.22;
+    float rim = clamp(1.0 + d / band, 0.0, 1.0) * step(d, 0.0);
+    float lens = 15.0 * rim;
+
+    half4 rr = content.eval(xy - n * (lens * 1.12));
+    half4 gg = content.eval(xy - n * lens);
+    half4 bb = content.eval(xy - n * (lens * 0.88));
+
+    float facing = clamp(dot(n, -light), 0.0, 1.0);
+    float fres = pow(rim, 1.6) * (0.35 + 0.65 * facing) * 0.34;
+    float foc = smoothstep(band * 1.8, 0.0, distance(xy, focal)) * focalStrength * 0.30;
+
+    half3 rgb = half3(rr.r, gg.g, bb.b) +
+        half3(highlight * ((fres + foc) * intensity)) * max(gg.a, 0.0);
+    return half4(rgb, gg.a);
 }
 """
 

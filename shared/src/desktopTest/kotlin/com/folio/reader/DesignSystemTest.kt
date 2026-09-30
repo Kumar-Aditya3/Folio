@@ -272,4 +272,33 @@ class DesignSystemTest {
             "a zero-duration root would make the morph a hard cut",
         )
     }
+
+    /**
+     * The bar's highlight is driven by the scroll, not by a timer.
+     *
+     * At rest it must be exactly the stop the masthead has always used — the bar is a
+     * shipped material and this is a movement, not a repaint — and it must travel
+     * monotonically with the finger without ever running past the bright end of its own
+     * ramp, which would put the transparent stop after the sheen and invert the band.
+     */
+    @Test
+    fun mastheadSheenTracksTheFingerAndRestsWhereItAlwaysDid() {
+        assertEquals(
+            0.62f,
+            com.folio.reader.ui.components.mastheadSheenStop(0f),
+            "an expanded bar changed the masthead's resting light",
+        )
+        var previous = 1f
+        for (f in listOf(0f, 0.2f, 0.4f, 0.6f, 0.8f, 1f)) {
+            val stop = com.folio.reader.ui.components.mastheadSheenStop(f)
+            assertTrue(stop < previous, "the sheen did not travel at collapse $f")
+            assertTrue(stop in 0.05f..0.62f, "the sheen stop left its legal range at $f: $stop")
+            previous = stop
+        }
+        assertEquals(
+            com.folio.reader.ui.components.mastheadSheenStop(1f),
+            com.folio.reader.ui.components.mastheadSheenStop(4f),
+            "collapse past 1.0 is not clamped, so an over-scroll would fling the light",
+        )
+    }
 }
