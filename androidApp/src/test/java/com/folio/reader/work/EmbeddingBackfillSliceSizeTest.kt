@@ -1,5 +1,7 @@
 package com.folio.reader.work
 
+import com.folio.reader.ml.MlDispatchers
+import com.folio.reader.ml.SweepPace
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -335,6 +337,33 @@ class EmbeddingBackfillSliceSizeTest {
         val samples = listOf(512L, 1024L, 2048L, 4096L, 8192L, 16384L).map { it * 1024 * 1024 }
         val floors = samples.map { EmbeddingBackfillWorker.headroomFloorFor(it) }
         assertEquals(floors.sorted(), floors, "the floor must not fall as RAM grows: $floors")
+    }
+
+    @Test
+    fun `width and rate together leave the reader most of the machine`() {
+        // The two gates are only meaningful as a product. `MlDispatchers.backfillThreads` decides how
+        // many cores the sweep may hold at an instant; `SweepPace` decides how much of the time it
+        // holds them. Neither alone is the quantity the reader feels — a capped width held
+        // continuously is exactly the state that produced "the whole app is slow while it indexes".
+        //
+        // Asserted across the pass durations seen on device (~15-100 ms) rather than one value, so a
+        // duty ratio that only holds for a lucky pass length cannot pass.
+        val share = MlDispatchers.backfillThreads.toDouble() /
+            Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        assertTrue(share > 0.0, "the width gate must leave something to divide by")
+
+        val dutyByPass = listOf(1L, 5L, 15L, 40L, 100L, 400L).map { pass ->
+            val pause = SweepPace.pauseMsFor(passMs = pass, readerInApp = true)
+            assertTrue(pause > 0L, "a pass of $pass ms must be followed by a real hold, got $pause")
+            pass.toDouble() / (pass + pause)
+        }
+        val worstAverageCoreLoad = checkNotNull(dutyByPass.maxOrNull()) * share
+
+        assertTrue(
+            worstAverageCoreLoad < 0.5,
+            "with the reader in the app the sweep should average well under half the machine; " +
+                "got $worstAverageCoreLoad from share=$share duty=$dutyByPass",
+        )
     }
 
     @Test

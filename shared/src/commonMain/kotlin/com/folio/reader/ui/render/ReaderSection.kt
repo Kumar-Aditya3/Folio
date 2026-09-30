@@ -48,3 +48,16 @@ const val READER_WINDOW_MAX_SECTIONS: Int = 11
 
 /** How many chapters load around the anchor when a window is (re)built. */
 const val READER_WINDOW_PRELOAD: Int = 3
+
+/**
+ * Ceiling on the chapter HTML a *rebuilt* window may hold, measured on loaded HTML. It bounds the
+ * cold build a Contents jump pays for, where the WebView must parse and lay out the whole document
+ * before the jump can land. [READER_WINDOW_PRELOAD] either side is a *count*, and a count is blind to
+ * size: measured across the repro books, a mid-book window of 7 chapters came to 931 KB / 3,901
+ * paragraphs for a book of 200 KB tales and 1.28 MB / 5,431 paragraphs for a pdf-split book whose 12
+ * files each hold several chapters, against 148-246 KB / 500-660 paragraphs for the books that
+ * behaved. Books whose chapters are a few KB never reach this ceiling, so their windows stay exactly
+ * as they were. Growth while scrolling is deliberately not capped here: it arrives as appends into
+ * the live document, and [READER_WINDOW_MAX_SECTIONS] alone governs it.
+ */
+const val READER_WINDOW_MAX_CHARS: Int = 400_000

@@ -7,6 +7,7 @@ import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.DocumentLocator
 import com.folio.reader.model.DocumentPosition
 import com.folio.reader.platform.DesktopPlatform
+import com.folio.reader.ui.render.ReaderSection
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -14,6 +15,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -33,6 +35,8 @@ class DocumentReaderViewModelTest {
         platform = DesktopPlatform(root)
         database = Database(platform.fileSystem.getDatabasePath())
         repository = JdbcDocumentRepository(database)
+        // Outlives each view model by design, so it must not outlive a test either.
+        reflowableContentCache.clear()
     }
 
     @AfterTest
@@ -190,6 +194,61 @@ class DocumentReaderViewModelTest {
         reader.setMode(DocumentReaderMode.SINGLE_PAGE)
         assertEquals(null, reported)
     }
+
+    @Test
+    fun servesAReopenFromTheChunkCacheWithoutReadingTheFile() = runBlocking {
+        val original = File(platform.fileSystem.getDocumentDir("warm-doc"), "original.html")
+            .apply { parentFile.mkdirs(); writeText("source") }
+        val index = File(platform.fileSystem.getDocumentGeneratedIndexPath("warm-doc"))
+            .apply { parentFile.mkdirs(); writeText("<html><body>On disk</body></html>") }
+        repository.upsertDocument(document("warm-doc", DocumentFormat.HTML, original))
+
+        // No chunking of that file yields this pair, so reading it back is proof the open never
+        // went to disk — which is the whole point: reopening used to re-read and re-parse the
+        // entire document on every visit.
+        val cached = ReflowableContent(
+            html = "<html><body>From cache</body></html>",
+            chunks = listOf(
+                ReaderSection(
+                    spineIndex = 0,
+                    chapterId = "document-chunk-0",
+                    href = "generated/index.html",
+                    html = "<body>From cache</body>"
+                )
+            )
+        )
+        reflowableContentCache.put(ReflowableContentKey("warm-doc", "hash-warm-doc", index.length()), cached)
+
+        val reader = reader().also { it.open("warm-doc") }
+        val ready = awaitReady(reader)
+
+        assertEquals(cached.html, reflowableHtml(ready))
+        assertEquals(cached.chunks, ready.reflowableWindow)
+    }
+
+    @Test
+    fun regeneratingADocumentsContentReplacesItsCachedChunks() = runBlocking {
+        val original = File(platform.fileSystem.getDocumentDir("regen-doc"), "original.html")
+            .apply { parentFile.mkdirs(); writeText("source") }
+        val index = File(platform.fileSystem.getDocumentGeneratedIndexPath("regen-doc"))
+            .apply { parentFile.mkdirs(); writeText("<html><body>First</body></html>") }
+        repository.upsertDocument(document("regen-doc", DocumentFormat.HTML, original))
+
+        val cold = reader().also { it.open("regen-doc") }
+        val firstHtml = reflowableHtml(awaitReady(cold))
+        assertNotNull(reflowableContentCache[ReflowableContentKey("regen-doc", "hash-regen-doc", index.length())])
+        cold.close()
+
+        index.writeText("<html><body>Second, rewritten after a re-import</body></html>")
+        val warm = reader().also { it.open("regen-doc") }
+
+        assertTrue(reflowableHtml(awaitReady(warm)) != firstHtml, "a rewritten document must not replay old chunks")
+    }
+
+    private fun reflowableHtml(state: DocumentReaderState): String =
+        assertIs<DocumentReaderContent.Reflowable>(
+            assertIs<DocumentReaderLoadState.Ready>(state.loadState).content
+        ).html
 
     private fun reader() = DocumentReaderViewModel(
         repository = repository,

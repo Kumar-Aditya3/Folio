@@ -135,8 +135,11 @@ internal fun daylightGradient(
  * [Shape.createOutline] — and `Outline.Rounded`'s own path accessor is internal,
  * so the rounded case is rebuilt from its [RoundRect]. [CacheDrawScope] is a
  * [Density], which is what `createOutline` asks for.
+ *
+ * Internal rather than private because [folioThemeRim] traces the same outline and
+ * must not fork a second copy of this rounded-case workaround (Rule 3).
  */
-private fun CacheDrawScope.shapePath(shape: Shape): Path =
+internal fun CacheDrawScope.shapePath(shape: Shape): Path =
     when (val outline = shape.createOutline(size, layoutDirection, this)) {
         is Outline.Rounded -> Path().apply { addRoundRect(outline.roundRect) }
         is Outline.Generic -> outline.path

@@ -101,12 +101,11 @@ data class ReaderSettings(
      */
     val morphIntoReader: Boolean = true,
     /**
-     * Atlas + Echoes — the on-device semantic-discovery surfaces (a library topic map reached
-     * from Home, and selection-driven cross-book resonant passages in the reader). App-level
-     * rather than per-book (it is a device feature, not a reading preference), so it lives
-     * outside the per-book override lists like [liquidGlassEffects]. Default on; both surfaces
-     * also gate on there being an index to answer from, so the flag only hides them, never
-     * fabricates them.
+     * Echoes — the on-device semantic-discovery surface (selection-driven cross-book
+     * resonant passages in the reader). App-level rather than per-book (it is a device
+     * feature, not a reading preference), so it lives outside the per-book override
+     * lists like [liquidGlassEffects]. Default on; the surface also gates on there
+     * being an index to answer from, so the flag only hides it, never fabricates it.
      */
     val semanticDiscovery: Boolean = true,
     /**

@@ -385,8 +385,14 @@ fun ReaderSettingsPanel(
                 }
                 val listState = rememberLazyListState()
                 val selectedIndex = quickThemes.indexOf(selectedThemeId).coerceAtLeast(0)
+                // Open on the active theme, then leave the list where the reader put it.
+                // Unconditional scrolling here snapped every tap to the top of the
+                // viewport; layoutInfo is still empty on the first pass, so the panel
+                // keeps its initial centring, and only a selection that lands
+                // off-screen — a write from elsewhere — pulls the list back to it.
                 LaunchedEffect(selectedThemeId) {
-                    listState.scrollToItem(index = selectedIndex)
+                    val offScreen = listState.layoutInfo.visibleItemsInfo.none { it.index == selectedIndex }
+                    if (offScreen) listState.scrollToItem(index = selectedIndex)
                 }
                 // Keep the theme list's scroll to itself: at its top/bottom the leftover
                 // used to bubble up and scroll the whole settings panel. Consume the

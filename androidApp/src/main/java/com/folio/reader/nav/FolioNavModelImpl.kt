@@ -23,12 +23,8 @@ import com.folio.reader.ui.statistics.StatisticsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,13 +68,6 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
      * truth; this is loaded on the sync screen and updated optimistically on save.
      */
     var syncCredentials by mutableStateOf(SyncCredentials())
-
-    /**
-     * Session-cached Atlas hero eligibility. Computed once (lazily, off Home's critical path) so
-     * the Home hero gate never re-queries the chunk table on every visit — that DB work was
-     * contending with Home's own startup queries and delaying the screen. Null = not yet resolved.
-     */
-    var atlasEligible: Boolean? = null
 
     /**
      * Guards [warmGlobalSettings] so composition can call it on every frame
@@ -315,41 +304,6 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         // frame. Left cold, the grid composes mid-morph. See [libraryBooks].
         libraryBooks
         statisticsVM
-        warmAtlas()
-    }
-
-    /**
-     * Keeps the Atlas roll-up warm **in the background**, so opening the Atlas is instant instead of
-     * blocking behind the multi-second recompute the reader complained about after every add/remove.
-     *
-     * The roll-up's cache is keyed by a fingerprint of the library (chunk/book/genre counts), so an
-     * add or remove invalidates it and the next open used to recompute on the open path. Here we
-     * watch the library size and, once it settles, recompute the map off-screen ([prewarm] no-ops
-     * when nothing changed). Combined with the Atlas screen showing the last computed map on the
-     * first frame, an open never waits: it shows the previous map immediately and swaps in the fresh
-     * one when this background pass (or the screen's own reconcile) finishes.
-     *
-     * [prewarm] defaults to the narrow `RollupLane.Background` budget — one lowest-priority core,
-     * not the machine — because this pass runs unattended on startup and after every add/remove,
-     * and at full width it starved Home, the shelf and an EPUB opened alongside it.
-     */
-    private var atlasWarmed = false
-    private fun warmAtlas() {
-        if (atlasWarmed) return
-        atlasWarmed = true
-        activity.appScope.launch(Dispatchers.Default) {
-            libraryBooks
-                .map { it.size }
-                .distinctUntilChanged()
-                // collectLatest cancels the pending prewarm when the size changes again, so a burst
-                // of imports/deletes coalesces into a single recompute once the library settles.
-                .collectLatest { count ->
-                    if (!globalSettings.semanticDiscovery) return@collectLatest
-                    if (count < com.folio.reader.ml.SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD) return@collectLatest
-                    delay(2_000)
-                    runCatching { graph.semanticDiscoveryRepository.prewarm() }
-                }
-        }
     }
     val sourceBrowseVmCache = mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
     val searchUiState = SearchUiState()
@@ -485,11 +439,10 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         onOpenRevisit: () -> Unit,
         onOpenExtensions: () -> Unit,
         onOpenDownloads: () -> Unit,
-        onOpenHistory: () -> Unit,
-        onOpenAtlas: () -> Unit
+        onOpenHistory: () -> Unit
     ) = MoreRoute(
         this, onOpenSettings, onOpenTags, onOpenQuotes, onOpenRevisit,
-        onOpenExtensions, onOpenDownloads, onOpenHistory, onOpenAtlas
+        onOpenExtensions, onOpenDownloads, onOpenHistory
     )
 
     @Composable
@@ -521,13 +474,6 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     @Composable
     override fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) =
         SearchRoute(this, onBack, onOpenReader)
-
-    @Composable
-    override fun atlasContent(
-        onBack: () -> Unit,
-        onOpenBook: (String) -> Unit,
-        onOpenReaderAt: (String, Int?, Float?) -> Unit
-    ) = AtlasRoute(this, onBack, onOpenBook, onOpenReaderAt)
 
     @Composable
     override fun settingsContent(category: String, onBack: () -> Unit) =

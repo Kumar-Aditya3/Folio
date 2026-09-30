@@ -17,15 +17,25 @@ class IncomingContentCoordinator(
 ) {
     private val importPermits = Semaphore(2)
 
-    suspend fun import(path: String, filename: String? = null, mimeType: String? = null): IncomingContentResult =
-        importPermits.withPermit { importWithPermit(path, filename, mimeType) }
+    suspend fun import(
+        path: String,
+        filename: String? = null,
+        mimeType: String? = null,
+        sourceSha256: String? = null
+    ): IncomingContentResult =
+        importPermits.withPermit { importWithPermit(path, filename, mimeType, sourceSha256) }
 
-    private suspend fun importWithPermit(path: String, filename: String?, mimeType: String?): IncomingContentResult = withContext(Dispatchers.IO) {
+    private suspend fun importWithPermit(
+        path: String,
+        filename: String?,
+        mimeType: String?,
+        sourceSha256: String?
+    ): IncomingContentResult = withContext(Dispatchers.IO) {
         try {
             val file = File(path)
             val detected = detector.detect(file, filename ?: file.name, mimeType)
             if (detected.format == IncomingFormat.EPUB) {
-                val result = bookImporter.importEpub(file.absolutePath)
+                val result = bookImporter.importEpub(file.absolutePath, sourceSha256)
                 result.fold(
                     onSuccess = { IncomingContentResult.ImportedBook(it) },
                     onFailure = { error ->
@@ -34,7 +44,9 @@ class IncomingContentCoordinator(
                     }
                 )
             } else {
-                IncomingContentResult.ImportedDocument(documentImporter.importDocument(file, detected, filename ?: file.name))
+                IncomingContentResult.ImportedDocument(
+                    documentImporter.importDocument(file, detected, filename ?: file.name, sourceSha256)
+                )
             }
         } catch (e: DuplicateDocument) {
             IncomingContentResult.DuplicateDocument(e.document)
@@ -44,7 +56,9 @@ class IncomingContentCoordinator(
     }
 
     suspend fun importMany(items: List<IncomingContent>): List<IncomingContentResult> = coroutineScope {
-        items.map { item -> async { import(item.path, item.filename, item.mimeType) } }.awaitAll()
+        items.map { item ->
+            async { import(item.path, item.filename, item.mimeType, item.sha256) }
+        }.awaitAll()
     }
 
     private fun mapFailure(error: Throwable): IncomingContentResult = when (error) {
@@ -58,4 +72,10 @@ class IncomingContentCoordinator(
     }
 }
 
-data class IncomingContent(val path: String, val filename: String? = null, val mimeType: String? = null)
+/** [sha256] is the digest of [path]'s exact contents, when the caller already computed it. */
+data class IncomingContent(
+    val path: String,
+    val filename: String? = null,
+    val mimeType: String? = null,
+    val sha256: String? = null
+)

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -71,12 +72,31 @@ class LibraryViewModel(
     // shelf. The selection is remembered per device and restored on the next
     // visit — the manga library's category row, on the books side.
 
-    /** The shelf row: every collection, Main first (sortOrder = -1), then sort order and name. */
-    val collections: StateFlow<List<Collection>> = collectionRepository.getAllCollections()
-        .map { list ->
+    /**
+     * The shelf row, with "not read yet" kept distinct from "no shelves".
+     *
+     * `null` means the collections table has not answered. That distinction is the whole bug:
+     * a `stateIn` whose placeholder is `emptyList()` makes an unread table look exactly like a
+     * library with no collections, and both [shelfReady]'s escape hatch and the restore collector
+     * in [init] read that placeholder as an answer — which is how two hardening passes left the
+     * shelf drawing the unfiltered library on every cold start.
+     *
+     * Shared `Eagerly` so the read starts with the view model rather than with the first
+     * collector, shortening the window instead of merely observing it. A failed read logs and
+     * holds its last value: emitting a substitute here would hand the gate a fake "loaded and
+     * empty" answer and reopen the bleed.
+     */
+    private val collectionSnapshot: StateFlow<List<Collection>?> = collectionRepository.getAllCollections()
+        .map<List<Collection>, List<Collection>?> { list ->
             list.sortedWith(compareBy({ it.sortOrder != -1 }, { it.sortOrder }, { it.name }))
         }
-        .stateIn(scope, SharingStarted.Lazily, emptyList())
+        .catch { println("⚠️ Book collections read failed: $it") }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    /** The shelf row for the rail: every collection, Main first (sortOrder = -1), then sort order and name. */
+    val collections: StateFlow<List<Collection>> = collectionSnapshot
+        .map { it.orEmpty() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** The selected shelf's collection id; null while no selection has landed. */
     val selectedCollectionId = MutableStateFlow<String?>(null)
@@ -102,18 +122,35 @@ class LibraryViewModel(
      * False until the shelf's collection selection has settled AND that collection's
      * membership has actually resolved.
      *
-     * The remembered collection (`KEY_BOOKS_COLLECTION`) is restored from a *suspend*
-     * settings read, so at construction `selectedCollectionId == null` and no membership
-     * is known. On a fresh start the shelf would otherwise render the *unfiltered*
-     * library — every collection's books — and then snap to the remembered shelf: the
-     * "category bleed". Gating the shelf on this closes that window. "No collection to
-     * select" (an empty list) stays a stable first-frame answer so a library with no
-     * collections does not hang on the skeleton. Mirrors the manga shelf's `categoryReady`.
+     * The remembered collection (`KEY_BOOKS_COLLECTION`) is restored from a *suspend* settings
+     * read, so at construction `selectedCollectionId == null` and no membership is known. The
+     * host holds its skeleton across that window instead of drawing a shelf and then snapping to
+     * it. Two versions of this gate shipped before working, because their escape hatch — "there
+     * is no collection to select, so there is nothing to wait for" — was written as
+     * `collections.isEmpty()`, which the shared flow's own placeholder satisfies on frame 1 of
+     * every cold start. It must be a *loaded* empty answer, which is what [collectionSnapshot]'s
+     * `null` makes expressible.
      */
     val shelfReady: StateFlow<Boolean> =
-        combine(selectedCollectionId, collections, shelfMembership) { selected, list, membership ->
-            (selected != null && membership != null && membership.collectionId == selected) || list.isEmpty()
+        combine(selectedCollectionId, collectionSnapshot, shelfMembership) { selected, snapshot, membership ->
+            (selected != null && membership != null && membership.collectionId == selected) ||
+                (snapshot != null && snapshot.isEmpty())
         }.stateIn(scope, SharingStarted.Lazily, false)
+
+    /**
+     * The ids of the shelf that has settled for the current selection, or null while it has not.
+     *
+     * The host seeds the shelf's first frame from this. Without it the only honest seed is the
+     * hoisted *unfiltered* library, so the gate is the sole thing between that value and the
+     * screen — and a gate is a policy, not a data guarantee. This is the same set
+     * [filteredBooks] filters by, read off the same shared state, so it is not a second source of
+     * truth about membership.
+     */
+    fun settledShelfIds(): Set<String>? {
+        val selected = selectedCollectionId.value ?: return null
+        val membership = shelfMembership.value ?: return null
+        return membership.ids.takeIf { membership.collectionId == selected }
+    }
 
     /** No virtual All bucket: the shelf always shows one real collection. */
     fun selectCollection(collectionId: String) {
@@ -124,8 +161,13 @@ class LibraryViewModel(
     /** Selects Main when present, otherwise the first collection; startup and after deletes. */
     fun selectDefaultCollection() {
         scope.launch {
-            val target = runCatching { collectionRepository.defaultCollection() }.getOrNull() ?: return@launch
-            if (selectedCollectionId.value != target.id) selectCollection(target.id)
+            // The snapshot is already loaded and sorted Main-first, so it answers the same
+            // question without a second read. Without this fallback a failed `defaultCollection()`
+            // would leave the selection null against a non-empty list, and the gate would then
+            // hold the shelf on its skeleton for the rest of the session.
+            val target = runCatching { collectionRepository.defaultCollection() }.getOrNull()
+                ?: collectionSnapshot.value?.firstOrNull()
+            if (target != null && selectedCollectionId.value != target.id) selectCollection(target.id)
         }
     }
 
@@ -142,7 +184,13 @@ class LibraryViewModel(
         // as Main exists, and a deleted selection falls back to the default
         // instead of an empty grid.
         scope.launch {
-            collections.collect { list ->
+            collectionSnapshot.collect { snapshot ->
+                // An unanswered table is not "no collections": acting on the placeholder let
+                // `selectDefaultCollection()` race the suspend remembered-id read, and because
+                // `selectCollection` writes its choice back, the start that lost also overwrote
+                // the shelf the reader left. Waiting for a real answer removes the race instead
+                // of outrunning it.
+                val list = snapshot ?: return@collect
                 val current = selectedCollectionId.value
                 if (list.none { it.id == current }) {
                     // First selection of the session: reopen the shelf the reader
@@ -320,16 +368,21 @@ class LibraryViewModel(
             else -> allBooks()
         }
 
-        return combine(baseFlow, selectedCollectionId, shelfMembership) { books, selectedCollection, membership ->
+        return combine(baseFlow, selectedCollectionId, shelfMembership, collectionSnapshot) { books, selectedCollection, membership, snapshot ->
             // Effective shelf id-filter for the CURRENT selection:
-            //  - no collection selected (only the pre-select first frame, which the
-            //    host gates on shelfReady) → the whole library
             //  - membership resolved for exactly this collection → that set
             //  - a collection is selected but its membership has not landed yet, or the
             //    set still belongs to the previous shelf mid-switch → empty, so another
             //    collection's books never bleed through before the real set arrives.
+            //  - nothing selected yet → empty too. This used to be *no filter at all*, which
+            //    made the shelf flow itself the source of the bleed: it emitted the whole
+            //    library during the startup window and only the host's gate hid it. A value
+            //    that must be hidden is not a fix, so the unfiltered answer is gone.
+            //  - a loaded table with no collections in it → no filter, because there is no
+            //    shelf to bleed from and that is the pre-collections library.
             val shelfIds: Set<String>? = when {
-                selectedCollection == null -> null
+                selectedCollection == null ->
+                    if (snapshot != null && snapshot.isEmpty()) null else emptySet()
                 membership != null && membership.collectionId == selectedCollection -> membership.ids
                 else -> emptySet()
             }

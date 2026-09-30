@@ -60,6 +60,7 @@ import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -112,7 +113,9 @@ internal fun CollectionRow(
  * The featured manga entry: a wide, image-led composition where the cover sits at
  * `coverFeature` beside its own typography and throws a halo onto the page behind
  * it. Mirrors [FeaturedShelfEntry] for books so the manga shelf has the same
- * visual hierarchy — the one you're reading comes forward.
+ * visual hierarchy — the one you're reading comes forward. Its rim carries the
+ * same travelling light, but against `accentDiscovery` rather than the progress
+ * hue, so the two shelves' heroes are told apart by their edges.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -138,6 +141,11 @@ fun FeaturedMangaShelfEntry(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction, scaleTo = 0.985f)
+            .folioThemeRim(
+                shape = FolioShapes.card,
+                accent = accent,
+                counterAccent = FolioTheme.colors.accentDiscovery,
+            )
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,

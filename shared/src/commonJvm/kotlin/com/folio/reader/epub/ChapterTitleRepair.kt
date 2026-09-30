@@ -1,6 +1,7 @@
 package com.folio.reader.epub
 
 import com.folio.reader.database.BookRepository
+import com.folio.reader.database.SettingsRepository
 import com.folio.reader.model.Chapter
 
 /**
@@ -33,8 +34,20 @@ private fun chapterNumberOf(title: String): Int? =
     chapterNumberExact.matchEntire(title.trim())?.groupValues?.get(1)?.toIntOrNull()
 
 /**
- * Re-derives stored chapter titles for one book, and returns without touching the database when
- * nothing needs repairing or when the fresh parse cannot be trusted.
+ * Bump when chapter labelling rules change, so every book is re-checked once against the new
+ * ones. Stored per book under [titlesCheckedKey] because the check below is not always
+ * convergent: a book whose own navigation supplies bare "Chapter N" labels reproduces the very
+ * titles `needsTitleRepair` objects to, so re-deriving them changes nothing and the next open
+ * would pay for the whole-book parse all over again.
+ */
+const val TITLE_LABELER_VERSION = "1"
+
+internal fun titlesCheckedKey(bookId: String) = "chapterTitlesChecked.$bookId"
+
+/**
+ * Re-derives stored chapter titles for one book, at most once per [TITLE_LABELER_VERSION], and
+ * returns without touching the database when nothing needs repairing or when the fresh parse
+ * cannot be trusted.
  *
  * Only `chapters` rows are rewritten, and only while ids and spine order are unchanged: reading
  * positions, bookmarks and highlights key on them, so a repair must never renumber the book.
@@ -43,18 +56,24 @@ suspend fun repairStoredChapterTitles(
     bookId: String,
     epubPath: String,
     parser: EpubParser,
-    repository: BookRepository
+    repository: BookRepository,
+    settings: SettingsRepository
 ) {
     runCatching {
+        if (settings.getRaw(titlesCheckedKey(bookId)) == TITLE_LABELER_VERSION) return
         val existing = repository.getChaptersForBook(bookId)
-        if (!existing.needsTitleRepair()) return
-
-        val fixed = parser.parseEpub(epubPath).chapters.map { it.copy(bookId = bookId) }
-        if (fixed.size != existing.size) return
-        if (fixed.map { it.id } != existing.map { it.id }) return
-        if (fixed.map { it.spineIndex } != existing.map { it.spineIndex }) return
-        if (fixed.map { it.title } == existing.map { it.title }) return
-
-        repository.insertChapters(bookId, fixed)
+        if (existing.needsTitleRepair()) {
+            val fixed = parser.parseEpub(epubPath).chapters.map { it.copy(bookId = bookId) }
+            // Every guard the repair used to bail on individually, in one condition: the fresh
+            // labels may only replace the stored ones when they describe the same chapters.
+            val canApply = fixed.size == existing.size &&
+                fixed.map { it.id } == existing.map { it.id } &&
+                fixed.map { it.spineIndex } == existing.map { it.spineIndex } &&
+                fixed.map { it.title } != existing.map { it.title }
+            if (canApply) repository.insertChapters(bookId, fixed)
+        }
+        // Reached by every pass that got an answer, including "nothing to do". A parse or write
+        // that threw lands in runCatching instead, so that book is checked again next open.
+        settings.setRaw(titlesCheckedKey(bookId), TITLE_LABELER_VERSION)
     }
 }

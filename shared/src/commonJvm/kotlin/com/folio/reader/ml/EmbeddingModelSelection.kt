@@ -36,17 +36,11 @@ class EmbeddingModelSelection(
     private val modelsDir: java.io.File,
     private val chunkRepository: ChunkRepository,
     /**
-     * Shared, model-independent — the Atlas/Echoes discovery repo resolves book titles, covers
+     * Shared, model-independent — the Echoes discovery repo resolves book titles, covers
      * and reading progress through it. Kept behind this holder like the other derived services
      * so a model swap tears the discovery repo down with the searcher it borrows from.
      */
     private val bookRepository: com.folio.reader.database.BookRepository,
-    /**
-     * Optional store for per-book broad genre + parsed subjects. When present, the discovery repo
-     * reads genres to name Atlas communities and a [GenreClassificationService] is offered for the
-     * backfill/import to populate it. Null keeps the Atlas working with "Mixed" community names.
-     */
-    private val genreRepository: com.folio.reader.database.GenreRepository? = null,
     threads: Int = defaultEmbedThreads(),
     useXnnpack: Boolean = true,
 ) {
@@ -73,9 +67,6 @@ class EmbeddingModelSelection(
     private var _semantic: SemanticSearchRepository? = null
     private var _tagger: ZeroShotTagger? = null
     private var _discovery: SemanticDiscoveryRepository? = null
-    private var _genreClassifier: GenreClassifier? = null
-    private var _themeClassifier: ThemeClassifier? = null
-    private var _genreClassification: GenreClassificationService? = null
 
     val embedderFactory: OnnxEmbedderFactory get() = _embedderFactory
 
@@ -94,40 +85,14 @@ class EmbeddingModelSelection(
         get() = _tagger ?: ZeroShotTagger(_embedderFactory).also { _tagger = it }
 
     /**
-     * Atlas + Echoes. Reuses [semanticSearch] rather than opening a second embedder, so it must
+     * Echoes. Reuses [semanticSearch] rather than opening a second embedder, so it must
      * be rebuilt whenever the searcher is (an [adopt] nulls both).
      */
     val discovery: SemanticDiscoveryRepository
         get() = _discovery ?: SemanticDiscoveryRepository(
             semanticSearch = semanticSearch,
-            chunkRepository = chunkRepository,
             bookRepository = bookRepository,
-            genreRepository = genreRepository,
-            cacheDir = modelsDir,
         ).also { _discovery = it }
-
-    /** Genre inference engine (taxonomy + zero-shot), rebuilt on a model swap like the tagger. */
-    val genreClassifier: GenreClassifier
-        get() = _genreClassifier ?: GenreClassifier(_embedderFactory).also { _genreClassifier = it }
-
-    /** Theme inference engine (fixed theme vocabulary + zero-shot), rebuilt on a model swap. */
-    val themeClassifier: ThemeClassifier
-        get() = _themeClassifier ?: ThemeClassifier(_embedderFactory).also { _themeClassifier = it }
-
-    /**
-     * The backfill/import genre pass. Null when no [genreRepository] was supplied (there is nowhere
-     * to persist), so callers no-op rather than classify into the void.
-     */
-    val genreClassification: GenreClassificationService?
-        get() = genreRepository?.let { repo ->
-            _genreClassification ?: GenreClassificationService(
-                classifier = genreClassifier,
-                chunkRepository = chunkRepository,
-                genreRepository = repo,
-                bookRepository = bookRepository,
-                themeClassifier = themeClassifier,
-            ).also { _genreClassification = it }
-        }
 
     /**
      * Reads the stored choice and adopts it. Returns the model now in force.
@@ -169,9 +134,6 @@ class EmbeddingModelSelection(
         _semantic = null
         _tagger = null
         _discovery = null
-        _genreClassifier = null
-        _themeClassifier = null
-        _genreClassification = null
         return model
     }
 

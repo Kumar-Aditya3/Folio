@@ -18,14 +18,15 @@ import java.io.InputStream
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
-class EpubParser(
+open class EpubParser(
     private val platform: FolioPlatform? = null
 ) {
     private val xmlFactory = XmlPullParserFactory.newInstance().apply {
         isNamespaceAware = true
     }
 
-    suspend fun parseEpub(filePath: String): ParsedEpub {
+    /** Reads every spine document, so callers should parse at most once per book per labeling version. */
+    open suspend fun parseEpub(filePath: String): ParsedEpub {
         return withContext(Dispatchers.IO) {
             val zipFile = ZipFile(filePath)
             try {

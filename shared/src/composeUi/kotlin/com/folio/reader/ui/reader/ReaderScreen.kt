@@ -247,19 +247,53 @@ fun ReaderScreen(
     // only once that chapter is on screen, else the seek would move the old chapter.
     var pendingJump by remember { mutableStateOf<Triple<Int, String?, Float?>?>(null) }
     var seekTargetReq by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    // The chapter a jump aimed at, with the fraction that row's own heading sits at. `goToChapter`
+    // reseeds `chapterProgress` to 0.0 for a jump and the page's first report arrives a beat later, so
+    // in that window a heading-less book — several Contents rows sharing one spine file — has no
+    // fraction left to break the tie, and the lit row fell back to the PREVIOUS chapter's last one:
+    // tapping "Chapter Twenty-Four" lit "Twenty-Two". Consulted only for the chapter it was set for,
+    // and only until the page reports a position of its own.
+    var jumpSeed by remember { mutableStateOf<Pair<Int, Double>?>(null) }
+    LaunchedEffect(position?.chapterProgress) {
+        if ((position?.chapterProgress ?: 0.0) > 0.0) jumpSeed = null
+    }
+    // The chapter a live seek request belongs to, or MIN_VALUE when none is live. A page-turn
+    // that carries no jump must drop a leftover request — it would otherwise re-fire against the
+    // freshly loaded chapter and seek it to "p:0", stomping the end-seed that "back from a
+    // chapter's start" depends on (the intermittent land-on-first-page). But it must not drop a
+    // request issued FOR the chapter now on screen: a Contents tap aimed at a chapter already
+    // inside the loaded window changes the index without reloading anything, so both happen in
+    // the same frame as the navigation, and issuing the seek and clearing it from two effects
+    // made the second discard the first. That is why release and clear live in ONE effect.
+    var seekOwnedBy by remember { mutableStateOf(Int.MIN_VALUE) }
+
+    fun issueTargetSeek(target: String) {
+        seekNonce++
+        seekOwnedBy = currentChapterIndex
+        seekTargetReq = target to seekNonce
+    }
+
+    fun issueFractionSeek(fraction: Float) {
+        seekNonce++
+        seekOwnedBy = currentChapterIndex
+        seekReq = fraction.coerceIn(0f, 1f) to seekNonce
+    }
 
     LaunchedEffect(pendingJump, currentChapterIndex, chapterHtml, isLoadingContent) {
-        val jump = pendingJump ?: return@LaunchedEffect
+        val jump = pendingJump
+        if (jump == null) {
+            if (seekOwnedBy != currentChapterIndex) {
+                seekReq = null
+                seekTargetReq = null
+                seekOwnedBy = Int.MIN_VALUE
+            }
+            return@LaunchedEffect
+        }
+        // Released only once the target is on screen, else the seek would move the old chapter.
         if (currentChapterIndex != jump.first) return@LaunchedEffect
         if (isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
         pendingJump = null
-        seekNonce++
-        val target = jump.second
-        val fraction = jump.third
-        when {
-            target != null -> seekTargetReq = target to seekNonce
-            fraction != null -> seekReq = fraction to seekNonce
-        }
+        jump.second?.let { issueTargetSeek(it) } ?: jump.third?.let { issueFractionSeek(it) }
     }
 
     // Search deep-link landing. Fires once, when the opening chapter's content is first on
@@ -273,22 +307,7 @@ fun ReaderScreen(
         val fraction = initialSeekFraction ?: return@LaunchedEffect
         if (isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
         initialSeekApplied = true
-        seekNonce++
-        seekReq = fraction.coerceIn(0f, 1f) to seekNonce
-    }
-
-    // A page-turn that crosses a chapter boundary (onChapterStart/onChapterEnd → the
-    // view model reloads the neighbour) changes currentChapterIndex WITHOUT a
-    // pendingJump. A seek request left over from an earlier Contents / ▲▼ jump would
-    // otherwise re-fire against the freshly loaded chapter when its WebView is swapped
-    // in — seeking it to "p:0" and stomping the end-seed that "back from a chapter's
-    // start" depends on (the intermittent land-on-first-page). Clear stale requests on
-    // such a navigation; a real jump sets pendingJump first, so it is preserved.
-    LaunchedEffect(currentChapterIndex) {
-        if (pendingJump == null) {
-            seekReq = null
-            seekTargetReq = null
-        }
+        issueFractionSeek(fraction)
     }
 
     // ── The page block (diegetic progress) ──────────────────────────────────────
@@ -336,7 +355,11 @@ fun ReaderScreen(
     // count is meaningless there. `chapterProgress` is reported section-local in *both* modes,
     // so the in-chapter percentage is the honest, always-available figure for continuous reading;
     // paged reading keeps the concrete "N pages left" it can actually count.
-    val chapterFrac = (position?.chapterProgress ?: 0.0).coerceIn(0.0, 1.0)
+    val liveChapterFrac = (position?.chapterProgress ?: 0.0).coerceIn(0.0, 1.0)
+    // Until the page reports for THIS chapter, answer from the row the jump aimed at (see jumpSeed).
+    val chapterFrac = jumpSeed
+        ?.takeIf { it.first == currentChapterIndex && liveChapterFrac == 0.0 }
+        ?.second ?: liveChapterFrac
     // Pages left in the current chapter, in both layouts.
     //
     // Paged mode counts real pages (`currentPage`/`totalPages`). Continuous mode has no page
@@ -380,13 +403,15 @@ fun ReaderScreen(
         if (landing.chapterIndex in renderedSpan) {
             val start = chapterStops.getOrElse(renderedSpan.first) { 0f }
             val width = chapterStops.getOrElse(renderedSpan.last + 1) { 1f } - start
-            seekNonce += 1L
-            seekReq = (if (width > 0f) ((bookTarget - start) / width).coerceIn(0f, 1f) else 0f) to seekNonce
+            issueFractionSeek(if (width > 0f) ((bookTarget - start) / width).coerceIn(0f, 1f) else 0f)
         } else {
             val alreadyAsked = pendingJump?.first == landing.chapterIndex
             val alreadyThere = landing.chapterIndex == currentChapterIndex
             if (!alreadyAsked && !alreadyThere) {
                 pendingJump = Triple(landing.chapterIndex, null, landing.chapterFraction)
+                if (landing.chapterFraction > 0f) {
+                    jumpSeed = landing.chapterIndex to landing.chapterFraction.toDouble()
+                }
                 onChapterChange(landing.chapterIndex)
             }
         }
@@ -405,14 +430,14 @@ fun ReaderScreen(
      * When the target is the chapter already on screen a pendingJump would never fire (the index
      * does not change), so that case issues the seek directly.
      */
-    fun jumpToChapter(index: Int, seekParagraph: Int = 0) {
+    fun jumpToChapter(index: Int, seekParagraph: Int = 0, seedFraction: Double = 0.0) {
         val target = "p:$seekParagraph"
         if (index != currentChapterIndex) {
             pendingJump = Triple(index, target, null)
         } else if (seekParagraph > 0) {
-            seekNonce++
-            seekTargetReq = target to seekNonce
+            issueTargetSeek(target)
         }
+        if (seedFraction > 0.0) jumpSeed = index to seedFraction
         onChapterChange(index)
     }
 
@@ -472,11 +497,7 @@ fun ReaderScreen(
             locator = locator,
             markId = markId,
             onSeek = { target, fraction ->
-                seekNonce++
-                when {
-                    target != null -> seekTargetReq = target to seekNonce
-                    fraction != null -> seekReq = fraction to seekNonce
-                }
+                target?.let { issueTargetSeek(it) } ?: fraction?.let { issueFractionSeek(it) }
             },
             onPendingJump = { pendingJump = it },
             onChapterChange = onChapterChange
@@ -565,7 +586,10 @@ fun ReaderScreen(
                     showReaderPanel = false
                     onSettingsClick()
                 },
-                onChapterChange = { i, p -> jumpToChapter(i, p) },
+                onChapterChange = { i, p ->
+                    val row = tocEntries.firstOrNull { it.chapterIndex == i && it.paragraph == p }
+                    jumpToChapter(i, p, row?.fraction?.toDouble() ?: 0.0)
+                },
                 onSettingsChange = onSettingsChange,
                 onSaveNote = { id, text ->
                     if (text.isNotBlank()) onSetHighlightNote(id, text)
@@ -890,7 +914,7 @@ fun ReaderScreen(
             tocEntries = tocEntries,
             currentChapterIndex = currentChapterIndex,
             currentFraction = chapterFrac.toFloat(),
-            onTocRowClick = { row -> jumpToChapter(row.chapterIndex, row.paragraph) },
+            onTocRowClick = { row -> jumpToChapter(row.chapterIndex, row.paragraph, row.fraction.toDouble()) },
             onToggleToc = onToggleToc,
             onToggleAnnotations = onToggleAnnotations,
             bookmarks = bookmarks,

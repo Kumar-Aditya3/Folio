@@ -794,45 +794,11 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
             "CREATE INDEX IF NOT EXISTS idx_vectors_model ON chapter_vectors(model_id)"
         )
 
-        // Broad genre per book, per embedding model (Atlas galaxy communities). Derived data — a
-        // model swap changes model_id so genres re-derive, and a mismatch is never silently reused.
-        // Additive and idempotent, the same contract as every other table here.
-        conn.createStatementExec(
-            """
-            CREATE TABLE IF NOT EXISTS book_genre (
-                book_id TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                genre TEXT NOT NULL,
-                confidence REAL NOT NULL DEFAULT 0,
-                source TEXT NOT NULL,
-                updated_at INTEGER NOT NULL DEFAULT 0,
-                themes TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY (book_id, model_id)
-            )
-            """.trimIndent()
-        )
-        conn.createStatementExec(
-            "CREATE INDEX IF NOT EXISTS idx_book_genre_model ON book_genre(model_id)"
-        )
-        // Migration: add the themes column on databases created before it existed. Same probe-then-
-        // ALTER contract as the other additive migrations here (SQLite has no ADD COLUMN IF NOT EXISTS).
-        runCatching {
-            conn.createStatement().executeQuery("SELECT themes FROM book_genre LIMIT 0").close()
-        }.onFailure {
-            conn.createStatementExec("ALTER TABLE book_genre ADD COLUMN themes TEXT NOT NULL DEFAULT ''")
-        }
-
-        // Parsed OPF <dc:subject> strings per book, captured at import so the metadata-first genre
-        // path has something to canonicalize. Not on the `books` row: subjects were never persisted
-        // there and adding a column would ripple into the sync-tracked Book model.
-        conn.createStatementExec(
-            """
-            CREATE TABLE IF NOT EXISTS book_subjects (
-                book_id TEXT NOT NULL PRIMARY KEY,
-                subjects TEXT NOT NULL
-            )
-            """.trimIndent()
-        )
+        // Retired: the per-book genre/subject store read the derived Atlas regions and had no other
+        // reader, so the tables are dropped rather than merely left uncreated — otherwise an existing
+        // install keeps rows nothing can read or delete. Idempotent, and cheap next to the CREATEs above.
+        conn.createStatementExec("DROP TABLE IF EXISTS book_genre")
+        conn.createStatementExec("DROP TABLE IF EXISTS book_subjects")
     }
 
     /**
@@ -1165,8 +1131,6 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 "DELETE FROM revisit_items WHERE book_id = ?",
                 "DELETE FROM book_statistics WHERE book_id = ?",
                 "DELETE FROM reading_cycles WHERE book_id = ?",
-                "DELETE FROM book_genre WHERE book_id = ?",
-                "DELETE FROM book_subjects WHERE book_id = ?",
                 "DELETE FROM books WHERE id = ?"
             ).forEach { sql ->
                 conn.prepareStatement(sql).use { stmt ->

@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
@@ -82,10 +81,7 @@ fun SettingsHubScreen(
     onOpenRevisit: () -> Unit,
     onOpenExtensions: () -> Unit,
     onOpenDownloads: () -> Unit,
-    onOpenHistory: () -> Unit,
-    // Atlas is a full-screen pushed route, not a settings category, so it needs
-    // its own lambda rather than routing through onOpenSettings.
-    onOpenAtlas: () -> Unit
+    onOpenHistory: () -> Unit
 ) {
     val headerState = rememberFolioHeaderState()
     // Re-tap on the More nav item scrolls the hub back to its top.
@@ -241,18 +237,8 @@ fun SettingsHubScreen(
                         title = "Semantic search",
                         subtitle = "Find passages by meaning, entirely on this device",
                         accent = colors.accentAnnotation,
-                        onClick = { onOpenSettings(FolioSettingsCategory.SEMANTIC_SEARCH) }
-                    )
-                    // Atlas is a full-screen pushed route (FolioRoutes.ATLAS), not a
-                    // settings category — the screen handles its own empty/too-few-books
-                    // states, so the row is always shown.
-                    HubRow(
-                        icon = Icons.Filled.Map,
-                        title = "Atlas",
-                        subtitle = "A map of your library by meaning",
-                        accent = colors.accentAnnotation,
                         last = true,
-                        onClick = onOpenAtlas
+                        onClick = { onOpenSettings(FolioSettingsCategory.SEMANTIC_SEARCH) }
                     )
                 }
             }

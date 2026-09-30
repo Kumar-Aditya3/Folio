@@ -228,12 +228,34 @@ data class BookTocRow(
  * every row. Position-aware: for an ordinary Contents (one row per chapter, [BookTocRow.fraction]
  * 0) it reduces to "the current chapter's row"; when several rows share one spine file it advances
  * row-by-row as [fraction] within that chapter grows.
+ *
+ * A row is allowed a little slack: the page reports a scroll fraction while [BookTocRow.fraction] is
+ * the paragraph index over a count, and the two disagree by a hair — measured on Ship of Magic a tap
+ * on the row stored at 0.279 reported 0.2741, which lit the row *behind* it. Slack is half the
+ * distance to the next row of the same chapter (or to the chapter's end, for its last row), so the
+ * nearest row that has started wins, and a row whose heading has not been reached yet still cannot.
  */
-fun List<BookTocRow>.activeTocIndex(chapterIndex: Int, fraction: Float): Int =
-    indexOfLast {
-        it.chapterIndex < chapterIndex ||
-            (it.chapterIndex == chapterIndex && it.fraction <= fraction + 1e-3f)
+fun List<BookTocRow>.activeTocIndex(chapterIndex: Int, fraction: Float): Int {
+    var best = -1
+    forEachIndexed { i, row ->
+        val next = getOrNull(i + 1)
+        val gapToNext = when {
+            next != null && next.chapterIndex == row.chapterIndex -> next.fraction - row.fraction
+            else -> 1f - row.fraction
+        }
+        // Half the gap would let a row win while the reader is still in the previous row's territory,
+        // which is plainly wrong when a chapter holds only a handful of rows; the slack exists to
+        // absorb a few paragraphs' worth of reporting difference, and nothing more.
+        val slack = ((gapToNext / 2f).coerceAtMost(MAX_TOC_SLACK)).coerceAtLeast(1e-3f)
+        if (row.chapterIndex < chapterIndex ||
+            (row.chapterIndex == chapterIndex && row.fraction <= fraction + slack)
+        ) best = i
     }
+    return best
+}
+
+/** Most of a chapter a Contents row may be lit ahead by — about five paragraphs of 1,086 measured. */
+private const val MAX_TOC_SLACK = 0.01f
 
 @Serializable
 data class ParsedEpub(

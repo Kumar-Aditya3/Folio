@@ -21,6 +21,8 @@ import com.folio.reader.FolioApplication
 import com.folio.reader.ml.BackfillSlice
 import com.folio.reader.ml.EmbeddingIndexer
 import com.folio.reader.ml.MlDispatchers
+import com.folio.reader.ml.SweepPace
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -41,6 +43,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   that came before that: charging is satisfied precisely when someone is reading on a cable, so
  *   it let the backfill run flat out during use, and on many devices a battery at 100% reports
  *   `BATTERY_NOT_LOW` false, so it also silently blocked the work it was meant to allow;
+ * - **rate-gated** — [SweepPace] pauses the sweep after every forward pass for as long as that pass
+ *   took, whenever the reader is in the app. Capping the *width* was never enough on its own: two of
+ *   eight cores held continuously for ninety seconds still starves a frame, because the sweep never
+ *   lets go. This is the lever that actually leaves the UI a gap to run in, and it re-decides per
+ *   pass rather than per slice;
  * - **chunked** — one [EmbeddingIndexer.backfillSlice] per loop, so a run yields to the
  *   system instead of holding a core for ten minutes;
  * - **reduced-footprint** — the slice's ONNX session gets fewer intra-op threads than an
@@ -183,6 +190,11 @@ class EmbeddingBackfillWorker(
         var rounds = 0
         val startedAt = System.currentTimeMillis()
 
+        // The run's rate gate — the gate this loop never had. Built once per run rather than per
+        // slice because its foreground reading is memoised, and that cache is only worth having if
+        // it survives across slices.
+        val pace = sweepPace()
+
         while (rounds < MAX_ROUNDS) {
             if (isStopped) {
                 Log.i(TAG, "stopped after $rounds slice(s), $totalChapters chapter(s) indexed")
@@ -249,8 +261,39 @@ class EmbeddingBackfillWorker(
                     // work knows how long it has been going. Shorter still under pressure, so a
                     // struggling device gets to re-evaluate sooner.
                     budgetMs = if (pressured) SLICE_BUDGET_MS / 3 else SLICE_BUDGET_MS,
+                    // The rate gate — how often the sweep works, as opposed to how much of the
+                    // machine it holds. `readerAway` above caps the slice's *width* and is read once
+                    // per slice, because ONNX fixes a session's intra-op thread count at
+                    // `createSession` and re-opening one costs ~142 MB plus a graph load. This re-reads
+                    // the same state every forward pass, so a reader who arrives mid-slice waits at
+                    // most one pass (~15-100 ms) for the sweep to start leaving cores alone, rather
+                    // than the up-to-90 s the per-slice reading implies.
+                    pace = pace,
                 )
             } catch (error: Throwable) {
+                // A cancellation is not a fault, and now has to be separated from one.
+                //
+                // `SweepPace` yields with `delay`, which is the first suspension point the sweep has
+                // ever had that can sit *between* two forward passes rather than inside a chapter's
+                // work. So a stop that used to be noticed at the top of the next slice now arrives
+                // here, and the branch below would have counted it as a genuine failure — burning a
+                // `runAttemptCount` and paying the linear backoff for the reader pressing a button
+                // that means "stop".
+                //
+                // `Result.success` rather than [continueLater]: `continueLater` enqueues a fresh row,
+                // which is right for a run that ended early and wrong for one the reader deliberately
+                // stopped — it would resurrect the very thing they cancelled. The index is resumable
+                // and idempotent, and every app start calls [EmbeddingBackfillScheduler.schedule], so
+                // a run the system stopped is picked up without help from here.
+                if (error is CancellationException) {
+                    Log.i(TAG, "slice cancelled after $rounds slice(s), $totalChapters chapter(s)")
+                    return Result.success(
+                        workDataOf(
+                            PROGRESS_CHAPTERS to totalChapters,
+                            PROGRESS_CHUNKS to totalChunks,
+                        )
+                    )
+                }
                 // Logged, not merely printed: the release build has no visible stderr, and a
                 // silent retry is indistinguishable from a stalled worker. This is what made
                 // the earlier "Resume indexing does nothing" investigation take so long.
@@ -327,7 +370,6 @@ class EmbeddingBackfillWorker(
                     continueLater(totalChapters, totalChunks)
                 } else {
                     Log.i(TAG, "library exhausted after $rounds slice(s)")
-                    classifyGenresBestEffort(graph)
                     Result.success()
                 }
             }
@@ -349,46 +391,12 @@ class EmbeddingBackfillWorker(
             "run finished: $totalChapters chapter(s), $totalChunks chunk(s), " +
                 "$totalFailed failure(s) over $rounds slice(s)",
         )
-        classifyGenresBestEffort(graph)
         return Result.success(
             workDataOf(
                 PROGRESS_CHAPTERS to totalChapters,
                 PROGRESS_CHUNKS to totalChunks,
             )
         )
-    }
-
-    /**
-     * Best-effort broad-genre classification of embedded books that still lack a genre row for the
-     * current model (Atlas galaxy communities). Runs after the embedding pass, so the books just
-     * embedded this run are covered; a model swap re-derives genres because they are keyed by model
-     * id. Null-safe and never fatal — the Atlas degrades to "Mixed" communities without it.
-     *
-     * It reuses the *stored* chunk vectors (a cheap mean per book) rather than re-embedding whole
-     * books, and only embeds the ≈20 fixed taxonomy labels once, so it is far lighter than the
-     * embedding pass it follows and does not need the same memory gating.
-     */
-    private suspend fun classifyGenresBestEffort(graph: AppGraph) {
-        val service = graph.genreClassification ?: return
-        // Re-derive genres once when the classifier algorithm changes. Rows are keyed by model, not
-        // by algorithm, so a library already classified by the previous (flat-threshold) classifier
-        // would otherwise keep its stale genres forever. A stored per-model version makes the clear
-        // happen exactly once per bump; failures here are swallowed so classification still runs.
-        runCatching {
-            val key = "genre_classifier_version:${service.model.id}"
-            val seen = graph.settingsRepository.getRaw(key)?.toIntOrNull()
-            if (seen != com.folio.reader.ml.GenreClassificationService.CLASSIFIER_VERSION) {
-                val cleared = service.clearForModel()
-                if (cleared > 0) Log.i(TAG, "genre: cleared $cleared stale row(s) for reclassification")
-                graph.settingsRepository.setRaw(
-                    key,
-                    com.folio.reader.ml.GenreClassificationService.CLASSIFIER_VERSION.toString(),
-                )
-            }
-        }.onFailure { Log.w(TAG, "genre reclassification gate skipped", it) }
-        runCatching { service.backfillMissing() }
-            .onSuccess { classified -> if (classified > 0) Log.i(TAG, "genre: classified $classified book(s)") }
-            .onFailure { Log.w(TAG, "genre classification skipped", it) }
     }
 
     /**
@@ -495,15 +503,42 @@ class EmbeddingBackfillWorker(
      * looking" and never blocks the backfill.
      *
      * This is a *state reading*, not a gate. It is consulted once per slice to choose a thread
-     * count, and the slice proceeds either way — see the call site for why waiting on it was
-     * removed. A background or cached process has no frames to drop, and neither does one whose
-     * screen is off, which is why the backfill correctly carries on with the display asleep.
+     * count, and again — memoised, through [sweepPace] — before every forward pass to choose how
+     * long the sweep pauses afterwards. The slice proceeds either way, and so does the pass: see
+     * the call site for why waiting on it was removed. A background or cached process has no frames
+     * to drop, and neither does one whose screen is off, which is why the backfill correctly carries
+     * on with the display asleep.
      */
     private fun isForeground(): Boolean = runCatching {
         val info = ActivityManager.RunningAppProcessInfo()
         ActivityManager.getMyMemoryState(info)
         info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     }.getOrDefault(false)
+
+    /**
+     * This run's [SweepPace] — the rate gate for the whole sweep.
+     *
+     * The state read is memoised for [FOREGROUND_READ_INTERVAL_MS] rather than taken per pass. A
+     * forward pass costs ~15-100 ms, so an uncached read would fire dozens of times a second for a
+     * value that changes on the scale of seconds; the cache is what makes a per-pass gate cheap
+     * enough to be a per-pass gate at all. A stale reading inside that window costs at most one
+     * interval's worth of the wrong pause length, and the pause is only ever a *gap* — being wrong
+     * briefly cannot corrupt the index.
+     *
+     * One instance per run, so the cached reading survives across slices.
+     */
+    private fun sweepPace(): SweepPace {
+        var lastReadAtMs = 0L
+        var lastWasForeground = false
+        return SweepPace(readerInApp = {
+            val now = System.currentTimeMillis()
+            if (now - lastReadAtMs >= FOREGROUND_READ_INTERVAL_MS) {
+                lastReadAtMs = now
+                lastWasForeground = isForeground()
+            }
+            lastWasForeground
+        })
+    }
 
     /**
      * Suspends while the device is short of memory, so indexing cannot evict other apps.
@@ -737,6 +772,16 @@ class EmbeddingBackfillWorker(
          * that neither can be ignored for long.
          */
         private const val SLICE_BUDGET_MS = 90_000L
+
+        /**
+         * How stale the rate gate's foreground reading is allowed to get.
+         *
+         * The bound on the wrong side is a pass, not a slice: at ~15-100 ms per forward pass this is
+         * the difference between a state read every few passes and one *inside* every pass. A reader
+         * arriving is noticed within a quarter of a second, which is two orders of magnitude sooner
+         * than the per-slice width reading above can react.
+         */
+        private const val FOREGROUND_READ_INTERVAL_MS = 250L
 
         // A per-chunk byte estimate used to live here (`BYTES_PER_INFLIGHT_CHUNK = 1_800_000`), and
         // deleting it is the point rather than a tidy-up. It counted the `[batch, seq, hidden]`

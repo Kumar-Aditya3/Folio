@@ -213,10 +213,17 @@ class EmbeddingIndexer(
      *
      * Called from the import path, which is already off the UI thread — the plan's rule is
      * that no ML call may run on the composition dispatcher, and this never does.
+     *
+     * [pace] defaults to [SweepPace.None] here, which is the *opposite* of [backfillSlice] where it
+     * is required. That inversion is deliberate: an import is work the reader is watching and
+     * waiting on, so silently halving its speed would be a regression they never asked for, whereas
+     * the backfill is an unattended sweep whose whole cost model is "must not disturb the reader".
+     * A caller that wants the import paced hands it a pace explicitly.
      */
     suspend fun indexChapters(
         bookId: String,
         entries: List<ChapterIndexEntry>,
+        pace: SweepPace = SweepPace.None,
     ): IndexResult = withContext(dispatcher) {
         if (entries.isEmpty()) return@withContext IndexResult.SkippedNoModel
         // Importing a book is a sweep too: it embeds every chapter in one session, which is
@@ -236,11 +243,11 @@ class EmbeddingIndexer(
                 chapters++
                 pending.addAll(chapterChunks)
                 if (pending.size >= batch) {
-                    chunks += flush(pending, embedder, batch)
+                    chunks += flush(pending, embedder, batch, pace)
                     pending.clear()
                 }
             }
-            chunks += flush(pending, embedder, batch)
+            chunks += flush(pending, embedder, batch, pace)
             IndexResult.Indexed(chapters = chapters, chunks = chunks)
         } finally {
             runCatching { embedder.close() }
@@ -279,12 +286,25 @@ class EmbeddingIndexer(
      * vectors with it, and would count them as succeeded because the exception is raised outside
      * the per-chapter `try`. So the batch is attributed per chapter and a failure falls back to
      * the chapters that did embed.
+     *
+     * **`pace` has no default, and that is the point.** This is the one embedding call the app makes
+     * unattended, for hours, while the reader is doing something else — the sweep the width and
+     * memory gates above were built to protect them *from*. Those gates all bound how much of the
+     * machine a slice may hold at an instant; none of them ever let go, so a pass follows pass
+     * back-to-back for the whole slice. [SweepPace] is the rate gate that gap was missing. Making it
+     * a required parameter is what stops a future call site — or a refactor of this one — silently
+     * dropping back to unthrottled, which is exactly the shape of the bug this closes.
+     *
+     * It changes *when* work runs, never *what* is computed: the chunking, the batch widths, the
+     * order of the vectors and the per-chapter atomicity of `storeChunks` are all untouched, so a
+     * paced slice stores byte-identical rows to an unpaced one.
      */
     suspend fun backfillSlice(
         limit: Int,
         batchSize: Int? = null,
         threads: Int? = null,
         budgetMs: Long = Long.MAX_VALUE,
+        pace: SweepPace,
     ): BackfillSlice = withContext(dispatcher) {
         val chapters = chunkRepository.chaptersMissingVectors(model.id, limit)
         if (chapters.isEmpty()) return@withContext BackfillSlice(0, 0, complete = true)
@@ -323,7 +343,7 @@ class EmbeddingIndexer(
 
             suspend fun drain() {
                 if (pending.isEmpty()) return
-                val outcome = flushGroups(pending, embedder, perPass)
+                val outcome = flushGroups(pending, embedder, perPass, pace)
                 indexedChapters += outcome.storedGroups
                 indexedChunks += outcome.storedChunks
                 failedChapters += outcome.failedGroups
@@ -399,23 +419,28 @@ class EmbeddingIndexer(
         groups: List<List<Chunk>>,
         embedder: Embedder,
         maxRowsPerPass: Int,
+        pace: SweepPace,
     ): FlushOutcome {
         if (groups.isEmpty()) return FlushOutcome(0, 0, 0, null)
 
         val all = groups.flatten()
-        val fast = runCatching { flush(all, embedder, maxRowsPerPass) }
+        val fast = runCatching { flush(all, embedder, maxRowsPerPass, pace) }
         if (fast.isSuccess) {
             return FlushOutcome(storedGroups = groups.size, storedChunks = all.size, failedGroups = 0, firstError = null)
         }
 
         // Something in the batch is bad. Find out which, chapter by chapter.
+        //
+        // Re-embedding group by group means more forward passes than the fast path attempted, so a
+        // batch with a bad chapter costs more pauses under a [SweepPace] than a clean one. That is
+        // the correct price and it is only ever a rate: the rows stored are the same ones.
         var storedGroups = 0
         var storedChunks = 0
         var failedGroups = 0
         var firstError: Throwable? = null
         for (group in groups) {
             try {
-                storedChunks += flush(group, embedder, maxRowsPerPass)
+                storedChunks += flush(group, embedder, maxRowsPerPass, pace)
                 storedGroups++
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -468,6 +493,7 @@ class EmbeddingIndexer(
         pending: List<Chunk>,
         embedder: Embedder,
         maxRowsPerPass: Int,
+        pace: SweepPace,
     ): Int {
         if (pending.isEmpty()) return 0
         // The forward pass is bounded **here**, not by how many chunks the caller accumulated.
@@ -489,7 +515,15 @@ class EmbeddingIndexer(
         // per-chunk and independent, so the split costs only a little ORT call overhead.
         val vectors = ArrayList<FloatArray>(pending.size)
         for (pass in pending.chunked(maxRowsPerPass.coerceAtLeast(1))) {
-            vectors += embedder.embed(pass.map { it.text }, EmbedKind.PASSAGE)
+            // Paced, not merely run: this is the innermost loop of the sweep and the only place a
+            // rate gate can react within one pass (~15-100 ms) rather than one slice (up to 90 s).
+            //
+            // Deliberately no `budgetMs` or stopped-check *inside* this loop. `storeChunks` deletes
+            // the chapter's existing rows and re-inserts them in one call, so `vectors` must arrive
+            // complete and aligned with `pending` — a truncation here would either store half a
+            // chapter or delete rows it cannot rewrite. The pause can only interleave passes; the
+            // slice deadline stays where it is, between chapters.
+            vectors += pace.embedPass { embedder.embed(pass.map { it.text }, EmbedKind.PASSAGE) }
         }
         chunkRepository.storeChunks(pending, model.id, model.dims, vectors)
         return pending.size

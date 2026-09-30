@@ -16,12 +16,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Echoes and Atlas readiness, end to end minus the UI.
+ * Echoes end to end minus the UI.
  *
  * The two things that break in practice are the two things covered here: Echoes must exclude
  * the book the reader is *in* (an "echo" of the open page is not a discovery) while still
- * honouring the relevance floor, and the Atlas readiness gate must tell "unavailable",
- * "too few books" and "ready" apart — each is a different sentence to the reader.
+ * honouring the relevance floor, and a blank selection must resolve to nothing without ever
+ * opening the embedder session.
+ *
+ * Both run over a real SQLite database with a fake embedder, so the seams the pure cosine maths
+ * cannot see are exercised for real: that a hit's book id resolves to a title, and that the
+ * current-book filter is applied after the relevance floor rather than instead of it.
  */
 class SemanticDiscoveryTest {
 
@@ -49,7 +53,6 @@ class SemanticDiscoveryTest {
                 chunkRepository = chunkRepository,
                 embedderFactory = FakeFactory(FakeEmbedder.TEST_MODEL),
             ),
-            chunkRepository = chunkRepository,
             bookRepository = bookRepository,
         )
     }
@@ -110,92 +113,4 @@ class SemanticDiscoveryTest {
         seed("b-a", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves")
         assertEquals(emptyList(), discovery.echoes(selectedText = "   ", currentBookId = "b-a"))
     }
-
-    @Test
-    fun `readiness is Unavailable with no library`() = runBlocking {
-        assertEquals(AtlasReadiness.Unavailable, discovery.atlasReadiness())
-    }
-
-    @Test
-    fun `readiness is TooFewBooks below the threshold when fully indexed`() = runBlocking {
-        // Three fully-indexed books — under the threshold of five.
-        repeat(3) { i ->
-            addBook("b$i", "Book $i")
-            seed("b$i", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves")
-        }
-        val readiness = discovery.atlasReadiness()
-        assertTrue(readiness is AtlasReadiness.TooFewBooks, "three books is too few: $readiness")
-        readiness as AtlasReadiness.TooFewBooks
-        assertEquals(3, readiness.count)
-        assertEquals(SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD, readiness.threshold)
-    }
-
-    @Test
-    fun `readiness is Ready at or above the threshold`() = runBlocking {
-        repeat(SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD) { i ->
-            addBook("b$i", "Book $i")
-            seed("b$i", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves")
-        }
-        val readiness = discovery.atlasReadiness()
-        assertTrue(readiness is AtlasReadiness.Ready, "five embedded books should be ready: $readiness")
-    }
-
-    @Test
-    fun `atlas maps the embedded books`() = runBlocking {
-        repeat(6) { i ->
-            addBook("b$i", "Book $i")
-            seed("b$i", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves and rocks")
-        }
-        val atlas = discovery.atlas()
-        assertEquals(6, atlas.books.size, "every embedded book must appear on the map")
-        atlas.books.forEach { b ->
-            assertTrue(b.title.isNotBlank())
-            assertTrue(b.clusters.isNotEmpty())
-        }
-        // Cached: a second call with an unchanged index returns the same instance.
-        assertTrue(discovery.atlas() === atlas, "an unchanged index must return the cached map")
-    }
-
-    @Test
-    fun `atlas is served from disk on a cold start`() = runBlocking {
-        repeat(6) { i ->
-            addBook("b$i", "Book $i")
-            seed("b$i", "ch1", 0, "the sea took everything the vessel carried and kept it forever below the waves and rocks")
-        }
-
-        // A repo with a cache dir writes the roll-up to disk after computing it.
-        val cacheDir = File(tempRoot, "models").apply { mkdirs() }
-        val warm = newDiscovery(cacheDir)
-        val first = warm.atlas()
-        assertTrue(first.books.isNotEmpty(), "the warm build must produce a map")
-        assertTrue(File(cacheDir, "atlas_cache.json").exists(), "the roll-up must be persisted")
-
-        // A *fresh* repo over the same DB and cache dir (a cold app start: empty in-memory cache)
-        // must reconstruct the map from disk rather than a from-scratch roll-up. It is a different
-        // instance, but round-trips to an equivalent map — proving the @Serializable envelope holds.
-        val cold = newDiscovery(cacheDir)
-        val restored = cold.atlas()
-        assertTrue(restored !== first, "a cold start starts with an empty in-memory cache")
-        assertEquals(
-            first.books.map { it.bookId }.toSet(),
-            restored.books.map { it.bookId }.toSet(),
-            "the disk-restored map must cover the same books",
-        )
-        assertEquals(
-            first.books.sumOf { it.clusters.size },
-            restored.books.sumOf { it.clusters.size },
-            "the disk-restored map must carry the same clusters",
-        )
-    }
-
-    private fun newDiscovery(cacheDir: File) = SemanticDiscoveryRepository(
-        semanticSearch = SemanticSearchRepository(
-            searchRepository = JdbcSearchRepository(database),
-            chunkRepository = chunkRepository,
-            embedderFactory = FakeFactory(FakeEmbedder.TEST_MODEL),
-        ),
-        chunkRepository = chunkRepository,
-        bookRepository = bookRepository,
-        cacheDir = cacheDir,
-    )
 }

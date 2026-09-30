@@ -28,13 +28,29 @@ class DocumentImporter(
 ) {
     private val hashLocks = ConcurrentHashMap<String, Mutex>()
 
-    suspend fun importDocument(file: File, detected: DetectedContent, originalFilename: String = file.name): Document = withContext(Dispatchers.IO) {
+    suspend fun importDocument(
+        file: File,
+        detected: DetectedContent,
+        originalFilename: String = file.name,
+        /**
+         * SHA-256 of [file]'s exact contents when the caller already has it. Enables the
+         * duplicate lookup below to run before a single byte is copied, which is what makes
+         * re-opening an already-imported document cheap. Null keeps today's staging-then-check
+         * order, including hashing during the staging copy.
+         */
+        sourceSha256: String? = null
+    ): Document = withContext(Dispatchers.IO) {
         val format = detected.format
         if (format.documentFormat == null) throw UnsupportedContent("EPUB must use BookImporter")
         val observedSize = file.length()
         if (observedSize > MAX_SOURCE_BYTES) throw ContentTooLarge("Input exceeds 512 MiB")
         if (format in setOf(IncomingFormat.DOCX, IncomingFormat.ODT) && observedSize > MAX_OFFICE_BYTES) {
             throw ContentTooLarge("Office document exceeds 100 MiB")
+        }
+        // The re-check inside the hash lock further down is what actually serialises concurrent
+        // imports of one content hash, so this earlier lookup is a shortcut, not a replacement.
+        if (sourceSha256 != null) {
+            repository.getDocumentByHash(sourceSha256)?.let { throw DuplicateDocument(it) }
         }
         val fallbackTitle = originalFilename.substringBeforeLast('.').ifBlank { "Untitled" }
         val importToken = UUID.randomUUID().toString()

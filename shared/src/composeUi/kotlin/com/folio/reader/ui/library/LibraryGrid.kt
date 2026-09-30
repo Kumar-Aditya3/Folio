@@ -60,6 +60,7 @@ import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioHaptic
@@ -172,7 +173,10 @@ fun BookGrid(
  * The featured entry: a wide, image-led composition where the cover sits at
  * `coverFeature` beside its own typography and throws a halo onto the page behind
  * it. Deliberately *not* a card — the halo and the plate's shadow do the
- * separating, so the page stays continuous.
+ * separating, so the page stays continuous. What it does carry is a themed rim:
+ * a light travelling the outline in the cover's own hue against the progress
+ * accent, which marks the one entry the shelf is about without putting a
+ * container under it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -193,6 +197,18 @@ private fun FeaturedShelfEntry(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction, scaleTo = 0.985f)
+            // After the pressable's layer so the rim travels with the plane when
+            // it dips, and behind the content so the plate occludes the arc
+            // passing under it.
+            .folioThemeRim(
+                shape = FolioShapes.card,
+                accent = accent,
+                // The streak hue rather than the progress hue: this row is about pace
+                // to finish, and accentProgress is a saturated blue in most palettes —
+                // which is also rememberCoverAccent's own fallback, so a book with no
+                // usable cover accent would have edged in blue at both ends.
+                counterAccent = FolioTheme.colors.accentStreak,
+            )
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,

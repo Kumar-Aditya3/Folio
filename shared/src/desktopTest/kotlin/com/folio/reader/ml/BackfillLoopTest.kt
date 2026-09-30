@@ -100,6 +100,7 @@ class BackfillLoopTest {
         indexer: EmbeddingIndexer,
         limit: Int = 40,
         maxRounds: Int = 2_000,
+        pace: SweepPace = SweepPace.None,
     ): LoopOutcome {
         var indexed = 0
         var failed = 0
@@ -107,7 +108,7 @@ class BackfillLoopTest {
         var reason = "maxRounds"
         while (rounds < maxRounds) {
             rounds++
-            val slice = indexer.backfillSlice(limit)
+            val slice = indexer.backfillSlice(limit, pace = pace)
             if (slice.modelMissing) {
                 reason = "modelMissing"
                 break
@@ -166,7 +167,7 @@ class BackfillLoopTest {
         val indexer = EmbeddingIndexer(repository, factory)
 
         // First pass, interrupted after one slice.
-        val first = indexer.backfillSlice(40)
+        val first = indexer.backfillSlice(40, pace = SweepPace.None)
         assertEquals(40, first.indexedChapters)
         assertTrue(!first.complete)
 
@@ -192,7 +193,7 @@ class BackfillLoopTest {
         val factory = FakeFactory(FakeEmbedder.TEST_MODEL)
         val indexer = EmbeddingIndexer(repository, factory)
 
-        val firstSlice = indexer.backfillSlice(40)
+        val firstSlice = indexer.backfillSlice(40, pace = SweepPace.None)
         assertEquals(40, firstSlice.indexedChapters, "the first slice must be full")
         assertTrue(!firstSlice.complete, "400 chapters cannot be done in one slice")
 
@@ -232,7 +233,7 @@ class BackfillLoopTest {
         val indexer = EmbeddingIndexer(repository, factory)
 
         // Before the fix this call threw, taking the whole slice with it.
-        val slice = indexer.backfillSlice(40)
+        val slice = indexer.backfillSlice(40, pace = SweepPace.None)
         assertEquals(39, slice.indexedChapters, "the other 39 chapters in the slice must land")
         assertEquals(1, slice.failedChapters, "the poison chapter must be reported, not swallowed")
         assertTrue(slice.firstError != null, "the cause must be carried out for logging")

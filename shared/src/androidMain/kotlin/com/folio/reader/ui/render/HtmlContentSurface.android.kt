@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -23,6 +24,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -45,7 +53,8 @@ private val RE_FOLIO_LOAD = Regex("""[?&]folio-load=\d+""")
 
 // Reader WebView diagnostics. The onReceivedTitle/onConsoleMessage callbacks fire on essentially
 // every scroll frame, so their logging + string work must not run in shipped builds. The shared
-// module has no BuildConfig, so this is a compile-time flag a developer flips locally.
+// module has no BuildConfig, so this is a compile-time flag a developer flips locally — it was ON
+// for builds 96-98 while the jump's settle loop was being measured off logcat.
 private const val READER_DEBUG_LOG = false
 
 @Composable
@@ -190,31 +199,43 @@ actual fun HtmlContentSurface(
     // last *reported* progress fraction, which both lags the finger and means
     // something else after a reflow — the "changing fonts jumps page position"
     // report). Geometry (margins/text width/layout mode) still reloads.
-    val content = remember(
-        sections, windowed,
-        settings.copy(
-            themeId = "", customTheme = null,
-            fontFamily = "", fontSize = 0f, fontWeight = 0,
-            lineHeight = 0f, letterSpacing = 0f, paragraphSpacing = 0f,
-        ),
-    ) {
-        if (windowed) {
-            injectReaderCss(
-                ReaderWindowAssembler.assemble(sections.map { it.copy(html = canonicalSection(it)) }, shadow = false),
-                settings
-            )
-        } else {
-            // Paged attribute refs already resolve through the chapter's own base URL, so only
-            // the CSS ones — which do not — are made absolute here.
-            val only = sections.firstOrNull()
-            injectReaderCss(
-                if (only == null) "" else rewriteCssUrls(only.html, only.href), settings,
-                // A single non-windowed reflowable doc (DOCX/HTML) hides its body
-                // until first paint so the raw markup does not paint in a fallback
-                // font and then reflow — see [readerStyleSheet]. EPUB is always
-                // windowed here, so this reveal gate never touches it.
-                revealGate = true,
-            )
+    val documentKey = settings.copy(
+        themeId = "", customTheme = null,
+        fontFamily = "", fontSize = 0f, fontWeight = 0,
+        lineHeight = 0f, letterSpacing = 0f, paragraphSpacing = 0f,
+    )
+    // Building the document is regex plus concatenation over the whole window — 119 ms measured for a
+    // book of 200 KB chapters on a desktop CPU, and several times that on a phone. In remember{} that
+    // work ran inside the composition a Contents jump is supposed to feel instant, freezing the frame
+    // before the WebView had even been handed the HTML. It is produced on a worker now, and the load
+    // below refuses to issue until a document exists — so building is a hold, the same hold the
+    // resource pass already imposes, never a blank page.
+    val content by produceState(initialValue = "", sections, windowed, documentKey) {
+        // The previous document belongs to the previous keys, and it must not be loadable under a new
+        // load token: blank it while the next one is built. The WebView keeps showing what it already
+        // loaded, so this is not a blank frame — it is the same hold the resource pass already does.
+        value = ""
+        value = withContext(Dispatchers.Default) {
+            if (windowed) {
+                injectReaderCss(
+                    ReaderWindowAssembler.assemble(
+                        sections.map { it.copy(html = canonicalSection(it)) }, shadow = false
+                    ),
+                    settings
+                )
+            } else {
+                // Paged attribute refs already resolve through the chapter's own base URL, so only
+                // the CSS ones — which do not — are made absolute here.
+                val only = sections.firstOrNull()
+                injectReaderCss(
+                    if (only == null) "" else rewriteCssUrls(only.html, only.href), settings,
+                    // A single non-windowed reflowable doc (DOCX/HTML) hides its body
+                    // until first paint so the raw markup does not paint in a fallback
+                    // font and then reflow — see [readerStyleSheet]. EPUB is always
+                    // windowed here, so this reveal gate never touches it.
+                    revealGate = true,
+                )
+            }
         }
     }
     // Live stylesheet swap: a theme or typography change rewrites the baked
@@ -258,39 +279,65 @@ actual fun HtmlContentSurface(
     // the decode reflow in both paged and continuous modes.
     val imageDims = remember { ConcurrentHashMap<String, com.folio.reader.epub.ImageDimensions.Size>() }
     var resourcesReady by remember(loadKey) { mutableStateOf(false) }
-    suspend fun resolveSectionSources(section: ReaderSection) {
-        val pending = ArrayDeque<Pair<String, String>>()
-        sourcesOf(section.html).forEach { pending.addLast(section.href to it) }
-        val visited = mutableSetOf<String>()
-        while (pending.isNotEmpty()) {
-            val (baseHref, src) = pending.removeFirst()
-            val canonical = canonicalEpubPath(baseHref, src)
-            if (!visited.add(canonical)) continue
-            onResolveResource(baseHref, canonical)?.let { path ->
-                val file = File(path)
-                if (file.isFile) {
-                    resourceCache[canonical] = file
-                    val ext = file.extension.lowercase()
-                    if (ext in IMAGE_DIM_EXTS) {
-                        com.folio.reader.epub.ImageDimensions.read(file)?.let { imageDims[canonical] = it }
-                    }
-                    // EPUB stylesheets commonly reference fonts/images through
-                    // url(); preload those too because WebView requests are
-                    // normalized and cannot call a suspend resolver.
-                    if (file.extension.equals("css", true)) {
-                        CSS_URL_REF
-                            .findAll(file.readText())
-                            .map { it.groupValues[1] }
-                            .filter { !it.startsWith("data:") && !it.startsWith("#") }
-                            .forEach { pending.addLast(canonical to it) }
-                    }
+    val resolvePermits = remember { Semaphore(RESOLVE_PARALLELISM) }
+
+    /**
+     * Extracts one resource and returns the references it carries — a stylesheet's `url()`
+     * entries, still relative to the stylesheet itself, become the next level of the walk.
+     */
+    suspend fun resolveOne(baseHref: String, canonical: String): List<Pair<String, String>> =
+        resolvePermits.withPermit {
+            val path = onResolveResource(baseHref, canonical) ?: return@withPermit emptyList()
+            val file = File(path)
+            if (!file.isFile) return@withPermit emptyList()
+            resourceCache[canonical] = file
+            val ext = file.extension.lowercase()
+            if (ext in IMAGE_DIM_EXTS) {
+                com.folio.reader.epub.ImageDimensions.read(file)?.let { imageDims[canonical] = it }
+            }
+            // EPUB stylesheets commonly reference fonts/images through
+            // url(); preload those too because WebView requests are
+            // normalized and cannot call a suspend resolver.
+            if (file.extension.equals("css", true)) {
+                CSS_URL_REF
+                    .findAll(file.readText())
+                    .map { it.groupValues[1] }
+                    .filter { !it.startsWith("data:") && !it.startsWith("#") }
+                    .map { canonical to it }
+                    .toList()
+            } else emptyList()
+        }
+
+    suspend fun resolveSectionSources(section: ReaderSection, visited: MutableSet<String>) =
+        withContext(Dispatchers.IO) {
+            var frontier = sourcesOf(section.html)
+                .map { section.href to canonicalEpubPath(section.href, it) }
+                .filter { visited.add(it.second) }
+            while (frontier.isNotEmpty()) {
+                val nested = coroutineScope {
+                    frontier.map { (baseHref, canonical) -> async { resolveOne(baseHref, canonical) } }
+                        .awaitAll().flatten()
                 }
+                frontier = nested
+                    .map { (cssPath, ref) -> cssPath to canonicalEpubPath(cssPath, ref) }
+                    .filter { visited.add(it.second) }
             }
         }
-    }
+
+    // A window holds several chapters, each with its own images, stylesheets and fonts, and every
+    // lookup opens the archive on a worker. Walking them one call at a time is what a jump that
+    // had to reload the window waited behind, and the walk reads CSS text and image headers, which
+    // does not belong on the UI thread. They fan out now — bounded, because an unbounded fan-out
+    // over a book of full-page plates means hundreds of simultaneously open archives — across one
+    // `visited` set shared by the whole pass. That set is also what keeps two coroutines off the
+    // same cache file: the provider keys the extracted copy by this canonical path, so a stylesheet
+    // every chapter links is resolved once instead of once per chapter.
     LaunchedEffect(loadKey, sections, onResolveResource) {
         resourcesReady = false
-        for (section in sections) resolveSectionSources(section)
+        val visited = ConcurrentHashMap.newKeySet<String>()
+        coroutineScope {
+            sections.map { async { resolveSectionSources(it, visited) } }.awaitAll()
+        }
         resourcesReady = true
     }
     // Grow/trim the window on screen. Each op is consumed once; an append or
@@ -301,7 +348,7 @@ actual fun HtmlContentSurface(
         val wv = webViewRef ?: return@LaunchedEffect
         when (op) {
             is WindowOp.Append -> {
-                resolveSectionSources(op.section)
+                resolveSectionSources(op.section, ConcurrentHashMap.newKeySet())
                 val fragment = ReaderWindowAssembler.sectionFragment(
                     op.section.copy(html = canonicalSection(op.section)),
                     shadow = false
@@ -316,7 +363,7 @@ actual fun HtmlContentSurface(
             }
 
             is WindowOp.Prepend -> {
-                resolveSectionSources(op.section)
+                resolveSectionSources(op.section, ConcurrentHashMap.newKeySet())
                 val fragment = ReaderWindowAssembler.sectionFragment(
                     op.section.copy(html = canonicalSection(op.section)),
                     shadow = false
@@ -595,7 +642,9 @@ actual fun HtmlContentSurface(
         update = { webView ->
             webView.isEnabled = enabled
             val contentKey = "$loadKey:${content.hashCode()}"
-            if (resourcesReady && webView.tag != contentKey) {
+            // `content` is produced on a worker, so its first value for a new load is the empty
+            // initial: loading that would paint a blank document over the reader.
+            if (resourcesReady && content.isNotEmpty() && webView.tag != contentKey) {
                 webView.tag = contentKey
                 val importedFonts = settings.customFonts.joinToString("") { font ->
                     val url = "file://${webView.context.filesDir.absolutePath}/fonts/${font.fileName}"
@@ -916,6 +965,9 @@ private fun resourceResponse(
 
 /** Longest edge (px) any served image is decoded down to; a phone never needs more. */
 private const val MAX_IMAGE_DIM = 1600
+
+/** Archive lookups one resource pass keeps open at once; each `onResolveResource` opens the EPUB. */
+private const val RESOLVE_PARALLELISM = 8
 
 /**
  * Returns [file] as an image response, downsampling raster formats whose longest

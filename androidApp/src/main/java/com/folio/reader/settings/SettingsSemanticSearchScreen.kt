@@ -169,17 +169,17 @@ fun SettingsSemanticSearchScreen(navModel: FolioNavModelImpl, onBack: () -> Unit
             },
         )
 
-        // Atlas & Echoes master switch. Off hides both discovery surfaces (the Home Atlas hero and
-        // the reader's Echoes action) without touching the index — a preference, not a teardown.
+        // Semantic discovery master switch. Off hides the reader's Echoes action
+        // without touching the index — a preference, not a teardown.
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Semantic discovery (Atlas & Echoes)", style = MaterialTheme.typography.bodyLarge)
+                Text("Semantic discovery (Echoes)", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Map your library by meaning and surface resonant passages across books, entirely on this device.",
+                    "Surface resonant passages across books, entirely on this device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

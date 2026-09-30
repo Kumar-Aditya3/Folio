@@ -15,13 +15,16 @@ import com.folio.reader.settings.ReaderSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
@@ -45,14 +48,22 @@ class LibraryShelfReadyTest {
         collections: List<Collection>,
         membership: Map<String, Set<String>>,
         remembered: String? = null,
-    ): LibraryViewModel = LibraryViewModel(
-        bookRepository = FakeBookRepo(books),
-        collectionRepository = FakeCollectionRepo(collections, membership),
-        seriesRepository = FakeSeriesRepo(),
-        settingsRepository = FakeSettingsRepo(
-            if (remembered != null) mutableMapOf("library.books.collection" to remembered) else mutableMapOf()
-        ),
-    )
+        /** Production always has one (Main, seeded by `ensureSeeded`); returning null hid the race. */
+        default: Collection? = null,
+        /** How long the collections table takes to answer. 0 makes the read synchronous-ish and
+         *  hides the cold-start window entirely. */
+        firstReadDelayMs: Long = 0L,
+        /** Pass a map you keep a reference to when the test must see what was persisted. */
+        settings: MutableMap<String, String> = mutableMapOf(),
+    ): LibraryViewModel {
+        if (remembered != null) settings["library.books.collection"] = remembered
+        return LibraryViewModel(
+            bookRepository = FakeBookRepo(books),
+            collectionRepository = FakeCollectionRepo(collections, membership, default, firstReadDelayMs),
+            seriesRepository = FakeSeriesRepo(),
+            settingsRepository = FakeSettingsRepo(settings),
+        )
+    }
 
     @Test
     fun shelfIsNotReadyUntilTheRememberedCollectionRestores() = runBlocking {
@@ -131,6 +142,97 @@ class LibraryShelfReadyTest {
         }
     }
 
+    /**
+     * The hole that survived two hardening passes: `collections` is a `stateIn` whose
+     * *placeholder* is `emptyList()`, which is byte-identical to a genuinely collection-less
+     * library. The gate's `|| list.isEmpty()` escape hatch therefore opened on frame 1 of
+     * every cold start — exactly when the JDBC read behind it is slowest — and the shelf drew
+     * the unfiltered seed anyway. An empty answer must be a *loaded* empty answer.
+     */
+    @Test
+    fun coldStartHoldsTheShelfWhileTheCollectionsTableHasNotAnswered() = runBlocking {
+        val vm = viewModel(
+            books = listOf(book("b1"), book("b2")),
+            collections = listOf(
+                Collection(id = "main", name = "Main", sortOrder = -1),
+                Collection(id = "reading", name = "Reading"),
+            ),
+            membership = mapOf("main" to setOf("b1"), "reading" to setOf("b2")),
+            remembered = "reading",
+            default = Collection(id = "main", name = "Main", sortOrder = -1),
+            firstReadDelayMs = 400,
+        )
+        val collector = launch { vm.shelfReady.collect {} }
+        try {
+            delay(60)
+            assertFalse(
+                vm.shelfReady.value,
+                "a collections read that has not answered is not an empty library",
+            )
+            awaitCondition("the shelf settles once the table answers") { vm.shelfReady.value }
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    /**
+     * The restore collector watched `collections`, so the placeholder frame passed its
+     * `list.none { it.id == current }` test and it raced the remembered-id read against
+     * `defaultCollection()`. Main winning is not only the wrong shelf: `selectCollection`
+     * *writes* the choice back, so the reader's remembered shelf was destroyed by the start
+     * that got it wrong. This is why the bleed looked intermittent — it was a race, not a state.
+     */
+    @Test
+    fun rememberedShelfWinsOverTheDefaultWhenTheTableAnswersLate() = runBlocking {
+        val settings = mutableMapOf<String, String>()
+        val vm = viewModel(
+            books = listOf(book("b1"), book("b2")),
+            collections = listOf(
+                Collection(id = "main", name = "Main", sortOrder = -1),
+                Collection(id = "reading", name = "Reading"),
+            ),
+            membership = mapOf("main" to setOf("b1"), "reading" to setOf("b2")),
+            remembered = "reading",
+            default = Collection(id = "main", name = "Main", sortOrder = -1),
+            firstReadDelayMs = 400,
+            settings = settings,
+        )
+        val collector = launch { vm.shelfReady.collect {} }
+        try {
+            awaitCondition("the shelf settles onto the remembered collection") { vm.shelfReady.value }
+            assertEquals("reading", vm.selectedCollectionId.value)
+            assertEquals(
+                "reading", settings["library.books.collection"],
+                "the default must not overwrite the shelf the reader left",
+            )
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    /**
+     * `filteredBooks` answered "no collection selected" with *no filter at all*, so the shelf
+     * flow itself emitted the whole library during the startup window and the gate was the only
+     * thing hiding it. The unfiltered answer has to go, not just be hidden: it is also the
+     * `collectAsState` seed, so any gap in the gate paints it.
+     */
+    @Test
+    fun unsettledShelfNeverAnswersWithTheWholeLibrary() = runBlocking {
+        val vm = viewModel(
+            books = listOf(book("b1"), book("b2")),
+            collections = listOf(Collection(id = "main", name = "Main", sortOrder = -1)),
+            membership = mapOf("main" to setOf("b1")),
+            firstReadDelayMs = 30_000,
+        )
+        val shown = withTimeout(8_000) {
+            vm.filteredBooks(LibraryViewModel.LibraryState()).first()
+        }
+        assertTrue(
+            shown.isEmpty(),
+            "with no shelf resolved the answer must be empty, not every collection's books (got ${shown.map { it.id }})",
+        )
+    }
+
     private suspend fun awaitCondition(message: String, timeoutMs: Long = 8000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition()) {
@@ -178,19 +280,26 @@ class LibraryShelfReadyTest {
     private class FakeCollectionRepo(
         initial: List<Collection>,
         private val membership: Map<String, Set<String>>,
+        private val default: Collection? = null,
+        private val firstReadDelayMs: Long = 0L,
     ) : CollectionRepository {
-        val collections = MutableStateFlow(initial)
-        override fun getAllCollections(): Flow<List<Collection>> = collections
+        private val state = MutableStateFlow(initial)
+
+        /**
+         * The shape production has and the old fake did not: a read that has not answered
+         * yet. `JdbcCollectionRepository.getAllCollections()` is `bookDataRevision.map { JDBC }`,
+         * so its `stateIn` placeholder is observable for the whole round trip — which is what
+         * the shelf's gate and its restore collector must not mistake for an answer.
+         */
+        override fun getAllCollections(): Flow<List<Collection>> = flow {
+            if (firstReadDelayMs > 0) delay(firstReadDelayMs)
+            emitAll(state)
+        }
         override fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>> =
             MutableStateFlow(membership[collectionId] ?: emptySet())
         override suspend fun bookIdsInCollection(collectionId: String): Set<String> =
             membership[collectionId] ?: emptySet()
-        // Null on purpose, mirroring the manga category test's fake: it isolates the
-        // *remembered* restore. With a real default here, the collections flow's
-        // empty-first frame would race the suspend settings read and let the default
-        // (Main) win before the remembered id is applied — a separate concern from the
-        // bleed gate under test.
-        override suspend fun defaultCollection(): Collection? = null
+        override suspend fun defaultCollection(): Collection? = default
         override suspend fun ensureSeeded() {}
         override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) {}
@@ -201,7 +310,7 @@ class LibraryShelfReadyTest {
         override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {}
         override suspend fun createCollection(name: String): Collection = Collection(id = name, name = name)
         override suspend fun renameCollection(id: String, name: String) {}
-        override suspend fun getCollection(id: String): Collection? = collections.value.firstOrNull { it.id == id }
+        override suspend fun getCollection(id: String): Collection? = state.value.firstOrNull { it.id == id }
         override suspend fun assign(bookId: String, collectionIds: Set<String>) {}
         override fun observeCollectionsFor(bookId: String): Flow<Set<String>> = MutableStateFlow(emptySet())
         override suspend fun ensureMembership(bookId: String) {}

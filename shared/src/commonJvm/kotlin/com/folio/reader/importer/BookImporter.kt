@@ -38,27 +38,20 @@ class BookImporter(
      * to when the embedding model has not been downloaded.
      */
     private val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer? = null,
-    /**
-     * Optional genre store. When present, the book's parsed `<dc:subject>` strings are recorded so
-     * the Atlas's metadata-first genre path has something to canonicalize. Null keeps imports
-     * byte-for-byte as they were (tests).
-     */
-    private val genreRepository: com.folio.reader.database.GenreRepository? = null,
-    /**
-     * Optional genre classifier. When present (and a model is on disk), the freshly imported and
-     * embedded book is classified immediately so it appears on the Atlas with a genre rather than
-     * waiting for the next backfill pass. Best-effort and null-safe.
-     */
-    private val genreClassification: com.folio.reader.ml.GenreClassificationService? = null,
 ) {
-    suspend fun importEpub(filePath: String): Result<Book> {
+    /**
+     * [sourceSha256] lets a caller that already digested the incoming bytes skip a second full
+     * read of the file. It must be the SHA-256 of the file's exact contents, so it must never be
+     * supplied for a file the caller has not read end to end.
+     */
+    suspend fun importEpub(filePath: String, sourceSha256: String? = null): Result<Book> {
         return withContext(Dispatchers.IO) {
             try {
                 println("Import: Starting import of $filePath")
 
                 // 1. Calculate hash
                 println("Import: Calculating file hash...")
-                val hash = hashUtil.sha256File(filePath)
+                val hash = sourceSha256 ?: hashUtil.sha256File(filePath)
 
                 // 2. Deterministic book ID based on file content hash so identical books across devices get identical IDs
                 val deterministicBookId = UUID.nameUUIDFromBytes("folio_epub_$hash".toByteArray()).toString()
@@ -207,18 +200,6 @@ class BookImporter(
                     val result = runCatching { indexer.indexChapters(bookId, indexEntries) }
                     result.onFailure { it.printStackTrace() }
                     println("Import: Semantic indexing -> ${result.getOrNull()}")
-                }
-
-                // Record parsed subjects for the metadata-first genre path (cheap, no model), then
-                // classify the just-embedded book so it lands on the Atlas already coloured. Both
-                // best-effort: the Atlas degrades to a "Mixed" community without them.
-                genreRepository?.let { repo ->
-                    runCatching { repo.setSubjects(bookId, parsed.metadata.subject) }
-                        .onFailure { println("Import: could not record subjects: ${it.message}") }
-                }
-                genreClassification?.let { svc ->
-                    runCatching { svc.classifyBook(bookId) }
-                        .onFailure { println("Import: genre classification skipped: ${it.message}") }
                 }
 
                 println("Import: Successfully imported '${book.title}'")

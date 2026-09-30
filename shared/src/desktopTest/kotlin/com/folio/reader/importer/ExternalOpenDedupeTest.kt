@@ -120,4 +120,47 @@ class ExternalOpenDedupeTest {
         assertEquals(first.document.id, duplicate.document.id)
         assertEquals(1, documentRepository.observeDocuments().first().size)
     }
+
+    @Test
+    fun `a pre hashed reopen copies nothing into document storage`() = runBlocking {
+        val note = File(root, "report.txt").apply { writeText("already in the library, cheaply") }
+        val imported = assertIs<IncomingContentResult.ImportedDocument>(
+            coordinator.import(note.absolutePath, note.name)
+        )
+
+        // A second copy under a different name: same bytes, so the caller's digest is enough to
+        // settle it. Staging is what the expensive part used to be — it copies every byte.
+        val reopened = File(root, "report (1).txt").apply { writeBytes(note.readBytes()) }
+        val result = coordinator.import(
+            reopened.absolutePath,
+            reopened.name,
+            sourceSha256 = platform.hasher.sha256File(reopened.absolutePath)
+        )
+        assertEquals(imported.document.id, assertIs<IncomingContentResult.DuplicateDocument>(result).document.id)
+
+        val entries = assertNotNull(platform.fileSystem.libraryDocumentsDir.list()).toList()
+        assertEquals(listOf(imported.document.id), entries, "no staging directory may be created")
+    }
+
+    @Test
+    fun `racing pre hashed reopens still settle on one document`() = runBlocking {
+        val bytes = "four taps on the same file".toByteArray()
+        val files = (1..4).map { index ->
+            File(root, "race-$index.txt").apply { writeBytes(bytes) }
+        }
+        val hash = platform.hasher.sha256File(files.first().absolutePath)
+
+        val results = coordinator.importMany(
+            files.map { file -> IncomingContent(file.absolutePath, file.name, sha256 = hash) }
+        )
+
+        assertEquals(1, results.count { it is IncomingContentResult.ImportedDocument })
+        val duplicates = results.filterIsInstance<IncomingContentResult.DuplicateDocument>()
+        assertEquals(3, duplicates.size)
+        assertEquals(1, documentRepository.observeDocuments().first().size)
+        val winner = assertIs<IncomingContentResult.ImportedDocument>(
+            results.first { it is IncomingContentResult.ImportedDocument }
+        ).document
+        assertTrue(duplicates.all { it.document.id == winner.id })
+    }
 }

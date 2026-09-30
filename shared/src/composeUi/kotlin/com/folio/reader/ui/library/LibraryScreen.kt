@@ -370,7 +370,13 @@ fun LibraryScreen(
     // flow's value on the frame *after* the first composition, so seeding from
     // it would put one frame of skeleton inside the morph. See
     // [libraryShelfSeedFrom], which is where the reasoning and the tests live.
-    val booksInitial: List<Book>? = remember(knownBooks) { libraryShelfSeedFrom(knownBooks) }
+    //
+    // Restricted to the shelf that has already settled: the seed used to be the whole
+    // unfiltered library, which the `shelfReady` gate below was trusted to hide. Seeding
+    // the actual shelf means the opening frame cannot be another collection's books.
+    val booksInitial: List<Book>? = remember(knownBooks) {
+        libraryShelfSeedFrom(knownBooks, viewModel.settledShelfIds())
+    }
     // Keyed on the shelf's own inputs so the flow is only rebuilt when the shelf
     // actually changes, for the same reason as `knownBooksFlow` above.
     val shelfState = LibraryViewModel.LibraryState(

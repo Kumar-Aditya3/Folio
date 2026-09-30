@@ -1,6 +1,7 @@
 package com.folio.reader.ui.document
 
 import com.folio.reader.database.DocumentRepository
+import com.folio.reader.model.Document
 import com.folio.reader.model.DocumentBookmark
 import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.DocumentLocator
@@ -117,36 +118,44 @@ class DocumentReaderViewModel(
                         loadState = DocumentReaderLoadState.Ready(DocumentReaderContent.Pdf(path))
                     )
                 }
-                else -> loadReflowable(documentId, saved)
+                else -> loadReflowable(document, saved)
             }
             runCatching { repository.markOpened(documentId) }
             collectBookmarks(documentId)
         }
     }
 
-    private suspend fun loadReflowable(documentId: String, saved: DocumentPosition?) {
+    private suspend fun loadReflowable(document: Document, saved: DocumentPosition?) {
+        val documentId = document.id
         val index = File(fileSystem.getDocumentGeneratedIndexPath(documentId))
-        if (!withContext(ioDispatcher) { index.isFile }) {
+        val indexBytes = withContext(ioDispatcher) { if (index.isFile) index.length() else -1L }
+        if (indexBytes < 0) {
             fail(DocumentReaderErrorKind.MISSING_FILE, "The generated document content is missing")
             return
         }
-        val html = try {
-            withContext(ioDispatcher) { index.readText(Charsets.UTF_8) }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            fail(DocumentReaderErrorKind.CORRUPT, "The generated document content could not be read")
-            return
+        val key = ReflowableContentKey(documentId, document.contentHash, indexBytes)
+        val cached = reflowableContentCache[key]
+        val content = cached ?: run {
+            val html = try {
+                withContext(ioDispatcher) { index.readText(Charsets.UTF_8) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                fail(DocumentReaderErrorKind.CORRUPT, "The generated document content could not be read")
+                return
+            }
+            val chunks = withContext(ioDispatcher) { DocumentChunker.chunk(html) }
+            ReflowableContent(html, chunks).also { reflowableContentCache.put(key, it) }
         }
+        val html = content.html
+        val chunks = content.chunks
         val progress = saved?.normalizedProgress?.coerceIn(0.0, 1.0) ?: 0.0
         val locator = (saved?.locator as? DocumentLocator.Reflowable) ?: reflowableLocator()
 
-        // Split the one document into ordered, screen-sized chunks and window
-        // them like EPUB chapters, so a large/image-heavy doc never overruns the
-        // WebView tile budget. The single-section Reflowable content is kept for
-        // the paged-mode fallback and desktop; the screen renders windowed
-        // sections whenever [reflowableWindow] is populated and layout is scroll.
-        val chunks = withContext(ioDispatcher) { DocumentChunker.chunk(html) }
+        // Chunks are windowed like EPUB chapters, so a large/image-heavy doc never
+        // overruns the WebView tile budget. The single-section Reflowable content is kept
+        // for the paged-mode fallback and desktop; the screen renders windowed sections
+        // whenever [reflowableWindow] is populated and layout is scroll.
         reflowableChunks = chunks
         // Map the saved global progress to an anchor chunk plus a section-local
         // offset within it. This global→local mapping is approximate (chunks are

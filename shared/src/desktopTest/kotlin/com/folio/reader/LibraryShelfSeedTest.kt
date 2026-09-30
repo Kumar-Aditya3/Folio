@@ -10,12 +10,20 @@ import kotlin.test.assertNull
 
 /**
  * The shelf's starting value, which decides whether a Library visit renders a
- * skeleton for a frame.
+ * skeleton for a frame — and, since the category-bleed fix, *whose* books that
+ * frame shows.
  *
  * The bug these guard: the shelf flow is a cold `combine`, so each composition
  * pushes a `null` before its first emission. Seeded with that, `LibraryContent`
  * took its loading branch for one frame — inside the tab cross-fade, which is what
  * showed the library arriving blank and then filling in.
+ *
+ * The second bug, and the reason the seed takes [settledShelfIds]: the seed used to
+ * be the whole hoisted library, on the reasoning that a complete shelf beats an empty
+ * one and the `shelfReady` gate would hide the parts that were not the current
+ * collection. When that gate proved to open on frame 1 of every cold start, the seed
+ * *was* the bleed. So the unfiltered list is no longer a value this function can
+ * return, and no gate has to be trusted to hide it.
  */
 class LibraryShelfSeedTest {
 
@@ -23,34 +31,50 @@ class LibraryShelfSeedTest {
         Book(id = id, title = "Title $id", epubHash = "hash-$id", epubFileSize = 1024L)
 
     @Test
-    fun a_known_shelf_is_handed_to_the_first_frame() {
+    fun a_settled_shelf_is_handed_to_the_first_frame() {
         val known = listOf(book("a"), book("b"))
-        assertEquals(known, libraryShelfSeed(known), "a warm entry must not start empty")
+        assertEquals(known, libraryShelfSeed(known, setOf("a", "b")), "a warm entry must not start empty")
     }
 
     @Test
     fun a_library_that_has_not_been_read_starts_unmeasured() {
         assertNull(
-            libraryShelfSeed(emptyList()),
+            libraryShelfSeed(emptyList(), setOf("a")),
             "an unread library has nothing to hand over, so the skeleton is correct",
         )
     }
 
     @Test
-    fun the_seed_is_the_known_books_unchanged() {
+    fun the_seed_carries_only_the_current_shelf() {
         val known = listOf(book("a"), book("b"), book("c"))
-        // Not a copy, not a filtered subset: the shelf's own sort and filter land a
-        // frame later, and reimplementing either here would be a second source of
-        // truth that could disagree with the real flow.
-        assertEquals(3, libraryShelfSeed(known)?.size)
-        assertEquals(known.map { it.id }, libraryShelfSeed(known)?.map { it.id })
+        // b is the only book on this shelf. Handing over a and c too is the bleed, and the
+        // seed used to do exactly that: the membership is applied here, but *read* from the
+        // view model's own settled set, so this is the same fact the shelf flow filters by,
+        // not a second copy of the rule that could drift from it.
+        assertEquals(listOf("b"), libraryShelfSeed(known, setOf("b"))?.map { it.id })
     }
 
     @Test
-    fun one_known_book_is_enough_to_skip_the_skeleton() {
+    fun an_unsettled_shelf_seeds_nothing() {
+        val known = listOf(book("a"), book("b"))
+        assertNull(
+            libraryShelfSeed(known, null),
+            "before the selection settles there is no honest shelf, and the whole library is not one",
+        )
+    }
+
+    @Test
+    fun a_settled_shelf_with_no_books_seeds_an_empty_shelf() {
+        // An empty shelf is a real answer, not a missing one: `[]` renders the empty state,
+        // `null` would render a skeleton over books that exist on other shelves.
+        assertEquals(emptyList(), libraryShelfSeed(listOf(book("a"), book("b")), emptySet()))
+    }
+
+    @Test
+    fun one_book_on_the_shelf_is_enough_to_skip_the_skeleton() {
         // The common case on a real device: the library is not empty, so the shelf
         // resolves immediately and there is no loading frame to show.
-        assertEquals(1, libraryShelfSeed(listOf(book("only")))?.size)
+        assertEquals(1, libraryShelfSeed(listOf(book("only")), setOf("only"))?.size)
     }
 
     // ── the hoisted read ─────────────────────────────────────────────────────
@@ -67,8 +91,8 @@ class LibraryShelfSeedTest {
         // composition. A seed that needed collecting first would be null here —
         // and null is the skeleton, one frame of it, mid-morph.
         val hoisted = MutableStateFlow(listOf(book("a"), book("b")))
-        assertEquals(2, libraryShelfSeedFrom(hoisted)?.size)
-        assertEquals(listOf("a", "b"), libraryShelfSeedFrom(hoisted)?.map { it.id })
+        assertEquals(2, libraryShelfSeedFrom(hoisted, setOf("a", "b"))?.size)
+        assertEquals(listOf("a", "b"), libraryShelfSeedFrom(hoisted, setOf("b"))?.map { it.id })
     }
 
     @Test
@@ -76,7 +100,7 @@ class LibraryShelfSeedTest {
         // Hoisted but empty — a genuinely empty library, or a launch that has not
         // finished its first read. The skeleton is the honest answer; what must
         // *not* happen is an empty shelf rendered as a real one.
-        assertNull(libraryShelfSeedFrom(MutableStateFlow(emptyList())))
+        assertNull(libraryShelfSeedFrom(MutableStateFlow(emptyList()), setOf("a")))
     }
 
     @Test
@@ -84,7 +108,8 @@ class LibraryShelfSeedTest {
         // Desktop and tests pass no hoisted flow. That must mean "seed nothing"
         // and leave the screen on its own cold read — never a crash, and never a
         // shelf invented out of a missing read.
-        assertNull(libraryShelfSeedFrom(null))
+        assertNull(libraryShelfSeedFrom(null, setOf("a")))
+        assertNull(libraryShelfSeedFrom(null, null))
     }
 
     @Test
@@ -94,9 +119,9 @@ class LibraryShelfSeedTest {
         // this ever became live state it would fight the shelf flow for control
         // of what the grid shows.
         val hoisted = MutableStateFlow(emptyList<Book>())
-        val seed = libraryShelfSeedFrom(hoisted)
+        val seed = libraryShelfSeedFrom(hoisted, setOf("late"))
         hoisted.value = listOf(book("late"))
         assertNull(seed, "the seed sampled before the read must not change under it")
-        assertEquals(1, libraryShelfSeedFrom(hoisted)?.size, "the next visit samples the new value")
+        assertEquals(1, libraryShelfSeedFrom(hoisted, setOf("late"))?.size, "the next visit samples the new value")
     }
 }

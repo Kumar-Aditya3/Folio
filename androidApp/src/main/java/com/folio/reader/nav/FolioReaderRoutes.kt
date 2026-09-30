@@ -195,7 +195,8 @@ private fun ReaderRouteContent(
             bookId = book.id,
             epubPath = graph.platform.fileSystem.getBookEpubPath(book.id),
             parser = graph.epubParser,
-            repository = graph.bookRepository
+            repository = graph.bookRepository,
+            settings = graph.settingsRepository
         )
         viewModel.openBook(
             book.id,

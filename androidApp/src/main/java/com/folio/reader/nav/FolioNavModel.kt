@@ -43,8 +43,7 @@ interface FolioNavModel {
         onOpenRevisit: () -> Unit,
         onOpenExtensions: () -> Unit,
         onOpenDownloads: () -> Unit,
-        onOpenHistory: () -> Unit,
-        onOpenAtlas: () -> Unit
+        onOpenHistory: () -> Unit
     )
 
     @Composable
@@ -83,13 +82,6 @@ interface FolioNavModel {
 
     @Composable
     fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit)
-
-    @Composable
-    fun atlasContent(
-        onBack: () -> Unit,
-        onOpenBook: (String) -> Unit,
-        onOpenReaderAt: (String, Int?, Float?) -> Unit
-    )
 
     @Composable
     fun settingsContent(category: String, onBack: () -> Unit)

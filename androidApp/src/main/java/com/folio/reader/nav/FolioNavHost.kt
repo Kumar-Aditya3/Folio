@@ -230,8 +230,7 @@ fun FolioNavHost(
                         onOpenRevisit = { navController.navigate(FolioRoutes.REVISIT) },
                         onOpenExtensions = { navController.navigate(FolioRoutes.EXTENSIONS) },
                         onOpenDownloads = { navController.navigate(FolioRoutes.MANGA_DOWNLOADS) },
-                        onOpenHistory = { navController.navigate(FolioRoutes.MANGA_HISTORY) },
-                        onOpenAtlas = { navController.navigate(FolioRoutes.ATLAS) }
+                        onOpenHistory = { navController.navigate(FolioRoutes.MANGA_HISTORY) }
                     )
                 }
 
@@ -323,22 +322,6 @@ fun FolioNavHost(
                             )
                         }
                     )
-                }
-
-                // Atlas — full-screen semantic map. Wrapped in the shared-element scope so a book
-                // region can morph into Book Detail via the cover key, exactly like the shelves.
-                composable(FolioRoutes.ATLAS) {
-                    FolioSharedElementScope(this) {
-                        navModel.atlasContent(
-                            onBack = { navController.popBackStack() },
-                            onOpenBook = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) },
-                            onOpenReaderAt = { bookId, spine, frac ->
-                                navController.navigate(
-                                    FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
-                                )
-                            }
-                        )
-                    }
                 }
 
                 // Search opened from the reader chrome. Same screen, same state holder — the

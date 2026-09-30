@@ -291,11 +291,11 @@ window.__folioSeek=function(f){
 // __folioReanchor uses) so it survives content inserted anywhere above the target.
 var stick=null;
 function stickClear(){stick=null;}
-function stickSet(el,target){stick={el:el,top:el.getBoundingClientRect().top,target:target,until:Date.now()+2200,tries:0,stable:0,lastTop:-1,pending:0};stickArm(90);}
+function stickSet(el,target){stick={el:el,top:el.getBoundingClientRect().top,target:target,until:Date.now()+2200,tries:0,stable:0,lastTop:-1,pending:0};if(DIAG)try{console.log('FOLIO-STICK set t='+target+' fonts='+(document.fonts?document.fonts.status:'-')+' top='+Math.round(stick.top)+' sh='+scroller().scrollHeight);}catch(e){}stickArm(90);}
 function stickArm(d){if(!stick||stick.pending)return;stick.pending=1;setTimeout(stickTick,d);}
 function stickTick(){
   var a=stick;if(!a)return;a.pending=0;
-  if(Date.now()>a.until||a.tries++>6){stickClear();return;}
+  if(Date.now()>a.until||a.tries++>6){if(DIAG)try{console.log('FOLIO-STICK cap tries='+a.tries);}catch(e){}stickClear();return;}
   if(!a.el.isConnected){
     // The node was replaced under us (a highlight re-wrap, a window trim that dropped the
     // chapter). Re-resolve the same target once; a target that cannot be resolved anymore is
@@ -303,13 +303,17 @@ function stickTick(){
     var again=seekResolve(a.target);
     if(!again||!again.el){seekMiss(a.target);stickClear();return;}
     a.el=again.el;a.top=a.el.getBoundingClientRect().top;
+    if(DIAG)try{console.log('FOLIO-STICK re-resolved '+a.target);}catch(e){}
   }
   var s=scroller(),d2=a.el.getBoundingClientRect().top-a.top;
-  if(Math.abs(d2)>0.5)s.scrollTop=Math.max(0,(s.scrollTop||0)+d2);
+  if(Math.abs(d2)>0.5){
+    s.scrollTop=Math.max(0,(s.scrollTop||0)+d2);
+    if(DIAG)try{console.log('FOLIO-STICK nudge#'+a.tries+' d='+Math.round(d2)+' fonts='+(document.fonts?document.fonts.status:'-')+' sh='+s.scrollHeight);}catch(e){}
+  }
   var y=topOf(a.el);
   if(a.lastTop>=0&&Math.abs(y-a.lastTop)<1)a.stable++;else a.stable=0;
   a.lastTop=y;
-  if(a.stable>=2){stickClear();schedule();return;}
+  if(a.stable>=2){if(DIAG)try{console.log('FOLIO-STICK settled tries='+a.tries);}catch(e){}stickClear();schedule();return;}
   stickArm(320);schedule();
 }
 // Called ONLY from layout-change hooks, never from the scroll listener: yanking the page back
@@ -358,8 +362,24 @@ window.__folioSeekTo=function(t){
   if(!r){seekMiss(t);return;}
   if(r.frac!==undefined){window.__folioSeek(r.frac);return;}
   if(r.clamped)seekMiss(t);
-  stickSet(r.el,String(t));
-  r.el.scrollIntoView({block:'start'});restorePending=false;schedule();
+  // Scroll FIRST, then arm the hold. stickSet records the element's viewport position as the baseline
+  // every later correction is measured against; taken before the scroll it holds where the target sat
+  // before the jump — a whole section above in a big-chapter book — so the first tick applies that
+  // distance as though the layout had moved, and the reader watches their landing get undone (~165,517
+  // px measured on Hyperion). It stayed hidden because the only seeks that reached this were
+  // post-reload ones, and a freshly loaded document already shows the target: its pre-scroll rect was
+  // ~0, so the bogus delta was invisible.
+  r.el.scrollIntoView({block:'start'});stickSet(r.el,String(t));restorePending=false;schedule();
+  // Which section was actually reached, how many <p> it holds NOW (the Contents ordinal was counted
+  // against the file, and dedupe/repairSection can delete a section and renumber after load), and the
+  // text the reader landed on. Distinguishes a drifted live DOM from a genuinely wrong target.
+  if(DIAG)try{
+    var sc=r.el.closest?r.el.closest('section[data-folio-spine]'):null;
+    var cs=sc?contentRoot(sc):null;
+    console.log('FOLIO-LAND t='+t+' spine='+(sc?sc.getAttribute('data-folio-spine'):'-')+
+      ' liveP='+(cs?cs.querySelectorAll('p').length:-1)+
+      ' text='+String(r.el.textContent||'').replace(/\s+/g,' ').slice(0,44));
+  }catch(e){}
 };
 window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 // Reflow-safe anchor: the paragraph holding the viewport's centre, plus how far

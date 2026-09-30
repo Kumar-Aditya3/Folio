@@ -322,20 +322,23 @@ function absLeft(el){return el.getBoundingClientRect().left;}
 function pageForEl(el){return Math.min(maxPage(),Math.max(0,Math.floor((absLeft(el)+2)/pitch())));}
 function miss(t){try{report('folio-seekmiss:'+(++nonce)+':'+encodeURIComponent(String(t||'')));}catch(e){}}
 function clearStick(){stickEl=null;stickTarget='';stickStable=0;if(stickTimer){clearTimeout(stickTimer);stickTimer=null;}}
-function setStick(el,target){clearStick();if(!el)return;stickEl=el;stickTarget=target||'';stickUntil=Date.now()+2200;stickTries=0;stickStable=0;armStick(90);}
+function setStick(el,target){clearStick();if(!el)return;stickEl=el;stickTarget=target||'';stickUntil=Date.now()+2200;stickTries=0;stickStable=0;if(DIAG)try{console.log('FOLIO-STICK paged set t='+target+' page='+page+'/'+total+' fontsReady='+fontsReady+' fonts='+(doc.fonts?doc.fonts.status:'-'));}catch(e){}armStick(90);}
 function armStick(d){if(stickTimer)clearTimeout(stickTimer);stickTimer=setTimeout(stickTick,d);}
 function stickTick(){
   stickTimer=null;
-  if(!stickEl||Date.now()>stickUntil){clearStick();return;}
+  if(!stickEl||Date.now()>stickUntil){if(DIAG)try{console.log('FOLIO-STICK paged cap tries='+stickTries);}catch(e){}clearStick();return;}
   if(!stickEl.isConnected){
     stickEl=stickTarget?targetEl(stickTarget):null;
     if(!stickEl){miss(stickTarget);clearStick();return;}
   }
-  if(stickTries++>=6){clearStick();return;}
+  if(stickTries++>=6){if(DIAG)try{console.log('FOLIO-STICK paged cap tries=6');}catch(e){}clearStick();return;}
   var beforePage=page,beforeTotal=total;
   dirty=true;relayout();
-  if(page===beforePage&&total===beforeTotal)stickStable++;else stickStable=0;
-  if(stickStable>=2){clearStick();return;}
+  if(page!==beforePage||total!==beforeTotal){
+    if(DIAG)try{console.log('FOLIO-STICK paged move#'+stickTries+' page='+beforePage+'->'+page+' total='+beforeTotal+'->'+total+' fontsReady='+fontsReady);}catch(e){}
+    stickStable=0;
+  }else stickStable++;
+  if(stickStable>=2){if(DIAG)try{console.log('FOLIO-STICK paged settled tries='+stickTries+' page='+page);}catch(e){}clearStick();return;}
   armStick(320);
 }
 function targetEl(t){

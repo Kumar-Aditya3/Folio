@@ -46,7 +46,7 @@ class ReaderViewModel(
     private val quoteRepository: com.folio.reader.database.QuoteRepository? = null,
     private val revisitRepository: com.folio.reader.database.RevisitRepository? = null,
     /**
-     * Atlas + Echoes engine. Nullable because the reader is constructed on both platforms and in
+     * Echoes engine. Nullable because the reader is constructed on both platforms and in
      * tests, and Echoes is an additive surface — a null repo (or the feature flag off) simply
      * means the action never lights and no panel opens. Reused from the app graph, so it shares
      * the one embedder session the search stack already holds.

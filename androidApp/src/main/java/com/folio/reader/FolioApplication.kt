@@ -101,7 +101,6 @@ class AppGraph(private val app: Application) {
     // indexer on one model and the searcher on another — a mismatch that reads as "search
     // returns nothing" rather than as an error. See that class.
     val chunkRepository = com.folio.reader.database.JdbcChunkRepository(database)
-    val genreRepository = com.folio.reader.database.JdbcGenreRepository(database)
     val modelDownloader = com.folio.reader.ml.ModelDownloader(platform.fileSystem, platform.hasher)
     val modelSelection = com.folio.reader.ml.EmbeddingModelSelection(
         settingsRepository = settingsRepository,
@@ -109,7 +108,6 @@ class AppGraph(private val app: Application) {
         modelsDir = platform.fileSystem.getModelsDir(),
         chunkRepository = chunkRepository,
         bookRepository = bookRepository,
-        genreRepository = genreRepository,
     )
 
     /** The model in force. Kept as a convenience so existing call sites keep reading well. */
@@ -122,14 +120,10 @@ class AppGraph(private val app: Application) {
     val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer
         get() = modelSelection.indexer
 
-    /** Genre backfill/classification pass, or null when the genre store is unavailable. */
-    val genreClassification: com.folio.reader.ml.GenreClassificationService?
-        get() = modelSelection.genreClassification
-
     val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
         get() = modelSelection.semanticSearch
 
-    /** Atlas + Echoes data owner; reuses the searcher's embedder and resident index. */
+    /** Echoes data owner; reuses the searcher's embedder and resident index. */
     val semanticDiscoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository
         get() = modelSelection.discovery
 
@@ -466,9 +460,6 @@ class AppGraph(private val app: Application) {
         // to embed chapters missing vectors, so the index is built in the background instead. The
         // desktop app keeps its inline indexer because it has no background worker.
         embeddingIndexer = null,
-        // Record parsed subjects at import (cheap, no model) so the metadata-first genre path works.
-        // Classification itself runs in EmbeddingBackfillWorker, after the chapters are embedded.
-        genreRepository = genreRepository,
     )
     val documentImporter = DocumentImporter(
         platform,

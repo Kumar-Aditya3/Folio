@@ -136,30 +136,6 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
             // from app start (FolioNavModelImpl.homeState) — the skeleton used
             // to re-run on every visit because the route rebuilt the VM.
             val state by navModel.homeState.collectAsState()
-            // Atlas hero gating: the app-level flag plus a map-ready library (≥ threshold embedded
-            // books). Resolved off the main thread; the hero simply does not appear until true.
-            var atlasReady by remember { mutableStateOf(navModel.atlasEligible == true) }
-            // A cheap, reactive gate on the *total* library size (the hot shelf read): below the
-            // threshold the hero can't qualify, and crossing it re-fires the resolve below so the
-            // hero appears without an app restart.
-            val mapReadySize = navModel.libraryBooks.collectAsState().value.size >=
-                com.folio.reader.ml.SemanticDiscoveryRepository.ATLAS_BOOK_THRESHOLD
-            LaunchedEffect(navModel.globalSettings.semanticDiscovery, mapReadySize) {
-                if (!navModel.globalSettings.semanticDiscovery) { atlasReady = false; return@LaunchedEffect }
-                // Show the session-cached answer immediately so a revisit never flickers, then ALWAYS
-                // re-resolve the cheap COUNT(DISTINCT). The old code short-circuited on the cache and
-                // never re-checked, so a hero that first resolved false — because the embedding
-                // backfill had not caught up yet — stayed hidden for the whole session, and on tab
-                // re-entry the keyless remember re-read that frozen false. Re-resolving here (the
-                // effect also re-runs when Home recomposes after a tab switch, and when the library
-                // crosses the threshold) is what lets the hero reliably (re)appear once eligible.
-                navModel.atlasEligible?.let { atlasReady = it }
-                kotlinx.coroutines.delay(500)
-                val eligible = runCatching { graph.semanticDiscoveryRepository.atlasHeroEligible() }
-                    .getOrDefault(navModel.atlasEligible ?: false)
-                navModel.atlasEligible = eligible
-                atlasReady = eligible
-            }
             HomeScreen(
                 state = state,
                 topInset = folioBarTopInset(),
@@ -168,8 +144,6 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 onImportClick = { navModel.callbacks.onImportEpubs() },
                 onOpenStats = { navController.navigate(FolioRoutes.STATS) },
                 onOpenLibrary = { navController.navigate(FolioRoutes.LIBRARY) },
-                onOpenAtlas = { navController.navigate(FolioRoutes.ATLAS) },
-                atlasReady = atlasReady,
                 onOpenExclusions = {
                     navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
                 },
@@ -500,8 +474,7 @@ fun MoreRoute(
     onOpenRevisit: () -> Unit,
     onOpenExtensions: () -> Unit,
     onOpenDownloads: () -> Unit,
-    onOpenHistory: () -> Unit,
-    onOpenAtlas: () -> Unit
+    onOpenHistory: () -> Unit
 ) {
     com.folio.reader.settings.SettingsHubScreen(
         onOpenSettings = onOpenSettings,
@@ -510,8 +483,7 @@ fun MoreRoute(
         onOpenRevisit = onOpenRevisit,
         onOpenExtensions = onOpenExtensions,
         onOpenDownloads = onOpenDownloads,
-        onOpenHistory = onOpenHistory,
-        onOpenAtlas = onOpenAtlas
+        onOpenHistory = onOpenHistory
     )
 }
 
@@ -572,8 +544,7 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
             onOpenRevisit = { navModel.navController?.navigate(FolioRoutes.REVISIT) },
             onOpenExtensions = { navModel.navController?.navigate(FolioRoutes.EXTENSIONS) },
             onOpenDownloads = { navModel.navController?.navigate(FolioRoutes.MANGA_DOWNLOADS) },
-            onOpenHistory = { navModel.navController?.navigate(FolioRoutes.MANGA_HISTORY) },
-            onOpenAtlas = { navModel.navController?.navigate(FolioRoutes.ATLAS) }
+            onOpenHistory = { navModel.navController?.navigate(FolioRoutes.MANGA_HISTORY) }
         )
     }
 }

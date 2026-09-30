@@ -133,26 +133,6 @@ class SemanticSearchRepository(
     private var lastQueryEmbed: Triple<String, EmbedKind, FloatArray>? = null
 
     /**
-     * Embeds a batch of short texts with the cached session (reused if warm), for callers that
-     * need raw vectors outside of search — e.g. the Atlas label re-rank, which embeds a cluster's
-     * candidate phrases and keeps the ones nearest the cluster's meaning. Returns null entries for
-     * anything that failed, and an all-null list if the model is unavailable. Uses [EmbedKind.QUERY]
-     * because the inputs are short phrases, like a query, not passages.
-     */
-    suspend fun embedTexts(texts: List<String>): List<FloatArray?> = withContext(dispatcher) {
-        if (texts.isEmpty()) return@withContext emptyList()
-        embedderMutex.withLock {
-            val embedder = cachedEmbedder ?: embedderFactory.create()?.also { cachedEmbedder = it }
-                ?: return@withLock texts.map { null }
-            runCatching { embedder.embed(texts, EmbedKind.QUERY) }.getOrElse {
-                runCatching { embedder.close() }
-                cachedEmbedder = null
-                texts.map { null }
-            }
-        }
-    }
-
-    /**
      * Warms the cached embedder session ahead of the first query.
      *
      * Constructing an ONNX session parses the model and builds XNNPACK's packed weights — the

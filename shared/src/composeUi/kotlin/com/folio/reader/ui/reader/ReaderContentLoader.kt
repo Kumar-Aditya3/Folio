@@ -2,14 +2,17 @@ package com.folio.reader.ui.reader
 
 import com.folio.reader.model.Chapter
 import com.folio.reader.ui.render.FixedLayoutDetector
+import com.folio.reader.ui.render.READER_WINDOW_MAX_CHARS
 import com.folio.reader.ui.render.READER_WINDOW_MAX_SECTIONS
 import com.folio.reader.ui.render.READER_WINDOW_PRELOAD
 import com.folio.reader.ui.render.ReaderSection
 import com.folio.reader.ui.render.WindowOp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Loads the open book's chapter HTML behind a bounded LRU cache.
@@ -104,15 +107,14 @@ internal class ReaderContentLoader(
         isLoadingContentState.value = true
         loadErrorState.value = null
         try {
-            val last = allChapters.lastIndex
-            val from = (center - READER_WINDOW_PRELOAD).coerceAtLeast(0)
-            val to = (center + READER_WINDOW_PRELOAD).coerceAtMost(last)
-            val sections = (from..to).map { i ->
-                val chapter = allChapters[i]
-                sectionOf(chapter, loadHtml(bookId, chapter))
+            // Reading every chapter's HTML and probing each for fixed layout is work proportional to
+            // the window's size — 0.5-1.3 MB on the books that jump badly — and this runs on the main
+            // dispatcher, so it froze the very frame a Contents jump is supposed to feel instant.
+            val (range, sections) = withContext(Dispatchers.IO) {
+                buildWindow(bookId, allChapters, center)
             }
             windowSections.value = sections
-            windowRange.value = from..to
+            windowRange.value = range
             windowLoad.value = sections
             // A fresh document supersedes any pending mutation; clear it so a
             // stale append can never inject a chapter into the new window.
@@ -134,6 +136,60 @@ internal class ReaderContentLoader(
             isLoadingContentState.value = false
         }
     }
+
+    /**
+     * The chapters a jump to [center] loads: the anchor plus one chapter either side, then outward
+     * while the window stays inside [READER_WINDOW_MAX_CHARS] and never wider than
+     * [READER_WINDOW_PRELOAD] chapters from the anchor. Returns the chapter range and its sections in
+     * spine order.
+     *
+     * Chapters are loaded as the spread grows, so nothing is read only to be dropped. One neighbour
+     * either side always loads: a single huge chapter must still flow into the chapters around it,
+     * which is the whole reason a window exists.
+     *
+     * This bounds the *cold* build — the one a Contents jump pays for, where the WebView parses and
+     * lays out the whole document before the jump can land. Growth while scrolling is left alone on
+     * purpose: it arrives as appends into the live document, and trimming the far end to hold a
+     * ceiling there would change the scroll geometry under the reader.
+     */
+    private suspend fun buildWindow(
+        bookId: String,
+        allChapters: List<Chapter>,
+        center: Int,
+    ): Pair<IntRange, List<ReaderSection>> {
+        val last = allChapters.lastIndex
+        val sections = ArrayList<ReaderSection>()
+        var chars = 0
+        suspend fun load(index: Int): ReaderSection {
+            val chapter = allChapters[index]
+            return sectionOf(chapter, loadHtml(bookId, chapter)).also { chars += it.html.length }
+        }
+        var from = (center - 1).coerceAtLeast(0)
+        var to = (center + 1).coerceAtMost(last)
+        for (index in from..to) sections.add(load(index))
+        while (chars < READER_WINDOW_MAX_CHARS) {
+            val canLeft = from > 0 && center - from < READER_WINDOW_PRELOAD
+            val canRight = to < last && to - center < READER_WINDOW_PRELOAD
+            if (!canLeft && !canRight) break
+            // Grow toward whichever neighbour is smaller, so a 250 KB chapter on one side does not
+            // spend the whole budget while a 40 KB one waits on the other. Estimated from the stored
+            // counts, because measuring it properly would mean loading it first.
+            val leftChars = if (canLeft) estimatedChars(allChapters[from - 1]) else Long.MAX_VALUE
+            val rightChars = if (canRight) estimatedChars(allChapters[to + 1]) else Long.MAX_VALUE
+            if (canLeft && leftChars <= rightChars) {
+                sections.add(0, load(from - 1))
+                from--
+            } else {
+                sections.add(load(to + 1))
+                to++
+            }
+        }
+        return from..to to sections
+    }
+
+    /** Rough text length of a chapter, only ever used to choose between two unloaded neighbours. */
+    private fun estimatedChars(chapter: Chapter): Long =
+        if (chapter.characterCount > 0) chapter.characterCount else chapter.wordCount * CHARS_PER_WORD
 
     /**
      * Grows the window in [forward] direction, filling the lead in one call.
@@ -259,5 +315,8 @@ internal class ReaderContentLoader(
 
     private companion object {
         const val MAX_HTML_CACHE = 12
+
+        /** Fallback text length when a chapter stored no character count: only ever a comparison. */
+        const val CHARS_PER_WORD = 6L
     }
 }

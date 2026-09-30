@@ -175,7 +175,6 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     // keeps the embedder factory and every service derived from it in lockstep. See
     // `EmbeddingModelSelection`.
     val chunkRepository = com.folio.reader.database.JdbcChunkRepository(database)
-    val genreRepository = com.folio.reader.database.JdbcGenreRepository(database)
     val modelDownloader = com.folio.reader.ml.ModelDownloader(platform.fileSystem, platform.hasher)
     val modelSelection = com.folio.reader.ml.EmbeddingModelSelection(
         settingsRepository = settingsRepository,
@@ -183,7 +182,6 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         modelsDir = platform.fileSystem.getModelsDir(),
         chunkRepository = chunkRepository,
         bookRepository = bookRepository,
-        genreRepository = genreRepository,
     )
 
     val embeddingModel: com.folio.reader.ml.EmbeddingModel
@@ -198,7 +196,7 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
     val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
         get() = modelSelection.semanticSearch
 
-    /** Atlas + Echoes data owner; reuses the searcher's embedder and resident index. */
+    /** Echoes data owner; reuses the searcher's embedder and resident index. */
     val semanticDiscoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository
         get() = modelSelection.discovery
 
@@ -271,10 +269,6 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
         collectionRepository = collectionRepository,
         // Embeddings are written on the import path, right after the FTS5 index.
         embeddingIndexer = embeddingIndexer,
-        // Desktop has no background worker, so record subjects and classify genre inline — the book
-        // is already embedded above, so classification can run immediately.
-        genreRepository = genreRepository,
-        genreClassification = modelSelection.genreClassification,
     )
     val documentImporter = DocumentImporter(
         platform,
@@ -1982,7 +1976,8 @@ private fun ReaderRoute(
             bookId = book.id,
             epubPath = deps.platform.fileSystem.getBookEpubPath(book.id),
             parser = deps.epubParser,
-            repository = deps.bookRepository
+            repository = deps.bookRepository,
+            settings = deps.settingsRepository
         )
         viewModel.openBook(
             book.id,

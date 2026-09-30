@@ -46,9 +46,6 @@ object FolioRoutes {
     const val QUOTES = "quotes"
     const val REVISIT = "revisit"
 
-    /** Atlas — the full-screen semantic map of the library. Pushed, bar hidden. */
-    const val ATLAS = "atlas"
-
     /** Routes on which the bottom bar is visible — nothing else (§3.3). */
     val BAR_ROUTES = setOf(HOME, LIBRARY, STATS, MORE)
 }

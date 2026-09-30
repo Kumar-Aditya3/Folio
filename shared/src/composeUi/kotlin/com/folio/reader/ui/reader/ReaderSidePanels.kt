@@ -138,7 +138,7 @@ internal fun BoxScope.ReaderSidePanels(
         }
     }
 
-    // Echoes: cross-book resonant passages, styled as "land fragments" of the Atlas.
+    // Echoes: cross-book resonant passages.
     androidx.compose.animation.AnimatedVisibility(
         visible = showEchoes,
         modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding().navigationBarsPadding(),

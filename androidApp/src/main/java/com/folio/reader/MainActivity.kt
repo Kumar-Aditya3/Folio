@@ -534,11 +534,14 @@ class MainActivity : ComponentActivity() {
                             "incoming_${UUID.randomUUID()}${extension?.let { ".$it" }.orEmpty()}"
                         )
                         temporaryFiles += tempFile
-                        copyIncomingUri(uri, tempFile, displayName, mimeType)
+                        val (digest, streamedBytes) = copyIncomingUri(uri, tempFile, displayName, mimeType)
                         IncomingContent(
                             path = tempFile.absolutePath,
                             filename = displayName,
-                            mimeType = mimeType
+                            mimeType = mimeType,
+                            // Trust the digest only if it covers every byte the importer will read;
+                            // anything shorter falls back to hashing the file here.
+                            sha256 = digest.takeIf { tempFile.length() == streamedBytes }
                         )
                     }.onFailure { error ->
                         withContext(Dispatchers.Main) {
@@ -644,12 +647,21 @@ class MainActivity : ComponentActivity() {
                 ?.takeIf { it.isNotBlank() }
             ?: "shared_$index"
 
+    /**
+     * Streams [uri] into [destination], digesting the bytes on the way past so the importer can
+     * settle "already in the library?" without reading the copy a second time.
+     *
+     * The hex must stay byte-identical to `MessageDigestFileHasher.sha256File`: a digest that
+     * merely *looks* right is a silent dedupe miss, not a failure.
+     *
+     * @return the content digest and how many bytes were written.
+     */
     private fun copyIncomingUri(
         uri: Uri,
         destination: File,
         displayName: String,
         mimeType: String?
-    ) {
+    ): Pair<String, Long> {
         val extension = displayName.substringAfterLast('.', "").lowercase()
         val isOfficeDocument =
             extension == "docx" ||
@@ -661,7 +673,8 @@ class MainActivity : ComponentActivity() {
         } else {
             MAX_INCOMING_SOURCE_BYTES
         }
-        contentResolver.openInputStream(uri)?.use { input ->
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        return contentResolver.openInputStream(uri)?.use { input ->
             destination.outputStream().use { output ->
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 var total = 0L
@@ -672,8 +685,10 @@ class MainActivity : ComponentActivity() {
                     if (total > limit) {
                         throw IllegalArgumentException("$displayName exceeds the import size limit")
                     }
+                    digest.update(buffer, 0, count)
                     output.write(buffer, 0, count)
                 }
+                digest.digest().joinToString("") { "%02x".format(it) } to total
             }
         } ?: throw IllegalArgumentException("Unable to open $displayName")
     }

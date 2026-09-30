@@ -99,6 +99,18 @@ class DocumentLibraryViewModel(
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val reload = MutableStateFlow(0)
 
+    /**
+     * One serialized lane for every settings write this model makes (view mode, sort,
+     * filter, and the selected category). A single consumer drains it in submission order
+     * and awaits each write before the next, so the choice the reader lands on last is the
+     * one stored last. The previous fire-and-forget `launch`-per-change raced on the scope's
+     * dispatcher, letting an earlier value (e.g. LIST) commit after a later one (GRID) — the
+     * "I put it on grid and it doesn't stay" report. `UNLIMITED` keeps [persistChoice]
+     * non-suspending and lossless from the UI thread.
+     */
+    private val settingsWrites =
+        kotlinx.coroutines.channels.Channel<Pair<String, String>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+
     private val categoryMembership: StateFlow<Set<String>?> = selectedCategoryId
         .flatMapLatest { id ->
             if (id == null) flowOf<Set<String>?>(null)
@@ -176,6 +188,12 @@ class DocumentLibraryViewModel(
 
     init {
         scope.launch {
+            for ((key, value) in settingsWrites) {
+                runCatching { settingsRepository.setRaw(key, value) }
+                    .onFailure { println("⚠️ Document library settings write failed ($key): $it") }
+            }
+        }
+        scope.launch {
             runCatching { categoryRepository.ensureSeeded() }
                 .onFailure { println("⚠️ Document category seed failed: $it") }
         }
@@ -208,7 +226,7 @@ class DocumentLibraryViewModel(
 
     fun selectCategory(categoryId: String) {
         selectedCategoryId.value = categoryId
-        scope.launch { settingsRepository.setRaw(KEY_LIBRARY_CATEGORY, categoryId) }
+        persistChoice(KEY_LIBRARY_CATEGORY, categoryId)
     }
 
     suspend fun createCategory(name: String): String? =
@@ -323,7 +341,9 @@ class DocumentLibraryViewModel(
     }
 
     private fun persistChoice(key: String, value: String) {
-        scope.launch { settingsRepository.setRaw(key, value) }
+        // Enqueue rather than launch: the single consumer in `init` writes these in order,
+        // so the last choice made is the last one stored (see [settingsWrites]).
+        settingsWrites.trySend(key to value)
     }
 
     /**

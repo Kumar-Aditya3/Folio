@@ -3,6 +3,7 @@ package com.folio.reader.ui.library
 import com.folio.reader.database.Database
 import com.folio.reader.database.JdbcDocumentCategoryRepository
 import com.folio.reader.database.JdbcDocumentRepository
+import com.folio.reader.database.JdbcSettingsRepository
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.model.Document
 import com.folio.reader.model.DocumentCategory
@@ -262,6 +263,46 @@ class DocumentLibraryViewModelTest {
             } finally {
                 reopened.close()
             }
+        }
+    }
+
+    @Test
+    fun rapidViewModeTogglesPersistTheLastChoiceThroughTheRealSettingsStore() = runBlocking {
+        val root = createTempDir("folio-document-library-jdbc-")
+        val database = Database(DesktopPlatform(root).fileSystem.getDatabasePath())
+        try {
+            val documents = JdbcDocumentRepository(database)
+            val categories = JdbcDocumentCategoryRepository(database)
+            val settings = JdbcSettingsRepository(database)
+            categories.ensureSeeded()
+
+            val first = DocumentLibraryViewModel(
+                documents, categories, settings, Dispatchers.Default, fileExists = { true }
+            )
+            try {
+                await { first.selectedCategoryId.value == DocumentCategory.MAIN_ID }
+                assertEquals(DocumentViewMode.GRID, first.viewMode.value)
+
+                // A quick toggle: whatever the reader lands on must be what the store keeps.
+                // Independent launch-per-change writes could commit LIST after GRID and lose it.
+                first.setViewMode(DocumentViewMode.LIST)
+                first.setViewMode(DocumentViewMode.GRID)
+                await { settings.getRaw("document.library.viewMode") == "GRID" }
+            } finally {
+                first.close()
+            }
+
+            val reopened = DocumentLibraryViewModel(
+                documents, categories, settings, Dispatchers.Default, fileExists = { true }
+            )
+            try {
+                await { reopened.viewMode.value == DocumentViewMode.GRID }
+            } finally {
+                reopened.close()
+            }
+        } finally {
+            database.close()
+            root.deleteRecursively()
         }
     }
 

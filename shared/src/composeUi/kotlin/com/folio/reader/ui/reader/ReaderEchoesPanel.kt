@@ -42,8 +42,8 @@ import com.folio.reader.ui.theme.readerVeilAlpha
 /**
  * The Echoes side panel — cross-book resonant passages for the reader's current selection.
  *
- * Each result is a "land fragment": the same palette and shape language as the Atlas, tinted by
- * its source book's cover accent, so Echoes reads as pieces of the map surfacing beside the page.
+ * Each result is a "land fragment": a low, veiled card tinted by its source book's cover accent,
+ * so Echoes reads as ground surfacing beside the page rather than as search results.
  * Resonance (the cosine score) is shown as the fragment's brightness rather than a number — a
  * stronger echo is a warmer, more present card. The states are honest: a spinner while the
  * lookup runs, "No echoes found." when the library holds nothing comparable (a real answer, not

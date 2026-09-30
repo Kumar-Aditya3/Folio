@@ -127,15 +127,37 @@ is the real cost of the feature: roughly **100 books × 400 chunks × 15 ms ≈ 
 sustained CPU**.
 
 Done on first launch, that is a battery and thermal event which also makes the app feel sluggish
-exactly when the reader is exploring it. So it is:
+exactly when the reader is exploring it. So the sweep is held back four ways — and the fourth is the
+one that took three device reports to notice was missing:
 
-- **charging-gated** (`WorkManager`, `setRequiresCharging` + `setRequiresBatteryNotLow`);
+- **pool-isolated** — inference runs on its own two-worker `MlDispatchers.inference` pool, never on
+  `Dispatchers.Default`, which is the pool the Home, Library and Stats view models share;
+- **width-capped** — intra-op threads are a fraction of the machine while the reader may be in the
+  app (`MlDispatchers.backfillThreads`) and widen to `cores − 1` only once the process reports no
+  visible UI. Not charging-gated: `setRequiresCharging` was removed, because charging is satisfied
+  precisely when someone is reading on a cable, and a battery at 100% reports `BATTERY_NOT_LOW`
+  false on many devices, so it protected nothing and blocked the work it was meant to allow;
+- **memory-capped** — the batch is derived from the model's token ceiling so one forward pass fits
+  `NATIVE_BATCH_BUDGET_BYTES`, and `awaitHeadroom()` yields when the device cannot spare the RAM;
+- **rate-gated** — `SweepPace` pauses the sweep after every forward pass for as long as that pass
+  took, whenever the reader is in the app. This is the one a capped width does not give you: two of
+  eight cores held *continuously* still starves a frame, because the sweep never lets go. The pause
+  is the only lever that re-decides within a single pass (~15-100 ms) rather than once per slice
+  (up to 90 s), and it is why scheduler priority is not relied on — ONNX creates its intra-op
+  threads inside native `createSession`, so a Java thread priority set on the coroutine worker is
+  not reliably inherited by the threads that do the maths. It changes when work runs and never what
+  is computed; `BackfillPacedDeterminismTest` is the lock on that.
+
 - **chunked** — 40 chapters per slice, so a run yields to the system instead of holding a core
   for ten minutes;
 - **resumable and idempotent** — the slice query only selects chapters with no vectors for this
   model, so an interrupted run picks up where it stopped and a repeat run is a no-op;
 - **visible** — Settings → Semantic search shows progress, and the "Resume indexing" button
   starts it immediately without waiting for a charger.
+
+The sweep never waits for the app to be backgrounded before working — every gate above proceeds in
+whatever process state it finds, which is deliberate; see the ColorOS freezer evidence in
+`EmbeddingBackfillWorker`.
 
 Progress is written to the database as chunks land, so the UI observes it through
 `ChunkRepository.observeProgress` rather than the worker having to publish anything. That flow
@@ -407,7 +429,8 @@ Two conclusions that are baked into the product:
    getting worse.
 
 Cost: MiniLM embeds at **23.1 chunks/s** on desktop (4 threads) — 25 minutes for a 22-book
-library. This is why the model is downloaded on demand and the backfill is charging-gated.
+library. This is why the model is downloaded on demand, and why the backfill is held by the four
+gates in §5 rather than by a charging constraint it used to claim.
 
 ---
 

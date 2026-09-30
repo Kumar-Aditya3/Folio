@@ -5,14 +5,19 @@ import com.folio.reader.manga.MangaCategoryRepository
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.ui.manga.MangaLibraryViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -169,6 +174,103 @@ class MangaLibrarySharingTest {
         assertTrue(
             withTimeout(10_000) { model.ready.first { it } },
             "ready must still flip once the library lands",
+        )
+    }
+}
+
+/**
+ * The manga shelf's cold start, mirror of `LibraryShelfReadyTest` on the books side — the two
+ * gates are the same expression, so they are tested the same way.
+ *
+ * The shared `FakeCategoryRepo` answers `observeCategories()` with `flowOf(...)`, which lands
+ * immediately, and returns a null `defaultCategory()`. Together those made the manga gate
+ * exactly as untestable as the books gate had been: the placeholder frame the bug lives in could
+ * not be produced. These fakes delay the table and give it a real default.
+ */
+class MangaCategoryColdStartTest {
+
+    /** A categories table that has not answered yet, with the default a seeded library has. */
+    private class ColdCategoryRepo(
+        private val delegate: MangaReaderProgressTest.FakeCategoryRepo,
+        private val delayMs: Long,
+        private val default: MangaCategory?,
+    ) : MangaCategoryRepository by delegate {
+        override fun observeCategories(): Flow<List<MangaCategory>> = flow {
+            delay(delayMs)
+            emitAll(delegate.observeCategories())
+        }
+
+        override suspend fun defaultCategory(): MangaCategory? = default
+    }
+
+    private fun viewModel(
+        categories: List<MangaCategory>,
+        manga: List<String>,
+        default: MangaCategory?,
+        delayMs: Long,
+        settings: MutableMap<String, String>,
+    ): MangaLibraryViewModel {
+        val repo = MangaReaderProgressTest.FakeMangaRepo()
+        manga.forEach { id ->
+            repo.entries[id] = MangaEntry(
+                id = id, sourceId = 1L, sourceName = "Test", url = "u", title = "T", inLibrary = true,
+            )
+        }
+        return MangaLibraryViewModel(
+            backend = MangaReaderProgressTest.FakeBackend(emptyMap()),
+            mangaRepo = repo,
+            categoryRepo = ColdCategoryRepo(
+                MangaReaderProgressTest.FakeCategoryRepo().apply { categoriesList = categories },
+                delayMs,
+                default,
+            ),
+            chapterRepo = MangaReaderProgressTest.FakeChapterRepo(),
+            settingsRepo = MangaReaderProgressTest.FakeSettingsRepo(settings),
+        )
+    }
+
+    @Test
+    fun rememberedCategoryWinsOverTheDefaultWhenTheTableAnswersLate() = runBlocking {
+        val settings = mutableMapOf("manga.library.category" to "reading")
+        val main = MangaCategory(id = "main", name = "Main")
+        val vm = viewModel(
+            categories = listOf(main, MangaCategory(id = "reading", name = "Reading")),
+            manga = listOf("m1"),
+            default = main,
+            delayMs = 400,
+            settings = settings,
+        )
+        val collector = launch { vm.categoryReady.collect {} }
+        try {
+            delay(60)
+            assertFalse(
+                vm.categoryReady.value,
+                "an unanswered categories table is not the same fact as an empty library",
+            )
+            withTimeout(10_000) { vm.categoryReady.first { it } }
+            assertEquals("reading", vm.selectedCategoryId.value)
+            assertEquals(
+                "reading", settings["manga.library.category"],
+                "the default must not overwrite the category the reader left",
+            )
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    @Test
+    fun unsettledShelfNeverAnswersWithTheWholeLibrary() = runBlocking {
+        val vm = viewModel(
+            categories = listOf(MangaCategory(id = "main", name = "Main")),
+            manga = listOf("m1", "m2"),
+            default = null,
+            delayMs = 30_000,
+            settings = mutableMapOf(),
+        )
+        val shown = withTimeout(10_000) { vm.visible.first() }
+        assertTrue(
+            shown.isEmpty(),
+            "with no category resolved the shelf must be empty, not every category's manga (got ${shown.map { it.id }})",
         )
     }
 }
