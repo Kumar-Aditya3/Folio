@@ -145,11 +145,19 @@ fun FolioHeroCard(
     shape: Shape = com.folio.reader.ui.theme.FolioShapes.hero,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
 ) {
-    val tint = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.accentProgress
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    // The jacket's hue, clamped to the palette's own chroma, and then budgeted: a
+    // caller may ask for a brighter wash but not for one that supplies more of the
+    // card's finished colour than the hero's ceiling allows.
+    val coverTint = accent?.let { com.folio.reader.ui.theme.tameCover(it, colors.primary) }
+    val tint = coverTint ?: colors.accentProgress
+    val washAlpha = gradientAlpha.coerceAtMost(
+        com.folio.reader.ui.theme.heroWashBorrow(FolioTheme.atmosphere.isDark),
+    )
     val meshModifier = if (mesh) {
-        val colors = com.folio.reader.ui.theme.FolioTheme.colors
         Modifier.heroMesh(
-            layers = listOf(tint, colors.accentDiscovery, colors.accentProgress),
+            cover = coverTint,
+            palette = listOf(colors.accentDiscovery, colors.accentProgress),
             animate = com.folio.reader.ui.theme.rememberMotionEnabled()
         )
     } else Modifier
@@ -177,7 +185,7 @@ fun FolioHeroCard(
             )
             .background(
                 brush = Brush.verticalGradient(
-                    listOf(tint.copy(alpha = gradientAlpha), Color.Transparent)
+                    listOf(tint.copy(alpha = washAlpha), Color.Transparent)
                 ),
                 shape = shape
             )
@@ -310,7 +318,13 @@ fun FolioStatusBarBand(modifier: Modifier = Modifier, inkBand: Boolean = false) 
     val scrim = if (inkBand) {
         com.folio.reader.ui.theme.FolioTheme.colors.statusBar
     } else {
-        com.folio.reader.ui.theme.FolioTheme.atmosphere.barScrim
+        // Follows the room, not the palette's resting background — see scrimFor.
+        val atmos = com.folio.reader.ui.theme.FolioTheme.atmosphere
+        com.folio.reader.ui.theme.scrimFor(
+            atmos,
+            com.folio.reader.ui.theme.LocalFolioAmbientTint.current?.requested,
+            atmos.fieldTintStrength,
+        )
     }
     Box(
         modifier = modifier

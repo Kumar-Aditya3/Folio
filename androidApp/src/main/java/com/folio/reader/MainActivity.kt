@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
@@ -42,6 +43,7 @@ import com.folio.reader.nav.FolioNavShell
 import com.folio.reader.ui.components.folioField
 import com.folio.reader.ui.components.folioPredictiveBackScale
 import com.folio.reader.ui.theme.folioAmbientShader
+import com.folio.reader.ui.theme.folioLamp
 import com.folio.reader.nav.FolioRoutes
 import com.folio.reader.nav.changeMangaDownloadsLocation
 import com.folio.reader.nav.handleAnnotationsExport
@@ -52,6 +54,7 @@ import com.folio.reader.nav.handleMangaBackupExport
 import com.folio.reader.nav.handleMangaBackupImport
 import com.folio.reader.ui.library.LibraryMode
 import com.folio.reader.ui.theme.AppPalette
+import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FontTheme
 import com.folio.reader.ui.theme.surfaceOpacity
@@ -409,9 +412,86 @@ class MainActivity : ComponentActivity() {
                     // catch. Desktop and previews never provide it and keep the
                     // still room — today's look, byte-for-byte. Reduce-motion
                     // freezes it at neutral (rememberAmbientLight).
+                    val folioAmbientTint = com.folio.reader.ui.theme.rememberFolioAmbientTint()
+                    // The appearance switch, honoured once here rather than on every
+                    // screen: with the feature off the holder is not provided, so each
+                    // `FolioAmbientSource` call becomes a no-op, and the field and the
+                    // backdrop are handed an always-null colour, so the room, the bars
+                    // and the gel's refraction untint together and nothing stale can
+                    // survive the switch.
+                    val ambientOn = model.globalSettings.ambientColor
+                    val ambientOff = remember {
+                        androidx.compose.runtime.mutableStateOf<androidx.compose.ui.graphics.Color?>(
+                            null
+                        )
+                    }
+                    val ambientShown = if (ambientOn) folioAmbientTint.shown else ambientOff
+                    // The lamp. Its colour follows the ambient switch, and its
+                    // position is written by whichever cover the current screen is
+                    // featuring. Drawn with Canvas rather than AGSL, so it is not
+                    // capability-gated: an API 24 phone gets the same light as a 33
+                    // one. With the ambient colour off it lights the room in the
+                    // palette's own accent rather than going dark — the room always
+                    // has a source, the switch decides whose.
+                    val folioLampAnchor = remember {
+                        androidx.compose.runtime.mutableStateOf<androidx.compose.ui.geometry.Offset?>(
+                            null
+                        )
+                    }
+                    val lampFallback = FolioTheme.colors.accentProgress
+                    // The pack's own light: where its source sits, how hard it burns,
+                    // and how much of its colour it is willing to lend the book. The
+                    // lamp glows in the theme's primary, which is what stops a light
+                    // laid over every theme from overwriting the theme.
+                    val folioLight = com.folio.reader.ui.theme.folioLightFor(appPalette)
+                    val folioCoverLightState = remember {
+                        androidx.compose.runtime.mutableStateOf<com.folio.reader.ui.components.CoverLight?>(
+                            null
+                        )
+                    }
+                    val folioLamp = com.folio.reader.ui.theme.rememberFolioLamp(
+                        light = androidx.compose.runtime.derivedStateOf {
+                            ambientShown.value ?: lampFallback
+                        },
+                        at = folioLampAnchor,
+                        authored = folioLight,
+                        themeColor = FolioTheme.colors.primary,
+                        coverLight = folioCoverLightState,
+                    )
+                    // The room's closed form, published beneath the field so a
+                    // refracting surface can bend what is actually behind it instead
+                    // of what it contains. The field's pixel size arrives from the
+                    // Box below as a state, so measuring it never recomposes anything.
+                    val folioAtmos = FolioTheme.atmosphere
+                    val folioFieldPx = remember {
+                        androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+                    }
+                    val folioBackdrop = com.folio.reader.ui.theme.FolioBackdrop(
+                        atmos = folioAtmos,
+                        strength = folioAtmos.fieldTintStrength,
+                        shift = com.folio.reader.ui.theme.LocalFolioDaylight.current.let {
+                            it.azimuth * it.intensity
+                        },
+                        tint = ambientShown,
+                        ambient = com.folio.reader.ui.theme.LocalFolioAmbient.current,
+                        fieldSize = folioFieldPx,
+                        lamp = folioLamp,
+                    )
                     androidx.compose.runtime.CompositionLocalProvider(
                         com.folio.reader.ui.theme.LocalFolioAmbient provides
                             com.folio.reader.ui.theme.rememberAmbientLight(),
+                        // The room is lit by what is being read. One field sits under
+                        // every screen, and a screen cannot hand a colour *up* to the
+                        // ground it stands on — so it writes into this holder and the
+                        // field below reads it in its draw pass.
+                        com.folio.reader.ui.theme.LocalFolioAmbientTint provides
+                            if (ambientOn) folioAmbientTint else null,
+                        com.folio.reader.ui.theme.LocalFolioBackdrop provides folioBackdrop,
+                        com.folio.reader.ui.theme.LocalFolioLamp provides folioLamp,
+                        com.folio.reader.ui.theme.LocalFolioLight provides folioLight,
+                        com.folio.reader.ui.theme.LocalFolioCoverLight provides
+                            if (ambientOn) folioCoverLightState else null,
+                        com.folio.reader.ui.theme.LocalFolioLampAnchor provides folioLampAnchor,
                     ) {
                     // The app's ground plane. `folioField` replaces the flat
                     // background fill with the theme's atmosphere — a vertical wash
@@ -421,7 +501,8 @@ class MainActivity : ComponentActivity() {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .folioField()
+                            .onSizeChanged { folioFieldPx.value = it }
+                            .folioField(ambient = ambientShown)
                             // §17 living light: an animated ambient bloom film over
                             // the static field, so a resting Home/Library page has a
                             // slow drift of accent light. API 33+/pref/motion gated
@@ -431,6 +512,11 @@ class MainActivity : ComponentActivity() {
                                 colorB = FolioTheme.colors.tertiary,
                                 enabled = glassCapabilities.specular,
                             )
+                            // The lamp: one visible source in the room, anchored to
+                            // whichever cover this screen is featuring. Over the field
+                            // and its film, under every screen, so content sits *in*
+                            // the light rather than on top of a tint.
+                            .folioLamp(folioLamp)
                     ) {
                         FolioNavShell(
                             navController = navController,

@@ -44,7 +44,12 @@ import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.readingTimeCaption
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverLight
+import com.folio.reader.ui.theme.FolioAmbientSource
+import com.folio.reader.ui.theme.FolioCoverLightSource
+import com.folio.reader.ui.theme.FolioShapeFamily
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.rememberFolioShape
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -89,6 +94,13 @@ internal fun BookHeaderSection(
     sessions: List<ReadingSession> = emptyList(),
 ) {
     val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
+    // Opening a book brings its colour with it. The detail page is the step between
+    // the shelf and the reader, so this is where the room starts wearing the book:
+    // the morph into the reader leaves the shelf in this hue and the way back finds
+    // it again. Ungated here because the app root withholds the holder outright when
+    // the appearance switch is off.
+    FolioAmbientSource(accent)
+    FolioCoverLightSource(rememberCoverLight(book.coverPath))
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
@@ -205,10 +217,14 @@ internal fun BookHeaderSection(
 
 @Composable
 private fun BookMetadataGrid(book: Book, accent: Color) {
+    // This book's own well: the edgeStart family varies its trailing corners while
+    // the leading edge stays square against the screen edge. One shape governs the
+    // fill, the clip and the border, because folioSunken takes it once.
+    val wellShape = rememberFolioShape(book.id.hashCode(), FolioShapeFamily.edgeStart)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioSunken(FolioShapes.edgeStart, accent = accent)
+            .folioSunken(wellShape, accent = accent)
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
     ) {
         MetadataRow("Publisher", book.publisher ?: "—")

@@ -7,6 +7,9 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.heroMeshBorrow
 import com.folio.reader.ui.theme.rememberSlowPhases
 import kotlin.math.cos
 import kotlin.math.min
@@ -14,15 +17,34 @@ import kotlin.math.sin
 
 /** §13.4: cycle lengths within the 18–30s band, distinct so they never beat in sync. */
 private val MESH_PERIODS_MS = listOf(21_000L, 27_000L, 18_000L)
-private const val MESH_MAX_ALPHA = 0.18f
+/**
+ * The palette's own pools. These are not the cover's colour, so they are outside
+ * [com.folio.reader.ui.theme.HERO_COVER_CEILING_DARK] and its paper twin — the budget
+ * governs how much of the hero the jacket may supply, not how much of it may be the
+ * theme.
+ *
+ * Still the hero's second-loudest contributor once the cover was rationed: two
+ * saturated accents drifting across a pane that already carries its palette's chroma.
+ * Lowered to 0.07 for that reason, and it is the cheap place to go further — these
+ * pools are a draw-time layer, so unlike [com.folio.reader.ui.theme.FolioAtmosphere]'s
+ * `raisedFill` they are not load-bearing for any material guard.
+ */
+private const val MESH_POOL_ALPHA = 0.07f
 
 /**
- * §13.4 drifting gradient mesh: three large, low-alpha radial gradients behind
- * the hero, their centres drifting on slow independent cycles. Draw-phase state
- * reads keep this one drawing pass — no per-frame recomposition. Reduce-motion
- * freezes the centres (same mesh, zero animation); the lazy list disposing the
- * hero offscreen stops the clocks entirely. Radius scales with the shorter edge
- * and centres can sit outside the bounds, so no layer ever shows a visible edge.
+ * §13.4 drifting gradient mesh: large, low-alpha radial gradients behind the hero,
+ * their centres drifting on slow independent cycles. Draw-phase state reads keep
+ * this one drawing pass — no per-frame recomposition. Reduce-motion freezes the
+ * centres (same mesh, zero animation); the lazy list disposing the hero offscreen
+ * stops the clocks entirely. Radius scales with the shorter edge and centres can sit
+ * outside the bounds, so no layer ever shows a visible edge.
+ *
+ * [cover] is kept separate from [palette] because the two are not the same kind of
+ * colour and cannot share an alpha. One jacket hue drifting across the plane is the
+ * app being lit by the book; three of them is the app being painted by it, which is
+ * what happened while every pool was drawn at one uniform strength. The cover pool
+ * therefore draws at [com.folio.reader.ui.theme.heroMeshBorrow], its share of the
+ * hero's budget scaled to the surface underneath it, and the palette pools keep their own.
  *
  * The phases come from [rememberSlowPhases] rather than a
  * `rememberInfiniteTransition`, so an 18–30 second cycle is sampled ten times a
@@ -32,8 +54,16 @@ private const val MESH_MAX_ALPHA = 0.18f
  * kept the whole page redrawing forever. See [SLOW_MOTION_TICK_MS].
  */
 @Composable
-internal fun Modifier.heroMesh(layers: List<Color>, animate: Boolean): Modifier {
+internal fun Modifier.heroMesh(
+    cover: Color?,
+    palette: List<Color>,
+    animate: Boolean,
+): Modifier {
+    val layers = if (cover == null) palette else listOf(cover) + palette
     if (layers.isEmpty()) return this
+    // Resolved from the atmosphere's polarity: the same fraction of a saturated jacket
+    // is several times more visible laid over a near-black pane than over paper.
+    val coverAlpha = heroMeshBorrow(FolioTheme.atmosphere.isDark)
     val phases: State<List<Float>>? = if (animate) {
         rememberSlowPhases(MESH_PERIODS_MS)
     } else {
@@ -56,7 +86,12 @@ internal fun Modifier.heroMesh(layers: List<Color>, animate: Boolean): Modifier 
                 val radius = radii[index % radii.size]
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(color.copy(alpha = MESH_MAX_ALPHA), Color.Transparent),
+                        colors = listOf(
+                            color.copy(
+                                alpha = if (index == 0 && cover != null) coverAlpha else MESH_POOL_ALPHA,
+                            ),
+                            Color.Transparent,
+                        ),
                         center = center,
                         radius = radius,
                     ),

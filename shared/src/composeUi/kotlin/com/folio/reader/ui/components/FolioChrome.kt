@@ -58,7 +58,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.folio.reader.ui.theme.UiFonts
 import androidx.compose.ui.util.lerp
 import com.folio.reader.ui.theme.FolioShapes
@@ -304,12 +303,21 @@ fun FolioTopBar(
     // designed one: scaling a 0.36 `barGlass` could only ever go down, so the
     // slider ran from invisible to nearly invisible and its ends looked the same.
     val fill = FolioTheme.surfaceOpacity.topBarFill(f, blurred = blurred)
-    val statusColor = atmos.barScrim.copy(alpha = atmos.barScrim.alpha * fill.scrim)
-    val veil = atmos.barGlass
+    // The ground under the status icons is a piece of the page, so it takes the
+    // room's colour too — `barScrim` alone is derived from the untinted background,
+    // which left the top of the screen reading as a separate band from the field
+    // beneath it. Read the holder's nullable value rather than the fallback-taking
+    // helper, so an unlit tree stays byte-identical.
+    val roomTint = com.folio.reader.ui.theme.LocalFolioAmbientTint.current?.requested
+    val scrimBase = com.folio.reader.ui.theme.scrimFor(atmos, roomTint, atmos.fieldTintStrength)
+    val statusColor = scrimBase.copy(alpha = scrimBase.alpha * fill.scrim)
+    // Glass for *this* room, not the palette's resting one: `barGlass` is derived per
+    // palette and the book's colour is runtime, so the bar asks the field model to bend
+    // its hue. Hue only — alpha and lightness are pinned — so §15's glass window holds.
+    val veil = folioBarGlass(atmos)
     // Specular catch for the masthead's mirror finish — the atmosphere's own rim
     // light, so a dark field emits at the crown and paper catches a white sheen.
-    // Purely additive over the veil; it never touches barGlass's alpha, so the §15
-    // glass window (DesignSystemTest.appBarsAreGlassNotLids) still holds.
+    // Purely additive over the veil.
     val sheen = atmos.rimLight
     // Blur only while something is passing underneath — the same condition as the
     // fill — fading in with the bar's presence. A bar at rest over the page's own
@@ -647,6 +655,11 @@ fun FolioSegmented(
         }
     }
     val clamped = selectedIndex.coerceIn(0, options.lastIndex)
+    // The lit segment wears *its* option's destination colour, not the theme's one
+    // signature; labels the table does not know fall back to `primary`, so every other
+    // segmented control is unchanged. The ink takes the capsule's contrast guard.
+    val accent = folioDestinationAccent(options[clamped])
+    val accentInk = rememberLegibleAccent(accent)
     val targetLeft = remember(slotWidths, clamped) {
         val (left, _) = segmentedSlotBounds(slotWidths.map { it.value }, clamped, SEGMENT_GAP.value)
         left.dp
@@ -670,7 +683,7 @@ fun FolioSegmented(
                 val radius = CornerRadius(size.height / 2f)
                 onDrawBehind {
                     drawRoundRect(
-                        color = colors.primary.copy(alpha = 0.20f),
+                        color = accent.copy(alpha = 0.20f),
                         topLeft = Offset(indicatorLeft.toPx(), 0f),
                         size = Size(indicatorWidth.toPx(), size.height),
                         cornerRadius = radius,
@@ -687,7 +700,7 @@ fun FolioSegmented(
                 // Ink still cross-fades per segment: the label tells you where
                 // the light landed, the indicator shows it travelling.
                 val ink by animateColorAsState(
-                    targetValue = if (selected) colors.primary else colors.onSurfaceVariant,
+                    targetValue = if (selected) accentInk else colors.onSurfaceVariant,
                     label = "segmentInk",
                 )
                 Text(
@@ -746,20 +759,3 @@ fun navSweepBand(progress: Float, width: Float, band: Float, direction: Float): 
  */
 fun navSweepAlpha(progress: Float): Float =
     sin(PI * progress.coerceIn(0f, 1f).toDouble()).toFloat().coerceIn(0f, 1f)
-
-/**
- * Section label inside a menu, so one menu can carry two or three groups and still
- * be read at a glance. A twenty-item flat list is not a menu, it is an inventory.
- */
-@Composable
-fun FolioMenuLabel(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text.uppercase(),
-        style = FolioTheme.typography.labelSmall,
-        // Uppercase small text needs tracking to read as a kicker, like every
-        // other eyebrow in the app (FolioEyebrow adds 1.4sp).
-        letterSpacing = 1.2.sp,
-        color = FolioTheme.colors.onSurfaceVariant,
-        modifier = modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
-    )
-}

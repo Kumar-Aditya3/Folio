@@ -12,6 +12,7 @@ import com.folio.reader.AppGraph
 import com.folio.reader.MainActivity
 import com.folio.reader.FolioApplication
 import com.folio.reader.security.SyncCredentials
+import com.folio.reader.settings.AppSettingsStore
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.diffFields
 import com.folio.reader.settings.withFieldsFrom
@@ -60,7 +61,27 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     var callbacks: FolioNavCallbacks = object : FolioNavCallbacks {}
 
     // ── Hoisted UI state (was remembered in setContent before the nav move) ──
-    var globalSettings by mutableStateOf(ReaderSettings())
+    /**
+     * [globalSettings] for the half of the app that cannot observe Compose state.
+     * Declared ahead of the property that writes it, so the first publish can never
+     * reach a field that has not been initialised yet.
+     */
+    val settingsStore = AppSettingsStore()
+
+    private var globalSettingsState by mutableStateOf(ReaderSettings())
+
+    /**
+     * The live global-settings row. Every setting-dependent behaviour in the app reads
+     * this, and every write lands here — including the store publish — because two
+     * places that each have to remember to update is how the store would become a
+     * third stale copy of the row it exists to replace.
+     */
+    var globalSettings: ReaderSettings
+        get() = globalSettingsState
+        set(value) {
+            globalSettingsState = value
+            settingsStore.publish(value)
+        }
 
     /**
      * Cloud-sync credentials, mirrored from the no-backup [SecureCredentialStore] for the sync
@@ -174,7 +195,9 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         com.folio.reader.ui.home.HomeViewModel(
             graph.bookRepository,
             graph.sessionRepository,
-            graph.settingsRepository,
+            // The live store, not the repository: a one-shot read of the row is what
+            // made Home's cover tint, ambient colour and daily goal need a restart.
+            settingsStore,
             // §11.2/§12.9: exclusions gate every Home content selection;
             // group repos resolve each book's tags and collections.
             com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),

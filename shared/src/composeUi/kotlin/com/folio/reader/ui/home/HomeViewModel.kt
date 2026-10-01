@@ -3,7 +3,8 @@ package com.folio.reader.ui.home
 import com.folio.reader.database.BookRepository
 import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.ReadingSessionRepository
-import com.folio.reader.database.SettingsRepository
+import com.folio.reader.settings.AppSettingsStore
+import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
 import com.folio.reader.manga.BrowseMode
@@ -34,6 +35,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flow
@@ -90,6 +92,8 @@ data class HomeUiState(
     val exclusionsActive: Boolean = false,
     /** §13.3: hero gradient is tinted from the current book's cover (Themes toggle). */
     val coverTint: Boolean = true,
+    /** Whether the room itself is lit from the book being read (Appearance toggle). */
+    val ambientColor: Boolean = true,
     /**
      * Days since the last reading sitting (0 = today), or null when there is
      * no session history at all — the reading weather's drought signal. Derived
@@ -179,7 +183,7 @@ data class MangaDiscoverItem(
 class HomeViewModel(
     private val bookRepository: BookRepository,
     private val sessionRepository: ReadingSessionRepository,
-    private val settingsRepository: SettingsRepository? = null,
+    private val settingsStore: AppSettingsStore? = null,
     private val statsExclusionRepository: StatsExclusionRepository? = null,
     private val tagRepository: TagRepository? = null,
     private val collectionRepository: CollectionRepository? = null,
@@ -199,23 +203,34 @@ class HomeViewModel(
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
 
     /** Cold so a goal edited on the Stats tab is picked up on the next Home visit. */
-    private data class HomeSettings(val goalMinutes: Int, val coverTint: Boolean)
+    private data class HomeSettings(val goalMinutes: Int, val coverTint: Boolean, val ambientColor: Boolean)
 
     /**
-     * One settings read per emission, not two: the goal and the §13.3 cover-tint
-     * toggle used to be two separate flows, each fetching and deserializing the
-     * whole global-settings row before Home's first emission could assemble.
+     * The live settings row, narrowed to the three fields Home draws with.
+     *
+     * This used to be `flow { emit(getGlobalSettings()) }` — cold and one-shot, firing
+     * once and then never again. A cover-tint, ambient-colour or daily-goal change made
+     * in Settings therefore sat unread until this ViewModel was rebuilt, which in
+     * practice meant restarting the app. The store carries the same value the app root
+     * already keeps live; it is the only way a ViewModel, which cannot read a
+     * `mutableStateOf`, finds out anything changed.
+     *
+     * `distinctUntilChangedBy` is load-bearing: the store republishes the whole row on
+     * a save of *any* field, and without this Home would re-run its entire query set
+     * because the reading font changed.
      */
-    private val settingsFlow: Flow<HomeSettings> = flow {
-        val settings = settingsRepository
-            ?.let { repo -> runCatching { repo.getGlobalSettings() }.getOrNull() }
-        emit(
-            HomeSettings(
-                goalMinutes = settings?.dailyGoalMinutes ?: 60,
-                coverTint = settings?.homeCoverTint ?: true,
-            )
-        )
-    }
+    private val settingsFlow: Flow<HomeSettings> =
+        (settingsStore?.state ?: flowOf(ReaderSettings()))
+            .distinctUntilChangedBy {
+                it.dailyGoalMinutes to (it.homeCoverTint to it.ambientColor)
+            }
+            .map {
+                HomeSettings(
+                    goalMinutes = it.dailyGoalMinutes,
+                    coverTint = it.homeCoverTint,
+                    ambientColor = it.ambientColor,
+                )
+            }
 
     /** One combine emission before exclusion gating, so both pipelines share it. */
     private data class Inputs(
@@ -533,6 +548,7 @@ class HomeViewModel(
             discover = discover,
             exclusionsActive = exclusions?.isNotEmpty() == true,
             coverTint = coverTint,
+            ambientColor = settings.ambientColor,
             daysSinceLastRead = daysSinceLastRead
         )
     }

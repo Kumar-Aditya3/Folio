@@ -56,6 +56,22 @@ data class ReaderSettings(
     /** §13.3: tint the Home hero from the current book's cover. Contrast-guarded, so on by default. */
     val homeCoverTint: Boolean = true,
     /**
+     * Light the room from what is being read: the field, the colour pools, the
+     * bars' glass and the dissolve under the nav all take the featured cover's
+     * hue, so switching tab or book visibly changes the light.
+     *
+     * Off returns the environment to the palette's own atmosphere — the look every
+     * screen had before, byte-for-byte — and is the reversible escape hatch for an
+     * amplitude this large. Distinct from [homeCoverTint], which governs only
+     * Home's own surfaces: this one governs the ground plane under everything.
+     *
+     * App-level rather than per-book, and outside the per-book override lists like
+     * [liquidGlassEffects]. It cannot trade contrast for colour either way: the
+     * tint is applied at pinned luminance, so the room changes hue and the
+     * luminance-of-air, never the ink's ratio.
+     */
+    val ambientColor: Boolean = true,
+    /**
      * User-authored app palette. When present it replaces the palette named by
      * [appThemeId] everywhere; the atmosphere (field gradient, colour pools,
      * shadows) is re-derived from it, so the gradient applies to custom colours

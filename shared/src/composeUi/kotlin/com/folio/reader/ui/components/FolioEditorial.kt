@@ -15,15 +15,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.folio.reader.ui.theme.FolioAtmosphere
+import com.folio.reader.ui.theme.FolioAmbientTint
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioAmbientTint
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.barGlassFor
+import com.folio.reader.ui.theme.fieldColors
+import com.folio.reader.ui.theme.rememberFolioAmbientColor
 
 /**
  * Typography as structure.
@@ -47,15 +55,57 @@ fun FolioEyebrow(
     text: String,
     modifier: Modifier = Modifier,
     accent: Color? = null,
+    /**
+     * The ground the kicker is read on. The page's own surface by default; a
+     * caller that labels a panel or a hero passes that plane instead, so the
+     * guard below measures the contrast the reader actually gets.
+     */
+    background: Color = FolioTheme.colors.surface,
 ) {
+    val colors = FolioTheme.colors
+    // An accent may name a region; it may not make the name unreadable. Every
+    // eyebrow is uppercase `labelSmall` with 1.4sp of tracking — small type by
+    // WCAG's own line, which only lets a run near 24sp (or 18.66sp bold) have
+    // the 3:1 large-text tier — so this guards at 4.5:1 and blends toward
+    // `onSurfaceVariant`, the quiet ink the kicker already falls back to, rather
+    // than the louder `onSurface`. A null accent is that fallback by definition
+    // and is left untouched.
+    val ink = remember(accent, background, colors.onSurfaceVariant) {
+        if (accent == null) {
+            colors.onSurfaceVariant
+        } else {
+            legibleOn(accent, background, colors.onSurfaceVariant, 4.5)
+        }
+    }
     Text(
         text = text.uppercase(),
         style = FolioTheme.typography.labelSmall,
         letterSpacing = 1.4.sp,
-        color = accent ?: FolioTheme.colors.onSurfaceVariant,
+        color = ink,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
+    )
+}
+
+/**
+ * Section label inside a menu, so one menu can carry two or three groups and still
+ * be read at a glance. A twenty-item flat list is not a menu, it is an inventory.
+ *
+ * [FolioEyebrow]'s quieter sibling: the same uppercase kicker at the same type rank,
+ * but inset to a menu's own gutters and never in an accent, because a menu group is
+ * structure and structure does not get to shout.
+ */
+@Composable
+fun FolioMenuLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text.uppercase(),
+        style = FolioTheme.typography.labelSmall,
+        // Uppercase small text needs tracking to read as a kicker, like every
+        // other eyebrow in the app (FolioEyebrow adds 1.4sp).
+        letterSpacing = 1.2.sp,
+        color = FolioTheme.colors.onSurfaceVariant,
+        modifier = modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
     )
 }
 
@@ -190,4 +240,75 @@ fun FolioCallout(
             content = content,
         )
     }
+}
+
+/**
+ * A place's own colour, keyed by the strings the app already uses to name it.
+ *
+ * Chrome is byte-identical across screens — one `primary` at one alpha on every
+ * masthead and every capsule — which is most of why four different rooms read as
+ * one room. The palette already carries four *semantic* accents, and the app uses
+ * them consistently (§12.3): progress for what is being read, discovery for what
+ * may be found, streak for what was done, annotation for what was marked. This is
+ * the single table that spends them on destinations, keyed on a route id
+ * ("library", "stats") or a segmented label ("Books", "Manga") so the nav capsule
+ * and the masthead's own segment switch agree by construction rather than by two
+ * hardcoded lists drifting.
+ *
+ * [fallback] is the theme's signature `primary`, so any key not in the table — the
+ * reader's font-size switch, a theme card row's layout choice — keeps exactly the
+ * colour it wore before, and only real destinations change.
+ */
+@Composable
+fun folioDestinationAccent(
+    key: String,
+    fallback: Color = FolioTheme.colors.primary,
+): Color {
+    val colors = FolioTheme.colors
+    return when (key.trim().lowercase()) {
+        "home", "books" -> colors.accentProgress
+        "library", "manga" -> colors.accentDiscovery
+        "stats", "documents" -> colors.accentStreak
+        "more", "settings" -> colors.accentAnnotation
+        else -> fallback
+    }
+}
+
+/**
+ * The glass a bar is made of *in the room the reader is standing in*.
+ *
+ * [FolioAtmosphere.barGlass] is derived once per palette while the colour of the
+ * book being read is a runtime value, so a bar cannot bake it in at palette time — it
+ * asks [barGlassFor] here, at the atmosphere's own
+ * [FolioAtmosphere.fieldTintStrength] rather than a second constant.
+ *
+ * The holder is read for its **nullable** `requested`, exactly as [folioFieldBottom]
+ * and both `scrimFor` call sites do, rather than through
+ * [rememberFolioAmbientColor] with the glass as the fallback. That fallback encoded
+ * "nothing lit" as "lit by the glass itself", which was invisible while the bar mixed
+ * toward a raw colour but made it impossible to aim the bar at the *lit field* — an
+ * unlit tree would then have arrived lit by its own glass. Null now means unlit, so
+ * desktop, every preview and every unit test still get [FolioAtmosphere.barGlass]
+ * byte-for-byte, and a bar is finally free to follow the room's lightness and not
+ * merely its hue.
+ */
+@Composable
+fun folioBarGlass(atmos: FolioAtmosphere = FolioTheme.atmosphere): Color =
+    barGlassFor(atmos, LocalFolioAmbientTint.current?.requested, atmos.fieldTintStrength)
+
+/**
+ * The field's lower endpoint as the room lights it — the colour anything that
+ * *dissolves into* the ground plane must wear, or it dissolves into a colour the
+ * page is not.
+ *
+ * Deliberately not [rememberFolioAmbientColor]: [fieldColors] treats a null tint as
+ * "the palette's own", and no fallback colour can say that here, because a lit room
+ * also *deepens* its lower endpoint. So the holder is read for the same nullable
+ * value the helper itself reads — [FolioAmbientTint.requested], not the crossfading
+ * `shown`, so a chrome surface recomposes once per book and not once per frame.
+ */
+@Composable
+fun folioFieldBottom(atmos: FolioAtmosphere = FolioTheme.atmosphere): Color {
+    val tint = LocalFolioAmbientTint.current?.requested
+    return fieldColors(atmos, tint, atmos.fieldTintStrength).bottom
 }

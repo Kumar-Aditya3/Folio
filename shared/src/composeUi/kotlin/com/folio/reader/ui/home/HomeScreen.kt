@@ -75,6 +75,7 @@ import com.folio.reader.manga.MangaBackend
 import com.folio.reader.model.Book
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.COVER_HALO_STRENGTH_HERO
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioFigure
@@ -88,11 +89,13 @@ import com.folio.reader.ui.components.ProgressRing
 import com.folio.reader.ui.components.ReadingClimate
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.heroMesh
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.CLIMATE_LIGHT_MAX
 import com.folio.reader.ui.components.lightFraction
 import com.folio.reader.ui.components.phrase
 import com.folio.reader.ui.components.readingClimate
@@ -103,14 +106,23 @@ import com.folio.reader.ui.components.tint
 import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.components.LocalGlassCapabilities
+import com.folio.reader.ui.theme.FolioAmbientSource
+import com.folio.reader.ui.theme.FolioCoverLightSource
+import com.folio.reader.ui.components.rememberCoverLight
+import com.folio.reader.ui.theme.folioLampSource
+import com.folio.reader.ui.theme.FolioShapeFamily
+import com.folio.reader.ui.theme.rememberFolioShape
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.LocalFolioDaylight
+import com.folio.reader.ui.theme.heroWashBorrow
+import com.folio.reader.ui.theme.tameCover
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.folioLiquidGlass
 import com.folio.reader.ui.theme.lightDirection
+import com.folio.reader.ui.theme.paneFill
 import com.folio.reader.ui.theme.rememberFolioPressFocal
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.datetime.Clock
@@ -224,6 +236,25 @@ fun HomeScreen(
                 rememberCoverAccent(anchorItem.coverPath, FolioTheme.colors.accentProgress)
             } else null
             val fallbackTint = FolioTheme.colors.accentProgress
+            // The room is lit by the same cover, on its own switch: turning off
+            // Home's *surface* tint need not turn off the environment, and vice
+            // versa. Same cache key the hero above already samples, so this costs
+            // no extra pixel work — the accent cache is keyed by cover path and
+            // lives for the process.
+            val ambientTint = if (state.ambientColor && anchorItem != null) {
+                rememberCoverAccent(anchorItem.coverPath, fallbackTint)
+            } else null
+            FolioAmbientSource(ambientTint)
+            // And the artwork's own light: where its brightness sits, what colour the
+            // lit parts are, how much of it there is. This is what places the room's
+            // lamp by the book instead of by its average.
+            FolioCoverLightSource(
+                if (state.ambientColor && anchorItem != null) {
+                    rememberCoverLight(anchorItem.coverPath)
+                } else {
+                    null
+                }
+            )
             // §13.9: the collapse is reported *continuously*, not as a flip at the
             // end. The bar cross-fades "Folio" out and the book's title in over the
             // same 160dp the hero recedes across, so the two halves of the effect
@@ -253,7 +284,11 @@ fun HomeScreen(
             }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                // §16: this is the backdrop the capsule and masthead blur. Every other
+                // tab registers one and Home never did, so on Home the veil had nothing
+                // to sample and painted its own `backgroundColor` ground instead — the
+                // capsule read as a solid pill here and as glass everywhere else.
+                modifier = Modifier.fillMaxSize().folioBackdropSource(),
                 // No uniform arrangement: each block owns the space beneath it. No
                 // bottom runway either — the closing well absorbs the floating
                 // capsule's clearance itself (see [ThisWeekWell]).
@@ -357,13 +392,30 @@ private fun ReadingNowAnchor(
         }
         return
     }
-    val tint = heroTint ?: colors.accentProgress
+    // The jacket's hue, clamped to the palette's own chroma: a sampled cover carries
+    // its printing's violence along with its hue, and it is the violence that reads
+    // as the thumbnail overwriting the theme. Tamed once so every channel inherits it.
+    val coverTint = heroTint?.let { tameCover(it, colors.primary) }
+    val tint = coverTint ?: colors.accentProgress
     val fraction = collapse.value
     // The reading weather burns through the plane's lighting: the cover still
     // owns the hue (§13.3), but the climate scales how brightly it is lit — a
     // warm spell lifts the gradient, a dry spell lets the room go dim. The
     // collapse fade below keeps its own calibrated floor.
     val climateLight = climate?.lightFraction() ?: 0.30f
+    // The wash's allowance, scaled to the surface it lands on. Paper's pane is already
+    // 55% white and shrugs a bright jacket off; a near-black pane takes the same
+    // fraction as a brown wash over the whole card, so the dark face is given a
+    // fraction sized for the shift it produces rather than the fraction itself.
+    val washBorrow = heroWashBorrow(FolioTheme.atmosphere.isDark)
+    // The wash's starting alpha at the plane's lit corner: its budgeted share scaled by
+    // the climate (a warm spell lights it, a dry spell dims it) and faded as the hero
+    // collapses. Pulled out so the eased gradient stops below can taper from it.
+    val washAlpha = androidx.compose.ui.util.lerp(
+        washBorrow * (climateLight / CLIMATE_LIGHT_MAX),
+        washBorrow * 0.35f,
+        fraction,
+    )
     // §13.7: the room's virtual-sun direction, so the liquid-glass specular lands
     // on the same edge the raised rim catches.
     val heroLight = LocalFolioDaylight.current.lightDirection()
@@ -371,6 +423,14 @@ private fun ReadingNowAnchor(
     // Where the thumb lands on the hero. The AGSL film gathers its specular here; the
     // raised sheen and the mesh under it are daylight-only, as they were.
     val heroFocal = rememberFolioPressFocal(interaction)
+    // The anchor's silhouette is its own. The hero family varies the two wide corners
+    // per book, so a returning reader's page is not the same rectangle it was
+    // yesterday's, while the class stays unmistakably a hero (§12.1 Rule 13's blur
+    // test) and the leading edge stays square — that is where the cover bleeds off the
+    // plane, and a radius there would open the field behind it. Seeded on the id, not
+    // the list position, because the anchor changes book on every finish and a
+    // position-seeded shape would restyle the whole page to mark the occasion.
+    val heroShape = rememberFolioShape(item.id.hashCode(), FolioShapeFamily.heroBleed)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -392,15 +452,22 @@ private fun ReadingNowAnchor(
             }
             .folioPressable(interaction)
             .folioRaised(
-                shape = FolioShapes.heroBleed,
+                shape = heroShape,
                 accent = tint,
                 elevation = FolioTokens.elevationRaised,
+                // A pane, not a panel: the room shows through the hero, which is what
+                // the refraction along its rim has been trying to say. The shadow, the
+                // rim and the sheen are unchanged, so the card keeps its depth.
+                fill = FolioTheme.atmosphere.paneFill(),
             )
-            // §13.7 / M7: the AGSL liquid-glass film on the app's flagship hero,
-            // layered under the mesh and the gradient below it (and so under the
-            // cover and type). API 33+ and the liquid-glass preference on, or it
-            // is a no-op and the mesh + raised sheen carry the surface. Lit by the
-            // room's own virtual sun so its specular agrees with the rim catch.
+            // §13.7 / M7: the AGSL liquid-glass on the app's flagship hero — a
+            // film under the mesh and the gradient (and so under the cover and
+            // type), and a gel that bends the *room* at the hero's rim: the page
+            // behind the card, reproduced from the field's own closed form and
+            // rolled over at its edge. API 33+, the liquid-glass preference on and
+            // a backdrop published at the root, or it is a no-op and the mesh +
+            // raised sheen carry the surface. Lit by the room's own virtual sun so
+            // its specular agrees with the rim catch.
             .folioLiquidGlass(
                 accent = tint,
                 highlight = FolioTheme.atmosphere.rimLight,
@@ -408,6 +475,7 @@ private fun ReadingNowAnchor(
                 lightY = heroLight.second,
                 enabled = LocalGlassCapabilities.current.specular,
                 focal = heroFocal,
+                shape = heroShape,
             )
             // §13.4's drifting mesh, finally on the surface it was designed
             // for: three large low-alpha accent gradients breathing behind
@@ -417,25 +485,33 @@ private fun ReadingNowAnchor(
             // own hue plus the two discovery accents. Reduce-motion parks the
             // centres; the hero still reads as lit, merely still.
             .heroMesh(
-                layers = listOf(tint, colors.accentDiscovery, colors.accentProgress),
+                cover = coverTint,
+                palette = listOf(colors.accentDiscovery, colors.accentProgress),
                 animate = rememberMotionEnabled(),
             )
             .background(
+                // Eased falloff, not a two-stop fade. The old wash reached transparent
+                // by 0.65 of the diagonal and then held flat; the slope change where the
+                // fade met the flat drew a faint rectangle edge across the plane — a Mach
+                // band the eye reads as a box inside the card. These stops taper the
+                // slope to zero at the far corner, so the wash vanishes without ever
+                // laying down a line. Same top-corner light origin and the same ceiling
+                // alpha (`washAlpha`); only the tail's shape changed.
                 Brush.linearGradient(
-                    0f to tint.copy(
-                        alpha = androidx.compose.ui.util.lerp(climateLight, 0.10f, fraction)
-                    ),
-                    0.65f to Color.Transparent,
+                    0f to tint.copy(alpha = washAlpha),
+                    0.35f to tint.copy(alpha = washAlpha * 0.45f),
+                    0.6f to tint.copy(alpha = washAlpha * 0.16f),
+                    0.82f to tint.copy(alpha = washAlpha * 0.04f),
+                    1f to Color.Transparent,
                 ),
-                FolioShapes.heroBleed,
+                heroShape,
             )
             // The anchor's themed rim: a light travelling the plane's own
             // silhouette in the cover's hue against the discovery counter-hue.
             // Last of the background passes so it sits on the glass, and behind
             // the content so the overhanging plate occludes the arc under it.
             .folioThemeRim(
-                shape = FolioShapes.heroBleed,
-                accent = tint,
+                shape = heroShape,
                 counterAccent = colors.accentDiscovery,
                 // No velocity: this hero's scroll is a list offset reported through
                 // `setProgress`, not consumed deltas, so a rate measured here would
@@ -457,6 +533,9 @@ private fun ReadingNowAnchor(
                 Box(
                     modifier = Modifier
                         .offset(x = -(FolioTokens.gutter - FolioTokens.space1))
+                        // The room is lit from this artwork: the lamp's centre is the
+                        // cover's own, so the light reads as coming off the book.
+                        .folioLampSource()
                 ) {
                     // Manga plates load over the network and books load from a file:
                     // one switch, both in the same object language.
@@ -476,6 +555,10 @@ private fun ReadingNowAnchor(
                             author = item.subtitle,
                             width = FolioTokens.coverAnchor,
                             halo = tint,
+                            // Named, not defaulted: this is the only plate whose halo
+                            // lands on a card face instead of in the room, and leaving
+                            // it to the default drew paper's strength on any theme.
+                            haloStrength = COVER_HALO_STRENGTH_HERO,
                             elevation = FolioTokens.elevationRaised,
                             // §17: Home's anchor hands the cover to the book detail
                             // (or the manga detail) the same way the shelves do, so

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -46,10 +47,14 @@ import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.legibleOn
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.paneFill
+import com.folio.reader.ui.theme.rememberFolioAmbientColor
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.LocalDate
 import kotlin.math.PI
@@ -178,7 +183,14 @@ internal fun ActivityHeatmap(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = FolioTokens.gutter)
-            .folioRaised(shape = FolioShapes.hero, accent = FolioTheme.colors.accentProgress)
+            .folioRaised(
+                shape = FolioShapes.hero,
+                accent = FolioTheme.colors.accentProgress,
+                // The same pane every other hero is made of. Left on the default
+                // opaque raisedFill this was the one slab in the app that the room
+                // could not show through, and it read as pasted onto the page.
+                fill = FolioTheme.atmosphere.paneFill(),
+            )
             .padding(FolioTokens.space3)
     ) {
         Column {
@@ -207,7 +219,8 @@ internal fun ActivityHeatmap(
                 return@Column
             }
             val peak = remember(days) { (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L) }
-            val cellAccent = FolioTheme.colors.accentProgress
+            // Guarded against the grid's own material, not the page behind it.
+            val cellRamp = heatmapAccentRamp(FolioTheme.atmosphere.raisedFill)
             // Up to 365 cells → 52 week sublists; memoize so a mode toggle / entry animation / parent
             // scroll doesn't re-scan and re-chunk the whole year every recomposition.
             val weeks = remember(days) { days.chunked(7) }
@@ -291,7 +304,7 @@ internal fun ActivityHeatmap(
                                         day = day,
                                         peak = peak,
                                         size = cell,
-                                        accent = cellAccent,
+                                        ramp = cellRamp,
                                     )
                                 }
                             }
@@ -318,7 +331,9 @@ internal fun ActivityHeatmap(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text("Less", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
-                    (1..4).forEach { HeatmapCell(intensity = it, size = 9.dp, accent = cellAccent) }
+                    // The legend paints the ramp itself, not a re-derivation of it:
+                    // "Less"/"More" that disagrees with the grid is worse than none.
+                    (1..4).forEach { HeatmapRampCell(intensity = it, size = 9.dp, ramp = cellRamp) }
                     Text("More", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
                 }
             }
@@ -488,37 +503,81 @@ internal fun intensityFor(minutes: Long, peak: Long): Int {
 private fun LocalDate.shortLabel(): String = "$dayOfMonth.$monthNumber"
 
 /**
- * One heatmap day: transparent when the slot has no date (the leading/trailing
- * days of the first/last calendar weeks), the faint empty tint on a day with no
- * reading, else the accent stepped by [intensityFor]. The non-empty ladder is
- * floored at 0.4 alpha so the lowest activity level stays clearly distinct from a
- * no-reading cell rather than fading into it. Cells are purely visual — the year's
- * day-level detail is spoken once through the grid's summary description (Rule 17),
- * so there is no impossible per-13dp-cell tap target.
+ * Four bands, four alphas — floored at 0.4 so the lowest band stays clearly
+ * distinct from a no-reading cell rather than fading into it.
  */
-private val HEATMAP_CELL_SHAPE = RoundedCornerShape(3.dp)
 private val HEATMAP_LADDER = listOf(0.4f, 0.6f, 0.8f, 1f)
 
+/** How far each band travels from the quiet accent toward the room's own light. */
+private val HEATMAP_BAND_STOPS = listOf(0f, 0.34f, 0.67f, 1f)
+
+private val HEATMAP_CELL_SHAPE = RoundedCornerShape(3.dp)
+
+/** A day with no reading: present, and barely. Distinct from a slot with no date. */
+private const val HEATMAP_EMPTY_ALPHA = 0.14f
+
+/**
+ * Floor for the busiest band against the fill it is painted on. It is the one band
+ * drawn opaque, so its ratio against the container is the ratio it *is* — and the
+ * one band whose hue the palette did not choose.
+ */
+private const val HEATMAP_TOP_BAND_MIN_CONTRAST = 1.5
+
+/**
+ * The year's heat scale: four accent colours, one per [intensityFor] band.
+ *
+ * It used to be one hue at four alphas, which stops working as soon as the hue is
+ * not the palette's own: alpha alone cannot carry intensity over a dark base,
+ * because a 0.4 copy of a near-black umber *is* the well it sits in. The bands now
+ * travel in hue too, from the quiet `accentProgress` role toward the light of
+ * whatever is being read — `accentStreak` in an unlit tree, which is desktop, every
+ * preview and every test — so the book sits at the top of the reader's own year
+ * instead of in the background of it.
+ *
+ * [container] is the raised fill the grid is painted on. Only the opaque top band
+ * needs a guard, because only its colour is not the palette's own: [legibleOn]
+ * nudges a hue that fails the floor toward `accentStreak` in tenths, hue preserved,
+ * and returns it untouched once it clears.
+ */
 @Composable
-private fun HeatmapDayCell(
-    day: StatDay?,
-    peak: Long,
-    size: Dp,
-    accent: Color,
-) {
-    val shape = HEATMAP_CELL_SHAPE
+private fun heatmapAccentRamp(container: Color): List<Color> {
+    val colors = FolioTheme.colors
+    val from = colors.accentProgress
+    val to = legibleOn(rememberFolioAmbientColor(colors.accentStreak), container, colors.accentStreak, HEATMAP_TOP_BAND_MIN_CONTRAST)
+    return remember(from, to) { HEATMAP_BAND_STOPS.map { lerp(from, to, it) } }
+}
+
+/**
+ * One heatmap day: transparent when the slot has no date (the leading/trailing days
+ * of the first/last calendar weeks), the faint empty tint on a day with no reading,
+ * else the band of [ramp] that [intensityFor] puts it in, stepped by the alpha
+ * ladder on top. Purely visual — the year's day detail is spoken once through the
+ * grid's summary description (Rule 17).
+ */
+@Composable
+private fun HeatmapDayCell(day: StatDay?, peak: Long, size: Dp, ramp: List<Color>) {
     val ladder = HEATMAP_LADDER
-    val hasReading = day != null && day.minutes > 0L
     val fill = when {
         day == null -> Color.Transparent
-        !hasReading -> FolioTheme.colors.outline.copy(alpha = 0.14f)
-        else -> accent.copy(alpha = ladder[(intensityFor(day.minutes, peak) - 1).coerceIn(0, 3)])
+        day.minutes <= 0L -> FolioTheme.colors.outline.copy(alpha = HEATMAP_EMPTY_ALPHA)
+        else -> {
+            val band = (intensityFor(day.minutes, peak) - 1).coerceIn(0, ladder.lastIndex)
+            ramp[band].copy(alpha = ladder[band])
+        }
     }
-    Box(
-        modifier = Modifier
-            .size(size)
-            .background(fill, shape)
-    )
+    Box(Modifier.size(size).background(fill, HEATMAP_CELL_SHAPE))
+}
+
+/**
+ * One "Less → More" swatch, painted from the same [ramp] the grid climbs: a legend
+ * of one hue at four alphas under cells that travel a ramp describes a different
+ * chart. The shared `HeatmapCell` cannot express a ramp, so this is the local one.
+ */
+@Composable
+private fun HeatmapRampCell(intensity: Int, size: Dp, ramp: List<Color>) {
+    val band = (intensity - 1).coerceIn(0, ramp.lastIndex)
+    val fill = ramp[band].copy(alpha = HEATMAP_LADDER[band])
+    Box(Modifier.size(size).background(fill, HEATMAP_CELL_SHAPE))
 }
 
 /** "Mon 3 Sep · 45m read" / "Mon 3 Sep · no reading" — the tapped-cell tooltip. */

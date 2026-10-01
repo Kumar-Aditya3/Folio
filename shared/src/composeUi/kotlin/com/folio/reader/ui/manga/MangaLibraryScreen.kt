@@ -49,14 +49,19 @@ import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioSharedElementsSuppressed
 import com.folio.reader.ui.components.FolioTabReselect
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioFadeSwap
 import com.folio.reader.ui.components.folioSizeTransformEligible
 import com.folio.reader.ui.components.folioSwapSizeTransform
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverLight
 import com.folio.reader.ui.components.rememberSwapInFlight
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.LocalFolioTopInset
+import com.folio.reader.ui.theme.FolioAmbientSource
+import com.folio.reader.ui.theme.FolioCoverLightSource
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.launch
 
@@ -336,10 +341,27 @@ fun MangaLibraryScreen(
                         val rest = remember(visible, featured, showFeature) {
                             if (showFeature) visible.filter { it.id != featured!!.id } else visible
                         }
+                        // The shelf lights the room, the way Home's anchor and a book's
+                        // detail screen do. This tab never wrote one, so crossing onto it
+                        // kept whichever cover the previous writer had published. A manga
+                        // whose only artwork is a network thumbnail has no local file to
+                        // sample: both helpers fall back, and the room stays the palette's
+                        // own rather than guessing from a URL.
+                        val featuredCover = if (showFeature) featured?.coverPath else null
+                        FolioAmbientSource(
+                            featuredCover?.let {
+                                rememberCoverAccent(it, FolioTheme.colors.accentProgress)
+                            },
+                        )
+                        FolioCoverLightSource(
+                            featuredCover?.let { rememberCoverLight(it) },
+                        )
                         LazyVerticalGrid(
                             state = gridState,
                             columns = GridCells.Adaptive(minSize = 116.dp),
-                            modifier = Modifier.fillMaxSize(),
+                            // §16: the shelf is the backdrop the capsule and masthead
+                            // blur, exactly as LibraryScreen registers its own.
+                            modifier = Modifier.fillMaxSize().folioBackdropSource(),
                             contentPadding = PaddingValues(
                                 start = FolioTokens.gutter,
                                 end = FolioTokens.gutter,

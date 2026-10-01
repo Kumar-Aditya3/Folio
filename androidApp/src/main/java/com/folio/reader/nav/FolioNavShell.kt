@@ -50,7 +50,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -63,6 +65,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.folio.reader.ui.components.FolioTabReselect
+import com.folio.reader.ui.components.folioBarGlass
+import com.folio.reader.ui.components.folioDestinationAccent
+import com.folio.reader.ui.components.folioFieldBottom
 import com.folio.reader.ui.components.folioGlassPress
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.GlassSpec
@@ -241,11 +246,18 @@ fun FolioNavShell(
                     lastSelected = selectedIndex
                 }
             }
-            val sweepLight = FolioTheme.atmosphere.rimLight
+            val atmos = FolioTheme.atmosphere
+            val sweepLight = atmos.rimLight
+            // The glass this capsule is made of *in the room the reader is standing
+            // in*: the palette's bar glass with the colour of the book being read
+            // folded into its hue by the field model, at the atmosphere's own strength.
+            val roomGlass = folioBarGlass(atmos)
             // A soft dissolve under the capsule, in the page's own field colour: content
             // scrolling out at the bottom fades instead of being cut off by the glass.
             // It is the same idea as the masthead gaining glass on scroll, at the other
-            // end of the page.
+            // end of the page — and it now asks the field model for its lower endpoint
+            // rather than holding the palette's, so the page thickens toward the colour
+            // the ground plane actually has. Same 0.80 alpha; only the hue moves.
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -254,7 +266,7 @@ fun FolioNavShell(
                     .background(
                         Brush.verticalGradient(
                             0f to Color.Transparent,
-                            1f to FolioTheme.atmosphere.fieldBottom.copy(alpha = 0.80f),
+                            1f to folioFieldBottom(atmos).copy(alpha = 0.80f),
                         )
                     )
             )
@@ -301,6 +313,23 @@ fun FolioNavShell(
                             FolioShapes.pill,
                             fillAlpha = capsuleFill,
                             glass = GlassSpec.Default.copy(blurEnabled = !suppressBlur),
+                        )
+                        // The capsule is glass *in* a room, so the room shows in it.
+                        // `folioVeil` paints its own `veilFill` and offers only an alpha,
+                        // so the tinted glass cannot be handed to it — it goes over the
+                        // material as a hue-only wash instead. `BlendMode.Color` takes this
+                        // colour's hue and chroma and the surface's own luminance, so the
+                        // glass gains the book's colour and not a percent of opacity, and
+                        // with no tint the wash *is* the palette's own glass — so the layer
+                        // is skipped and an unlit tree draws what it always drew.
+                        .then(
+                            if (roomGlass == atmos.barGlass) {
+                                Modifier
+                            } else {
+                                Modifier.drawBehind {
+                                    drawRect(roomGlass, blendMode = BlendMode.Color)
+                                }
+                            }
                         )
                         // §17 liquid selection: the travelling specular band, over
                         // the veil's own material and under the items.
@@ -414,27 +443,28 @@ private fun FolioNavItem(
     // the unselected glyph is the *outlined* weight at reduced ink — selection
     // reads by weight and by saturation together, not by a tint a few percent
     // apart.
-    // Selection reads in the theme's *signature* colour, not the progress accent.
-    // accentProgress is the "progress ring" semantic — indigo/blue in most packs
-    // by convention — so the selected tab looked blue on Warm, Matcha, Sakura and
-    // the rest alike. `primary` is the one role that is each theme's identity
-    // (Warm's amber, Sakura's pink, Matcha's green…), so the capsule now wears the
-    // theme.
     //
-    // But on the monochromatic packs (Silver, and the pale lights where `primary`
-    // sits within a hair of `surface`) a raw-primary glyph/label washes out against
-    // the glass capsule. The fill keeps the theme's primary for identity, while the
-    // glyph and label ink pass through the contrast guard so "which tab am I on"
-    // survives every palette.
-    val legiblePrimary = rememberLegibleAccent(colors.primary)
+    // The hue is the *destination's*, not the theme's single signature. One `primary`
+    // across all four tabs is exactly what made the capsule byte-identical on Home,
+    // Library, Stats and More; each now wears the accent role that names its room —
+    // progress, discovery, streak, annotation — read from the one table the
+    // masthead's segment switch also uses, so a tab and the control inside it cannot
+    // disagree. Unknown routes fall back to `primary`, the shipped behaviour.
+    //
+    // The ink still passes the contrast guard: on the monochromatic packs (Silver,
+    // and the pale lights where an accent sits within a hair of `surface`) a raw
+    // saturated accent washes out against the glass capsule, and "which tab am I on"
+    // has to survive every palette.
+    val accent = folioDestinationAccent(item.route)
+    val legibleAccent = rememberLegibleAccent(accent)
     val pillFill by animateColorAsState(
-        targetValue = if (selected) colors.primary.copy(alpha = 0.20f) else Color.Transparent,
+        targetValue = if (selected) accent.copy(alpha = 0.20f) else Color.Transparent,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
         label = "navPillFill",
     )
     val iconTint by animateColorAsState(
         targetValue = if (selected) {
-            legiblePrimary
+            legibleAccent
         } else {
             colors.onSurfaceVariant.copy(alpha = 0.78f)
         },
@@ -442,7 +472,7 @@ private fun FolioNavItem(
         label = "navIconTint",
     )
     val labelColor by animateColorAsState(
-        targetValue = legiblePrimary,
+        targetValue = legibleAccent,
         animationSpec = if (motion) spring(stiffness = 700f) else snap(),
         label = "navLabelColor",
     )

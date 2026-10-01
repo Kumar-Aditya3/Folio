@@ -118,7 +118,11 @@ class SettingsMergeTest {
         // field-count guard below fail by exactly two — which is how the missing
         // global-only plumbing for the comfort toggle was caught.
         eyeProtection = true,
-        eyeProtectionIntensity = 0.7f
+        eyeProtectionIntensity = 0.7f,
+        // ambientColor defaults to true, so the non-default fixture value is false. The
+        // field-count guard below caught the omission on the first run after the setting
+        // landed, which is the whole reason the guard exists.
+        ambientColor = false
     )
 
     @Test

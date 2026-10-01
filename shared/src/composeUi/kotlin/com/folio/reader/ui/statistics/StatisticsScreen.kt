@@ -67,6 +67,7 @@ import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.FolioSlider
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberLegibleAccent
@@ -74,6 +75,8 @@ import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.paneFill
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.launch
 
@@ -258,7 +261,9 @@ private fun StatisticsContent(
 ) {
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        // §16: the backdrop the capsule and masthead blur, as on every other tab.
+        // Stats was the second screen that never registered one.
+        modifier = Modifier.fillMaxSize().folioBackdropSource(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             top = com.folio.reader.ui.theme.LocalFolioTopInset.current,
             bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current
@@ -409,7 +414,14 @@ private fun StatsOverture(
         modifier = Modifier
             .fillMaxWidth()
             .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
-            .folioRaised(shape = FolioShapes.heroBleed, accent = colors.accentProgress)
+            .folioRaised(
+                shape = FolioShapes.heroBleed,
+                accent = colors.accentProgress,
+                // Pane, not the default opaque raisedFill: Stats' overture is a hero in
+                // every sense but this file's history, and an opaque one here is what
+                // made the screen read as slabs laid on a page.
+                fill = FolioTheme.atmosphere.paneFill(),
+            )
             .padding(
                 start = FolioTokens.gutter,
                 end = FolioTokens.space3,

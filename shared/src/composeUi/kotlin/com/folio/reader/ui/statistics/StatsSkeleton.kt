@@ -26,6 +26,8 @@ import com.folio.reader.ui.components.rememberShimmerPhase
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.paneFill
 
 /**
  * Stats before Stats has arrived.
@@ -77,7 +79,13 @@ private fun OvertureSkeleton(phase: State<Float>) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
-            .folioRaised(shape = FolioShapes.heroBleed, accent = FolioTheme.colors.accentProgress)
+            .folioRaised(
+                shape = FolioShapes.heroBleed,
+                accent = FolioTheme.colors.accentProgress,
+                // Must track StatsOverture exactly: a pane resolving out of an opaque
+                // skeleton flashes the card's whole weight at the handoff.
+                fill = FolioTheme.atmosphere.paneFill(),
+            )
             .padding(
                 start = FolioTokens.gutter,
                 end = FolioTokens.space3,

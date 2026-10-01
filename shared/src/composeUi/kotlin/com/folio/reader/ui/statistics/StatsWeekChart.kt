@@ -29,6 +29,7 @@ import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.rememberFolioAmbientColor
 
 /**
  * The week chart — Stats' 7-day history as one smooth, continuous curve.
@@ -78,6 +79,19 @@ internal fun WeekChart(week: List<StatDay>) {
 }
 
 /**
+ * Alpha of the week curve's area wash where it meets the curve, fading to nothing
+ * at the baseline (Rule 15: a chart fill is a gradient, never a slab).
+ *
+ * 0.25 was calibrated against `accentProgress`, a saturated blue that keeps its
+ * edge on the sunken well. An ambient hue is not that obliging: a cover can hand
+ * the room a low-chroma sand or a near-black umber, and at a quarter strength
+ * either one dissolves into the well's own fill, so the wash reads as nothing.
+ * This is the level at which the darkest usable cover hue still separates from the
+ * well while the curve — not the colour under it — stays the top edge of the data.
+ */
+private const val WEEK_AREA_TOP_ALPHA = 0.42f
+
+/**
  * One smooth week curve, shared by the books minutes chart and the manga
  * chapters chart.
  *
@@ -117,7 +131,10 @@ internal fun SmoothWeekCurve(
             }
             Spacer(Modifier.height(4.dp))
         }
-        val accent = colors.accentProgress
+        // Stats' week is a record of what was read, so it is washed in the colour
+        // of what is being read. The fallback is the palette's own progress role,
+        // which is what every unlit tree — desktop, a preview, a test — draws.
+        val accent = rememberFolioAmbientColor(colors.accentProgress)
         val peakAccent = colors.accentStreak
         // Keyed on the window's shape: live value updates must not replay the
         // sweep mid-scroll.
@@ -149,7 +166,7 @@ internal fun SmoothWeekCurve(
                         close()
                     }
                     val areaBrush = Brush.verticalGradient(
-                        listOf(accent.copy(alpha = 0.25f), Color.Transparent)
+                        listOf(accent.copy(alpha = WEEK_AREA_TOP_ALPHA), Color.Transparent)
                     )
                     val strokePx = 2.dp.toPx()
                     val dotRadius = 3.dp.toPx()

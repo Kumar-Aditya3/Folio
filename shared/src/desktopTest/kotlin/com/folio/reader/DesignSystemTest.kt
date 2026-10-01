@@ -4,6 +4,9 @@ import androidx.compose.ui.graphics.Color
 import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphereFor
+import com.folio.reader.ui.theme.barGlassFor
+import com.folio.reader.ui.theme.fieldColors
+import com.folio.reader.ui.theme.mixG
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.test.Test
@@ -25,7 +28,9 @@ import kotlin.test.assertTrue
  *     or below "panel";
  *  4. the spacing rhythm is strictly increasing for the same reason;
  *  5. ambient shadow is never pure black on a light palette (a black shadow on
- *     warm paper reads as a hole).
+ *     warm paper reads as a hole);
+ *  6. a bar's glass may take the colour of the room it stands in — the book being
+ *     read — and never its weight, so the glass window holds in a lit room too.
  */
 class DesignSystemTest {
 
@@ -67,8 +72,15 @@ class DesignSystemTest {
     fun materialsAreVisuallyDistinguishable() {
         for (palette in AppPalette.entries) {
             val atmos = atmosphereFor(palette.colors)
-            val raised = luminance(atmos.raisedFill)
-            val sunken = luminance(atmos.sunkenFill)
+            // Measure the material as it is *drawn*. sunkenFill is a low-alpha layer
+            // that the field shows through, so comparing its raw RGB against an opaque
+            // raisedFill compares two different kinds of thing: on the near-black
+            // rooms the counter-accent that gives the well its temperature is lighter
+            // than a surface that is almost black, and depth reads inverted on paper
+            // while rendering correctly on screen. Compositing over the field is the
+            // only way the assertion describes the pixels.
+            val raised = luminance(mixG(atmos.fieldTop, atmos.raisedFill, atmos.raisedFill.alpha))
+            val sunken = luminance(mixG(atmos.fieldTop, atmos.sunkenFill, atmos.sunkenFill.alpha))
             val field = luminance(atmos.fieldTop)
             // A raised surface must be lighter than a sunken one on every palette:
             // that single relationship is what makes the depth legible.
@@ -300,5 +312,138 @@ class DesignSystemTest {
             com.folio.reader.ui.components.mastheadSheenStop(4f),
             "collapse past 1.0 is not clamped, so an over-scroll would fling the light",
         )
+    }
+
+    /**
+     * Saturated synthetic lights — a cover's colour may be anything, and a bar's glass
+     * has to keep its weight whatever it is. The raw primaries and the two extremes
+     * are deliberate: white and black are where `matchLuma`'s channel clamp binds
+     * hardest, and the chromatic ones are where a hue actually moves.
+     */
+    private val litTints = listOf(
+        Color(0xFFFF0000), Color(0xFF00FF00), Color(0xFF0000FF),
+        Color(0xFFFFFF00), Color(0xFF00FFFF), Color(0xFFFF00FF),
+        Color(0xFFFFFFFF), Color(0xFF000000),
+        Color(0xFFEC4899), Color(0xFF26C6DA), Color(0xFFF59E0B), Color(0xFF10B981),
+    )
+
+    /**
+     * Nothing lit, nothing spent. `LocalFolioAmbientTint` is null on desktop, in every
+     * preview and in every test, and chrome falls back to the palette's own colour —
+     * which has to be *exactly* the palette's own, or a bar over an unread book is a
+     * different bar than the one the atmosphere designed.
+     *
+     * The nav capsule compares its result against `FolioAtmosphere.barGlass` to decide
+     * whether to draw its room wash at all, so this identity is what keeps that wash
+     * off an unlit screen. It used to be protected twice over: `folioBarGlass` passed
+     * the glass as the *fallback tint*, so "no book" arrived as "lit by the glass
+     * itself" and had to be a no-op by arithmetic as well. That aliasing is gone — the
+     * holder is read for its nullable `requested` — which is precisely what let
+     * `barGlassFor` start following the lit field instead of only its hue.
+     */
+    @Test
+    fun barGlassForLeavesTheGlassAloneWhenNothingIsLit() {
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            assertEquals(
+                atmos.barGlass,
+                barGlassFor(atmos, null, atmos.fieldTintStrength),
+                "${palette.id}: a null tint returned something other than the palette's own " +
+                    "bar glass",
+            )
+            for (tint in litTints) {
+                for (strength in listOf(0f, -1f)) {
+                    assertEquals(
+                        atmos.barGlass,
+                        barGlassFor(atmos, tint, strength),
+                        "${palette.id}: strength $strength is no light at all, but the glass " +
+                            "moved toward $tint",
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * A room may change a bar's colour and never its weight.
+     *
+     * `barGlass`'s alpha *is* the §15 glass window — below 0.22 the bar stops reading
+     * as a surface, above 0.42 it reads as the grey lid the redesign removed — and it
+     * is a palette decision, made once per theme. The ambient is a runtime value,
+     * chosen by what the reader is holding, so it may not spend that budget: a bar over
+     * a red book must be exactly as transparent as a bar over no book at all, or
+     * `appBarsAreGlassNotLids` only holds in the empty room.
+     */
+    @Test
+    fun barGlassForNeverChangesTheGlassAlpha() {
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val designed = atmos.barGlass.alpha
+            for (tint in litTints + Color(0x80FF0080)) {
+                for (strength in listOf(atmos.fieldTintStrength, 0.05f, 1f)) {
+                    val alpha = barGlassFor(atmos, tint, strength).alpha
+                    assertTrue(
+                        alpha == designed,
+                        "${palette.id}: bar glass alpha ${"%.4f".format(designed)} became " +
+                            "${"%.4f".format(alpha)} under a $tint light at strength $strength",
+                    )
+                }
+            }
+            // The window itself, re-measured through the lit path.
+            for (tint in litTints) {
+                val alpha = barGlassFor(atmos, tint, atmos.fieldTintStrength).alpha
+                assertTrue(
+                    alpha in 0.22f..0.42f,
+                    "${palette.id}: lit bar glass alpha ${"%.4f".format(alpha)} left the " +
+                        "0.22–0.42 glass window",
+                )
+            }
+        }
+    }
+
+    /**
+     * The bar is a piece of the room, and it stays readable.
+     *
+     * This guard used to assert the opposite — that a lit room could move a bar's hue
+     * and nothing else, because `tintFill` pinned its lightness. That pin is exactly
+     * why the top of the screen read as a separate subject from the field under it: the
+     * page was free to brighten with a cover and the bar was not. `barGlassFor` now
+     * aims at the field's own lit endpoint, so lightness moving is the design.
+     *
+     * What replaces the pin is the thing a pin was only ever standing in for. The bar's
+     * ink is measured on the veil composited over the lit page it actually sits on, so
+     * legibility is governed by measurement rather than by holding one channel still.
+     */
+    @Test
+    fun barGlassFollowsTheLitRoomAndStaysReadable() {
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val ink = palette.colors.onSurface
+            for (tint in litTints) {
+                val field = fieldColors(atmos, tint, atmos.fieldTintStrength)
+                val glass = barGlassFor(atmos, tint, atmos.fieldTintStrength)
+                val ground = mixG(field.top, glass, glass.alpha)
+                val ratio = contrastRatio(ground, ink)
+                assertTrue(
+                    ratio >= 4.5,
+                    "${palette.id} on $tint: the bar's own ink reads at " +
+                        "${"%.2f".format(ratio)}:1 on the lit veil — a bar that follows the " +
+                        "room has to keep its label with it",
+                )
+            }
+            // Out of the loop on purpose: a white light on paper's already-white glass
+            // moves nothing and must not be called a failure. A saturated one can only
+            // pass if the function is doing something at all.
+            assertTrue(
+                barGlassFor(atmos, Color(0xFF10B981), atmos.fieldTintStrength) != atmos.barGlass,
+                "${palette.id}: a saturated light moved the bar's glass not at all",
+            )
+        }
+    }
+
+    private fun contrastRatio(a: Color, b: Color): Double {
+        val la = luminance(a)
+        val lb = luminance(b)
+        return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
     }
 }

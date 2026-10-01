@@ -61,7 +61,3 @@ fun deepenInkRoles(colors: FolioColors): FolioColors {
 /** The achromatic pole a dark surface's ink travels toward. */
 internal fun inkExtreme(surface: Color): Color =
     if (luminanceOf(surface) < 0.5f) Color.White else Color.Black
-
-/** Relative luminance, the same sRGB weighting `atmosphereFor` uses. */
-private fun luminanceOf(c: Color): Float =
-    c.red * 0.2126f + c.green * 0.7152f + c.blue * 0.0722f

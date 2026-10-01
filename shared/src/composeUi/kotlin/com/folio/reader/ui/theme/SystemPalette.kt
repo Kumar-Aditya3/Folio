@@ -169,10 +169,7 @@ private fun contrastRatioOrMin(a: Color, b: Color): Double {
     return (lighter + 0.05) / (darker + 0.05)
 }
 
-private fun relativeLuminance(c: Color): Double {
-    fun channel(v: Float): Double {
-        val d = v.toDouble()
-        return if (d <= 0.04045) d / 12.92 else Math.pow((d + 0.055) / 1.055, 2.4)
-    }
-    return 0.2126 * channel(c.red) + 0.7152 * channel(c.green) + 0.0722 * channel(c.blue)
-}
+// `relativeLuminance` is declared once, in FolioFieldModel.kt, with the identical
+// WCAG linearisation this file used to carry privately. A private function of the
+// same signature in the same package is itself the ambiguity, so nothing is declared
+// here; the call above resolves to the shared one.

@@ -13,6 +13,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -31,10 +32,18 @@ fun ProgressRing(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
 ) {
-    // §13.5: the sweep grows from zero once per instance — rememberSaveable, so
-    // a lazy-list item scrolled away and back does not replay it. Live progress
-    // changes draw through immediately once the entry has played.
-    val entry = rememberEntryProgress()
+    // §13.5: the sweep grows from zero once per instance — rememberSaveable, so a
+    // lazy-list item scrolled away and back does not replay it, and live progress
+    // changes draw through immediately once the entry has played. Rule 19 is that
+    // same seam's job: with system animations off it resolves to 1f on the first
+    // read, so the ring draws its final static arc rather than skipping the value.
+    //
+    // Held as a State and read inside the Canvas below rather than unwrapped in
+    // composition, the way BookCover's reveal and Stats' GoalDial already do it:
+    // `rememberEntryProgress` returns the value, which makes every frame of the
+    // sweep recompose this ring and whoever placed it, while `rememberEntryState`
+    // is the draw-phase form — same ramp, one drawing pass per frame.
+    val entry: State<Float> = rememberEntryState()
     Canvas(modifier = modifier.progressSemantics(progress.coerceIn(0f, 1f))) {
         val strokePx = strokeWidth.dp.toPx()
         val diameter = minOf(size.width, size.height) - strokePx
@@ -54,7 +63,7 @@ fun ProgressRing(
         drawArc(
             color = color,
             startAngle = -90f,
-            sweepAngle = 360f * progress.coerceIn(0f, 1f) * entry,
+            sweepAngle = 360f * progress.coerceIn(0f, 1f) * entry.value,
             useCenter = false,
             topLeft = topLeft,
             size = arcSize,

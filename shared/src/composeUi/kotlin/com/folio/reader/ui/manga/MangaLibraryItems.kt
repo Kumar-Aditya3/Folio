@@ -58,12 +58,19 @@ import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverHaloStrength
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioThemeRim
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.theme.paneFill
+import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioShapeClass
+import com.folio.reader.ui.theme.folioLampSource
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.rememberFolioShape
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
@@ -135,20 +142,20 @@ fun FeaturedMangaShelfEntry(
     onCategories: () -> Unit,
 ) {
     val accent = rememberCoverAccent(manga.coverPath, FolioTheme.colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != FolioTheme.colors.accentProgress)
     val interaction = rememberFolioInteraction()
     var menuOpen by remember { mutableStateOf(false) }
     val inProgress = progress > 0f && progress < 1f
+    val tileShape = rememberFolioShape(manga.id.hashCode(), FolioShapeClass.CARD)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction, scaleTo = 0.985f)
+            .folioRaised(shape = tileShape, accent = accent, fill = FolioTheme.atmosphere.paneFill())
             .folioThemeRim(
-                shape = FolioShapes.card,
-                accent = accent,
+                shape = tileShape,
                 counterAccent = FolioTheme.colors.accentDiscovery,
                 velocity = LocalFolioScrollVelocity.current,
-                // The same fraction `inProgress` above reads, so the light and the
-                // badge can never disagree about how far through this series he is.
                 parkedAt = progress,
             )
             .combinedClickable(
@@ -165,9 +172,13 @@ fun FeaturedMangaShelfEntry(
             sourceId = manga.sourceId,
             thumbnailUrl = manga.thumbnailUrl,
             coverPath = manga.coverPath,
-            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
+            modifier = Modifier
+                .sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id))
+                // The shelf's lamp sits behind its featured cover.
+                .folioLampSource(),
             width = FolioTokens.coverFeature,
             halo = accent,
+            haloStrength = haloStrength,
             elevation = FolioTokens.elevationRaised,
             dimmed = fullyRead,
             overlay = {
@@ -253,8 +264,9 @@ fun FeaturedMangaShelfEntry(
 
 /**
  * A manga shelf entry, in the same object language as the books shelf: a plate
- * with a contact shadow, type beneath, no card. Read-through titles sit back at
- * 0.86 alpha the way finished books do, so the shelf has depth.
+ * with a contact shadow and its own colour glowing behind it, type beneath, no
+ * card. Read-through titles sit back at 0.86 alpha the way finished books do, so
+ * the shelf has depth.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -277,6 +289,14 @@ internal fun MangaGridItem(
     var menuOpen by remember { mutableStateOf(false) }
     val interaction = rememberFolioInteraction()
     val inProgress = progress > 0f && progress < 1f
+    // The plate lights its own neighbourhood, exactly as a book shelf cell does —
+    // one object language for both shelves. Series whose artwork is a remote
+    // thumbnail rather than a local `coverPath` have nothing decoded to sample, so
+    // they keep reading as the fallback accent; that is [rememberCoverAccent]'s
+    // documented behaviour and it is the honest one, since inventing a colour for
+    // an image that has not arrived would be a lie about the artwork.
+    val accent = rememberCoverAccent(manga.coverPath, FolioTheme.colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != FolioTheme.colors.accentProgress)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -302,6 +322,8 @@ internal fun MangaGridItem(
             // stops tracking the adaptive column, which is exactly the case the
             // `width` parameter documents as needing null.
             width = null,
+            halo = accent,
+            haloStrength = haloStrength,
             dimmed = fullyRead,
             modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
             overlay = {

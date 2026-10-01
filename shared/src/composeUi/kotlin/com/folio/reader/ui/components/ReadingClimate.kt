@@ -66,6 +66,13 @@ fun ReadingClimate.lightFraction(): Float = when (this) {
     ReadingClimate.DROUGHT -> 0.13f
 }
 
+/**
+ * The brightest [lightFraction] can be. A surface that has to fit the climate inside
+ * a budget scales by this instead of re-declaring the top of the band, so widening
+ * the weather cannot silently widen a surface past its ceiling.
+ */
+const val CLIMATE_LIGHT_MAX = 0.38f
+
 /** The weather's own hue, from the palette's streak/progress accents. */
 @Composable
 fun ReadingClimate.tint(): Color {

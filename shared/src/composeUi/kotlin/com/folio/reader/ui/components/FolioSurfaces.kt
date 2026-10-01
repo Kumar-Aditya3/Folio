@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.folio.reader.ui.theme.DAYLIGHT_POOLS
 import com.folio.reader.ui.theme.DAYLIGHT_RIM_TINT_MAX
 import com.folio.reader.ui.theme.DAYLIGHT_WASH_ALPHA_MAX
 import com.folio.reader.ui.theme.FolioAmbient
@@ -67,7 +69,11 @@ import com.folio.reader.ui.theme.LocalFolioAmbient
 import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.ambientPoolDrift
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.fieldColors
+import com.folio.reader.ui.theme.fieldDrift
 import com.folio.reader.ui.theme.lightDirection
+import com.folio.reader.ui.theme.poolAlphaAt
+import com.folio.reader.ui.theme.poolCenterAt
 import com.folio.reader.ui.theme.panelFill
 import com.folio.reader.ui.theme.rememberGlassTick
 import com.folio.reader.ui.theme.surfaceOpacity
@@ -149,40 +155,6 @@ internal fun CacheDrawScope.shapePath(shape: Shape): Path =
         is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
     }
 
-/**
- * One ambient pool's resting geometry as fractions of the field, plus the
- * horizontal side it represents so daylight knows which pool the sun is on.
- * Centres sit outside the bounds and radii are large multiples of the width so no
- * pool ever shows an edge — unchanged from before; daylight only drifts them and
- * re-weights their alpha.
- */
-private data class DaylightPool(
-    val fx: Float,
-    val fy: Float,
-    val fr: Float,
-    val index: Int,
-    val sideX: Float,
-)
-
-private val DAYLIGHT_POOLS = listOf(
-    DaylightPool(-0.15f, -0.10f, 1.15f, 0, -1f),
-    DaylightPool(1.10f, 0.28f, 0.95f, 1, +1f),
-    DaylightPool(0.35f, 1.15f, 1.30f, 2, 0f),
-)
-
-/**
- * How far the pools drift toward the anti-sun edge, as a fraction of width. Small
- * on purpose: this shifts the page's temperature, it does not slide the
- * background. Scaled by intensity in the caller, so at night there is no drift.
- */
-private const val POOL_DRIFT = 0.12f
-
-/**
- * How much the far pool recedes while the sun-side one holds. The facing term is
- * capped in the caller so no alpha ever exceeds `atmos.poolAlpha` — daylight may
- * dim a pool, never brighten it past its design.
- */
-private const val POOL_FACING = 0.45f
 
 /**
  * Floating surface. The highest material — at most one or two per screen.
@@ -206,7 +178,7 @@ fun Modifier.folioRaised(
     val atmos = FolioTheme.atmosphere
     val base = fill ?: atmos.raisedFill
     val accentLight = if (accent != null) {
-        lerp(atmos.rimLight, accent, 0.35f).copy(alpha = atmos.rimLight.alpha)
+        lerp(atmos.rimLight, accent, 0.16f).copy(alpha = atmos.rimLight.alpha)
     } else {
         atmos.rimLight
     }
@@ -226,12 +198,29 @@ fun Modifier.folioRaised(
     // precedent) so the travelling sheen costs one drawing pass, never a
     // recomposition. The still-room default keeps the identity byte-for-byte.
     val ambient = LocalFolioAmbient.current
+    // A pane (translucent fill) shows the lit room through itself, and the room plus the
+    // caller's themed rim already give it depth. The directional sheen and the 1dp
+    // gradient border were drawn for an *opaque* raised slab; stacked on a pane they laid
+    // a bright rim and a darker perimeter band just inside it — two nested rounded rects,
+    // the "box within the card" that showed on every raised surface. So a pane keeps only
+    // its fill, shadow and clip; an opaque raised surface keeps the full treatment.
+    val pane = base.alpha < 1f
     return this
-        .shadow(
-            elevation = atmos.scaled(elevation),
-            shape = shape,
-            ambientColor = atmos.shadowAmbient,
-            spotColor = atmos.shadowSpot,
+        .then(
+            // A translucent pane lets its *own* elevation shadow show through from
+            // behind — Android occludes a shadow by the caster's alpha, so a 55% pane
+            // passes ~45% of the shadow, densest just inside the silhouette. That is the
+            // darker rounded band hugging the edge — the "box within the card" — and it
+            // is on every raised pane because every one is elevated. A pane does not need
+            // a cast shadow to float: the room shows through it and the themed rim rings
+            // it. Opaque raised surfaces keep their shadow.
+            if (pane) Modifier
+            else Modifier.shadow(
+                elevation = atmos.scaled(elevation),
+                shape = shape,
+                ambientColor = atmos.shadowAmbient,
+                spotColor = atmos.shadowSpot,
+            ),
         )
         .background(base, shape)
         .drawWithCache {
@@ -242,19 +231,25 @@ fun Modifier.folioRaised(
                 // shade vertical gradient with the transparent stop in the same place.
                 // The axis is recomputed here rather than cached so the ambient swing
                 // moves it — a few float ops per frame, against a recomposition per
-                // frame for anything cached in composition.
-                val (start, end) = daylightGradient(size, daylight, ambient.value)
-                val sheen = Brush.linearGradient(
-                    0f to shade.copy(alpha = shade.alpha * 0.5f),
-                    0.55f to Color.Transparent,
-                    1f to light.copy(alpha = light.alpha * 0.55f),
-                    start = start,
-                    end = end,
-                )
-                drawPath(path, sheen)
+                // frame for anything cached in composition. Opaque surfaces only: a pane
+                // gets its light from the room behind it, not a sheen painted on top.
+                if (!pane) {
+                    val (start, end) = daylightGradient(size, daylight, ambient.value)
+                    val sheen = Brush.linearGradient(
+                        0f to shade.copy(alpha = shade.alpha * 0.5f),
+                        0.5f to Color.Transparent,
+                        1f to light.copy(alpha = light.alpha * 0.55f),
+                        start = start,
+                        end = end,
+                    )
+                    drawPath(path, sheen)
+                }
             }
         }
-        .border(1.dp, Brush.verticalGradient(listOf(light, shade)), shape)
+        .then(
+            if (pane) Modifier
+            else Modifier.border(1.dp, Brush.verticalGradient(listOf(light, shade)), shape),
+        )
         .clip(shape)
 }
 
@@ -404,7 +399,14 @@ fun Modifier.folioVeil(
             .clip(shape)
             .folioGlassEffect(
                 backdrop = backdrop,
-                backgroundColor = FolioTheme.colors.background,
+                // What to show where the registered source has no content. This was
+                // the palette's *unlit* `background`, but the room a veil floats in is
+                // the field *after* the lamp and the cover's tint — so a surface over a
+                // page that stops short of it (Home's list ends above the capsule)
+                // painted a disc of a colour the surroundings disagree with, and read as
+                // an opaque pill rather than as glass. The nav shell already dissolves
+                // into `folioFieldBottom`; the blur has to fall back to the same ground.
+                backgroundColor = folioFieldBottom(atmos),
                 blurRadius = glass.blurRadius,
             )
     } else {
@@ -534,57 +536,73 @@ internal fun Modifier.folioGlassGrain(alpha: Float = FolioTokens.glassGrainAlpha
 
 /**
  * The page itself. A vertical field wash plus up to three enormous, very
- * low-alpha colour pools drawn from the palette's accent roles, so the background
- * has a temperature and a direction of light instead of one flat fill.
+ * low-alpha colour pools, so the background has a temperature and a direction of
+ * light instead of one flat fill.
+ *
+ * The room is lit by what is being read. [ambient] is the colour of the featured
+ * cover, hoisted to the app root because this field is an *ancestor* of every
+ * screen — a screen cannot provide a CompositionLocal upward to the ground it sits
+ * on, so it writes into this state instead. It moves the whole field's hue and
+ * re-weights the pools toward it at [FolioAtmosphere.fieldTintStrength], at pinned
+ * luminance: the room may become any colour a cover is, and may only ever deepen
+ * downward, so ink keeps every contrast ratio it had. See
+ * [fieldColors] for the two invariants that make that true.
+ *
+ * Geometry comes from [FolioFieldModel], the same closed form the refraction gel
+ * samples, so a card bending the page and the page itself cannot drift apart.
  *
  * Static by default: this is atmosphere, not motion. One drawing pass via
- * [drawWithCache]; nothing recomposes per frame. §17's living light adds one
- * exception — the pools breathe. Their centres drift a few percent of the width
- * on the ambient's slow cycles (draw-phase state reads, so still one pass),
- * which is what gives a resting page the slow shift of temperature that liquid
- * chrome needs behind it to read as material. Under reduce-motion, or in an
- * un-provided tree, the pools sit exactly where they always did.
+ * [drawWithCache]; nothing recomposes per frame. The ambient colour is read inside
+ * the cache block, so a tab switch rebuilds the wash once instead of recomposing
+ * the whole tree under it. §17's living light keeps its exception — the pools
+ * breathe, their centres drifting a few percent of the width on the ambient's slow
+ * cycles, read in the draw phase so even that costs no recomposition. Under
+ * reduce-motion, or in an un-provided tree, the pools sit exactly where they always
+ * did and the field is the palette's own.
  */
 @Composable
 fun Modifier.folioField(
-    /** Optional cover-derived hue that tints the top of the page. */
-    tint: Color? = null,
+    /** The colour of what is being read, hoisted from the screens above. */
+    ambient: State<Color?>? = null,
     daylight: FolioDaylight = LocalFolioDaylight.current,
+    strength: Float = FolioTheme.atmosphere.fieldTintStrength,
 ): Modifier {
     val atmos = FolioTheme.atmosphere
-    val pools = atmos.pools
-    val poolAlpha = atmos.poolAlpha
-    val top = if (tint != null) lerp(atmos.fieldTop, tint, 0.16f) else atmos.fieldTop
-    val bottom = atmos.fieldBottom
     // The sun's horizontal pull, scaled by intensity: the whole page's temperature
     // follows the day. At night (intensity ~0) this is 0, so the field is the
     // palette's own with its pools exactly where they always were.
     val shift = daylight.azimuth * daylight.intensity
+    // The day's own colour and how much of it the room may wear, read once in
+    // composition (daylight steps a minute at a time, so this rebuilds then, not per
+    // frame). Bounded by DAYLIGHT_WASH_ALPHA_MAX x intensity — the envelope DaylightTest
+    // proves cannot move a WCAG ratio off its floor — so at night it is 0 and at noon it
+    // is a whisper of white, warm amber at golden hour, never a filter.
+    val dayTemp = daylight.temperature
+    val dayAlpha = (DAYLIGHT_WASH_ALPHA_MAX * daylight.intensity).coerceIn(0f, DAYLIGHT_WASH_ALPHA_MAX)
     // §17: the living light, read in the draw phase only.
-    val ambient = LocalFolioAmbient.current
+    val ambientLight = LocalFolioAmbient.current
     return this.drawWithCache {
+        // Read here, not in composition: a new featured cover rebuilds the wash and
+        // the pool colours once, and nothing under the root invalidates.
+        val colors = fieldColors(atmos, ambient?.value, strength)
         val w = size.width
         val h = size.height
-        val field = Brush.verticalGradient(listOf(top, bottom))
-        // Drift toward the anti-sun edge: that swings the sun-side pool into view
-        // while the far pool recedes off the other side. Centres still rest outside
-        // the bounds and radii are still large multiples of the width, so no pool
-        // ever shows an edge.
-        val drift = -shift * POOL_DRIFT
+        val field = Brush.verticalGradient(listOf(colors.top, colors.bottom))
+        val drift = fieldDrift(shift)
         onDrawBehind {
             drawRect(field)
             // The ambient displacement is bounded by AMBIENT_DRIFT_MAX of the
             // width, on top of the sun's own drift, so the two never conspire to
             // walk a pool's centre somewhere the geometry above did not design for.
-            val (driftX, driftY) = ambientPoolDrift(ambient.value)
+            val (driftX, driftY) = ambientPoolDrift(ambientLight.value)
             DAYLIGHT_POOLS.forEach { pool ->
-                val color = pools.getOrNull(pool.index) ?: return@forEach
+                val color = colors.poolColors.getOrNull(pool.index) ?: return@forEach
                 // The pool on the sun's side holds at poolAlpha; the far side
                 // recedes. Capped, so daylight may dim a pool but never lift it
-                // past the atmosphere's own alpha ceiling.
-                val facing = pool.sideX * shift
-                val alpha = (poolAlpha * (1f + POOL_FACING * facing)).coerceIn(0f, poolAlpha)
-                val center = Offset((pool.fx + drift + driftX) * w, (pool.fy + driftY) * h)
+                // past the field's own alpha ceiling.
+                val alpha = poolAlphaAt(colors.poolAlpha, pool.sideX, shift)
+                val (cx, cy) = poolCenterAt(pool, drift, driftX, driftY)
+                val center = Offset(cx * w, cy * h)
                 val radius = pool.fr * w
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -596,6 +614,11 @@ fun Modifier.folioField(
                     center = center,
                 )
             }
+            // The day's own light, laid over the whole room as its last pass — the one
+            // wire that lets every screen read as a time of day instead of a constant.
+            // `fieldColorAtPoint` applies the identical mix, so a sampled tap agrees
+            // with the pixel; at intensity 0 (night) this is skipped entirely.
+            if (dayAlpha > 0f) drawRect(color = dayTemp.copy(alpha = dayAlpha))
         }
     }
 }

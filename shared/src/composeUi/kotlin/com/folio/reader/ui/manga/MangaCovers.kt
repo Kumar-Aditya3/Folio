@@ -33,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaBackend
+import com.folio.reader.ui.components.COVER_HALO_STRENGTH
 import com.folio.reader.ui.components.COVER_TARGET_WIDTH_PX
 import com.folio.reader.ui.components.decodeCoverImage
 import com.folio.reader.ui.components.folioShimmer
@@ -41,6 +42,7 @@ import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.lampColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -192,7 +194,10 @@ fun MangaCover(
 /**
  * A manga cover as a physical plate — mirroring [FolioCoverPlate] so manga
  * shelves read identically to book shelves: same trim, spine, contact shadow,
- * and optional halo.
+ * rim light and halo. [halo] is the artwork's own colour spilling onto the page
+ * behind it, at [haloStrength]; both default to the book plate's values, and the
+ * two plates must keep changing together — a manga shelf that drifts from the
+ * book shelf is two shelves, not one library.
  */
 @Composable
 fun MangaCoverPlate(
@@ -209,6 +214,7 @@ fun MangaCoverPlate(
     width: Dp? = FolioTokens.coverShelf,
     shape: androidx.compose.ui.graphics.Shape = FolioShapes.plate,
     halo: Color? = null,
+    haloStrength: Float = COVER_HALO_STRENGTH,
     elevation: Dp = FolioTokens.elevationVeil,
     dimmed: Boolean = false,
     overlay: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null,
@@ -222,7 +228,15 @@ fun MangaCoverPlate(
     Box(
         modifier = modifier
             .then(sizing)
-            .then(if (halo != null) Modifier.coverHalo(halo, strength = 0.30f) else Modifier)
+            .then(
+                if (halo != null) Modifier.coverHalo(
+                    // The lamp's colour, not the cover's average — see FolioCoverPlate.
+                    // The cover's own hue at a light source's saturation — a glow is
+                    // light the object throws, not the room's lamp.
+                    lampColor(halo, null, 0f, FolioTheme.atmosphere),
+                    strength = haloStrength,
+                ) else Modifier
+            )
             .shadow(
                 elevation = elevation * atmos.shadowScale,
                 shape = shape,
@@ -250,11 +264,27 @@ fun MangaCoverPlate(
                     ),
                 ),
         )
-        // A hairline keeps a white cover from dissolving into a light page.
+        // A rim-lit seat, identical to FolioCoverPlate's, not a flat 4-edge stroke: a
+        // light catch along the top edge falling to a soft shade at the foot is what
+        // makes the outline read as a printed object lit from above (the atmosphere's
+        // light model), while an even hairline reads as a border drawn around a
+        // picture. Manga plates used to carry that hairline, so the same book looked
+        // differently dressed on the two shelves — the object language has to be one
+        // language. Light palettes keep the foot shade outright, which is what still
+        // stops a white cover dissolving into a light page.
         Box(
             Modifier
                 .matchParentSize()
-                .border(0.5.dp, Color.Black.copy(alpha = if (atmos.isDark) 0.45f else 0.16f), shape),
+                .border(
+                    0.5.dp,
+                    Brush.verticalGradient(
+                        listOf(
+                            (if (atmos.isDark) atmos.rimLight else Color.White).copy(alpha = 0.5f),
+                            if (atmos.isDark) Color.Transparent else Color.Black.copy(alpha = 0.16f),
+                        ),
+                    ),
+                    shape,
+                ),
         )
         overlay?.invoke(this)
     }

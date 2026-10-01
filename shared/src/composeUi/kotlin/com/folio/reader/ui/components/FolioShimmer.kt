@@ -76,8 +76,8 @@ private const val SHIMMER_BAND_FRACTION = 0.45f
  * Internal rather than private so the §13.2 "an effect that silently does nothing
  * is a bug" guard can composite them per palette in test.
  */
-internal const val SHIMMER_EMISSION = 0.20f
-internal const val SHIMMER_OCCLUSION = 0.30f
+internal const val SHIMMER_EMISSION = 0.13f
+internal const val SHIMMER_OCCLUSION = 0.20f
 
 /** Where the band rests when the reader has asked for no motion. */
 private const val SHIMMER_PARKED = 0.5f

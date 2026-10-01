@@ -62,10 +62,17 @@ import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioThemeRim
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.theme.paneFill
+import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverHaloStrength
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioHaptic
+import com.folio.reader.ui.theme.FolioShapeClass
+import com.folio.reader.ui.theme.folioLampSource
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.rememberFolioShape
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
@@ -81,9 +88,12 @@ import com.folio.reader.ui.theme.rememberFolioHaptics
  *    Covers now sit directly on the page as plates with contact shadows, and the
  *    metadata is type beneath them — the composition a printed shelf actually has.
  * 2. **Variable weight.** The first in-progress book spans the full width as a
- *    *featured* entry with a cover-derived halo; everything after it is a standard
- *    shelf entry. A grid where every cell is identical cannot express that one of
- *    these books is the one you are reading tonight.
+ *    *featured* entry; everything after it is a standard shelf entry. A grid where
+ *    every cell is identical cannot express that one of these books is the one you
+ *    are reading tonight. What the two share is the glow: every plate carries its
+ *    own cover's colour out onto the page, so being lit is the shelf's baseline and
+ *    the featured entry is set apart by width, elevation and its travelling rim —
+ *    not by being the only lit thing on the page.
  * 3. **Active books come forward.** In-progress titles render at full strength;
  *    finished and untouched ones sit back slightly. Hierarchy between active and
  *    inactive, not just sort order.
@@ -191,19 +201,33 @@ private fun FeaturedShelfEntry(
     onDeleteBook: (Book) -> Unit,
 ) {
     val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != FolioTheme.colors.accentProgress)
     val interaction = rememberFolioInteraction()
     var menuOpen by remember { mutableStateOf(false) }
     val pickupHaptics = rememberFolioHaptics()
+    // The tile's own silhouette, seeded by the book: the hero already varies per
+    // title, and the featured row is the shelf's hero. The rim is the only outline
+    // this row draws, so one shape governs it. The cover beside it stays on
+    // FolioShapes.plate — a printed object keeps its printed corners.
+    val tileShape = rememberFolioShape(book.id.hashCode(), FolioShapeClass.CARD)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction, scaleTo = 0.985f)
+            // The shelf's hero has to sit *above* the page, not merely be drawn on it.
+            // Home's hero gets that from folioRaised's pane — a translucent fill the
+            // room and its lamp show through — and this row had only a rim, so it read
+            // as a row with an outline rather than as the shelf's object.
+            .folioRaised(
+                shape = tileShape,
+                accent = accent,
+                fill = FolioTheme.atmosphere.paneFill(),
+            )
             // After the pressable's layer so the rim travels with the plane when
             // it dips, and behind the content so the plate occludes the arc
             // passing under it.
             .folioThemeRim(
-                shape = FolioShapes.card,
-                accent = accent,
+                shape = tileShape,
                 // The streak hue rather than the progress hue: this row is about pace
                 // to finish, and accentProgress is a saturated blue in most palettes —
                 // which is also rememberCoverAccent's own fallback, so a book with no
@@ -230,9 +254,13 @@ private fun FeaturedShelfEntry(
             coverPath = book.coverPath,
             title = book.title,
             author = book.displayAuthor,
-            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
+            modifier = Modifier
+                .sharedElementOrNoop(FolioSharedKeys.bookCover(book.id))
+                // The shelf's lamp sits behind its featured cover.
+                .folioLampSource(),
             width = FolioTokens.coverFeature,
             halo = accent,
+            haloStrength = haloStrength,
             elevation = FolioTokens.elevationRaised,
             // The featured plate's neighbours are the eyebrow, title and author
             // below it, all of which stay put while the plate flies — so the
@@ -318,8 +346,9 @@ private fun FeaturedShelfEntry(
 }
 
 /**
- * A standard shelf entry: the plate, then type beneath it, ranged left. No card,
- * no centred text, no hover scale.
+ * A standard shelf entry: the plate — lit by its own cover colour, at
+ * [com.folio.reader.ui.components.COVER_HALO_STRENGTH] once the sample lands —
+ * then type beneath it, ranged left. No card, no centred text, no hover scale.
  *
  * Selection is expressed as an accent rim *on the plate* plus a check mark rather
  * than by recolouring a card container, so a selected book still shows its
@@ -341,6 +370,17 @@ fun BookCard(
     val interaction = rememberFolioInteraction()
     val inProgress = book.normalizedProgress > 0.0 && book.normalizedProgress < 0.99
     val colors = FolioTheme.colors
+    // The cover lights its own neighbourhood, exactly as the featured row's does.
+    // This is the change that stops a shelf cover being a flat sticker: the plate
+    // already knew how to spill its colour (coverHalo), it was never handed one —
+    // `halo` arrived null from every grid cell. Hoisted to the top of the item
+    // because rememberCoverAccent is @Composable, and the featured rows already
+    // call it in the same position; a modifier expression would re-read it per
+    // frame. It reads the process-lifetime accent cache through a three-permit
+    // gate, so a page of freshly decoded covers samples across frames instead of
+    // stacking a dozen pixel reads and their recompositions on one.
+    val accent = rememberCoverAccent(book.coverPath, colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != colors.accentProgress)
     var menuOpen by remember { mutableStateOf(false) }
     val pickupHaptics = rememberFolioHaptics()
     Column(
@@ -379,6 +419,11 @@ fun BookCard(
             // null width: the plate fills the grid cell and derives its height from
             // the printed trim, so a wide column never squashes the cover.
             width = null,
+            // The glow, not a second shadow: elevation stays at the plate's veil
+            // default so this change moves one variable — the shelf gains light, it
+            // does not also gain height.
+            halo = accent,
+            haloStrength = haloStrength,
             // The title and author directly below carry the paired keys, so the
             // plate must not draw the fallback's own copies of them.
             suppressFallbackText = true,

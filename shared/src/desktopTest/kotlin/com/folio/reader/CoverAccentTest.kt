@@ -1,11 +1,28 @@
 package com.folio.reader
 
 import androidx.compose.ui.graphics.Color
+import com.folio.reader.ui.components.COVER_HALO_PENDING_STRENGTH
+import com.folio.reader.ui.components.COVER_HALO_STRENGTH
+import com.folio.reader.ui.components.COVER_SAMPLE_PERMITS
+import com.folio.reader.ui.components.accentCache
+import com.folio.reader.ui.components.cachedOrSampledAccent
+import com.folio.reader.ui.components.clearCoverAccentCache
+import com.folio.reader.ui.components.coverSampleGate
 import com.folio.reader.ui.components.guardCoverContrast
 import com.folio.reader.ui.components.rgbToHsv
 import com.folio.reader.ui.components.sampleCoverAccent
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.test.runTest
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.ceil
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -129,5 +146,139 @@ class CoverAccentTest {
         val la = luminance(a)
         val lb = luminance(b)
         return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+}
+
+/**
+ * The §13.3 sampling gate and the accent cache's read-through, as pure units.
+ *
+ * There is no Compose runtime and no emulator in `desktopTest`, so the composable
+ * half of [com.folio.reader.ui.components.rememberCoverAccent] cannot be driven
+ * here. What *is* testable — and what the perf note in that file keeps promising —
+ * is the two mechanisms the grid-cover pass leans on: that the gate really bounds
+ * concurrency, that bounding it splits a shelf's samples across separate frames,
+ * and that one cover path is read once, ever. The gate's own semantics are
+ * reproduced with the same [COVER_SAMPLE_PERMITS] constant the composable uses and
+ * a virtual-time scheduler, so the assertions are exact and never sleep.
+ */
+class CoverAccentSamplingGateTest {
+
+    @BeforeTest
+    fun resetAccentCache() {
+        // Process-lifetime by design, so the only way to key it from a test is to
+        // empty it first. Paths are unique per test as well, in case a future
+        // runner parallelises these.
+        clearCoverAccentCache()
+    }
+
+    @Test
+    fun theGateTheComposableUsesIsTheWidthTheCommentClaims() {
+        assertEquals(
+            COVER_SAMPLE_PERMITS,
+            coverSampleGate.availablePermits,
+            "an untouched gate holds exactly its permit count — if this drifts from the constant, " +
+                "someone wrote a literal into the Semaphore() call and the shelf's cost model is a lie",
+        )
+        assertTrue(
+            COVER_SAMPLE_PERMITS in 2..4,
+            "3 is reasoned against the ~10ms shelf spike: below 2 a scrolled page trickles in, " +
+                "above 4 most of the aligned-frame cost comes back. Change the number and its comment together.",
+        )
+    }
+
+    @Test
+    fun aShelfsSamplesLandOnSeparateFrames() = runTest {
+        val gate = Semaphore(COVER_SAMPLE_PERMITS)
+        val inFlight = AtomicInteger()
+        val peak = AtomicInteger()
+        val landingFrames = Collections.synchronizedSet(mutableSetOf<Long>())
+
+        repeat(SHELF_SIZE) {
+            launch {
+                gate.withPermit {
+                    val now = inFlight.incrementAndGet()
+                    peak.updateAndGet { maxOf(it, now) }
+                    delay(SAMPLE_COST_MS)
+                    inFlight.decrementAndGet()
+                }
+                // The frame the sample's state write lands in: what the ~10ms spike
+                // actually was, twelve of these stacked on one scheduler instant.
+                landingFrames.add(testScheduler.currentTime)
+            }
+        }
+
+        val expectedRounds = ceil(SHELF_SIZE.toDouble() / COVER_SAMPLE_PERMITS).toInt()
+        // The launches above are children of the test scope; without draining the
+        // scheduler the counters below are read before a single sample has run.
+        testScheduler.advanceUntilIdle()
+        assertTrue(
+            peak.get() <= COVER_SAMPLE_PERMITS,
+            "${peak.get()} sampled at once through a $COVER_SAMPLE_PERMITS-permit gate",
+        )
+        assertTrue(
+            peak.get() > 1,
+            "the gate never held more than one sample, so the shelf is serialised rather " +
+                "than bounded — ${expectedRounds} rounds' worth of waiting for no reason",
+        )
+        assertTrue(
+            landingFrames.size > 1,
+            "the gate exists so a shelf's samples do not land in one frame; they landed in " +
+                "${landingFrames.size} at ${landingFrames.sorted()}",
+        )
+    }
+
+    @Test
+    fun oneCoverPathIsSampledOnceForTheLifeOfTheProcess() {
+        var calls = 0
+        repeat(4) {
+            assertEquals(
+                Color(0xFFAA0000),
+                cachedOrSampledAccent("shelf/red.jpg") { calls++; Color(0xFFAA0000) },
+                "every read of a cached cover returns the same raw colour",
+            )
+        }
+        assertEquals(1, calls, "a LazyGrid recycles its slots: re-reading the same cover per pass is the cost the cache carries")
+        assertEquals(Color(0xFFAA0000), accentCache["shelf/red.jpg"], "the cache holds the raw sample, so the guard can re-run per theme")
+        assertEquals(
+            COVER_SAMPLE_PERMITS,
+            coverSampleGate.availablePermits,
+            "the warm read never reaches the gate — it stays a synchronous map lookup",
+        )
+    }
+
+    @Test
+    fun anUnqualifiedSampleIsNotNegativeCached() {
+        var calls = 0
+        repeat(3) { assertNull(cachedOrSampledAccent("shelf/white.jpg") { calls++; null }) }
+        assertFalse(accentCache.containsKey("shelf/white.jpg"))
+        assertEquals(3, calls, "deliberate: null means 'nothing qualified', and a sentinel in a map of trusted colours is worse")
+    }
+
+    private companion object {
+        /** The shelf the ~10ms spike was measured on: ~a dozen covers decoding together. */
+        const val SHELF_SIZE = 12
+
+        /** Stand-in for one stride read. Virtual time, so the value only sets the ratio. */
+        const val SAMPLE_COST_MS = 50L
+    }
+}
+
+/**
+ * The halo's arrival ramp, at the one layer that needs no Compose runtime: the two
+ * strengths it interpolates between. The endpoints are the visual contract — a
+ * pending cover must still read as lit (this pass exists to kill flat covers), and
+ * a resolved one must land on the strength every anchored and featured cover has
+ * always used, or the shelf silently dims the hero.
+ */
+class CoverHaloStrengthTest {
+
+    @Test
+    fun resolvedGlowIsTheHistoricFullStrength() {
+        assertTrue(COVER_HALO_STRENGTH == 0.30f, "coverHalo's own default: the glow must not drift with the ramp")
+        assertTrue(
+            COVER_HALO_PENDING_STRENGTH < COVER_HALO_STRENGTH && COVER_HALO_PENDING_STRENGTH >= 0.15f,
+            "pending ($COVER_HALO_PENDING_STRENGTH) sits under resolved ($COVER_HALO_STRENGTH) but stays " +
+                "visible — a glow too faint to see is a flat cover with a promise attached",
+        )
     }
 }

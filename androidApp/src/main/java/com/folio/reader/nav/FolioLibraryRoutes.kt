@@ -37,6 +37,8 @@ import androidx.compose.material3.TextButton
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverLight
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.home.HomeScreen
@@ -45,6 +47,8 @@ import com.folio.reader.ui.library.LibraryScreen
 import com.folio.reader.ui.library.DocumentLibraryViewModel
 import com.folio.reader.ui.library.LibraryViewModel
 import com.folio.reader.ui.statistics.StatisticsTabContent
+import com.folio.reader.ui.theme.FolioAmbientSource
+import com.folio.reader.ui.theme.FolioCoverLightSource
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.folioBarTopInset
 import kotlinx.coroutines.Dispatchers
@@ -241,6 +245,9 @@ fun LibraryRoute(
         }
     }
 
+    // The room is lit by the shelf, not by whatever tab was visited last.
+    LibraryAmbientSource(navModel)
+
     LibraryScreen(
         onBookClick = { onOpenReader(it.id) },
         onBookDetailClick = { onOpenBookDetail(it.id) },
@@ -409,6 +416,27 @@ fun LibraryRoute(
     }
 }
 
+/**
+ * The Library lights the room from its own reading-now entry: the first in-progress
+ * book, else the first cover on the shelf, else the palette's own light.
+ *
+ * It reads [FolioNavModelImpl.libraryBooks], the eagerly-shared shelf flow already
+ * passed below as the shelf's opening-frame seed, so a further collector is free
+ * where re-deriving the shelf would be a second database pass for a tint. That seed
+ * carries no filter, so a filtered shelf can light the room with a book it is not
+ * showing. Both samples are keyed by cover path, which the featured row paid for.
+ */
+@Composable
+private fun LibraryAmbientSource(navModel: FolioNavModelImpl) {
+    val shelf by navModel.libraryBooks.collectAsState()
+    val anchor = remember(shelf) {
+        shelf.firstOrNull { it.normalizedProgress > 0.0 && it.normalizedProgress < 0.99 } ?: shelf.firstOrNull()
+    }
+    val lit = navModel.globalSettings.ambientColor && anchor != null
+    FolioAmbientSource(if (lit) rememberCoverAccent(anchor?.coverPath, FolioTheme.colors.accentProgress) else null)
+    FolioCoverLightSource(if (lit) rememberCoverLight(anchor?.coverPath) else null)
+}
+
 @Composable
 fun StatsRoute(
     navModel: FolioNavModelImpl,
@@ -436,6 +464,8 @@ fun StatsRoute(
                     .nestedScroll(headerState.nestedScrollConnection)
                     .folioBackdropSource()
             ) {
+                // Stats is where colour is expected: the room lights from the year's #1 book.
+                StatsAmbientSource(navModel)
                 StatisticsTabContent(
                     viewModel = navModel.statisticsVM,
                     onBookClick = onOpenBookDetail,
@@ -459,6 +489,25 @@ fun StatsRoute(
             modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter),
         )
     }
+}
+
+/**
+ * Stats lights the room from the reader's #1 book of the year — the cover
+ * `topBooks` already carries, so nothing new is fetched.
+ *
+ * The collect of [com.folio.reader.ui.statistics.StatisticsViewModel.sharedState]
+ * (eager, process-wide, already collected by the screen below) lives *here* rather
+ * than in StatsRoute: an emission then relights the room inside this scope only,
+ * where recomposing the route would rebuild the manga statistics repository passed
+ * down and re-run its whole pass, for a colour.
+ */
+@Composable
+private fun StatsAmbientSource(navModel: FolioNavModelImpl) {
+    val stats by navModel.statisticsVM.sharedState.collectAsState()
+    val topCover = stats.topBooks.firstOrNull()?.coverPath
+    val lit = navModel.globalSettings.ambientColor && topCover != null
+    FolioAmbientSource(if (lit) rememberCoverAccent(topCover, FolioTheme.colors.accentProgress) else null)
+    FolioCoverLightSource(if (lit) rememberCoverLight(topCover) else null)
 }
 
 /**

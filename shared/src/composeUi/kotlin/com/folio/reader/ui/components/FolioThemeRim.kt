@@ -72,6 +72,13 @@ import kotlin.math.sin
 internal const val RIM_PERIOD_MS = 24_000L
 
 /**
+ * How far the static ring is lifted from the palette's hairline toward its rim light.
+ * A polished edge, not a neon one: enough to read as a real specular rim now that the
+ * theme owns it, short of becoming the brightest thing on the card.
+ */
+internal const val RIM_METALLIC = 0.62f
+
+/**
  * 30 Hz rather than the house 10 Hz slow clock
  * ([com.folio.reader.ui.theme.SLOW_MOTION_TICK_MS]).
  *
@@ -87,6 +94,21 @@ internal const val RIM_BEAM_SPAN = 0.30f
 
 /** Peak alpha at the centre of the arc; it ramps to nothing at both ends across [RIM_BEAM_SPAN]. */
 internal const val RIM_HEAD_ALPHA = 0.80f
+
+/**
+ * How much fainter the bloom is than the core ring it surrounds.
+ *
+ * The bloom is the same beam through a 4.5× wider stroke, and until now it was drawn at
+ * exactly the same alpha as the core — so the halo was as bright as the light inside it.
+ * That is not a bloom, it is a saturated stripe: a 6.75dp band of pure primary hugging
+ * the inside of the clip, which reads as a second, badly drawn border and flattens the
+ * colour it is supposed to be glowing from.
+ *
+ * Only the intensity differs. Hue, span, position and travel are shared with the core, so
+ * the travelling light is untouched — this changes how wide the glow is allowed to shout,
+ * nothing about how it moves.
+ */
+internal const val RIM_BLOOM_RATIO = 0.30f
 
 /**
  * How much a fling may widen the beam, as a fraction of [RIM_BEAM_SPAN].
@@ -284,7 +306,6 @@ internal fun rimBeamColors(
 @Composable
 fun Modifier.folioThemeRim(
     shape: Shape,
-    accent: Color,
     counterAccent: Color,
     width: Dp = 1.5.dp,
     animate: Boolean = rememberMotionEnabled(),
@@ -294,13 +315,30 @@ fun Modifier.folioThemeRim(
     /** How far through the book this surface is, 0..1, or null for none. */
     parkedAt: Float? = null,
 ): Modifier {
-    val hairline = FolioTheme.atmosphere.hairline
+    val rimAtmos = FolioTheme.atmosphere
+    val hairline = rimAtmos.hairline
+    // The glint runs in the theme's own signature colour. Head and ring were both
+    // built from `rimLight`, which is what the card's surface is already lifted from,
+    // so the beam had nothing to contrast against and the animated border vanished.
+    // The palette, not the book, gets to be loud here.
+    val rimAccent = FolioTheme.colors.primary
     val phases: State<List<Float>>? =
         if (animate) rememberSlowPhases(listOf(RIM_PERIOD_MS), RIM_TICK_MS) else null
     return drawWithCache {
         val path = shapePath(shape)
         val center = Offset(size.width / 2f, size.height / 2f)
-        val base = lerp(hairline, accent, 0.40f)
+        // A specular edge, mixed from the palette's own two light colours: the hairline
+        // it was designed with, lifted toward the atmosphere's rim light. Now that the
+        // edge belongs to the theme rather than the book, it can be brighter than a
+        // hairline without reading as decoration — a real polished rim, short of a
+        // neon outline.
+        //
+        // The cover is out of the boundary entirely. A rim is the seam *between* a card
+        // and the room, so a colour laid on it cannot say which of the two it came from:
+        // a gold ring around a yellow jacket in a purple room read as a random gold
+        // ring. The book is carried by the lamp and by the light inside the pane, where
+        // its cause is obvious.
+        val base = lerp(hairline, rimAtmos.rimLight, RIM_METALLIC)
         // Every pass is clipped to the shape and drawn at twice its visible
         // weight, so half the stroke falls outside and what remains is a rim that
         // hugs the inside of the edge. Without the clip, a surface that is not
@@ -335,12 +373,18 @@ fun Modifier.folioThemeRim(
                 wrapToOne(turn / TWO_PI + (parkedAt ?: 0f).coerceIn(0f, 1f) * RIM_PROGRESS_SWING)
             }
             val beam = Brush.sweepGradient(
-                rimBeamColors(head, accent, counterAccent, span, headAlpha),
+                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha),
+                center,
+            )
+            // The halo is the same light through a wider stroke, and has to be fainter
+            // than the core or it is a stripe rather than a glow. See [RIM_BLOOM_RATIO].
+            val halo = Brush.sweepGradient(
+                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha * RIM_BLOOM_RATIO),
                 center,
             )
             clipPath(path) {
                 drawPath(path, base, style = edge)
-                drawPath(path, beam, style = bloom)
+                drawPath(path, halo, style = bloom)
                 drawPath(path, beam, style = ring)
             }
         }

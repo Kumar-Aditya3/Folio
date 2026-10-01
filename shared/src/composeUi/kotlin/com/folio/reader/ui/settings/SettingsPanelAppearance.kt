@@ -477,6 +477,35 @@ fun TransparencySettingsPanel(
                 },
             )
         }
+        // The room's colour comes from the book now, and an amplitude this large
+        // needs an exit. Off restores the palette's own atmosphere everywhere,
+        // byte-for-byte. Contrast is not what is being traded either way: the tint
+        // moves hue at pinned luminance, so it cannot take a ratio from ink.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Ambient colour",
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = "Light the page, the bars and the cover glows from the " +
+                        "book you are reading, so the room changes with your shelf. " +
+                        "Off keeps every theme's own colours.",
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.ambientColor,
+                onCheckedChange = { on ->
+                    onSettingsChange(settings.copy(ambientColor = on))
+                },
+            )
+        }
         // Wide-gamut colour. It is not a filter or a tint: the same numbers are drawn,
         // with a wider window to express them. Off maps everything into sRGB on the way
         // to the panel, which is what silently desaturated any cover authored in P3.

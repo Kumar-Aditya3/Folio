@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import kotlin.math.abs
 
 /**
  * A palette is a colour set; an **atmosphere** is an environment. This derives
@@ -33,6 +34,18 @@ data class FolioAtmosphere(
     val pools: List<Color>,
     /** Alpha a pool is drawn at. Dark fields tolerate more; paper needs less. */
     val poolAlpha: Float,
+    /**
+     * How hard the colour of what is being read is folded into the field, 0..1.
+     * Zero leaves the room exactly the palette's own.
+     *
+     * Paired across polarities here rather than in [FolioTokens], which is
+     * deliberately polarity-free and cannot express a different amplitude in a
+     * dark room and a light one. A dark field can carry far more of a cover's hue
+     * before it reads as painted, so it is given more; paper shows tint readily
+     * and is given a whisper. Hue and chroma move at this strength — luminance is
+     * pinned by [tintFill] — so this knob cannot trade away contrast.
+     */
+    val fieldTintStrength: Float,
     /** Ambient shadow colour — the palette's darkness, not black. */
     val shadowAmbient: Color,
     /** Spot (directional) shadow colour. */
@@ -45,6 +58,18 @@ data class FolioAtmosphere(
     val rimShade: Color,
     /** Fill for a surface that sits *above* the page. */
     val raisedFill: Color,
+    /**
+     * The alpha [raisedFill] is drawn at when a surface is meant to be a **pane**
+     * rather than a panel: the hero, which is the one large object sitting *in* the
+     * room rather than on top of it. At 1f the room behind it is irrelevant, which is
+     * also why the refraction along its rim read as a dark band — glass that hides
+     * what is behind it is paint.
+     *
+     * Paired per polarity like the rest of this type: paper gives up its character
+     * through a translucent panel far more readily than a dark field does, so the
+     * light face stays closer to solid.
+     */
+    val paneAlpha: Float,
     /** Fill for a surface pressed *into* the page. */
     val sunkenFill: Color,
     /** Translucent fill for bars, nav and sheets that sit over content. */
@@ -63,21 +88,30 @@ data class FolioAtmosphere(
     val barGlass: Color,
     /** Hairline colour for structural rules and dividers. */
     val hairline: Color,
+    /**
+     * The body ink that sits directly on the field, carried so the environment can
+     * bound itself: [FolioFieldModel] lights the room as brightly as this colour can
+     * still clear its contrast floor against it, and no brighter.
+     */
+    val ink: Color,
 )
 
 /**
  * Perceptual lightness, cheap. Used only to pick a lighting model, so the
  * sRGB-weighted approximation is sufficient and avoids a LAB conversion on
  * every recomposition.
+ *
+ * Internal rather than private because [FolioFieldModel] tints the field with the
+ * same arithmetic and must not fork a second copy of it (Rule 3).
  */
-private fun luminanceOf(c: Color): Float =
+internal fun luminanceOf(c: Color): Float =
     c.red * 0.2126f + c.green * 0.7152f + c.blue * 0.0722f
 
 /** Pushes a colour toward its own saturated form without changing hue. */
-private fun deepen(c: Color, amount: Float): Color =
+internal fun deepen(c: Color, amount: Float): Color =
     lerp(c, Color.Black, amount)
 
-private fun lift(c: Color, amount: Float): Color =
+internal fun lift(c: Color, amount: Float): Color =
     lerp(c, Color.White, amount)
 
 // ── Region tinting (straight-line sRGB channel math, kept deterministic so the
@@ -89,17 +123,21 @@ private fun lift(c: Color, amount: Float): Color =
 // own temperature — iconic — while every tint is drawn from the theme's own
 // roles, so it still blends. matchLuma pins the tinted result back to the
 // untinted base's luminance, so text contrast on each plane is unchanged.
-private fun mixG(a: Color, b: Color, t: Float): Color = Color(
+//
+// Internal for the same reason as luminanceOf: the field tint is the same
+// operation on the same inputs, and the invariant "hue moves, luminance does
+// not" has to hold in exactly one place.
+internal fun mixG(a: Color, b: Color, t: Float): Color = Color(
     red = (a.red + (b.red - a.red) * t).coerceIn(0f, 1f),
     green = (a.green + (b.green - a.green) * t).coerceIn(0f, 1f),
     blue = (a.blue + (b.blue - a.blue) * t).coerceIn(0f, 1f),
 )
 
-private fun liftG(c: Color, amount: Float): Color = mixG(c, Color.White, amount)
+internal fun liftG(c: Color, amount: Float): Color = mixG(c, Color.White, amount)
 
-private fun deepenG(c: Color, amount: Float): Color = mixG(c, Color.Black, amount)
+internal fun deepenG(c: Color, amount: Float): Color = mixG(c, Color.Black, amount)
 
-private fun matchLuma(c: Color, target: Float): Color {
+internal fun matchLuma(c: Color, target: Float): Color {
     val l = luminanceOf(c)
     if (l <= 0.0001f) return c
     val k = target / l
@@ -111,8 +149,91 @@ private fun matchLuma(c: Color, target: Float): Color {
 }
 
 /** Pulls [base] toward [toward] in hue, then restores base luminance. */
-private fun tintFill(base: Color, toward: Color, amount: Float): Color =
+internal fun tintFill(base: Color, toward: Color, amount: Float): Color =
     matchLuma(mixG(base, toward, amount), luminanceOf(base))
+
+/**
+ * Mixes [base] toward a grey of its own lightness, so a region loses *chroma*
+ * without gaining or losing brightness. Used to neutralise the base field so an
+ * injected cover hue reads as a light in the room rather than as more brown.
+ */
+internal fun desaturate(c: Color, amount: Float): Color {
+    val l = luminanceOf(c)
+    return mixG(c, Color(l, l, l), amount)
+}
+
+/**
+ * Pulls [c] toward its own neutral and then puts back exactly the lightness the mix
+ * cost, so only *hue* leaves the colour.
+ *
+ * [desaturate] holds [luminanceOf] — the cheap gamma-weighted sum — but every legibility
+ * guard in the app reads `relativeLuminance`, the linearised WCAG one, and those two
+ * disagree as soon as a colour has chroma in it: a violet's blue channel contributes far
+ * more linear light than its gamma value suggests, so flattening it toward grey quietly
+ * dims it. That is why desaturate could only ever take 0.30 out of the hero's fill before
+ * the pane fell onto its own field and stopped reading as a surface at all.
+ *
+ * This decouples the two axes. The pull can then go as far as the design wants, because
+ * the thing the guards measure — the pane's lightness against the room — is restored by
+ * construction rather than traded away.
+ *
+ * The scaling is a local function rather than a top-level one: `ui.theme` already holds a
+ * private `scaled` in `FolioFieldModel`, and a second copy of it here is the redeclaration
+ * that has bitten this package before.
+ */
+internal fun neutralise(c: Color, amount: Float): Color {
+    val target = relativeLuminance(c)
+    val grey = luminanceOf(c)
+    val flat = mixG(c, Color(grey, grey, grey), amount)
+
+    fun at(k: Float): Color = Color(
+        red = (flat.red * k).coerceIn(0f, 1f),
+        green = (flat.green * k).coerceIn(0f, 1f),
+        blue = (flat.blue * k).coerceIn(0f, 1f),
+    )
+
+    if (abs(relativeLuminance(flat) - target) < 1e-6) return flat
+    // Linear luminance rises monotonically with a channel-wise scale, so the correction
+    // is a bisection rather than a guess. 24 passes is well under a 1/255 step on any
+    // channel, which is the finest thing an sRGB colour can express anyway.
+    var lo = 0.5f
+    var hi = 2.0f
+    var mid = 1f
+    repeat(24) {
+        mid = (lo + hi) / 2f
+        if (relativeLuminance(at(mid)) < target) lo = mid else hi = mid
+    }
+    return at((lo + hi) / 2f)
+}
+
+/**
+ * How much chroma the base field gives up toward its own neutral, per polarity.
+ * See the field block in [atmosphereFor]: this is what lets an injected cover hue
+ * read as light instead of as a second brown, and it costs no luminance.
+ */
+private const val FIELD_NEUTRALITY_DARK = 0.35f
+private const val FIELD_NEUTRALITY_LIGHT = 0.10f
+
+/**
+ * How much chroma the **hero's own fill** gives up, on a dark field.
+ *
+ * The field was neutralised at palette time to stop every room looking like the same
+ * brown and to clear a place for the cover's hue. The pane never got the same treatment,
+ * so it kept its palette's full chroma while the room behind it did not. On the dark
+ * faces that is stark: `vaporwave`'s fill carries a channel spread of 57 where its own
+ * field carries 33. The hero was roughly twice as loud as the room it stands in.
+ *
+ * The paper branch needs none of this, and the reason is worth keeping because it
+ * explains why this went unnoticed for so long: `raisedFill` on light is
+ * `liftG(surface, 0.55f)` — fifty-five percent white — which dilutes the chroma away
+ * before any of this is needed. Dark has no such dilution, so dark is the only face
+ * where the pane out-shouts its own theme.
+ *
+ * [neutralise] rather than [desaturate]: the lightness the pull costs is put straight
+ * back, so this number is free to go as far as the design wants without the pane
+ * collapsing onto the field and tripping `materialsAreVisuallyDistinguishable`.
+ */
+private const val PANE_NEUTRALITY_DARK = 0.80f
 
 /**
  * Derives the atmosphere for [colors]. Pure and cheap — remembered per palette
@@ -123,17 +244,25 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
     val dark = bgLuma < 0.45f
 
     // The field is the page itself: a vertical wash from a slightly lifted top
-    // (where the light is) to a slightly deepened bottom. Kept under ~4% so it
-    // never reads as a gradient — only as air.
+    // (where the light is) to a deepened bottom.
+    //
+    // It is also neutralised first. A warm brown ground competes with the colour of
+    // whatever is being read, and the winner was always the brown — which is most of
+    // why every room looked the same. [desaturate] mixes toward a grey of the
+    // colour's *own* lightness, and because the sRGB weights sum to one it is
+    // luminance-preserving by construction, so pulling the base toward neutral moves
+    // no contrast ratio at all: it only clears a place for the cover's hue to be read
+    // as a light in the room rather than as more of the room's brown. Paper needs far
+    // less of this than a dark field does, and gets a tenth of what the darks do.
     val fieldTop = if (dark) {
-        lerp(colors.background, colors.surface, 0.55f)
+        desaturate(lerp(colors.background, colors.surface, 0.55f), FIELD_NEUTRALITY_DARK)
     } else {
-        lift(colors.background, 0.035f)
+        desaturate(lift(colors.background, 0.035f), FIELD_NEUTRALITY_LIGHT)
     }
     val fieldBottom = if (dark) {
-        deepen(colors.background, 0.22f)
+        deepen(desaturate(colors.background, FIELD_NEUTRALITY_DARK), 0.30f)
     } else {
-        lerp(colors.background, colors.surfaceVariant, 0.45f)
+        desaturate(lerp(colors.background, colors.surfaceVariant, 0.45f), FIELD_NEUTRALITY_LIGHT)
     }
 
     // Colour pools come from the semantic accents, not primary, so a theme's
@@ -151,6 +280,20 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         pools = pools,
         // Paper shows tint far more readily than a dark field absorbs it.
         poolAlpha = if (dark) 0.16f else 0.085f,
+        // The room is lit by what is being read, and the amplitude has to be real
+        // for that to register at all: the value this replaced was a whisper at one
+        // edge of the wash, which is why every screen looked like the same brown room.
+        //
+        // This moves the cover's *whole* colour, lightness included — `fieldColors`
+        // mixes it and then clamps only at what the ink survives, which is a lot of
+        // headroom on a deep dark. The pairing used to run the other way, on the
+        // theory that a dark field can carry hue before it reads as painted: 0.24
+        // against paper's 0.13. On device that theory is what turned deep dark rooms
+        // olive — "makes dark themes bright and saturated... make the darker
+        // background more dominant". So the faces are inverted: a dark room now takes
+        // *less* of a cover than paper does, and keeps its character through where the
+        // lamp sits rather than by drinking the jacket.
+        fieldTintStrength = if (dark) 0.11f else 0.13f,
         // A shadow is absence of light, so it takes the palette's own deepest
         // neutral. Pure black on a warm cream page reads as a hole.
         shadowAmbient = if (dark) Color.Black else deepen(colors.onSurfaceVariant, 0.35f),
@@ -172,15 +315,57 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         // brighter card. Luminance is pinned to the untinted lift, so ink keeps
         // its contrast.
         raisedFill = if (dark) {
-            tintFill(mixG(colors.surface, colors.surfaceVariant, 0.35f), colors.primary, 0.12f)
+            // Deeper and less chromatic than the paper branch: the hero sits over a
+            // dark field it is also lighting, so a strong primary lean here stacked on
+            // the lamp and the halo and read as a saturated violet slab. Sleeker wins
+            // at this size.
+            //
+            // Then neutralised the way the field already was — and further than the
+            // field, because this is the one surface large enough to be read as a
+            // colour in its own right. `neutralise` takes the hue out and hands the
+            // lightness straight back, so the pane keeps its separation from the room
+            // instead of paying for quiet with flatness.
+            neutralise(
+                tintFill(mixG(colors.surface, colors.surfaceVariant, 0.18f), colors.primary, 0.02f),
+                PANE_NEUTRALITY_DARK,
+            )
         } else {
             tintFill(liftG(colors.surface, 0.55f), colors.primary, 0.12f)
         },
-        // Sunken planes (charts, wells, heatmaps) lean toward the tertiary
-        // counter-accent, so a recessed region reads as a different temperature
-        // from both the resting card and the raised hero.
+        // The hero's pane: the room shows through it.
+        //
+        // This is now an *ambition*, not a calibration. A pane this transparent is
+        // what makes the gel's refraction honest — bending a room that the eye can
+        // already see through the glass reads as glass, while the same bend on a near
+        // opaque card reads as a strip of wallpaper laid over a sticker, which is
+        // exactly what it was. The two settings only make sense together.
+        //
+        // `theHeroPaneKeepsItsOwnTextLegible` holds the veto: it composites this pane
+        // over the brightest point the *lit* page can reach and requires 7:1 for the
+        // ink on it. If it fails, this number is wrong and the glass is not affordable
+        // on that theme — the floor does not move.
+        //
+        // Paper stays much closer to solid: a light surface is already near white, so
+        // translucency costs it its identity far faster than a dark field loses anything.
+        paneAlpha = if (dark) 0.55f else 0.82f,
+        // A recess cannot be an opaque colour. The page a reader actually sees is the
+        // field *after* the runtime pools and the cover's lamp have been laid over it,
+        // so any at-rest token chosen to be "the dark of the page" is either flat
+        // against it or an abrupt cut — and three values picked in that family (a
+        // deepenG of the background, background scaled by 0.74, a third of the way
+        // back up from fieldBottom to fieldTop) all rendered the same black hole.
+        //
+        // So the well is no longer a colour, it is a layer: a dark tint at low alpha
+        // that sits in front of the theme rather than beside it, and therefore darkens
+        // whatever the room happens to be instead of trying to guess it. The tint is
+        // the counter-accent rather than neutral black so the recess reads as a
+        // different temperature from the card around it, which is what carries the
+        // depth now that the luminance step no longer can.
+        //
+        // The alpha is the mechanism, not a tuning knob: raising it back toward opaque
+        // re-creates the hole. Separation at the well's edge is folioSunken's rim lip.
         sunkenFill = if (dark) {
-            tintFill(deepenG(colors.background, 0.35f), colors.tertiary, 0.14f)
+            mixG(Color.Black, colors.tertiary, 0.10f).copy(alpha = 0.34f)
         } else {
             tintFill(mixG(colors.surfaceVariant, colors.background, 0.25f), colors.tertiary, 0.14f)
         },
@@ -228,6 +413,9 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         } else {
             colors.outline.copy(alpha = 0.42f)
         },
+        // The ink that sits straight on the page — most rows and lists in the app are
+        // this colour on the field, with no surface between them.
+        ink = colors.onBackground,
     )
 }
 
@@ -238,3 +426,12 @@ val FolioTheme.atmosphere: FolioAtmosphere
         val colors = LocalFolioColors.current
         return remember(colors) { atmosphereFor(colors) }
     }
+
+/**
+ * [raisedFill] at [FolioAtmosphere.paneAlpha] — the hero's material. Everything else
+ * about a raised surface stays: the shadow, the rim, the directional sheen all read
+ * the same, so the card keeps its depth and only the fill starts letting the room
+ * through. That is the difference between a panel pasted on a page and a pane sitting
+ * in one.
+ */
+fun FolioAtmosphere.paneFill(): Color = raisedFill.copy(alpha = paneAlpha)

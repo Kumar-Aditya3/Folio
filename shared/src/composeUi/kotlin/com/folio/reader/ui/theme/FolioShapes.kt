@@ -23,6 +23,11 @@ import androidx.compose.ui.unit.dp
  *
  * Nothing here is a token alias: each value exists because a different class of
  * object needs a different silhouette.
+ *
+ * These are the vocabulary. `FolioShapeFamily.kt` is the grammar: it varies the hero,
+ * card, inset and callout values below per object, by a budget that keeps each class
+ * readable as itself, and leaves plate, pill/chip, sheet and nav exactly as declared
+ * here.
  */
 object FolioShapes {
     /** Hero surfaces: asymmetric, generous at the leading edge. */
