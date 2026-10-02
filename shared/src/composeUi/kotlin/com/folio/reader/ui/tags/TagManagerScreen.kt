@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +25,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -46,6 +46,7 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -163,6 +164,10 @@ fun TagManagerScreen(
     onBookClick: (Book) -> Unit,
     viewModel: TagManagerViewModel
 ) {
+    // Cosmic art direction: a management surface — Quiet, so the field is a faint
+    // backdrop and the forms stay the subject. The default Scaffold ground is made
+    // transparent below so the field shows.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Quiet)
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     fun notify(message: String) {
@@ -184,6 +189,7 @@ fun TagManagerScreen(
     }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             val detail = selectedTagDetail
@@ -367,30 +373,34 @@ private fun TagListItem(
 ) {
     val tag = tagCount.tag
     val tagColor = tag.color?.let { Color(it) } ?: FolioTheme.colors.primary
-    ListItem(
+    Row(
         modifier = modifier
             .fillMaxWidth()
+            .folioPanel(accent = tagColor)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            ),
-        leadingContent = {
-            // A clean colour disc is the tag's identity. The old inner square was a
-            // hardcoded Color.White@0.3 that read as a placeholder glitch on the disc.
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(tagColor, CircleShape)
             )
-        },
-        headlineContent = {
+            .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+    ) {
+        // A clean colour disc is the tag's identity. The old inner square was a
+        // hardcoded Color.White@0.3 that read as a placeholder glitch on the disc.
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(tagColor, CircleShape)
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = tag.name,
                 style = FolioTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-        },
-        supportingContent = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "${tagCount.bookCount} book${if (tagCount.bookCount != 1) "s" else ""}",
@@ -403,16 +413,14 @@ private fun TagListItem(
                     color = FolioTheme.colors.onSurfaceVariant
                 )
             }
-        },
-        trailingContent = {
-            Row {
-                IconButton(onClick = onEditClick) {
-                    Icon(Icons.Filled.Edit, contentDescription = "Rename")
-                }
-                IconButton(onClick = onDeleteClick) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Delete")
-                }
+        }
+        Row {
+            IconButton(onClick = onEditClick) {
+                Icon(Icons.Filled.Edit, contentDescription = "Rename")
+            }
+            IconButton(onClick = onDeleteClick) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete")
             }
         }
-    )
+    }
 }

@@ -1,0 +1,6 @@
+Manifest-Version: 1.0
+Import-Package: java.io,java.lang,kotlin;version="[2.2,3)",kotlin.jvm.
+ internal;version="[2.2,3)",okhttp3;version="[5.3,6)",okio;version="[3
+ .16,4)",org.brotli.dec;version="[0.1,1)"
+Require-Capability: osgi.ee;filter:="(&(osgi.ee=JavaSE)(version=1.8))"
+

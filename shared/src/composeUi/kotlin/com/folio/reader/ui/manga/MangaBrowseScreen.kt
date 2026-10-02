@@ -34,7 +34,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,9 +52,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioSourceSectionSkeleton
+import com.folio.reader.ui.components.FolioSunkenField
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -242,7 +242,7 @@ fun MangaBrowseScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                                .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
                                 .clickable(onClick = onOpenExtensions)
                                 .padding(FolioTokens.space3),
                             verticalAlignment = Alignment.CenterVertically,
@@ -297,11 +297,11 @@ fun MangaBrowseScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedTextField(
+                    FolioSunkenField(
                         value = queryText,
                         onValueChange = { queryText = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search all sources") },
+                        placeholder = "Search all sources",
                         singleLine = true,
                     )
                     Spacer(Modifier.width(FolioTokens.space1))
@@ -393,7 +393,7 @@ private fun SourceRow(source: MangaSourceInfo, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+            .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
             .clickable(onClick = onClick)
             .padding(FolioTokens.space3),
         verticalAlignment = Alignment.CenterVertically,

@@ -569,6 +569,21 @@ fun ReaderScreen(
     // inherited palette is passed through untouched so the user's chosen app theme
     // survives into the bars, panels and in-page overlays.
     FolioTheme.MaterialTheme(darkTheme = appIsDark, colors = appColors) {
+    // Phase 7 — the reader-open morph lands in the book's colour. The chrome (bars,
+    // panels, status scrim) wears the same tamed cover accent the detail page set,
+    // and the room carries the book's lamp, so as the flying plate dissolves into the
+    // page the destination is already lit by the book rather than snapping to it. The
+    // reading theme still paints the page itself; this only tints the app chrome. A
+    // no-op when the appearance holder is withheld (ambient/lamp sources return early).
+    val readerAccent = com.folio.reader.ui.components.rememberCoverAccent(
+        coverPath, FolioTheme.colors.accentProgress,
+    )
+    com.folio.reader.ui.theme.FolioAmbientSource(
+        com.folio.reader.ui.theme.tameCover(readerAccent, FolioTheme.colors.primary),
+    )
+    com.folio.reader.ui.theme.FolioCoverLightSource(
+        com.folio.reader.ui.components.rememberCoverLight(coverPath),
+    )
     androidx.compose.runtime.CompositionLocalProvider(
         com.folio.reader.ui.render.LocalOverlayHtml provides overlayHtml,
         com.folio.reader.ui.render.LocalOverlayAction provides { a ->
@@ -740,16 +755,20 @@ fun ReaderScreen(
             )
         }
 
-        // Eye-protection: a warm amber wash over the reading surface, painted
-        // below the chrome so the controls stay neutral. Global comfort setting;
-        // intensity scales the warmth. Decorative only (no pointer modifier), so
-        // like pageFoxing it never intercepts taps to the page beneath.
+        // Eye-protection: a warm wash over the reading surface, painted below the
+        // chrome so the controls stay neutral. Phase 4 ties "comfort warmth" and
+        // "time of day" into one system — the wash takes the room's own daylight
+        // temperature (amber at dusk/dawn, near-neutral at noon, cool-dim overnight)
+        // rather than a fixed amber slab, with the manual intensity kept as a user
+        // multiplier on top. No-op at intensity 0. Decorative only (no pointer
+        // modifier), so like pageFoxing it never intercepts taps to the page beneath.
         if (settings.eyeProtection) {
+            val eyeWarmth = com.folio.reader.ui.theme.LocalFolioDaylight.current.temperature
             androidx.compose.foundation.layout.Spacer(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Color(0xFFFF8A3D).copy(
+                        eyeWarmth.copy(
                             alpha = (settings.eyeProtectionIntensity * 0.35f).coerceIn(0f, 0.35f)
                         )
                     )

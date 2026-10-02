@@ -18,15 +18,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.lampColor
 import com.folio.reader.ui.theme.rememberMotionEnabled
@@ -249,6 +252,38 @@ fun FolioCoverPlate(
                     shape,
                 ),
         )
+        // §13.7 M7 — a refractive lens lip, where the platform can show one.
+        //
+        // The cover-sampling gel the brief sketched (a RuntimeShader with the decoded
+        // jacket as a `uniform shader`) is the speculative path; this is its sanctioned
+        // fallback — a shape-aware specular rim that reads as glass over a detailed
+        // jacket without live-sampling it or risking the cover decode. It is a thin
+        // highlight laid along the room's own sun axis, brightest on the sun-facing
+        // edge and gone on the anti-sun side (a crude fresnel), over the plate's
+        // outline. Gated on the `specular` capability alone, so desktop, previews and
+        // low-RAM devices (and the liquid-glass preference off) render the plate
+        // byte-for-byte as it was — today's rim-lit seat above and nothing more.
+        if (LocalGlassCapabilities.current.specular) {
+            val daylight = LocalFolioDaylight.current
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .drawWithCache {
+                        val path = shapePath(shape)
+                        val (start, end) = daylightGradient(size, daylight)
+                        val lip = Brush.linearGradient(
+                            0f to Color.Transparent,
+                            0.55f to atmos.rimLight.copy(alpha = atmos.rimLight.alpha * 0.12f),
+                            1f to atmos.rimLight.copy(alpha = atmos.rimLight.alpha * 0.60f),
+                            start = start,
+                            end = end,
+                        )
+                        onDrawBehind {
+                            drawPath(path, lip, style = Stroke(width = 1.5.dp.toPx()))
+                        }
+                    },
+            )
+        }
         overlay?.invoke(this)
     }
 }

@@ -1,8 +1,11 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.statistics
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -64,13 +67,19 @@ import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.statistics.Scope
 import kotlinx.coroutines.flow.StateFlow
 import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
+import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.folioCosmicCard
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberLegibleAccent
+import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -146,6 +155,10 @@ fun StatisticsTabContent(
      *  Default no-op keeps other hosts unchanged. */
     onOpenQuote: (RecentQuote) -> Unit = {},
 ) {
+    // Cosmic art direction: Stats is Expressive — the reference case for the shared
+    // primitives (orbital progress + celestial atmosphere + animated chart glow). The
+    // field runs its boldest base behind the figures while the wells keep them legible.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Expressive)
     val stats by state.collectAsState()
     // Gate the first frames on the real emission. `state` is a combine of four
     // suspense queries (plus a roundtrip per book when exclusions resolve tags and
@@ -308,6 +321,20 @@ private fun StatisticsContent(
             return@LazyColumn
         }
 
+        // ── Most-read hero: the window's #1 book, whose cover carries the same
+        // shared key (FolioSharedKeys.bookCover) the Home hero and the Library
+        // grid attach to that book. §17: a tab↔tab switch then flies the cover
+        // between the tabs instead of hard-cutting; when the book is not on the
+        // tab being left there is no pair to fly to and the switch rides its own
+        // fade — still smoother than a cut. Rendered only when a top book exists,
+        // so an empty leaderboard shows no placeholder. ──
+        stats.topBooks.firstOrNull()?.let { topBook ->
+            item {
+                MostReadHero(book = topBook, onBookClick = onBookClick)
+                Spacer(Modifier.height(FolioTokens.spaceMovement))
+            }
+        }
+
         // ── a. Daily goal ring ────────────────────────────────────────
         item {
             StatsOverture(
@@ -385,6 +412,78 @@ private fun StatisticsContent(
 }
 
 // ---------------------------------------------------------------------------
+// Most-read hero — Stats' flying cover
+// ---------------------------------------------------------------------------
+
+/**
+ * The reader's most-read book of the window, as a compact hero.
+ *
+ * Its cover carries [FolioSharedKeys.bookCover] — the *same* key the Home hero
+ * and the Library grid cell attach to this book — so a tab↔tab switch (§17)
+ * flies the cover between the two surfaces instead of hard-cutting. When the
+ * book is not on the tab being left there is no pair to fly to, and
+ * [sharedElementOrNoop] simply rides the tab's own fade; outside a shared-element
+ * scope (desktop, previews) or under reduce-motion it no-ops and the plate just
+ * renders. Tapping opens the book through [onBookClick] — the same open-detail
+ * callback the leaderboard rows use.
+ *
+ * `coverFeature` + the bare `sharedElementOrNoop` mirror the Library grid cell
+ * exactly, so key, size token and morph spec are identical on both ends of the
+ * flight.
+ */
+@Composable
+private fun MostReadHero(
+    book: TopBook,
+    onBookClick: (String) -> Unit,
+) {
+    val colors = FolioTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = colors.accentProgress)
+            .clickable { onBookClick(book.id) }
+            .padding(FolioTokens.space3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FolioCoverPlate(
+            coverPath = book.coverPath,
+            title = book.title,
+            author = book.author,
+            width = FolioTokens.coverFeature,
+            halo = rememberCoverAccent(book.coverPath, colors.accentProgress),
+            elevation = FolioTokens.elevationRaised,
+            // The title and author sit beside the plate and stay put while it
+            // flies, so the generated-cover fallback must not draw its own copy.
+            suppressFallbackText = true,
+            // §17: the same key the Home hero / Library grid publish for this book.
+            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id)),
+        )
+        Spacer(Modifier.width(FolioTokens.space3))
+        Column(modifier = Modifier.weight(1f)) {
+            FolioEyebrow("Most read", accent = colors.accentProgress)
+            Spacer(Modifier.height(FolioTokens.spaceHair))
+            Text(
+                text = book.title,
+                style = FolioTheme.typography.titleMedium,
+                color = colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (book.author.isNotBlank()) {
+                Text(
+                    text = book.author,
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The overture — Stats' opening statement
 // ---------------------------------------------------------------------------
 
@@ -413,9 +512,11 @@ private fun StatsOverture(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
+            .padding(start = FolioTokens.gutter, end = FolioTokens.gutter, top = FolioTokens.space2)
             .folioRaised(
-                shape = FolioShapes.heroBleed,
+                // Fully rounded, inset from both edges — the old heroBleed sat flush to
+                // the screen edge and read as a blocky slab. Smooth card now.
+                shape = FolioShapes.card,
                 accent = colors.accentProgress,
                 // Pane, not the default opaque raisedFill: Stats' overture is a hero in
                 // every sense but this file's history, and an opaque one here is what
@@ -423,7 +524,7 @@ private fun StatsOverture(
                 fill = FolioTheme.atmosphere.paneFill(),
             )
             .padding(
-                start = FolioTokens.gutter,
+                start = FolioTokens.space3,
                 end = FolioTokens.space3,
                 top = FolioTokens.space3,
                 bottom = FolioTokens.space3,

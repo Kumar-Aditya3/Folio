@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.folioClearing
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
@@ -54,6 +55,7 @@ internal fun WeekChart(week: List<StatDay>) {
         Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
             FolioSectionHead(
                 title = "Last 7 days",
+                modifier = Modifier.folioClearing(),
                 trailing = if (total > 0L) {
                     {
                         Text(

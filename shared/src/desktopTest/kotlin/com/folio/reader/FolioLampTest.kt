@@ -17,10 +17,13 @@ import com.folio.reader.ui.theme.daylightAt
 import com.folio.reader.ui.theme.fieldColors
 import com.folio.reader.ui.theme.fieldColorAtPoint
 import com.folio.reader.ui.theme.folioLightFor
+import com.folio.reader.ui.theme.heroMeshBorrow
+import com.folio.reader.ui.theme.heroWashBorrow
 import com.folio.reader.ui.theme.lampColor
 import com.folio.reader.ui.theme.lampOf
 import com.folio.reader.ui.theme.mixG
 import com.folio.reader.ui.theme.paneFill
+import com.folio.reader.ui.theme.tameCover
 import kotlin.math.pow
 import kotlin.test.Test
 import kotlin.test.assertNotNull
@@ -249,6 +252,48 @@ class FolioLampTest {
                     "${palette.id} on cover ${cover.hex()}: body ink on the hero pane reads at " +
                         "${"%.2f".format(worst)}:1 over the worst lit point, under the $floor " +
                             "floor (pane alpha ${pane.alpha})",
+                )
+            }
+        }
+    }
+
+    /**
+     * Phase 2 raised the dark hero's cover ceiling ([HERO_COVER_CEILING_DARK]) so a
+     * book actually registers on a dark hero. That amplitude is only affordable if the
+     * *whole* cover stack a reader's text sits on still clears §12.3. So compose it the
+     * way the hero draws it — lit field → pane → cover wash ([heroWashBorrow]) → cover
+     * mesh pool ([heroMeshBorrow]), each in the jacket's own tamed colour at full
+     * alpha — over the worst point each pack's lamp and the most hostile cover can
+     * produce, and require 7:1. This guard, not taste, sets the ceiling: if it fails,
+     * the ceiling is too high.
+     */
+    @Test
+    fun theHeroCoverChannelsKeepTextLegible() {
+        val floor = 7.0
+        for (palette in AppPalette.entries) {
+            val colors = palette.colors
+            val atmos = atmosphereFor(colors)
+            val pane = atmos.paneFill()
+            val ink = colors.onSurface
+            for (cover in covers) {
+                val lit = fieldColors(atmos, cover, atmos.fieldTintStrength)
+                val lamp = lampFor(palette, cover, phase = PI_HALF) ?: error("no lamp for ${palette.id}")
+                val tamed = tameCover(cover, colors.primary)
+                var worst = Double.MAX_VALUE
+                for (iy in 0..6) for (ix in 0..6) {
+                    val page = fieldColorAtPoint(
+                        lit, w, h, (0.05f + ix * 0.15f) * w, (0.05f + iy * 0.15f) * h, 0f, lamp = lamp,
+                    )
+                    val base = mixG(page, pane, pane.alpha)
+                    val washed = mixG(base, tamed, heroWashBorrow(atmos.isDark))
+                    val meshed = mixG(washed, tamed, heroMeshBorrow(atmos.isDark))
+                    worst = minOf(worst, ratio(meshed, ink))
+                }
+                assertTrue(
+                    worst >= floor,
+                    "${palette.id} on cover ${cover.hex()}: body ink on the hero's full cover " +
+                        "stack reads at ${"%.2f".format(worst)}:1, under $floor — the dark " +
+                        "ceiling (wash+mesh ${"%.3f".format(heroWashBorrow(atmos.isDark) + heroMeshBorrow(atmos.isDark))}) is too high",
                 )
             }
         }

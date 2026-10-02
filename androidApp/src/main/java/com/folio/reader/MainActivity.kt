@@ -40,7 +40,10 @@ import com.folio.reader.nav.FolioNavCallbacks
 import com.folio.reader.nav.FolioNavHost
 import com.folio.reader.nav.FolioNavModelImpl
 import com.folio.reader.nav.FolioNavShell
+import com.folio.reader.nav.LAUNCH_ANIMATION_PREF_KEY
+import com.folio.reader.nav.LAUNCH_PREFS_NAME
 import com.folio.reader.ui.components.folioField
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioPredictiveBackScale
 import com.folio.reader.ui.theme.folioAmbientShader
 import com.folio.reader.ui.theme.folioLamp
@@ -126,8 +129,58 @@ class MainActivity : ComponentActivity() {
         runCatching { mode.menu?.clear() }
     }
 
+    /**
+     * §redesign: the Android 14+ window-open "pop". Scales the app window up and
+     * fades it in when it opens, reversing on close, via `overrideActivityTransition`.
+     *
+     * A strict no-op below API 34, where the method and its `OVERRIDE_TRANSITION_*`
+     * constants were added — older devices keep the system default transition.
+     * Gated on the user's [com.folio.reader.settings.ReaderSettings.launchAnimation]
+     * flag, read from the [LAUNCH_PREFS_NAME] SharedPreferences mirror because the
+     * JDBC settings row is async-warmed and not readable this early (default on
+     * when the key is absent), and on system animations being enabled
+     * (reduce-motion off), mirroring the §13 Compose motion gate in
+     * MotionCapabilities.android.kt. Everything is kept in this one method so the
+     * single `SDK_INT` guard covers every API-34-only reference for lint's
+     * version-check flow analysis.
+     */
+    private fun maybeApplyLaunchTransition() {
+        if (android.os.Build.VERSION.SDK_INT < 34) return
+        val enabled = getSharedPreferences(
+            LAUNCH_PREFS_NAME,
+            android.content.Context.MODE_PRIVATE,
+        ).getBoolean(LAUNCH_ANIMATION_PREF_KEY, true)
+        if (!enabled) return
+        // Animator duration scale 0 means the user has turned system animations
+        // off; honour it exactly as rememberMotionEnabled does.
+        val motionEnabled = runCatching {
+            android.provider.Settings.Global.getFloat(
+                contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) > 0f
+        }.getOrDefault(true)
+        if (!motionEnabled) return
+        overrideActivityTransition(
+            android.app.Activity.OVERRIDE_TRANSITION_OPEN,
+            R.anim.folio_open_enter,
+            R.anim.folio_open_exit,
+        )
+        overrideActivityTransition(
+            android.app.Activity.OVERRIDE_TRANSITION_CLOSE,
+            R.anim.folio_close_enter,
+            R.anim.folio_close_exit,
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // §redesign: register the Android 14+ window-open "pop" before anything
+        // draws. Must run in onCreate (the overrideActivityTransition contract),
+        // reads a synchronous SharedPreferences mirror because the JDBC settings
+        // row is async-warmed and not available this early, and is a no-op below
+        // API 34 / when the user turns it off / when system animations are off.
+        maybeApplyLaunchTransition()
         enableEdgeToEdge()
 
         val graph = (application as FolioApplication).graph
@@ -477,6 +530,10 @@ class MainActivity : ComponentActivity() {
                         fieldSize = folioFieldPx,
                         lamp = folioLamp,
                     )
+                    // The hoisted cosmic-intensity holder: screens write it via
+                    // CosmicIntensitySource, folioField reads it. One per app root.
+                    val folioCosmicIntensity =
+                        com.folio.reader.ui.theme.rememberCosmicIntensityState()
                     androidx.compose.runtime.CompositionLocalProvider(
                         com.folio.reader.ui.theme.LocalFolioAmbient provides
                             com.folio.reader.ui.theme.rememberAmbientLight(),
@@ -486,6 +543,12 @@ class MainActivity : ComponentActivity() {
                         // field below reads it in its draw pass.
                         com.folio.reader.ui.theme.LocalFolioAmbientTint provides
                             if (ambientOn) folioAmbientTint else null,
+                        // The per-screen cosmic intensity, hoisted the same way: a screen
+                        // calls CosmicIntensitySource(level) and the field below reads it.
+                        // Provided above folioField so the field (and the screens that
+                        // write it) share one holder; default Atmospheric.
+                        com.folio.reader.ui.theme.LocalCosmicIntensityController provides
+                            folioCosmicIntensity,
                         com.folio.reader.ui.theme.LocalFolioBackdrop provides folioBackdrop,
                         com.folio.reader.ui.theme.LocalFolioLamp provides folioLamp,
                         com.folio.reader.ui.theme.LocalFolioLight provides folioLight,
@@ -517,6 +580,13 @@ class MainActivity : ComponentActivity() {
                             // and its film, under every screen, so content sits *in*
                             // the light rather than on top of a tint.
                             .folioLamp(folioLamp)
+                            // §16: register the field itself as a glass backdrop source,
+                            // so liquid-glass surfaces (cosmic cards, the nav capsule)
+                            // blur the *actual* cosmic field — nebula, stars, lamp —
+                            // behind them, instead of falling back to a flat field
+                            // colour (the "dull shade" a card showed with nothing but
+                            // screen content in the source). No-op when blur is off.
+                            .folioBackdropSource()
                     ) {
                         FolioNavShell(
                             navController = navController,

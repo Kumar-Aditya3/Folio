@@ -46,6 +46,7 @@ import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.folioClearing
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.legibleOn
 import com.folio.reader.ui.components.rememberEntryState
@@ -136,7 +137,7 @@ internal fun ChartBar(
 internal fun MangaWeekChart(chaptersPerDay: List<Int>, labels: List<String>) {
     Column {
         Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-            FolioEyebrow("Manga — last 7 days")
+            FolioEyebrow("Manga — last 7 days", modifier = Modifier.folioClearing())
         }
         Spacer(Modifier.height(FolioTokens.space2))
         SmoothWeekCurve(

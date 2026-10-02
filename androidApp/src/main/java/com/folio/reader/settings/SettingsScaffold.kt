@@ -77,6 +77,9 @@ fun SettingsCategoryScaffold(
     livePreviewSettings: ReaderSettings? = null,
     content: @Composable () -> Unit
 ) {
+    // Cosmic art direction: settings categories are Quiet — the field is a faint backdrop
+    // so the controls and the live preview stay the subject.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Quiet)
     val headerState = rememberFolioHeaderState()
     val topInset = folioBarTopInset()
 

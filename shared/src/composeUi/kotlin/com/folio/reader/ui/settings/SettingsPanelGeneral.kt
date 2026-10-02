@@ -13,13 +13,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,9 +25,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.FolioToggleRow
 import com.folio.reader.ui.components.onVerticalWheel
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.flipThemeMode
@@ -178,31 +176,13 @@ fun GeneralSettingsPanel(
 
         // §13.3: hero tint sampled from the current book's cover. On by default —
         // the contrast guard keeps the hero legible even on white/black covers.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .toggleable(
-                    value = settings.homeCoverTint,
-                    onValueChange = { onSettingsChange(settings.copy(homeCoverTint = it)) },
-                    role = Role.Switch
-                ),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Tint Home from book cover", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Colour the Home hero from the book you are reading, " +
-                        "contrast-checked so text stays readable.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(
-                checked = settings.homeCoverTint,
-                onCheckedChange = null
-            )
-        }
+        FolioToggleRow(
+            checked = settings.homeCoverTint,
+            onCheckedChange = { onSettingsChange(settings.copy(homeCoverTint = it)) },
+            label = "Tint Home from book cover",
+            supporting = "Colour the Home hero from the book you are reading, " +
+                "contrast-checked so text stays readable.",
+        )
 
         // Import custom font button
         OutlinedButton(

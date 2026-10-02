@@ -35,6 +35,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
@@ -63,12 +66,19 @@ import com.folio.reader.ui.theme.FolioPressFocal
 import com.folio.reader.ui.theme.folioPressFocalOrigin
 import com.folio.reader.ui.theme.FolioDaylight
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioSignature
+import com.folio.reader.ui.theme.signatureHash
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioAmbient
 import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.ambientPoolDrift
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.cosmic
+import com.folio.reader.ui.theme.CosmicSkyIntensity
+import com.folio.reader.ui.theme.CosmicMotion
+import com.folio.reader.ui.theme.rememberCosmicIntensity
+import com.folio.reader.ui.theme.sky
 import com.folio.reader.ui.theme.fieldColors
 import com.folio.reader.ui.theme.fieldDrift
 import com.folio.reader.ui.theme.lightDirection
@@ -76,10 +86,16 @@ import com.folio.reader.ui.theme.poolAlphaAt
 import com.folio.reader.ui.theme.poolCenterAt
 import com.folio.reader.ui.theme.panelFill
 import com.folio.reader.ui.theme.rememberGlassTick
+import com.folio.reader.ui.theme.folioSkyShader
+import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.rememberShaderSupported
+import com.folio.reader.ui.theme.rememberSlowPhases
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.swungBy
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Folio's material system.
@@ -137,6 +153,22 @@ internal fun daylightGradient(
 }
 
 /**
+ * A rim colour warmed or cooled toward the sun, exactly as every lit edge in the
+ * app does it: capped at [DAYLIGHT_RIM_TINT_MAX] and scaled by intensity, the
+ * original [base] alpha preserved. At intensity 0 (Neutral, night) the tint is
+ * skipped outright, so the edge is byte-for-byte the palette's own with no Oklab
+ * round-trip to nudge it a sub-step off.
+ *
+ * The raised rim, the sunken caught-wall and the pane's new daylight hairline all
+ * read it, so the one "a sun tints a rim, it never replaces it" rule lives in one
+ * place (Rule 3) and the audit/guard can sample the same function the surfaces draw.
+ */
+internal fun daylightRimTint(base: Color, daylight: FolioDaylight): Color {
+    val tint = DAYLIGHT_RIM_TINT_MAX * daylight.intensity
+    return if (tint <= 0f) base else lerp(base, daylight.temperature, tint).copy(alpha = base.alpha)
+}
+
+/**
  * The surface's own outline as a [Path], so a directional sheen can be painted
  * *inside* the shape rather than over its bounding box.
  *
@@ -185,14 +217,8 @@ fun Modifier.folioRaised(
     // The sun colours the catch; it never replaces it. Capped at
     // DAYLIGHT_RIM_TINT_MAX and scaled by intensity, so the rim stays the one the
     // atmosphere designed — merely warmed or cooled. At intensity 0 (Neutral,
-    // night) the tint is skipped outright, so the rim is byte-for-byte the
-    // palette's own with no Oklab round-trip to nudge it a sub-step off.
-    val tint = DAYLIGHT_RIM_TINT_MAX * daylight.intensity
-    val light = if (tint <= 0f) {
-        accentLight
-    } else {
-        lerp(accentLight, daylight.temperature, tint).copy(alpha = accentLight.alpha)
-    }
+    // night) the tint is skipped outright (see daylightRimTint).
+    val light = daylightRimTint(accentLight, daylight)
     val shade = atmos.rimShade
     // §17: the living light, read in the draw phase only (FolioShimmer
     // precedent) so the travelling sheen costs one drawing pass, never a
@@ -247,7 +273,15 @@ fun Modifier.folioRaised(
             }
         }
         .then(
-            if (pane) Modifier
+            // A pane carries no cast shadow and no directional sheen (the room shows
+            // through it, which is what the box fix restored). But removing them also
+            // took paper's daylight *rim* with them, so a pane stopped reading the hour
+            // at all. This puts a single flat, shadowless daylight-tinted hairline back
+            // on the edge — the one cue a translucent pane can carry — tinted toward the
+            // sun exactly like every other rim (daylightRimTint) and otherwise the
+            // atmosphere's own hairline. Flat, 1dp, no gradient and no shadow, so the
+            // "box within the card" cannot return.
+            if (pane) Modifier.border(1.dp, daylightRimTint(atmos.hairline, daylight), shape)
             else Modifier.border(1.dp, Brush.verticalGradient(listOf(light, shade)), shape),
         )
         .clip(shape)
@@ -306,13 +340,8 @@ fun Modifier.folioSunken(
     // The caught wall takes the sun's temperature at the same rationed fraction as
     // the raised rim; the occluding lip stays the palette's own shade, because a
     // shadow is absence of light and the sun does not colour it. Tint 0 skips the
-    // lerp so neutral daylight is byte-for-byte the palette's rim.
-    val tint = DAYLIGHT_RIM_TINT_MAX * daylight.intensity
-    val light = if (tint <= 0f) {
-        atmos.rimLight
-    } else {
-        lerp(atmos.rimLight, daylight.temperature, tint).copy(alpha = atmos.rimLight.alpha)
-    }
+    // lerp so neutral daylight is byte-for-byte the palette's rim (daylightRimTint).
+    val light = daylightRimTint(atmos.rimLight, daylight)
     val shade = atmos.rimShade
     // §17 living light, draw-phase read — see folioRaised.
     val ambient = LocalFolioAmbient.current
@@ -338,10 +367,41 @@ fun Modifier.folioSunken(
 }
 
 /**
- * Glass over content: bars, floating navigation, sheets. Near-opaque by default on
- * purpose — Android cannot blur a separate native surface (the reader page), so
- * translucency alone would let text bleed through at full contrast. The glass is
- * carried by the rim and the sheen.
+ * A **cosmic content card**: real **liquid glass** (via [folioVeil]) that blurs the
+ * cosmic field behind it, with a cosmic accent personality on top. Now that the field
+ * carries actual nebula/stars (and is registered as a glass backdrop source), the glass
+ * has something to refract — so this reads as frosted glass over space rather than the
+ * flat "dull shade" a plain translucent pane gave.
+ *
+ * It delegates the glass to [folioVeil]: when the device allows blur and the screen
+ * provides a backdrop, the fill steps down to its translucent glass tier and the field
+ * blurs through; otherwise it falls back to a near-opaque pane so text stays legible.
+ * On top of that it lays a diagonal accent wash and a characterful 1.5dp accent rim —
+ * the "personality" — using the project's own tokens, no new hex. Rounded
+ * [FolioShapes.card] by default (never an edge-bleed silhouette), which reads as smooth.
+ */
+@Composable
+fun Modifier.folioCosmicCard(
+    accent: Color? = null,
+    shape: Shape = FolioShapes.card,
+): Modifier {
+    val atmos = FolioTheme.atmosphere
+    val cosmic = FolioTheme.cosmic
+    val acc = accent ?: cosmic.accent.primary
+    // A diagonal accent wash from the top-start — personality with contrast, kept light
+    // enough that it tints the glass rather than hiding what it refracts.
+    val tint = acc.copy(alpha = if (atmos.isDark) 0.16f else 0.10f)
+    // A characterful accent edge, pulled well toward the accent and lifted, 1.5dp.
+    val rim = lerp(atmos.hairline, acc, 0.55f)
+        .copy(alpha = (atmos.hairline.alpha + 0.38f).coerceAtMost(1f))
+    return this
+        .folioVeil(shape = shape)
+        .background(Brush.linearGradient(listOf(tint, Color.Transparent)), shape)
+        .border(1.5.dp, rim, shape)
+        .clip(shape)
+}
+
+/**
  *
  * [fillAlpha] overrides that for glass that sits over *Compose* content only, where
  * a little transparency is what makes the surface read as glass rather than as a
@@ -581,6 +641,29 @@ fun Modifier.folioField(
     val dayAlpha = (DAYLIGHT_WASH_ALPHA_MAX * daylight.intensity).coerceIn(0f, DAYLIGHT_WASH_ALPHA_MAX)
     // §17: the living light, read in the draw phase only.
     val ambientLight = LocalFolioAmbient.current
+    // The per-theme guilloché signature and its slow breathing clock. The clock is
+    // only attached when motion is enabled; under reduce-motion the figure is still
+    // drawn, just parked (no phase travel) — see the draw block below.
+    val sig = atmos.signature
+    // On API 33+ the skyscape is rendered by the AGSL folioSkyShader (chained onto the
+    // return below); on desktop/older devices that is a no-op and the portable Canvas
+    // skyscape (drawSkyscape) stands in. Gated on the one capability flag so exactly one
+    // of the two ever draws.
+    val shaderSky = rememberShaderSupported()
+    val signatureMotion = rememberMotionEnabled()
+    // Two phases on the one house clock: a slow 30s drift (nebula + orbit) and a
+    // few-second twinkle, so stars shimmer at a lively rate while the clouds still drift
+    // imperceptibly. Same 10 Hz cost as the single clock it replaced.
+    val sigPhases: State<List<Float>>? = if (signatureMotion) {
+        rememberSlowPhases(listOf(FOLIO_SIGNATURE_PERIOD_MS, CosmicMotion.starTwinkleMs))
+    } else {
+        null
+    }
+    // The per-screen cosmic intensity, hoisted from the screens above (last-writer-wins,
+    // default Atmospheric). Read in composition so a tab switch rebuilds the wash once;
+    // the solved scalars scale every atmosphere term below. contentScale is capped at 1,
+    // so no level can raise the content-band ceiling the contrast guards measure.
+    val skyIntensity = rememberCosmicIntensity().sky()
     return this.drawWithCache {
         // Read here, not in composition: a new featured cover rebuilds the wash and
         // the pool colours once, and nothing under the root invalidates.
@@ -589,6 +672,10 @@ fun Modifier.folioField(
         val h = size.height
         val field = Brush.verticalGradient(listOf(colors.top, colors.bottom))
         val drift = fieldDrift(shift)
+        // The per-theme skyscape, built once per size (and seed) in the cache block so
+        // the stars/arcs/mist never reallocate per frame; only the twinkle/drift phase
+        // is read per draw.
+        val sky = buildSkyscape(size, sig)
         onDrawBehind {
             drawRect(field)
             // The ambient displacement is bounded by AMBIENT_DRIFT_MAX of the
@@ -599,8 +686,9 @@ fun Modifier.folioField(
                 val color = colors.poolColors.getOrNull(pool.index) ?: return@forEach
                 // The pool on the sun's side holds at poolAlpha; the far side
                 // recedes. Capped, so daylight may dim a pool but never lift it
-                // past the field's own alpha ceiling.
-                val alpha = poolAlphaAt(colors.poolAlpha, pool.sideX, shift)
+                // past the field's own alpha ceiling. The cosmic intensity dims it
+                // further on Quiet screens (contentScale <= 1), never brighter.
+                val alpha = poolAlphaAt(colors.poolAlpha, pool.sideX, shift) * skyIntensity.contentScale
                 val (cx, cy) = poolCenterAt(pool, drift, driftX, driftY)
                 val center = Offset(cx * w, cy * h)
                 val radius = pool.fr * w
@@ -614,12 +702,317 @@ fun Modifier.folioField(
                     center = center,
                 )
             }
+            // The per-theme skyscape, laid over the pools and *under* the day's wash so
+            // the hour still passes over everything. Vivid at the top/bottom edges,
+            // falling to the alpha ceiling through the content band (see drawSkyscape),
+            // so cardless text stays legible and folioClearing can finish the job. The
+            // slow clock drives star twinkle and a few percent of drift; parked under
+            // reduce-motion.
+            val phase = sigPhases?.value?.getOrNull(0) ?: 0f
+            val twinkle = sigPhases?.value?.getOrNull(1) ?: 0f
+            if (!shaderSky) drawSkyscape(sky, sig, phase, skyIntensity, twinkle)
             // The day's own light, laid over the whole room as its last pass — the one
             // wire that lets every screen read as a time of day instead of a constant.
             // `fieldColorAtPoint` applies the identical mix, so a sampled tap agrees
             // with the pixel; at intensity 0 (night) this is skipped entirely.
             if (dayAlpha > 0f) drawRect(color = dayTemp.copy(alpha = dayAlpha))
         }
+    }.folioSkyShader(enabled = shaderSky)
+}
+
+/**
+ * The slow period of the skyscape's drift + twinkle. Slower than the hero mesh's
+ * 18–30s band — a field this faint should read as a place, not a moving thing.
+ */
+internal const val FOLIO_SIGNATURE_PERIOD_MS = 30_000L
+private const val SKY_TWO_PI = 6.2831855f
+private const val SKY_STAR_COUNT = 90
+
+/** One drawn star: position (px), radius, base alpha, twinkle phase, and whether it
+ *  carries a sparkle cross at the edges. */
+private class SkyStar(
+    val x: Float,
+    val y: Float,
+    val r: Float,
+    val alpha: Float,
+    val phase: Float,
+    val sparkle: Boolean,
+)
+
+/** One theme's sky geometry at a given pixel size — built once, drawn per frame. */
+private class Skyscape(
+    val w: Float,
+    val h: Float,
+    val stars: List<SkyStar>,
+    val constellation: Path,
+    val bodyCenter: Offset,
+    val bodyRadius: Float,
+    val orbits: List<Triple<Offset, Size, Float>>,
+    val mountains: Path?,
+)
+
+/** 0..1 from the signature hash stream, salted so one seed yields many values. */
+private fun skyRnd(seed: Int, salt: Int): Float =
+    (signatureHash(seed * 31 + salt) ushr 8 and 0xFFFF) / 65535f
+
+/**
+ * Builds a theme's [Skyscape] from its [FolioSignature] seed at the field's size.
+ * Portable `Path`/point geometry only (no AGSL), so Desktop/Skiko draws the same sky;
+ * run inside `folioField`'s `drawWithCache`, so the scatter happens once per size.
+ */
+private fun buildSkyscape(size: Size, sig: FolioSignature): Skyscape {
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) {
+        return Skyscape(w, h, emptyList(), Path(), Offset.Zero, 0f, emptyList(), null)
+    }
+    val seed = sig.seed
+    val minWH = min(w, h)
+    val stars = ArrayList<SkyStar>(SKY_STAR_COUNT)
+    for (i in 0 until SKY_STAR_COUNT) {
+        val x = skyRnd(seed, i * 7 + 1) * w
+        val y = skyRnd(seed, i * 7 + 2) * h
+        val r = 0.6f + skyRnd(seed, i * 7 + 3) * 1.6f
+        val alpha = 0.35f + skyRnd(seed, i * 7 + 4) * 0.65f
+        val sparkle = skyRnd(seed, i * 7 + 5) > 0.90f
+        stars.add(SkyStar(x, y, r, alpha, skyRnd(seed, i * 7 + 6) * SKY_TWO_PI, sparkle))
+    }
+    // A constellation: a hairline polyline through a handful of the upper stars.
+    val constellation = Path()
+    val topStars = stars.filter { it.y < h * 0.32f }.sortedBy { it.x }.take(7)
+    topStars.forEachIndexed { i, s -> if (i == 0) constellation.moveTo(s.x, s.y) else constellation.lineTo(s.x, s.y) }
+    // A far planet near a seeded top corner.
+    val leftSide = skyRnd(seed, 101) > 0.5f
+    val bodyCenter = Offset(
+        (if (leftSide) 0.17f else 0.83f) * w,
+        (0.16f + skyRnd(seed, 102) * 0.12f) * h,
+    )
+    val bodyRadius = minWH * (0.045f + skyRnd(seed, 103) * 0.02f)
+    // One or two thin orbital ellipses.
+    val orbits = ArrayList<Triple<Offset, Size, Float>>()
+    orbits.add(Triple(bodyCenter, Size(bodyRadius * 3.4f, bodyRadius * 1.35f), -20f + skyRnd(seed, 104) * 40f))
+    if (skyRnd(seed, 105) > 0.4f) {
+        orbits.add(Triple(Offset(w * 0.5f, h * 0.11f), Size(w * 1.15f, h * 0.3f), -8f + skyRnd(seed, 106) * 16f))
+    }
+    // Light faces get a low mist/mountain horizon near the bottom.
+    val mountains = if (!sig.isDark) {
+        Path().apply {
+            val baseY = h * 0.90f
+            moveTo(0f, h)
+            lineTo(0f, baseY)
+            val peaks = 7
+            for (p in 0..peaks) {
+                val px = p.toFloat() / peaks * w
+                val py = baseY - (0.02f + skyRnd(seed, 200 + p) * 0.07f) * h
+                lineTo(px, py)
+            }
+            lineTo(w, h)
+            close()
+        }
+    } else {
+        null
+    }
+    return Skyscape(w, h, stars, constellation, bodyCenter, bodyRadius, orbits, mountains)
+}
+
+/**
+ * Draws a built [Skyscape], intensity-scaled. The whole figure is **vivid at the top and
+ * bottom edges and falls to the alpha ceiling through the content band** — a reader's
+ * cardless text lives in the middle, so the sky gets out of its way there (and
+ * `folioClearing` finishes the job), while the margins carry the weather. [phase] is the
+ * slow clock (0 under reduce-motion → a static sky).
+ *
+ * [intensity] scales every term: `contentScale` (≤1) sets the content-band ceiling —
+ * capped at 1 so no level ever renders brighter under text than the field the contrast
+ * guards prove legible — while `edgeStrength` runs the margins bolder on Expressive and
+ * fainter on Quiet. Stars thin by `starDensity`; the planet and horizon haze gate on
+ * their flags. Draw-phase only; nothing recomposes.
+ */
+private fun DrawScope.drawSkyscape(
+    sky: Skyscape,
+    sig: FolioSignature,
+    phase: Float,
+    intensity: CosmicSkyIntensity = CosmicSkyIntensity.Atmospheric,
+    twinkle: Float = phase,
+) {
+    val w = sky.w
+    val h = sky.h
+    if (w <= 0f || h <= 0f) return
+    val c = intensity.contentScale
+    val e = intensity.edgeStrength
+    val ceil = sig.alphaCeiling * c
+    // Present across the WHOLE field — the content band holds at 0.5*contentScale (so a
+    // fainter level is uniformly fainter and the strongest is capped at the proven
+    // ceiling) and the margins lift to +0.5*edge*edgeStrength, which is where Expressive
+    // reads bolder without touching the content band. At Atmospheric (c=e=1) this is
+    // exactly 0.5 .. 1.0, the falloff the field always had.
+    fun falloff(yf: Float): Float {
+        val top = ((0.50f - yf) / 0.50f).coerceIn(0f, 1f)
+        val bot = ((yf - 0.50f) / 0.50f).coerceIn(0f, 1f)
+        val edge = maxOf(top, bot)
+        return 0.5f * c + 0.5f * edge * e
+    }
+    clipRect(0f, 0f, w, h) {
+        // 1) Sky wash — a tinted sky from the top edge, and (both polarities) a second
+        // wash lifting from the bottom, so the lower field carries the sky too. These are
+        // pure top/bottom-edge effects (~0 in the content band); scaled by contentScale so
+        // a Quiet screen's wash is fainter and no level exceeds the shipped look.
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to sig.skyTop.copy(alpha = 0.90f * c),
+                0.50f to sig.skyTop.copy(alpha = 0f),
+                startY = 0f,
+                endY = h,
+            ),
+        )
+        drawRect(
+            brush = Brush.verticalGradient(
+                0.64f to sig.skyTop.copy(alpha = 0f),
+                1f to sig.skyTop.copy(alpha = 0.45f * c),
+                startY = 0f,
+                endY = h,
+            ),
+        )
+        if (!sig.isDark && intensity.drawsHaze) {
+            // paper: a warm sunset haze lifting from the horizon, over the cool wash.
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0.55f to sig.glow.copy(alpha = 0f),
+                    1f to sig.glow.copy(alpha = 0.26f * c),
+                    startY = 0f,
+                    endY = h,
+                ),
+            )
+        }
+        // 2) Drifting nebula/cloud pools spread top → middle → lower, so the clouds show
+        // wherever the field is open, not only behind the (usually covered) top.
+        val driftX = sin(phase) * w * 0.03f
+        val pools = listOf(
+            Triple(sig.nebulaWarm, Offset(w * 0.26f + driftX, h * 0.15f), minOf(w, h) * 0.95f),
+            Triple(sig.nebulaCool, Offset(w * 0.76f - driftX, h * 0.44f), minOf(w, h) * 0.98f),
+            Triple(sig.nebulaWarm, Offset(w * 0.30f + driftX, h * 0.80f), minOf(w, h) * 0.90f),
+        )
+        pools.forEach { (col, center, radius) ->
+            val a = 0.22f * falloff(center.y / h)
+            if (a > 0f) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(col.copy(alpha = a), Color.Transparent),
+                        center = center,
+                        radius = radius,
+                    ),
+                    radius = radius,
+                    center = center,
+                )
+            }
+        }
+        // 3) The far planet (small, subtle — a distant body, not a sun) + its orbits.
+        if (intensity.drawsPlanet) {
+            val bf = falloff(sky.bodyCenter.y / h)
+            if (bf > 0f && sky.bodyRadius > 0f) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(
+                            sig.glow.copy(alpha = 0.34f * bf),
+                            sig.glow.copy(alpha = 0.10f * bf),
+                            Color.Transparent,
+                        ),
+                        center = sky.bodyCenter,
+                        radius = sky.bodyRadius * 2.1f,
+                    ),
+                    radius = sky.bodyRadius * 2.1f,
+                    center = sky.bodyCenter,
+                )
+            }
+        }
+        sky.orbits.forEach { (center, ovalSize, rot) ->
+            val a = 0.22f * falloff(center.y / h) * intensity.orbitLineAlpha
+            if (a > 0f) {
+                rotate(rot + sin(phase) * 2f, center) {
+                    drawOval(
+                        color = sig.glow.copy(alpha = a),
+                        topLeft = Offset(center.x - ovalSize.width / 2f, center.y - ovalSize.height / 2f),
+                        size = ovalSize,
+                        style = Stroke(width = maxOf(1f, 0.8.dp.toPx())),
+                    )
+                }
+            }
+        }
+        // 4) Stars (ceiling through the band, brighter at the edges) + edge glints.
+        // Thinned by starDensity on Quiet. The twinkle is staggered: a per-star phase AND
+        // a per-star speed, swung at CosmicMotion's raised amplitude, so stars shimmer out
+        // of sync (a few at a time) rather than pulsing as one. [twinkle] is the fast
+        // few-second phase; 0 under reduce-motion → a static sky.
+        val starCount = (sky.stars.size * intensity.starDensity).toInt().coerceIn(0, sky.stars.size)
+        val twBase = CosmicMotion.twinkleBase
+        val twAmp = CosmicMotion.twinkleAmplitude
+        for (i in 0 until starCount) {
+            val s = sky.stars[i]
+            // Per-star speed 0.7..1.5 derived from its stable phase: different stars cycle
+            // at different rates, which is what keeps the shimmer from reading as a pulse.
+            val speed = 0.7f + (s.phase / SKY_TWO_PI) * 0.8f
+            val tw = (twBase + twAmp * sin(twinkle * speed + s.phase)).coerceAtLeast(0f)
+            val f = falloff(s.y / h)
+            val a = ((ceil + (s.alpha - ceil).coerceAtLeast(0f) * f).coerceAtMost(s.alpha) * tw)
+                .coerceIn(0f, 1f)
+            if (a <= 0f) continue
+            drawCircle(color = sig.star.copy(alpha = a), radius = s.r, center = Offset(s.x, s.y))
+            // A soft gold/white glint on the brighter (sparkle) stars that swells to a
+            // cross at the twinkle crest and vanishes in the trough.
+            if (s.sparkle && f > 0f) {
+                val glint = ((tw - twBase) / twAmp).coerceIn(0f, 1f)
+                val sa = 0.55f * f * glint
+                if (sa > 0.01f) {
+                    val len = s.r * (3.5f + 2.5f * glint)
+                    drawLine(sig.glow.copy(alpha = sa), Offset(s.x - len, s.y), Offset(s.x + len, s.y), strokeWidth = 1f)
+                    drawLine(sig.glow.copy(alpha = sa), Offset(s.x, s.y - len), Offset(s.x, s.y + len), strokeWidth = 1f)
+                }
+            }
+        }
+        // 5) The constellation hairline.
+        drawPath(sky.constellation, color = sig.star.copy(alpha = 0.22f * c), style = Stroke(width = 1f))
+        // 6) The mist horizon (paper faces only).
+        if (intensity.drawsHaze) {
+            sky.mountains?.let { drawPath(it, color = (sig.mist ?: sig.star).copy(alpha = 0.38f * c)) }
+        }
+    }
+}
+
+/** Peak alpha of the paper radial a clearing paints over the motif. */
+internal const val FOLIO_CLEARING_PEAK = 0.6f
+
+/**
+ * Soft paper clearing for cardless type-on-field.
+ *
+ * The per-theme signature ([folioField]) is faint by construction, but editorial
+ * screens put real type *directly on the field* with no surface under it. A clearing
+ * paints a soft paper-tinted radial — the field's own [FolioAtmosphere.fieldTop],
+ * no border, no box — behind such a node, locally fading the motif to near-nothing
+ * and giving the content a whisper of lift. Because a content node draws *after* the
+ * ancestor field, this is purely local and needs no upward registry (same model as
+ * [coverHalo]).
+ *
+ * Apply it to cardless content only (section heads, eyebrows, figures, empty states,
+ * settings rows, ledger strips, detail metadata). Content already sitting on a
+ * `folioPanel`/`folioRaised`/`folioSunken` surface must NOT use it — the paper radial
+ * would read as a lighter blotch on the surface.
+ */
+@Composable
+fun Modifier.folioClearing(strength: Float = 1f): Modifier {
+    val atmos = FolioTheme.atmosphere
+    val paper = atmos.fieldTop
+    val peak = (FOLIO_CLEARING_PEAK * strength).coerceIn(0f, 1f)
+    if (peak <= 0f) return this
+    return this.drawBehind {
+        val radius = maxOf(size.width, size.height) * 0.75f
+        if (radius <= 0f) return@drawBehind
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(paper.copy(alpha = peak), paper.copy(alpha = 0f)),
+                center = Offset(size.width * 0.5f, size.height * 0.5f),
+                radius = radius,
+            ),
+        )
     }
 }
 
@@ -787,6 +1180,26 @@ fun Modifier.folioGlassPress(
                 Modifier
             }
         )
+}
+
+/**
+ * One-call liquid press for glass surfaces: wires [rememberFolioPressFocal] into
+ * [folioGlassPress] so a primary tile can opt into the §16 press-where-the-finger-is
+ * bloom with a single modifier. The specular/no-op fallback already lives in
+ * [folioGlassPress] — on a platform without the specular capability this is the
+ * resting (scale-only) press — and reduce-motion collapses the focal to nothing, so
+ * callers need not remember the focal or branch on capability themselves.
+ *
+ * Scope it to **primary** affordances (a hero's Continue, a feature tile), not every
+ * row, so the focal stays a signature rather than noise.
+ */
+@Composable
+fun Modifier.folioPressFocal(
+    interactionSource: MutableInteractionSource,
+    shape: Shape,
+): Modifier {
+    val focal = com.folio.reader.ui.theme.rememberFolioPressFocal(interactionSource)
+    return this.folioGlassPress(interactionSource, shape, focal)
 }
 
 /** The settle tick, attached once per press. */

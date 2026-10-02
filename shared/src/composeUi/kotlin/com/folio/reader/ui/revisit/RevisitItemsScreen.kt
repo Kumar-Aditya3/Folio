@@ -27,16 +27,11 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -62,8 +57,10 @@ import com.folio.reader.model.Note
 import com.folio.reader.model.RevisitItem
 import com.folio.reader.model.RevisitType
 import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.LoadingPlaceholder
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
@@ -190,6 +187,9 @@ fun RevisitItemsScreen(
     onItemClick: (RevisitDisplayItem) -> Unit,
     viewModel: RevisitItemsViewModel
 ) {
+    // Cosmic art direction: Quiet — the field is a faint backdrop behind the revisit
+    // list; the default Scaffold ground is made transparent below so the field shows.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Quiet)
     var filterType by remember { mutableStateOf<RevisitType?>(null) }
     // Build the flow once per filter, not per recomposition: collectAsState keys on the flow
     // instance, so an unremembered new instance would tear down and re-run the full per-item
@@ -200,6 +200,7 @@ fun RevisitItemsScreen(
     val items by itemsFlow.collectAsState(initial = null)
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             FolioTopBar(
                 title = "Revisit",
@@ -219,18 +220,10 @@ fun RevisitItemsScreen(
                         RevisitType.values().forEach { type ->
                             val badge = type.toBadge()
                             val selected = filterType == type
-                            FilterChip(
+                            FolioChip(
                                 selected = selected,
                                 onClick = { filterType = if (selected) null else type },
-                                label = { Text(badge.label) },
-                                leadingIcon = {
-                                    Icon(
-                                        badge.icon,
-                                        contentDescription = null,
-                                        tint = badge.color,
-                                        modifier = Modifier.width(18.dp).height(18.dp)
-                                    )
-                                }
+                                label = badge.label
                             )
                         }
                     }
@@ -319,17 +312,26 @@ private fun RevisitCard(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                OutlinedButton(
-                    onClick = onResolve,
-                    modifier = Modifier.minimumInteractiveComponentSize()
+                Row(
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .folioPanel(com.folio.reader.ui.theme.FolioShapes.pill, accent = FolioTheme.colors.primary)
+                        .clickable { onResolve() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         Icons.Filled.Check,
                         contentDescription = null,
+                        tint = FolioTheme.colors.primary,
                         modifier = Modifier.width(16.dp).height(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Resolve", style = FolioTheme.typography.labelMedium)
+                    Text(
+                        "Resolve",
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.primary
+                    )
                 }
             }
 

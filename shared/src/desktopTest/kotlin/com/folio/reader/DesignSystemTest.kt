@@ -1,14 +1,20 @@
 package com.folio.reader
 
 import androidx.compose.ui.graphics.Color
+import com.folio.reader.ui.components.FOLIO_FIELD_WELL_ALPHA
+import com.folio.reader.ui.components.daylightRimTint
+import com.folio.reader.ui.components.folioToggleThumb
+import com.folio.reader.ui.components.folioToggleTrack
 import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphereFor
 import com.folio.reader.ui.theme.barGlassFor
+import com.folio.reader.ui.theme.daylightAt
 import com.folio.reader.ui.theme.fieldColors
 import com.folio.reader.ui.theme.mixG
 import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.sqrt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -441,9 +447,132 @@ class DesignSystemTest {
         }
     }
 
+    /**
+     * §R1 Phase-1 atoms: the new Folio controls must read as well as the surfaces
+     * they sit on. Two pins, both pure so no Compose rig is needed:
+     *
+     *  - the sunken input well ([com.folio.reader.ui.components.FolioSunkenField])
+     *    keeps its typed body ink clear of §12.3's 7:1 floor over the lit field it is
+     *    cut into — an input a reader cannot read what they typed into is the whole
+     *    failure the OutlinedTextField swap exists to avoid;
+     *  - the Folio switch's thumb stays distinguishable from its track in both
+     *    states, or the control stops reading as on/off at a glance.
+     *
+     * The control and this guard share [folioToggleTrack]/[folioToggleThumb] and the
+     * well alpha, so the two cannot drift (Rule 3).
+     */
+    private val wellCovers = listOf(
+        Color.hsv(35f, 0.90f, 0.95f), Color.hsv(210f, 0.85f, 0.90f),
+        Color.hsv(205f, 0.12f, 0.92f),
+    )
+
+    @Test
+    fun theSunkenInputWellKeepsTypedInkLegible() {
+        val floor = 7.0
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val ink = palette.colors.onSurface
+            val well = atmos.sunkenFill.copy(alpha = FOLIO_FIELD_WELL_ALPHA)
+            // Resting (untinted) field and the loudest lit rooms a book can paint.
+            val grounds = listOf(fieldColors(atmos)) + wellCovers.map {
+                fieldColors(atmos, it, atmos.fieldTintStrength)
+            }
+            for (field in grounds) {
+                val ground = mixG(field.top, well, well.alpha)
+                val ratio = contrastRatio(ground, ink)
+                assertTrue(
+                    ratio >= floor,
+                    "${palette.id}: typed ink in the sunken field reads at " +
+                        "${"%.2f".format(ratio)}:1 over its well, under the $floor body floor",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun theFolioToggleThumbReadsAgainstItsTrack() {
+        val floor = 1.5
+        for (palette in AppPalette.entries) {
+            val colors = palette.colors
+            val atmos = atmosphereFor(colors)
+            val field = fieldColors(atmos).top
+            for (on in listOf(true, false)) {
+                val track = folioToggleTrack(on, colors, atmos)
+                val thumb = folioToggleThumb(on, colors)
+                // The track may be translucent (off state), so measure it as drawn —
+                // composited over the field the row sits on.
+                val ground = mixG(field, track, track.alpha)
+                val ratio = contrastRatio(ground, thumb)
+                assertTrue(
+                    ratio >= floor,
+                    "${palette.id}: the switch thumb reads at ${"%.2f".format(ratio)}:1 " +
+                        "against its ${if (on) "on" else "off"} track — the state is not legible",
+                )
+            }
+        }
+    }
+
     private fun contrastRatio(a: Color, b: Color): Double {
         val la = luminance(a)
         val lb = luminance(b)
         return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+
+    /**
+     * Phase 2: the box fix stripped panes of their border, which also took paper's
+     * daylight *rim* off them — a translucent pane stopped reading the hour at all.
+     * `folioRaised` now puts a single flat daylight-tinted hairline back on a pane's
+     * edge ([daylightRimTint] over `atmosphere.hairline`). This pins that the edge
+     * actually carries the hour: the pane hairline at 03:00 vs 12:00 must separate by
+     * at least a JND on paper (measured as the median across the paper faces, so one
+     * palette with an already-bright outline cannot make "paper reads the hour" a lie),
+     * and the tint must never change the hairline's own weight (its alpha), or the
+     * edge would thicken with the day instead of merely warming.
+     */
+    @Test
+    fun panesReadTheHourAtTheirEdge() {
+        val night = daylightAt(3)
+        val noon = daylightAt(12)
+        val paperArcs = mutableListOf<Double>()
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val rimNight = daylightRimTint(atmos.hairline, night)
+            val rimNoon = daylightRimTint(atmos.hairline, noon)
+            // Weight is pinned: the tint warms the edge, it does not thicken it.
+            assertEquals(
+                atmos.hairline.alpha, rimNight.alpha, 1e-4f,
+                "${palette.id}: the night pane hairline changed its own alpha",
+            )
+            assertEquals(
+                atmos.hairline.alpha, rimNoon.alpha, 1e-4f,
+                "${palette.id}: the noon pane hairline changed its own alpha",
+            )
+            if (!palette.isDark) paperArcs.add(labDe(rimNight, rimNoon))
+        }
+        val median = paperArcs.sorted()[paperArcs.size / 2]
+        assertTrue(
+            median >= 2.3,
+            "paper panes' night→noon edge arc medians ${"%.2f".format(median)} ΔE — under a " +
+                "JND, so paper stopped reading the hour at its edge",
+        )
+    }
+
+    private fun labDe(a: Color, b: Color): Double {
+        fun lab(c: Color): Triple<Double, Double, Double> {
+            fun ch(v: Float): Double {
+                val d = v.toDouble()
+                return if (d <= 0.04045) d / 12.92 else ((d + 0.055) / 1.055).pow(2.4)
+            }
+            val r = ch(c.red); val g = ch(c.green); val bl = ch(c.blue)
+            val x = (r * 0.4124 + g * 0.3576 + bl * 0.1805) / 0.95047
+            val y = r * 0.2126 + g * 0.7152 + bl * 0.0722
+            val z = (r * 0.0193 + g * 0.1192 + bl * 0.9505) / 1.08883
+            fun f(t: Double) = if (t > 0.008856) t.pow(1.0 / 3.0) else 7.787 * t + 16.0 / 116.0
+            val fx = f(x); val fy = f(y); val fz = f(z)
+            return Triple(116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+        }
+        val (l1, a1, b1) = lab(a)
+        val (l2, a2, b2) = lab(b)
+        return sqrt((l1 - l2).pow(2) + (a1 - a2).pow(2) + (b1 - b2).pow(2))
     }
 }

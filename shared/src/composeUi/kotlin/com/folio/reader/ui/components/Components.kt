@@ -109,7 +109,7 @@ fun FolioSectionCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .folioPanel(com.folio.reader.ui.theme.FolioShapes.card, accent)
+            .folioCosmicCard(accent = accent)
             .padding(com.folio.reader.ui.theme.FolioTokens.space3),
         verticalArrangement = Arrangement.spacedBy(com.folio.reader.ui.theme.FolioTokens.space2)
     ) {

@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntSize
+import com.folio.reader.ui.components.daylightRimTint
 import com.folio.reader.ui.theme.AppPalette
 import com.folio.reader.ui.theme.DAYLIGHT_RIM_TINT_MAX
 import com.folio.reader.ui.theme.DAYLIGHT_WASH_ALPHA_MAX
@@ -84,10 +85,10 @@ class VisualAuditTest {
     private fun realised(sb: StringBuilder) {
         sb.appendLine("## Realised ΔE — two states a user actually meets")
         sb.appendLine()
-        sb.appendLine("| palette | face | room A·B | room·none | lamp A·B | lamp iso | hero A·B | field night·noon |")
-        sb.appendLine("|---|---|--:|--:|--:|--:|--:|--:|")
+        sb.appendLine("| palette | face | room A·B | room·none | lamp A·B | lamp iso | hero A·B | mesh iso | rim-arc | field night·noon |")
+        sb.appendLine("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|")
 
-        val roomAB = Agg(); val roomNone = Agg(); val lampAB = Agg(); val lampIso = Agg(); val heroAB = Agg(); val dayAB = Agg()
+        val roomAB = Agg(); val roomNone = Agg(); val lampAB = Agg(); val lampIso = Agg(); val heroAB = Agg(); val meshIso = Agg(); val rimArc = Agg(); val dayAB = Agg()
 
         for (p in AppPalette.entries) {
             val atmos = atmosphereFor(p.colors)
@@ -125,6 +126,21 @@ class VisualAuditTest {
             // hero: the whole stack a reader sees — lit field, pane, cover wash.
             val heroABv = de(hero(p, atmos, primary, loudWarm, lampA), hero(p, atmos, primary, quiet, lamp(p, quiet)))
 
+            // mesh isolated: the same hero pane with vs without the cover's own mesh
+            // pool (heroMeshBorrow), so the dark-hero ceiling work has a number for the
+            // mesh channel on its own rather than only inside hero A·B.
+            val meshIsov = de(
+                hero(p, atmos, primary, loudWarm, lampA),
+                heroWithMesh(p, atmos, primary, loudWarm, lampA),
+            )
+
+            // rim-arc: paper's (and dark's) time-of-day as a realised rim colour —
+            // the raised rim at 03:00 vs 12:00, the production
+            // lerp(rim, temperature, DAYLIGHT_RIM_TINT_MAX*intensity). The field column
+            // already proves the room moves; this proves the *edge* does, which is the
+            // only daylight cue a translucent paper pane carries after the box fix.
+            val rimArcv = de(rimAt(atmos, 3), rimAt(atmos, 12))
+
             // daylight: the field at 03:00 vs 12:00, worst point on a sampled grid,
             // now including the wired day wash (temperature at DAYLIGHT_WASH_ALPHA_MAX x
             // intensity) that folioField/fieldColorAtPoint carry.
@@ -143,11 +159,11 @@ class VisualAuditTest {
                 )
             }
 
-            roomAB.add(roomABv); roomNone.add(roomNonev); lampAB.add(lampABv); lampIso.add(lampIsov); heroAB.add(heroABv); dayAB.add(dayv)
-            sb.appendLine("| ${p.id} | $face | ${cell(roomABv)} | ${cell(roomNonev)} | ${cell(lampABv)} | ${cell(lampIsov)} | ${cell(heroABv)} | ${cell(dayv)} |")
+            roomAB.add(roomABv); roomNone.add(roomNonev); lampAB.add(lampABv); lampIso.add(lampIsov); heroAB.add(heroABv); meshIso.add(meshIsov); rimArc.add(rimArcv); dayAB.add(dayv)
+            sb.appendLine("| ${p.id} | $face | ${cell(roomABv)} | ${cell(roomNonev)} | ${cell(lampABv)} | ${cell(lampIsov)} | ${cell(heroABv)} | ${cell(meshIsov)} | ${cell(rimArcv)} | ${cell(dayv)} |")
         }
-        sb.appendLine("| **median** | | ${cell(roomAB.median())} | ${cell(roomNone.median())} | ${cell(lampAB.median())} | ${cell(lampIso.median())} | ${cell(heroAB.median())} | ${cell(dayAB.median())} |")
-        sb.appendLine("| **max** | | ${cell(roomAB.max())} | ${cell(roomNone.max())} | ${cell(lampAB.max())} | ${cell(lampIso.max())} | ${cell(heroAB.max())} | ${cell(dayAB.max())} |")
+        sb.appendLine("| **median** | | ${cell(roomAB.median())} | ${cell(roomNone.median())} | ${cell(lampAB.median())} | ${cell(lampIso.median())} | ${cell(heroAB.median())} | ${cell(meshIso.median())} | ${cell(rimArc.median())} | ${cell(dayAB.median())} |")
+        sb.appendLine("| **max** | | ${cell(roomAB.max())} | ${cell(roomNone.max())} | ${cell(lampAB.max())} | ${cell(lampIso.max())} | ${cell(heroAB.max())} | ${cell(meshIso.max())} | ${cell(rimArc.max())} | ${cell(dayAB.max())} |")
         sb.appendLine()
     }
 
@@ -209,6 +225,15 @@ class VisualAuditTest {
         val base = mixG(pt, pane, pane.alpha)
         return mixG(base, tameCover(cover, primary), heroWashBorrow(p.isDark))
     }
+
+    /** The hero pane with the cover's own mesh pool laid over the wash. */
+    private fun heroWithMesh(p: AppPalette, atmos: com.folio.reader.ui.theme.FolioAtmosphere, primary: Color, cover: Color, lamp: FolioLampLight?): Color =
+        mixG(hero(p, atmos, primary, cover, lamp), tameCover(cover, primary), heroMeshBorrow(p.isDark))
+
+    /** The pane's realised daylight hairline at [hour], exactly as `folioRaised` lays
+     *  it on a translucent pane — the one time-of-day cue a paper pane carries. */
+    private fun rimAt(atmos: com.folio.reader.ui.theme.FolioAtmosphere, hour: Int): Color =
+        daylightRimTint(atmos.hairline, daylightAt(hour))
 
     private fun cell(v: Double): String = "%.2f %s".format(v, band(v))
     private fun band(v: Double): String = when {

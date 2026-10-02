@@ -1,6 +1,5 @@
 package com.folio.reader.ui.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioRadioRow
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -327,27 +326,10 @@ private fun ModelChoiceRow(
     enabled: Boolean,
     onSelect: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onSelect)
-            .padding(vertical = FolioTokens.space1),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1),
-    ) {
-        RadioButton(
-            selected = selected,
-            onClick = onSelect,
-            enabled = enabled,
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (enabled) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-    }
+    FolioRadioRow(
+        selected = selected,
+        onClick = onSelect,
+        label = label,
+        enabled = enabled,
+    )
 }

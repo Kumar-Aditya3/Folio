@@ -1,7 +1,6 @@
 package com.folio.reader.ui.manga
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,13 +24,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,9 +50,11 @@ import com.folio.reader.manga.ExtensionInstallStep
 import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioRowListSkeleton
+import com.folio.reader.ui.components.FolioSunkenField
+import com.folio.reader.ui.components.FolioToggleRow
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -249,7 +248,7 @@ fun ExtensionsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                        .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
                         .padding(FolioTokens.space3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -304,29 +303,23 @@ fun ExtensionsScreen(
             Spacer(Modifier.height(FolioTokens.space1))
             if (viewModel.supportsExtensions) {
                 val nsfw by viewModel.nsfw.collectAsState()
-                Row(
+                FolioToggleRow(
+                    checked = nsfw,
+                    onCheckedChange = { viewModel.setNsfw(it) },
+                    label = "Show NSFW extensions",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.setNsfw(!nsfw) }
                         .padding(horizontal = FolioTokens.space3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = nsfw, onCheckedChange = { viewModel.setNsfw(it) })
-                    Text(
-                        "Show NSFW extensions",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurface,
-                    )
-                }
+                )
             }
             Spacer(Modifier.height(FolioTokens.space1))
-            OutlinedTextField(
+            FolioSunkenField(
                 value = extQuery,
                 onValueChange = { extQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = FolioTokens.space3),
-                placeholder = { Text("Search extensions") },
+                placeholder = "Search extensions",
                 singleLine = true,
             )
             Spacer(Modifier.height(FolioTokens.space2))
@@ -396,7 +389,7 @@ private fun ExtensionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+            .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
             .padding(FolioTokens.space3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -537,19 +530,48 @@ private fun AddRepoDialog(onAdd: (name: String, baseUrl: String, indexUrl: Strin
         title = { Text("Add extension repository") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = indexUrl,
-                    onValueChange = { indexUrl = it },
-                    label = { Text("Index URL (optional)") },
-                    singleLine = true,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                    Text(
+                        "Name",
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    FolioSunkenField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "Name",
+                        singleLine = true,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                    Text(
+                        "Base URL",
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    FolioSunkenField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "Base URL",
+                        singleLine = true,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
+                    Text(
+                        "Index URL (optional)",
+                        style = FolioTheme.typography.labelMedium,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                    )
+                    FolioSunkenField(
+                        value = indexUrl,
+                        onValueChange = { indexUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "Index URL (optional)",
+                        singleLine = true,
+                    )
+                }
             }
         },
         confirmButton = {

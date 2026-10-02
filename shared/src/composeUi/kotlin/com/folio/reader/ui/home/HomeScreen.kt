@@ -90,6 +90,8 @@ import com.folio.reader.ui.components.ReadingClimate
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.folioClearing
+import com.folio.reader.ui.components.folioCosmicCard
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioThemeRim
@@ -164,6 +166,10 @@ fun HomeScreen(
     onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> },
     topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
 ) {
+    // Cosmic art direction: Home is Expressive — the field runs its boldest base at the
+    // margins and the hero region can carry foreground celestial art in safe zones, while
+    // covers and the ledger stay dominant.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Expressive)
     val motion = rememberMotionEnabled()
     // §13.5: the geometry-matched skeleton dissolves into the loaded content
     // rather than hard-cutting to it. Keyed on the loaded flag and motion-gated,
@@ -180,6 +186,7 @@ fun HomeScreen(
                 EmptyState(
                     icon = Icons.AutoMirrored.Outlined.MenuBook,
                     headline = "Your library is empty — import an EPUB to start.",
+                    modifier = Modifier.folioClearing(),
                     action = { Button(onClick = onImportClick) { Text("Import a book") } }
                 )
             }
@@ -732,7 +739,7 @@ private fun LedgerStrip(
     )
     val statsInteraction = rememberFolioInteraction()
     val exclusionsInteraction = rememberFolioInteraction()
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(modifier = Modifier.folioClearing().padding(horizontal = FolioTokens.gutter)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -830,14 +837,19 @@ private fun ContinueShelf(
     onOpen: (ReadingNowItem) -> Unit,
     onOpenSourceWeb: (String) -> Unit
 ) {
-    Column {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentProgress)
+            .padding(vertical = FolioTokens.space3),
+    ) {
         FolioSectionHead(
             title = "Continue reading",
-            modifier = Modifier.padding(horizontal = FolioTokens.gutter),
+            modifier = Modifier.padding(horizontal = FolioTokens.space3),
         )
         Spacer(Modifier.height(FolioTokens.space3))
         LazyRow(
-            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
+            contentPadding = PaddingValues(horizontal = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
             items(items.size, key = { "${items[it].kind}:${items[it].id}" }) { index ->
@@ -1001,8 +1013,13 @@ private fun BecauseYouFinishedShelf(
     onOpenBookDetail: (String) -> Unit
 ) {
     val discovery = FolioTheme.colors.accentDiscovery
-    Column {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = discovery)
+            .padding(vertical = FolioTokens.space3),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.space3)) {
             FolioEyebrow("Because you finished", accent = discovery)
             Spacer(Modifier.height(3.dp))
             Text(
@@ -1015,7 +1032,7 @@ private fun BecauseYouFinishedShelf(
         }
         Spacer(Modifier.height(FolioTokens.space3))
         LazyRow(
-            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
+            contentPadding = PaddingValues(horizontal = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
         ) {
             items(candidates.size, key = { candidates[it].id }) { index ->

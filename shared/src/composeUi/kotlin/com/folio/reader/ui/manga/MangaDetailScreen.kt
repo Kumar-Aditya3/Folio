@@ -69,6 +69,8 @@ import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.coverHalo
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioRowListSkeleton
@@ -78,6 +80,7 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.folioBarTopInset
+import com.folio.reader.ui.theme.folioLampSource
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
@@ -133,6 +136,22 @@ fun MangaDetailScreen(
         com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
         return
     }
+
+    // Opening a manga brings its colour and its light with it — the same per-book
+    // identity the book detail page and the library shelves wear. The room's field and
+    // chrome take the manga's (tamed) cover accent, and the cover below seats the lamp,
+    // so the detail page reads as lit by the book rather than as a flat list. Both
+    // sources are no-ops when the appearance holder is withheld, and the accent falls
+    // back to the palette's own when the cover has not been decoded (an online-only
+    // entry with no local coverPath).
+    val mangaAccent = com.folio.reader.ui.components.rememberCoverAccent(
+        m.coverPath, FolioTheme.colors.accentProgress,
+    )
+    val pageAccent = com.folio.reader.ui.theme.tameCover(mangaAccent, FolioTheme.colors.primary)
+    com.folio.reader.ui.theme.FolioAmbientSource(pageAccent)
+    com.folio.reader.ui.theme.FolioCoverLightSource(
+        com.folio.reader.ui.components.rememberCoverLight(m.coverPath),
+    )
 
     // The chapter list reports its scroll to the masthead, which gains its glass and
     // takes the manga's title as the identity block below scrolls out of sight — the
@@ -451,7 +470,13 @@ fun MangaDetailScreen(
                             )
                             .width(110.dp)
                             .aspectRatio(0.68f)
-                            .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
+                            // The jacket glows onto the page in its own colour and seats
+                            // the room's lamp, exactly as a book plate does on its detail
+                            // page — so a manga's cover is a lit object here, not a flat
+                            // thumbnail in a box.
+                            .coverHalo(pageAccent)
+                            .folioLampSource()
+                            .folioPanel(RoundedCornerShape(FolioTokens.radiusChip)),
                     ) {
                         MangaCover(
                             backend = backend,

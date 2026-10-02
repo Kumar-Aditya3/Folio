@@ -35,6 +35,16 @@ private val SETTINGS_CREDENTIAL_FIELDS =
     setOf("firebaseApiKey", "firebaseProjectId", "syncAccountEmail", "syncAccountPassword")
 
 /**
+ * The window-open transition flag ([ReaderSettings.launchAnimation]) is mirrored
+ * into this small SharedPreferences row so [MainActivity.onCreate] can read it
+ * synchronously — the Android 14+ `overrideActivityTransition` must be registered
+ * in `onCreate`, before Compose and long before the async-warmed JDBC settings row
+ * has landed. [MainActivity] reads the same name/key.
+ */
+const val LAUNCH_PREFS_NAME = "folio_launch"
+const val LAUNCH_ANIMATION_PREF_KEY = "launch_animation"
+
+/**
  * Android nav model: owns the state hoisted across destinations and implements
  * [FolioNavModel] by delegating each destination to its route composable
  * (§3.2/§3.4 FOLIO_IMPLEMENTATION_SPEC).
@@ -81,7 +91,31 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         set(value) {
             globalSettingsState = value
             settingsStore.publish(value)
+            // Mirror the one window-open flag into SharedPreferences on every
+            // settings write — this setter is the single choke point every write
+            // passes through (optimistic patch, merged reconcile, and the warm
+            // load from the DB), so the mirrored value tracks the live row and
+            // onCreate can read it before the async settings warm completes.
+            mirrorLaunchAnimationPref(value.launchAnimation)
         }
+
+    /**
+     * Writes [launchAnimation] into the [LAUNCH_PREFS_NAME] SharedPreferences row
+     * (key [LAUNCH_ANIMATION_PREF_KEY]) so [MainActivity.onCreate] can read it
+     * synchronously before Compose. Uses the application context (survives the
+     * activity rebind across configuration changes) and `apply()` so the write
+     * stays off the calling thread; `runCatching` keeps a storage failure from
+     * taking a settings write down.
+     */
+    private fun mirrorLaunchAnimationPref(launchAnimation: Boolean) {
+        runCatching {
+            activity.applicationContext
+                .getSharedPreferences(LAUNCH_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(LAUNCH_ANIMATION_PREF_KEY, launchAnimation)
+                .apply()
+        }
+    }
 
     /**
      * Cloud-sync credentials, mirrored from the no-backup [SecureCredentialStore] for the sync

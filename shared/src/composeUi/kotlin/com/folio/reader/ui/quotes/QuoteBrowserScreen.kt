@@ -82,6 +82,9 @@ fun QuoteBrowserScreen(
     onMangaNoteClick: (MangaQuoteItem) -> Unit = {},
     viewModel: QuoteBrowserViewModel
 ) {
+    // Cosmic art direction: Quotes is Atmospheric. Set explicitly so arriving from an
+    // Expressive tab resets the field (holder is last-writer-wins, no clear-on-dispose).
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Atmospheric)
     var viewMode by remember { mutableStateOf(QuoteBrowserViewModel.ViewMode.LIST) }
     var filter by remember { mutableStateOf(QuoteBrowserViewModel.FilterState()) }
     var searchExpanded by remember { mutableStateOf(false) }

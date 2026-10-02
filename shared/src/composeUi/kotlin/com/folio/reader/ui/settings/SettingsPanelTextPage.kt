@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,6 +27,7 @@ import com.folio.reader.settings.TextWidth
 import com.folio.reader.ui.components.DropdownMenuButton
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSliderRow
+import com.folio.reader.ui.components.FolioToggle
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -194,7 +194,7 @@ fun TextAndPageSettingsPanel(
                     color = colors.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.useEmbeddedFonts,
                 onCheckedChange = null
             )
@@ -305,7 +305,7 @@ fun TextAndPageSettingsPanel(
                     color = colors.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.hyphenation,
                 onCheckedChange = null
             )

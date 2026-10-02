@@ -1,6 +1,5 @@
 package com.folio.reader.ui.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,8 +13,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,7 +22,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.importer.LibraryScanScope
+import com.folio.reader.ui.components.FolioRadioRow
 import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.components.FolioToggle
 import com.folio.reader.ui.theme.FolioTokens
 
 /**
@@ -144,7 +143,7 @@ fun LibraryScanSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = state.scanOnStart,
                 onCheckedChange = null,
                 enabled = state.scope != LibraryScanScope.OFF,
@@ -177,22 +176,12 @@ private fun ScanScopeRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        RadioButton(selected = selected, onClick = onClick)
-    }
+    FolioRadioRow(
+        selected = selected,
+        onClick = onClick,
+        label = title,
+        supporting = subtitle,
+    )
 }
 
 @Composable

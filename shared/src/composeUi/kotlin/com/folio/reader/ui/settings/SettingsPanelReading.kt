@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -15,6 +14,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.FolioSliderRow
+import com.folio.reader.ui.components.FolioToggle
 import com.folio.reader.ui.theme.FolioTokens
 import kotlin.math.roundToInt
 
@@ -47,7 +47,7 @@ fun ReadingSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.showChapterTitle,
                 onCheckedChange = null
             )
@@ -74,7 +74,7 @@ fun ReadingSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.showProgress,
                 onCheckedChange = null
             )
@@ -100,7 +100,7 @@ fun ReadingSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.showClock,
                 onCheckedChange = null
             )
@@ -128,7 +128,7 @@ fun ReadingSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.morphIntoReader,
                 onCheckedChange = null
             )

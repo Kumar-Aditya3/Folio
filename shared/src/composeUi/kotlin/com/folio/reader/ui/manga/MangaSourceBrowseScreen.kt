@@ -34,16 +34,13 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LibraryAddCheck
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TriStateCheckbox
@@ -63,16 +60,20 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.folio.reader.manga.BrowseMode
 import com.folio.reader.manga.MangaBrowseItem
 import com.folio.reader.manga.MangaFilter
 import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioCoverGridSkeleton
 import com.folio.reader.ui.components.FolioCoverPaneSkeleton
+import com.folio.reader.ui.components.FolioSelectableRow
+import com.folio.reader.ui.components.FolioSunkenField
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
+import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
@@ -211,11 +212,11 @@ fun SourceBrowseScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedTextField(
+                    FolioSunkenField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search ${viewModel.source.name}") },
+                        placeholder = "Search ${viewModel.source.name}",
                         singleLine = true,
                     )
                     Spacer(Modifier.width(FolioTokens.space1))
@@ -326,7 +327,7 @@ private fun BrowseGridItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(FolioTokens.coverPaneRatio)
-                .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
+                .folioPanel(RoundedCornerShape(FolioTokens.radiusChip)),
         ) {
             MangaCover(
                 backend = backend,
@@ -373,10 +374,19 @@ private fun FilterSheet(
 ) {
     var filters by remember { mutableStateOf(template) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Filters") },
-        text = {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioPanel(FolioShapes.card)
+                .padding(FolioTokens.space3),
+        ) {
+            Text(
+                "Filters",
+                style = MaterialTheme.typography.titleMedium,
+                color = FolioTheme.colors.onSurface,
+            )
+            Spacer(Modifier.height(FolioTokens.space2))
             LazyColumn(modifier = Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Column {
@@ -388,14 +398,17 @@ private fun FilterSheet(
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(onClick = { onApply(filters) }) { Text("Apply") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+            Spacer(Modifier.height(FolioTokens.space2))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.width(FolioTokens.space1))
+                Button(onClick = { onApply(filters) }) { Text("Apply") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -409,20 +422,18 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
             modifier = Modifier.padding(top = 6.dp),
         )
         is MangaFilter.Separator -> Spacer(Modifier.height(2.dp))
-        is MangaFilter.Text -> OutlinedTextField(
+        is MangaFilter.Text -> FolioSunkenField(
             value = filter.state,
             onValueChange = { onChange(filter.copy(state = it)) },
-            label = { Text(filter.name.ifBlank { "Text" }) },
+            placeholder = filter.name.ifBlank { "Text" },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        is MangaFilter.CheckBox -> Row(
-            modifier = Modifier.fillMaxWidth().clickable { onChange(filter.copy(state = !filter.state)) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(checked = filter.state, onCheckedChange = { onChange(filter.copy(state = it)) })
-            Text(filter.name, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
-        }
+        is MangaFilter.CheckBox -> FolioSelectableRow(
+            selected = filter.state,
+            onClick = { onChange(filter.copy(state = !filter.state)) },
+            label = filter.name,
+        )
         is MangaFilter.TriState -> Row(
             modifier = Modifier.fillMaxWidth().clickable { onChange(filter.copy(state = (filter.state + 1) % 3)) },
             verticalAlignment = Alignment.CenterVertically,
@@ -435,7 +446,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
                 },
                 onClick = { onChange(filter.copy(state = (filter.state + 1) % 3)) },
             )
-            Text(filter.name, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+            Text(filter.name, style = FolioTheme.typography.bodyMedium, color = colors.onSurface)
         }
         is MangaFilter.Select -> Column(Modifier.fillMaxWidth()) {
             Text(filter.name, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)

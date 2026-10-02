@@ -33,6 +33,7 @@ import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaNewChapterBadge
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.components.folioCosmicCard
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.manga.MangaCover
@@ -161,8 +162,13 @@ internal fun DiscoverCard(
     backend: MangaBackend,
     onOpenDiscover: (MangaDiscoverItem) -> Unit
 ) {
-    Column {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentDiscovery)
+            .padding(vertical = FolioTokens.space3),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.space3)) {
             FolioEyebrow("Discover", accent = FolioTheme.colors.accentDiscovery)
             Spacer(Modifier.height(3.dp))
             Text(
@@ -175,7 +181,7 @@ internal fun DiscoverCard(
         }
         Spacer(Modifier.height(FolioTokens.space3))
         LazyRow(
-            contentPadding = PaddingValues(start = FolioTokens.gutter, end = FolioTokens.space3),
+            contentPadding = PaddingValues(horizontal = FolioTokens.space3),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
         ) {
             items(items.size, key = { "${items[it].sourceId}:${items[it].url}" }) { index ->

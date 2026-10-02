@@ -42,10 +42,19 @@ import androidx.compose.ui.graphics.Color
  * survive five rounds of tuning — every number was checked against the face that hides it.
  *
  * The dark allowance is set so the *shift* matches paper's, not the fraction: a bright
- * cover colour over a near-black pane moves it by roughly `(212-25) * alpha`, so 0.032
- * lands around six units, which is the order paper's 0.108 produces.
+ * cover colour over a near-black pane moves it by roughly `(212-25) * alpha`, so the
+ * value lands in the order paper's 0.108 produces.
+ *
+ * Raised from the original 0.07 to 0.11 once the composite guard existed to hold it:
+ * at 0.07 a dark hero's cover channels (`heroMeshBorrow`/`heroWashBorrow`) measured
+ * sub-JND in the audit — the book was wired into the hero but not felt. 0.11 is the
+ * largest value that both stays clearly under paper's half (the
+ * `theDarkFaceIsAllowedFarLessTintThanPaper` invariant that prevents the brown wash)
+ * and keeps body ink ≥ 7:1 over the full pane→mesh→wash stack
+ * (`FolioLampTest.theHeroCoverChannelsKeepTextLegible`). The guard sets this number,
+ * not taste; do not raise it without re-running that guard.
  */
-const val HERO_COVER_CEILING_DARK = 0.07f
+const val HERO_COVER_CEILING_DARK = 0.11f
 const val HERO_COVER_CEILING_PAPER = 0.24f
 
 /**

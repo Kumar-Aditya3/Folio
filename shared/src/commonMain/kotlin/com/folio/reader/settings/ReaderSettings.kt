@@ -130,6 +130,23 @@ data class ReaderSettings(
      */
     val morphIntoReader: Boolean = true,
     /**
+     * §redesign: the Android 14+ window-open "pop". On open the app window scales
+     * up from ~0.92 and fades in; on close it reverses. App-level rather than
+     * per-book (it is a window/device behaviour, not a reading preference), so it
+     * lives outside the per-book override lists like [liquidGlassEffects] and is
+     * never snapshotted onto a book.
+     *
+     * Default on. The effect only exists on API 34+, where
+     * `Activity.overrideActivityTransition` is available; below that the toggle is
+     * inert and the system default transition is used, exactly as other
+     * platform-limited toggles (e.g. [wideGamutColor]) behave on devices that
+     * cannot honour them. The window-open override is registered in
+     * `MainActivity.onCreate`, which cannot read the async-warmed settings row in
+     * time, so this one boolean is also mirrored into a small SharedPreferences
+     * row on every settings write (see `FolioNavModelImpl`).
+     */
+    val launchAnimation: Boolean = true,
+    /**
      * Echoes — the on-device semantic-discovery surface (selection-driven cross-book
      * resonant passages in the reader). App-level rather than per-book (it is a device
      * feature, not a reading preference), so it lives outside the per-book override

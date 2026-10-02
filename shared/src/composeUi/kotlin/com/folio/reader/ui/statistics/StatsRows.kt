@@ -44,6 +44,8 @@ import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSectionHead
 import com.folio.reader.ui.components.chartStagger
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioClearing
+import com.folio.reader.ui.components.folioCosmicCard
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.rememberFolioInteraction
@@ -70,7 +72,12 @@ internal fun FinishPredictionsCard(
     books: List<ReadingInProgress>,
     onBookClick: (String) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentProgress)
+            .padding(FolioTokens.space3),
+    ) {
         FolioSectionHead(title = "On pace to finish")
         Spacer(Modifier.height(FolioTokens.space3))
         books.forEachIndexed { index, book ->
@@ -138,7 +145,12 @@ internal fun WhereYourTimeWentCard(
     librarySize: Int,
     onBookClick: (String) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentProgress)
+            .padding(FolioTokens.space3),
+    ) {
         FolioSectionHead(title = "Where your time went", eyebrow = "This year")
         Spacer(Modifier.height(FolioTokens.space3))
         val peak = (books.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L)
@@ -290,7 +302,7 @@ internal fun everythingElseMinutes(topBooks: List<TopBook>, totalMinutes: Long):
 internal fun GenresCard(slices: List<TagSlice>) {
     Column {
         Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-            FolioSectionHead(title = "What you read")
+            FolioSectionHead(title = "What you read", modifier = Modifier.folioClearing())
         }
         Spacer(Modifier.height(FolioTokens.space3))
         val hues = FolioTheme.colors.chartSeries
@@ -357,7 +369,12 @@ internal fun FloatingQuotesCard(
     quotes: List<RecentQuote>,
     onQuoteClick: (RecentQuote) -> Unit = {},
 ) {
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentAnnotation)
+            .padding(FolioTokens.space3),
+    ) {
         FolioSectionHead(
             title = "Passages you kept",
             accent = FolioTheme.colors.accentAnnotation,
@@ -394,8 +411,13 @@ internal fun FloatingQuotesCard(
  */
 @Composable
 internal fun MangaStatsSection(stats: MangaStatistics) {
-    Column {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard(accent = FolioTheme.colors.accentDiscovery)
+            .padding(vertical = FolioTokens.space3),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = FolioTokens.space3)) {
             FolioSectionHead(title = "Manga", eyebrow = "Also tracked")
             Spacer(Modifier.height(FolioTokens.space3))
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -430,7 +452,7 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
 
         if (stats.topManga.isNotEmpty()) {
             Spacer(Modifier.height(FolioTokens.spaceBeat))
-            Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            Column(modifier = Modifier.padding(horizontal = FolioTokens.space3)) {
                 FolioEyebrow("Most read")
                 Spacer(Modifier.height(FolioTokens.space1))
                 stats.topManga.take(5).forEachIndexed { index, entry ->
@@ -477,7 +499,14 @@ internal fun MangaStatsSection(stats: MangaStatistics) {
  */
 @Composable
 internal fun HeadlineRow(stats: StatisticsUiState) {
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+    // The headline figures sit in a smooth cosmic card so they read as a grouped,
+    // characterful panel instead of floating on the open field.
+    Column(
+        modifier = Modifier
+            .padding(horizontal = FolioTokens.gutter)
+            .folioCosmicCard()
+            .padding(FolioTokens.space3),
+    ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             FolioFigure(
                 value = stats.streakDays.toString(),

@@ -100,37 +100,52 @@ fun EmptyState(
     // fade + rise on first composition (draw-phase, and instant under reduce-motion
     // via rememberEntryState).
     val reveal = rememberEntryState(headline)
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                alpha = reveal.value
-                translationY = (1f - reveal.value) * 8.dp.toPx()
-            }
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
-            modifier = Modifier.size(44.dp)
-        )
-        Text(
-            headline,
-            style = com.folio.reader.ui.theme.FolioTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-        if (body != null) {
+        // The expressive cosmic showcase: a calm celestial composition behind the
+        // cleared text. CosmicScene draws nothing below Expressive, so quieter hosts
+        // get the plain blank state at no cost; the text sits on its own clearing.
+        com.folio.reader.ui.components.cosmic.CosmicScene(
+            modifier = Modifier.matchParentSize(),
+        ) {
+            com.folio.reader.ui.components.cosmic.CelestialGlow(Modifier.matchParentSize())
+            com.folio.reader.ui.components.cosmic.CosmicStarField(Modifier.matchParentSize(), count = 28)
+            com.folio.reader.ui.components.cosmic.ShootingStar(Modifier.matchParentSize())
+        }
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = reveal.value
+                    translationY = (1f - reveal.value) * 8.dp.toPx()
+                }
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
+                modifier = Modifier.size(44.dp)
+            )
             Text(
-                body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
+                headline,
+                style = com.folio.reader.ui.theme.FolioTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+            if (body != null) {
+                Text(
+                    body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+            action?.invoke()
         }
-        action?.invoke()
     }
 }

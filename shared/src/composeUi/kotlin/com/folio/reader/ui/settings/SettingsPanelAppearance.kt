@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,6 +42,7 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioSliderRow
+import com.folio.reader.ui.components.FolioToggle
 import com.folio.reader.ui.components.folioField
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.folioVeil
@@ -470,7 +470,7 @@ fun TransparencySettingsPanel(
                     color = colors.onSurfaceVariant,
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.liquidGlassEffects,
                 onCheckedChange = { on ->
                     onSettingsChange(settings.copy(liquidGlassEffects = on))
@@ -499,7 +499,7 @@ fun TransparencySettingsPanel(
                     color = colors.onSurfaceVariant,
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.ambientColor,
                 onCheckedChange = { on ->
                     onSettingsChange(settings.copy(ambientColor = on))
@@ -527,10 +527,42 @@ fun TransparencySettingsPanel(
                     color = colors.onSurfaceVariant,
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = settings.wideGamutColor,
                 onCheckedChange = { on ->
                     onSettingsChange(settings.copy(wideGamutColor = on))
+                },
+            )
+        }
+        // §redesign: the Android 14+ window-open "pop". A flag, not a slider: the
+        // app window scales up and fades in when it opens and reverses when it
+        // closes. The effect only exists on API 34+ (where
+        // Activity.overrideActivityTransition lives); on older devices the toggle
+        // is shown but inert and the system default transition is used, exactly as
+        // the wide-gamut and liquid-glass toggles are shown on devices that cannot
+        // honour them.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Launch animation (Android 14+)",
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = "Scale the app window up and fade it in when it opens, " +
+                        "reversing on close. Takes effect on Android 14 and newer; " +
+                        "older devices keep the system default.",
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            FolioToggle(
+                checked = settings.launchAnimation,
+                onCheckedChange = { on ->
+                    onSettingsChange(settings.copy(launchAnimation = on))
                 },
             )
         }
@@ -695,7 +727,7 @@ fun CustomThemeSettingsPanel(
                     color = colors.onSurfaceVariant,
                 )
             }
-            Switch(
+            FolioToggle(
                 checked = active != null,
                 onCheckedChange = { on ->
                     onSettingsChange(

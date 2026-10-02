@@ -14,13 +14,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +32,8 @@ import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.components.FolioSunkenField
+import com.folio.reader.ui.components.FolioToggle
 import com.folio.reader.ui.theme.FolioTokens
 
 @Composable
@@ -99,11 +98,15 @@ fun CloudSyncSettingsPanel(
                     }
                 }
 
-                OutlinedTextField(
+                Text(
+                    "Firebase Project ID",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FolioSunkenField(
                     value = projectId,
                     onValueChange = { projectId = it },
-                    label = { Text("Firebase Project ID") },
-                    placeholder = { Text("my-folio-project") },
+                    placeholder = "my-folio-project",
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -116,11 +119,15 @@ fun CloudSyncSettingsPanel(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
+                Text(
+                    "Sync Account Email (Optional)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FolioSunkenField(
                     value = accountEmail,
                     onValueChange = { accountEmail = it },
-                    label = { Text("Sync Account Email (Optional)") },
-                    placeholder = { Text("Same email on all devices to link sync") },
+                    placeholder = "Same email on all devices to link sync",
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -195,7 +202,7 @@ fun CloudSyncSettingsPanel(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
+                        FolioToggle(
                             checked = settings.cloudSyncEnabled,
                             onCheckedChange = { onSettingsChange(settings.copy(cloudSyncEnabled = it)) }
                         )
@@ -252,6 +259,6 @@ private fun SyncToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        FolioToggle(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

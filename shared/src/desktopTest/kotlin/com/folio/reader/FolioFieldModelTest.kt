@@ -1,7 +1,9 @@
 package com.folio.reader
 
 import androidx.compose.ui.graphics.Color
+import com.folio.reader.ui.components.FOLIO_CLEARING_PEAK
 import com.folio.reader.ui.theme.AppPalette
+import com.folio.reader.ui.theme.FOLIO_SIGNATURE_ALPHA_MAX
 import com.folio.reader.ui.theme.atmosphereFor
 import com.folio.reader.ui.theme.barGlassFor
 import com.folio.reader.ui.theme.desaturate
@@ -9,6 +11,7 @@ import com.folio.reader.ui.theme.FolioFieldColors
 import com.folio.reader.ui.theme.fieldColorAt
 import com.folio.reader.ui.theme.fieldColorAtPoint
 import com.folio.reader.ui.theme.fieldColors
+import com.folio.reader.ui.theme.mixG
 import com.folio.reader.ui.theme.poolAlphaAt
 import kotlin.math.abs
 import kotlin.math.pow
@@ -361,6 +364,125 @@ class FolioFieldModelTest {
                     "is still not hearing what is being read",
             )
         }
+    }
+
+    /**
+     * The per-theme guilloché signature is drawn into the field at
+     * [FOLIO_SIGNATURE_ALPHA_MAX]. It may make the room distinct; it may not take a
+     * ratio from ink. Measured conservatively — the motif's opaque line composited at
+     * the full ceiling over the worst sampled point, on the untinted field and under
+     * every hostile lit cover — because a real stroke only covers a fraction of any
+     * glyph's ground, so full-coverage here over-states the darkening/lightening.
+     *
+     * This guard, not taste, is what sets [FOLIO_SIGNATURE_ALPHA_MAX].
+     */
+    @Test
+    fun theSignatureMotifKeepsBodyInkLegible() {
+        // AA (4.5:1), not AAA: the skyscape is decoration in the open field, and cardless
+        // body text that needs the AAA 7:1 floor gets a folioClearing (guarded separately
+        // below) that restores it. This bounds the *bare* field so an un-cleared label is
+        // still comfortably readable over the motif at its ceiling.
+        val floor = 4.5
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val ink = palette.colors.onBackground
+            val motif = atmos.signature.ink
+            val grounds = listOf(fieldColors(atmos)) +
+                hostileCovers.map { fieldColors(atmos, it, atmos.fieldTintStrength) }
+            for (field in grounds) {
+                val worst = sampleFractions.minOf { (fx, fy) ->
+                    val base = fieldColorAtPoint(field, phoneW, phoneH, fx * phoneW, fy * phoneH, 0f)
+                    ratio(mixG(base, motif, FOLIO_SIGNATURE_ALPHA_MAX), ink)
+                }
+                assertTrue(
+                    worst >= floor,
+                    "${palette.id}: the signature motif at $FOLIO_SIGNATURE_ALPHA_MAX puts body " +
+                        "ink at ${"%.2f".format(worst)}:1, under the $floor floor — lower the " +
+                        "ceiling, the guard sets it",
+                )
+            }
+        }
+    }
+
+    /**
+     * `folioClearing` paints the field's own paper over the motif behind cardless
+     * content. Its promise is the *worst case*, not every pixel: the lowest-contrast
+     * point of a cleared block must be at least as legible as the lowest-contrast
+     * point of the same block with the bare motif under it, and must clear the
+     * reading floor with margin — on every palette and under the loudest lit rooms.
+     *
+     * It is deliberately not a pointwise "only ever lifts": the clearing tends the
+     * whole block toward the clean [FolioAtmosphere.fieldTop], which on a dark field
+     * is a faint lift that can *lower* the raw ratio at a point that was already very
+     * dark (and so very legible) while raising the point that was weakest. The floor
+     * lives at the weakest point, which is the one that matters.
+     */
+    @Test
+    fun folioClearingRestoresLegibilityOverTheMotif() {
+        val floor = 7.0
+        for (palette in AppPalette.entries) {
+            val atmos = atmosphereFor(palette.colors)
+            val ink = palette.colors.onBackground
+            val motif = atmos.signature.ink
+            val paper = atmos.fieldTop
+            val grounds = listOf(fieldColors(atmos)) +
+                hostileCovers.map { fieldColors(atmos, it, atmos.fieldTintStrength) }
+            for (field in grounds) {
+                var worstMotif = Double.MAX_VALUE
+                var worstCleared = Double.MAX_VALUE
+                for ((fx, fy) in sampleFractions) {
+                    val base = fieldColorAtPoint(field, phoneW, phoneH, fx * phoneW, fy * phoneH, 0f)
+                    val withMotif = mixG(base, motif, FOLIO_SIGNATURE_ALPHA_MAX)
+                    val cleared = mixG(withMotif, paper, FOLIO_CLEARING_PEAK)
+                    worstMotif = minOf(worstMotif, ratio(withMotif, ink))
+                    worstCleared = minOf(worstCleared, ratio(cleared, ink))
+                }
+                assertTrue(
+                    worstCleared >= worstMotif - 1e-6,
+                    "${palette.id}: clearing lowered the worst-case legibility " +
+                        "(${"%.2f".format(worstCleared)}:1 < ${"%.2f".format(worstMotif)}:1)",
+                )
+                assertTrue(
+                    worstCleared >= floor,
+                    "${palette.id}: cleared cardless ink reads at ${"%.2f".format(worstCleared)}:1 " +
+                        "at its worst point, under the $floor floor",
+                )
+            }
+        }
+    }
+
+    /**
+     * The signature's ceiling and sky are pinned here so neither drifts silently: the
+     * alpha stays a tracery, the sky is deterministic per palette (a theme must look the
+     * same every launch, Android and Desktop), its polarity follows the palette (a dark
+     * face gets a night sky with no mist, a light face a day sky with one), and the 36
+     * built-ins do not all collapse onto one sky.
+     */
+    @Test
+    fun theSignatureCeilingAndFigureArePinned() {
+        assertTrue(
+            FOLIO_SIGNATURE_ALPHA_MAX in 0.01f..0.14f,
+            "the signature alpha ceiling $FOLIO_SIGNATURE_ALPHA_MAX left the tracery register",
+        )
+        val seeds = mutableSetOf<Int>()
+        for (palette in AppPalette.entries) {
+            val a = atmosphereFor(palette.colors).signature
+            val b = atmosphereFor(palette.colors).signature
+            assertEquals(a.seed, b.seed, "${palette.id}: the signature seed is not deterministic")
+            assertEquals(a.star, b.star, "${palette.id}: the signature sky is not deterministic")
+            assertEquals(a.isDark, palette.isDark, "${palette.id}: the sky polarity disagrees with the palette")
+            assertEquals(
+                palette.isDark, a.mist == null,
+                "${palette.id}: a dark face must have no mist and a light face must have one",
+            )
+            assertEquals(FOLIO_SIGNATURE_ALPHA_MAX, a.alphaCeiling, "${palette.id}: ceiling drifted")
+            seeds.add(a.seed)
+        }
+        assertTrue(
+            seeds.size > AppPalette.entries.size / 2,
+            "the signatures barely vary across themes (${seeds.size} distinct of " +
+                "${AppPalette.entries.size}) — the sky is supposed to tell them apart",
+        )
     }
 
     private fun Color.hex(): String = "#" + (

@@ -1,10 +1,15 @@
 package com.folio.reader.ui.library
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +98,7 @@ import com.folio.reader.model.DocumentFormat
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.folioClearing
 import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioFadeSwap
 import com.folio.reader.ui.components.folioSizeTransformEligible
@@ -205,6 +211,11 @@ fun LibraryScreen(
     mangaSourcesAvailable: Boolean = false,
     onOpenMangaDownloads: () -> Unit = {},
 ) {
+    // Cosmic art direction: the Library sits at Atmospheric — the full skyscape behind
+    // the shelves, with covers dominant. Set explicitly (not relying on the default)
+    // because the intensity holder is last-writer-wins and does not clear on dispose, so
+    // arriving from an Expressive tab must reset the field here.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Atmospheric)
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(LibraryViewModel.FilterState()) }
@@ -550,45 +561,53 @@ fun LibraryScreen(
                     if (!documentSearchActive) { railPxByMode[libraryMode] = it.height; lastRailPx = it.height }
                 }
             ) {
-                if (documentSearchActive && documentLibraryViewModel != null) {
-                    LibrarySearchRail(
-                        switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
-                        query = documentState.query,
-                        onQueryChange = { documentLibraryViewModel?.setQuery(it) },
-                        placeholder = "Search documents",
-                        onClose = {
-                            // The document grid's query flow filters as long as the
-                            // text is non-blank, so closing the field clears it —
-                            // otherwise the shelf would stay filtered with no field
-                            // on screen to explain why.
-                            documentLibraryViewModel?.setQuery("")
-                            onDocumentSearchActiveChange(false)
-                        },
-                    )
-                } else {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        item { LibraryModeSwitch(libraryMode, onLibraryModeChange) }
-                        items(documentCategories, key = { it.id }) { category ->
-                            com.folio.reader.ui.components.FolioChip(
-                                selected = selectedDocumentCategory == category.id,
-                                onClick = { documentLibraryViewModel?.selectCategory(category.id) },
-                                label = category.name
+                // Chips ↔ search-field: the field unfurls horizontally from the
+                // trailing search-icon side instead of hard-cutting in. See [RailSearchSwap].
+                RailSearchSwap(
+                    searchActive = documentSearchActive && documentLibraryViewModel != null,
+                    field = {
+                        if (documentLibraryViewModel != null) {
+                            LibrarySearchRail(
+                                switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                                query = documentState.query,
+                                onQueryChange = { documentLibraryViewModel?.setQuery(it) },
+                                placeholder = "Search documents",
+                                onClose = {
+                                    // The document grid's query flow filters as long as the
+                                    // text is non-blank, so closing the field clears it —
+                                    // otherwise the shelf would stay filtered with no field
+                                    // on screen to explain why.
+                                    documentLibraryViewModel?.setQuery("")
+                                    onDocumentSearchActiveChange(false)
+                                },
                             )
                         }
-                        item {
-                            com.folio.reader.ui.components.FolioChip(
-                                selected = false,
-                                onClick = { manageDocumentCategories = true },
-                                label = "Edit"
-                            )
+                    },
+                    chips = {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            item { LibraryModeSwitch(libraryMode, onLibraryModeChange) }
+                            items(documentCategories, key = { it.id }) { category ->
+                                com.folio.reader.ui.components.FolioChip(
+                                    selected = selectedDocumentCategory == category.id,
+                                    onClick = { documentLibraryViewModel?.selectCategory(category.id) },
+                                    label = category.name
+                                )
+                            }
+                            item {
+                                com.folio.reader.ui.components.FolioChip(
+                                    selected = false,
+                                    onClick = { manageDocumentCategories = true },
+                                    label = "Edit"
+                                )
+                            }
                         }
-                    }
-                }
+                    },
+                )
             }
         })
         LibraryMode.BOOKS -> ({
@@ -604,95 +623,103 @@ fun LibraryScreen(
                 }
             ) {
                 val controller = bookSearchController
-                if (bookSearchActive && controller != null) {
-                    Column(Modifier.fillMaxWidth()) {
-                        LibrarySearchRail(
-                            switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
-                            query = controller.query,
-                            onQueryChange = { q ->
-                                controller.runSearch(q, controller.scope, allBooks, railScope)
-                            },
-                            placeholder = "Search books",
-                            onClose = { onBookSearchActiveChange(false) },
-                            // The scope selector lives on the field's own search icon:
-                            // a chip row below the field folded out of sight on phones,
-                            // which is how Titles/Content/Highlights/Notes ended up
-                            // undiscoverable. The dropdown cannot scroll away.
-                            scopeOptions = SearchScope.entries.map { it.label },
-                            scopeSelected = SearchScope.entries.indexOf(controller.scope).coerceAtLeast(0),
-                            onScopeSelect = { index ->
-                                controller.runSearch(
-                                    controller.query,
-                                    SearchScope.entries[index],
-                                    allBooks,
-                                    railScope,
+                // Chips ↔ search-field: the field unfurls horizontally from the
+                // trailing search-icon side instead of hard-cutting in. See [RailSearchSwap].
+                RailSearchSwap(
+                    searchActive = bookSearchActive && controller != null,
+                    field = {
+                        if (controller != null) {
+                            Column(Modifier.fillMaxWidth()) {
+                                LibrarySearchRail(
+                                    switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                                    query = controller.query,
+                                    onQueryChange = { q ->
+                                        controller.runSearch(q, controller.scope, allBooks, railScope)
+                                    },
+                                    placeholder = "Search books",
+                                    onClose = { onBookSearchActiveChange(false) },
+                                    // The scope selector lives on the field's own search icon:
+                                    // a chip row below the field folded out of sight on phones,
+                                    // which is how Titles/Content/Highlights/Notes ended up
+                                    // undiscoverable. The dropdown cannot scroll away.
+                                    scopeOptions = SearchScope.entries.map { it.label },
+                                    scopeSelected = SearchScope.entries.indexOf(controller.scope).coerceAtLeast(0),
+                                    onScopeSelect = { index ->
+                                        controller.runSearch(
+                                            controller.query,
+                                            SearchScope.entries[index],
+                                            allBooks,
+                                            railScope,
+                                        )
+                                    },
                                 )
-                            },
-                        )
-                        // Retrieval mode, exactly as the reader's search screen offers it: the
-                        // same three chips, under the same two conditions — Content scope only,
-                        // and only on a build that can do semantics at all.
-                        //
-                        // Content-only is not a simplification, it is the same rule the other
-                        // surface has and for the same reason: Titles/Highlights/Notes/Bookmarks
-                        // are exact-match lookups over short strings, so an embedding adds
-                        // nothing, and showing "Meaning" over a title list would promise
-                        // something the index cannot deliver. Semantics *are* meaningful here
-                        // because this is the field that searches inside books — the library
-                        // rail is the road most readers take to content search, and until now
-                        // it led to a search that had no mode at all.
-                        if (controller.scope == SearchScope.CONTENT && controller.semanticAvailable) {
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                    horizontal = FolioTokens.gutter,
-                                    vertical = 2.dp,
-                                ),
-                            ) {
-                                items(SearchMode.entries.toList(), key = { "railmode:${it.name}" }) { m ->
-                                    com.folio.reader.ui.components.FolioChip(
-                                        selected = controller.mode == m,
-                                        onClick = {
-                                            controller.mode = m
-                                            controller.runSearch(
-                                                controller.query,
-                                                controller.scope,
-                                                allBooks,
-                                                railScope,
+                                // Retrieval mode, exactly as the reader's search screen offers it: the
+                                // same three chips, under the same two conditions — Content scope only,
+                                // and only on a build that can do semantics at all.
+                                //
+                                // Content-only is not a simplification, it is the same rule the other
+                                // surface has and for the same reason: Titles/Highlights/Notes/Bookmarks
+                                // are exact-match lookups over short strings, so an embedding adds
+                                // nothing, and showing "Meaning" over a title list would promise
+                                // something the index cannot deliver. Semantics *are* meaningful here
+                                // because this is the field that searches inside books — the library
+                                // rail is the road most readers take to content search, and until now
+                                // it led to a search that had no mode at all.
+                                if (controller.scope == SearchScope.CONTENT && controller.semanticAvailable) {
+                                    LazyRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                            horizontal = FolioTokens.gutter,
+                                            vertical = 2.dp,
+                                        ),
+                                    ) {
+                                        items(SearchMode.entries.toList(), key = { "railmode:${it.name}" }) { m ->
+                                            com.folio.reader.ui.components.FolioChip(
+                                                selected = controller.mode == m,
+                                                onClick = {
+                                                    controller.mode = m
+                                                    controller.runSearch(
+                                                        controller.query,
+                                                        controller.scope,
+                                                        allBooks,
+                                                        railScope,
+                                                    )
+                                                },
+                                                label = m.label,
                                             )
-                                        },
-                                        label = m.label,
-                                    )
+                                        }
+                                    }
+                                    if (controller.semanticUnavailable) {
+                                        Text(
+                                            text = "Semantic index not built yet — showing exact matches. " +
+                                                "Download the model in Settings, then index your library.",
+                                            modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = 2.dp),
+                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
-                            if (controller.semanticUnavailable) {
-                                Text(
-                                    text = "Semantic index not built yet — showing exact matches. " +
-                                        "Download the model in Settings, then index your library.",
-                                    modifier = Modifier.padding(horizontal = FolioTokens.gutter, vertical = 2.dp),
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                         }
-                    }
-                } else {
-                    LibraryFilterChips(
-                        filter = filter,
-                        allSeries = allSeries,
-                        onFilterChange = { filter = it },
-                        collections = shelfCollections,
-                        selectedCollectionId = selectedCollectionId,
-                        onSelectCollection = { viewModel.selectCollection(it) },
-                        onEditCollections = { manageCollectionsOpen = true },
-                        leading = if (mangaContent != null || documentLibraryViewModel != null) {
-                            ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
-                        } else {
-                            null
-                        },
-                    )
-                }
+                    },
+                    chips = {
+                        LibraryFilterChips(
+                            filter = filter,
+                            allSeries = allSeries,
+                            onFilterChange = { filter = it },
+                            collections = shelfCollections,
+                            selectedCollectionId = selectedCollectionId,
+                            onSelectCollection = { viewModel.selectCollection(it) },
+                            onEditCollections = { manageCollectionsOpen = true },
+                            leading = if (mangaContent != null || documentLibraryViewModel != null) {
+                                ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
+                            } else {
+                                null
+                            },
+                        )
+                    },
+                )
             }
         })
     }
@@ -1341,6 +1368,7 @@ fun LibraryScreen(
                                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                             com.folio.reader.ui.components.EmptyState(
                                                 icon = Icons.Filled.Search,
+                                                modifier = Modifier.folioClearing(),
                                                 headline = "No matches for \"$queryText\"",
                                             )
                                         }
@@ -1831,11 +1859,13 @@ private fun DocumentLibraryContent(
             state.isLoading || state.isImporting -> com.folio.reader.ui.components.LoadingPlaceholder(Modifier.fillMaxSize())
             state.errorMessage != null -> com.folio.reader.ui.components.EmptyState(
                 icon = Icons.Outlined.ErrorOutline,
+                modifier = Modifier.folioClearing(),
                 headline = "Couldn't load documents",
                 body = state.errorMessage
             )
             state.items.isEmpty() -> com.folio.reader.ui.components.EmptyState(
                 icon = Icons.AutoMirrored.Outlined.MenuBook,
+                modifier = Modifier.folioClearing(),
                 headline = if (state.query.isBlank()) "No documents in category" else "No matching documents",
                 body = if (state.query.isBlank()) "Import a document or choose another category" else "Try a different title, filename, author, description, or format",
                 action = if (state.query.isBlank()) ({
@@ -1906,6 +1936,7 @@ private fun LibraryContent(
                 ) {
                     com.folio.reader.ui.components.EmptyState(
                         icon = Icons.AutoMirrored.Outlined.MenuBook,
+                        modifier = Modifier.folioClearing(),
                         headline = if (libraryEmpty) "No books in library" else "No books in this collection",
                         body = if (libraryEmpty) {
                             "Import your first EPUB to get started"
@@ -2065,5 +2096,64 @@ private fun ViewCheck(active: Boolean) {
         )
     } else {
         Spacer(modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * The masthead rail's chips ↔ search-field swap, animated as a horizontal unfurl
+ * from the trailing search-icon side: the field *enters* with
+ * `expandHorizontally(expandFrom = End) + fadeIn` while the chips *exit* with
+ * `shrinkHorizontally(shrinkTowards = End) + fadeOut`, and the reverse plays on
+ * close. The motion is horizontal only — width and alpha, never height — so it
+ * cannot fight the masthead's own height collapse (which is parked open while a
+ * search is active, see `searchPinned`). `sizeTransform = null` keeps the
+ * container from spring-animating between the two sides' heights; the
+ * expand/shrink already carry the only motion the swap should have.
+ *
+ * Reduce-motion (Rule 19): the swap is an instant cut — `snap()` enter/exit with
+ * no fade — exactly as the springs elsewhere in the app collapse to `snap()`.
+ *
+ * Shared by the Books and Documents rails. The Manga rail performs the same
+ * chips↔field swap inside [com.folio.reader.ui.manga.MangaLibraryRail], so the
+ * identical treatment belongs there and cannot be applied from this file.
+ */
+@Composable
+private fun RailSearchSwap(
+    searchActive: Boolean,
+    modifier: Modifier = Modifier,
+    field: @Composable () -> Unit,
+    chips: @Composable () -> Unit,
+) {
+    val motion = rememberMotionEnabled()
+    AnimatedContent(
+        targetState = searchActive,
+        modifier = modifier,
+        transitionSpec = {
+            if (motion) {
+                val enterMs = FolioTokens.motionStandard.toInt()
+                val exitMs = FolioTokens.motionFast.toInt()
+                ContentTransform(
+                    targetContentEnter = expandHorizontally(
+                        animationSpec = tween(enterMs, easing = FastOutSlowInEasing),
+                        expandFrom = Alignment.End,
+                    ) + fadeIn(tween(enterMs, easing = FastOutSlowInEasing)),
+                    initialContentExit = shrinkHorizontally(
+                        animationSpec = tween(exitMs, easing = FastOutSlowInEasing),
+                        shrinkTowards = Alignment.End,
+                    ) + fadeOut(tween(exitMs, easing = FastOutSlowInEasing)),
+                    sizeTransform = null,
+                )
+            } else {
+                // Rule 19: instant swap, no fade and no size animation.
+                ContentTransform(
+                    targetContentEnter = fadeIn(snap()),
+                    initialContentExit = fadeOut(snap()),
+                    sizeTransform = null,
+                )
+            }
+        },
+        label = "rail search unfurl",
+    ) { active ->
+        if (active) field() else chips()
     }
 }

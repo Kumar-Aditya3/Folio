@@ -1,6 +1,5 @@
 package com.folio.reader.ui.manga
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,7 +30,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,9 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaChapter
+import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -89,9 +87,9 @@ internal fun ChapterRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onRead, onLongClick = onLongClick)
-            .background(
-                if (selected) FolioTheme.colors.primaryContainer else FolioTheme.colors.surface,
+            .folioPanel(
                 RoundedCornerShape(FolioTokens.radiusControl),
+                accent = if (selected) FolioTheme.colors.primary else null,
             )
             .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
         verticalAlignment = Alignment.CenterVertically,
@@ -124,9 +122,10 @@ internal fun ChapterRow(
                 Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             }
             if (status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING && dlTotal > 0) {
-                LinearProgressIndicator(
+                FolioProgressBar(
                     progress = (dlDone.toFloat() / dlTotal).coerceIn(0f, 1f),
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(3.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    color = FolioTheme.colors.accentProgress,
                 )
             }
         }
@@ -278,7 +277,7 @@ fun DownloadsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                            .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
                             .padding(FolioTokens.space3),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -318,9 +317,10 @@ fun DownloadsScreen(
                             if (download.status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING &&
                                 download.totalPages > 0
                             ) {
-                                LinearProgressIndicator(
+                                FolioProgressBar(
                                     progress = (download.downloadedPages.toFloat() / download.totalPages).coerceIn(0f, 1f),
-                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                    color = FolioTheme.colors.accentProgress,
                                 )
                             }
                         }
@@ -353,7 +353,7 @@ fun DownloadsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2)
-                    .glassPanel(RoundedCornerShape(FolioTokens.radiusControl))
+                    .folioPanel(RoundedCornerShape(FolioTokens.radiusControl))
                     .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

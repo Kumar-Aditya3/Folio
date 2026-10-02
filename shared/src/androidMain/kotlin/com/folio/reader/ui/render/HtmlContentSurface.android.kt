@@ -8,6 +8,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.JavascriptInterface
 import android.view.MotionEvent
+import kotlin.math.roundToInt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -215,12 +216,26 @@ actual fun HtmlContentSurface(
     // restyle re-columnises the chapter (`measure()` reads scrollWidth) and re-runs the
     // page-anchor save/restore — so a per-minute light would move the reader off the
     // page he is on. The light therefore refreshes with a chapter load or a theme
-    // change, both of which restyle anyway. Mid-session drift over ~2° of sun is not
-    // visible; a jumped page is.
+    // change, both of which restyle anyway (Decision 2: a coarse relight on chapter
+    // turn, never a per-minute one). A jumped page is far worse than ~2° of unshown sun.
+    //
+    // Phase 4: `pageLight` is now keyed on a COARSE daylight bucket rather than the raw
+    // minute, so the whole surface no longer recomposes once a minute to rebuild a
+    // light string whose anchor barely moved — it re-bakes a handful of times across
+    // the day, and still on every chapter turn / theme change with the current hour.
     val roomDaylight = LocalFolioDaylight.current
     val roomAtmosphere = FolioTheme.atmosphere
+    val lightBucket = remember(roomDaylight) {
+        // The page light's anchor tracks the sun (pageLightAnchor); quantise elevation
+        // and azimuth so adjacent minutes share a bucket and the sub-pixel step between
+        // them is never worth a recomposition. ~8 steps each gives a coarse grid that
+        // still visibly follows the day across a long session's chapter turns.
+        val e = (roomDaylight.elevation * 8f).roundToInt()
+        val a = (roomDaylight.azimuth * 8f).roundToInt()
+        e * 31 + a
+    }
     val pageLight = remember(
-        roomDaylight, roomAtmosphere, settings.themeId, settings.customTheme,
+        lightBucket, roomAtmosphere, settings.themeId, settings.customTheme,
     ) {
         val paper = settings.customTheme
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)

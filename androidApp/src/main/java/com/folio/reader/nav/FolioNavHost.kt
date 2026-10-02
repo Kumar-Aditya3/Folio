@@ -46,6 +46,20 @@ private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.n
         targetState.destination.route in topLevelRoutes
 
 /**
+ * True for a tab morph where a flying shared cover is unlikely to pair up — Stats
+ * shows only the single most-read book and More shows no cover at all, so neither
+ * reliably has the same `book_cover:$id` the other tab is showing. Those switches get
+ * a real crossfade (both sides dissolving over the morph window) so they read as a
+ * smooth change of mind instead of the hard cut the opaque-hold produces when no cover
+ * flies. Home↔Library keep the opaque hold below, because their covers *do* pair and
+ * should fly over a static destination rather than through a dissolve.
+ */
+private fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.isCrossfadeTab(): Boolean {
+    val pair = setOf(initialState.destination.route, targetState.destination.route)
+    return FolioRoutes.STATS in pair || FolioRoutes.MORE in pair
+}
+
+/**
  * Pops the reader — and anything pushed on top of it — back to [route].
  *
  * ### Why the reader's back cannot just pop
@@ -147,30 +161,49 @@ fun FolioNavHost(
                     // Tab↔tab: opaque from frame 0 (initialAlpha = 1) so the background/masthead
                     // swaps instantly, but the transition stays live for the morph window so the
                     // cover still flies (clipped below the masthead — see sharedElementOrNoop). The
-                    // outgoing tab is invisible from frame 0 (exit below), so nothing bleeds.
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
-                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                        slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                    // outgoing tab is invisible from frame 0 (exit below), so nothing bleeds. Stats
+                    // and More have no cover to fly, so they dissolve in instead of hard-cutting —
+                    // otherwise the switch reads as a jump.
+                    if (isTabMorph()) {
+                        if (isCrossfadeTab()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()))
+                        else fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
+                    } else {
+                        fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                            slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                    }
                 },
                 exitTransition = {
                     // Outgoing tab drops to fully transparent on the *first* frame and stays there
                     // for the morph window (keyframes: 0 at 0), kept composed only so the flying
                     // cover still has a source. None of the old tab is ever painted behind the bar.
+                    // Stats/More instead fade out over the window so the pair dissolves smoothly.
                     if (isTabMorph()) {
-                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        if (isCrossfadeTab()) {
+                            fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
+                        } else {
+                            fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        }
                     } else {
                         fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                             slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
                     }
                 },
                 popEnterTransition = {
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
-                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                        slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                    if (isTabMorph()) {
+                        if (isCrossfadeTab()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()))
+                        else fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
+                    } else {
+                        fadeIn(tween(FolioTokens.motionStandard.toInt())) +
+                            slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                    }
                 },
                 popExitTransition = {
                     if (isTabMorph()) {
-                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        if (isCrossfadeTab()) {
+                            fadeOut(tween(FolioTokens.motionTabMorph.toInt()))
+                        } else {
+                            fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        }
                     } else {
                         fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
                             slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }

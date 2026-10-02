@@ -59,6 +59,7 @@ import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.components.FolioProgressBar
 import com.folio.reader.ui.components.FolioTabReselect
 import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioPressFocal
 import com.folio.reader.ui.components.folioRightClick
 import com.folio.reader.ui.components.LocalFolioScrollVelocity
 import com.folio.reader.ui.components.folioThemeRim
@@ -223,6 +224,13 @@ private fun FeaturedShelfEntry(
                 accent = accent,
                 fill = FolioTheme.atmosphere.paneFill(),
             )
+            // §16 liquid press: the shelf's hero is a translucent pane, so a finger
+            // on it catches a specular bloom where it lands — the one press in the
+            // shelf that reads as glass answering the touch rather than a tile
+            // scaling. Scoped to this primary surface, not every cell (an opaque
+            // cover tile would hide the bloom behind its artwork anyway). Non-specular
+            // devices and reduce-motion keep the folioPressable scale above.
+            .folioPressFocal(interaction, tileShape)
             // After the pressable's layer so the rim travels with the plane when
             // it dips, and behind the content so the plate occludes the arc
             // passing under it.

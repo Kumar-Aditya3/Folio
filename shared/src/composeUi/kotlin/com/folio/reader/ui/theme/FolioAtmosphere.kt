@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import kotlin.math.abs
 
 /**
@@ -94,7 +95,151 @@ data class FolioAtmosphere(
      * still clear its contrast floor against it, and no brighter.
      */
     val ink: Color,
+    /**
+     * The per-theme **skyscape**: the cosmic/ethereal background that makes two themes
+     * read as different *places*, not the same room repainted. Dark faces get a deep
+     * night sky (nebula + stars + a far planet); light faces get an ethereal daylight
+     * sky (pale wash + sunset glow + mist). Every colour is tuned from the palette's
+     * own roles in [atmosphereFor], so all 36 built-ins, System/Material-You and custom
+     * themes get a distinct, alpha-bounded signature for free. See [FolioSignature].
+     */
+    val signature: FolioSignature,
 )
+
+/**
+ * The ceiling the skyscape is ever composited at **within the content band** (the
+ * middle of the screen, where cardless body text lives).
+ *
+ * A single constant, pinned by the `FolioFieldModelTest` contrast guard that
+ * composites the field + the motif's strongest colour at this alpha and asserts body
+ * ink still clears §12.3's 7:1 across every palette — the guard sets this value, not
+ * taste. The renderer may run richer at the very top/bottom *edges* (where no cardless
+ * body text sits), falling to this ceiling before the content band; see the vertical
+ * falloff in `drawSkyscape`. Kept in the hero-mesh register (0.07): air, not a wall.
+ */
+const val FOLIO_SIGNATURE_ALPHA_MAX = 0.10f
+
+/**
+ * One theme's skyscape, solved from its colours only — deterministic per palette.
+ *
+ * Everything is derived from [seed] (a stable hash of the palette's `background`+
+ * `primary`) and the palette's own accent roles, so a custom or System face inherits a
+ * distinct sky with no per-theme table. All colours are opaque; the renderer composites
+ * them at its own low alphas (bounded in the content band by [alphaCeiling]).
+ *
+ *  - [skyTop]/[skyBottom]: the vertical sky wash, strongest at the top edge.
+ *  - [nebulaCool]/[nebulaWarm]: the two drifting cloud/accent pools.
+ *  - [glow]: the celestial body + sparkle highlight (sunset-gold on paper, cool on dark).
+ *  - [star]: the point/star ink.
+ *  - [ink]: the single most contrast-reducing colour, the one the guard measures.
+ *  - [mist]: a low horizon haze band for light faces (null on dark).
+ */
+@Immutable
+data class FolioSignature(
+    val seed: Int,
+    val isDark: Boolean,
+    val skyTop: Color,
+    val skyBottom: Color,
+    val nebulaCool: Color,
+    val nebulaWarm: Color,
+    val glow: Color,
+    val star: Color,
+    val ink: Color,
+    val mist: Color?,
+    val alphaCeiling: Float,
+)
+
+/**
+ * A cheap, platform-stable integer hash (the well-known lowbias32 finaliser). Int
+ * multiplication wraps deterministically, so a palette's sky reproduces across
+ * processes and across Android/Desktop — the same reason [FolioShapeFamily] uses a
+ * splitmix finaliser rather than `Random(seed)`. Public so the renderer can scatter
+ * stars from the same stream without forking the arithmetic.
+ */
+internal fun signatureHash(x: Int): Int {
+    var h = x
+    h = h xor (h ushr 16); h *= 0x45d9f3b
+    h = h xor (h ushr 16); h *= 0x45d9f3b
+    h = h xor (h ushr 16)
+    return h
+}
+
+/**
+ * Solves a palette's [FolioSignature] from its colours only — the gradients are tuned
+ * per theme from its own roles (accentDiscovery = the cool/sky hue, accentStreak = the
+ * warm/sunset highlight, accentProgress = the secondary cloud), never fixed hex. Pure
+ * and deterministic, so every theme — built-in, System or custom — gets its own sky.
+ */
+private fun signatureFor(colors: FolioColors, dark: Boolean): FolioSignature {
+    val seed = signatureHash(colors.background.toArgb() * 31 + colors.primary.toArgb())
+    val cool = colors.accentDiscovery       // sky / nebula blue-violet
+    val warm = colors.accentStreak          // sunset gold / warm highlight
+    val second = colors.accentProgress      // the counter cloud (cyan/blue)
+    return if (dark) {
+        // Deep-space: a clearly indigo top lifting out of the palette's ground toward
+        // its cool accent, cool+second nebula clouds, a cool far-planet glow, near-white
+        // stars. Pulled well off the background so the wash actually reads as a sky.
+        // Nebula/glow hues are pushed to higher chroma (saturateG) so the field reads as
+        // vivid cloud, not a faded wash — star/ink are left exactly as calibrated.
+        val skyTop = saturateG(mixG(deepenG(colors.background, 0.34f), cool, 0.46f), 0.22f)
+        val star = liftG(colors.surface, 0.88f)
+        FolioSignature(
+            seed = seed,
+            isDark = true,
+            skyTop = skyTop,
+            skyBottom = colors.background,
+            nebulaCool = saturateG(second, 0.45f),
+            nebulaWarm = saturateG(cool, 0.45f),
+            glow = saturateG(cool, 0.40f),
+            star = star,
+            ink = star, // brightest element: worst case for light body ink on a dark field
+            mist = null,
+            alphaCeiling = FOLIO_SIGNATURE_ALPHA_MAX,
+        )
+    } else {
+        // Ethereal daylight — "Cosmic Dawn": a clear pale sky layered pale-blue → a hint
+        // of soft violet at the top, a warm (gold) sunset glow kept localized, faint cool
+        // points, and a low mist haze along the horizon. The top wash leans toward the
+        // cool hue and takes a whisper of the secondary accent so the sky reads as a
+        // layered atmosphere rather than one flat tint — still dominated by the (near
+        // white) background, so it stays luminous and the field never darkens under ink.
+        //
+        // `star`/`ink` are deliberately left exactly as calibrated: `ink = star` is the
+        // single darkest drawn element, the one FolioFieldModelTest measures, so the
+        // layering above (all lighter than the star) cannot move a contrast ratio.
+        val skyTop = mixG(mixG(colors.background, cool, 0.30f), second, 0.12f)
+        val star = mixG(colors.onSurfaceVariant, cool, 0.50f)
+        FolioSignature(
+            seed = seed,
+            isDark = false,
+            skyTop = skyTop,
+            skyBottom = liftG(colors.background, 0.05f),
+            nebulaCool = saturateG(cool, 0.32f),
+            nebulaWarm = saturateG(warm, 0.32f),
+            glow = saturateG(warm, 0.26f),
+            star = star,
+            ink = star, // darkest element: worst case for dark body ink on a light field
+            mist = liftG(mixG(colors.background, cool, 0.14f), 0.22f),
+            alphaCeiling = FOLIO_SIGNATURE_ALPHA_MAX,
+        )
+    }
+}
+
+/**
+ * Push a colour's chroma up (or down, for a negative [amount]) around its own luminance,
+ * so the cosmic nebula/arc/planet hues read as vivid rather than faded. Luma-preserving
+ * and clamped, so it brightens the *colour*, not the lightness. Used only for decorative
+ * signature hues — never for `ink`/`star`, which the contrast guards measure.
+ */
+private fun saturateG(c: Color, amount: Float): Color {
+    val l = 0.299f * c.red + 0.587f * c.green + 0.114f * c.blue
+    return Color(
+        red = (l + (c.red - l) * (1f + amount)).coerceIn(0f, 1f),
+        green = (l + (c.green - l) * (1f + amount)).coerceIn(0f, 1f),
+        blue = (l + (c.blue - l) * (1f + amount)).coerceIn(0f, 1f),
+        alpha = c.alpha,
+    )
+}
 
 /**
  * Perceptual lightness, cheap. Used only to pick a lighting model, so the
@@ -273,6 +418,8 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         colors.accentStreak,
     )
 
+    val signature = signatureFor(colors, dark)
+
     return FolioAtmosphere(
         isDark = dark,
         fieldTop = fieldTop,
@@ -416,6 +563,7 @@ fun atmosphereFor(colors: FolioColors): FolioAtmosphere {
         // The ink that sits straight on the page — most rows and lists in the app are
         // this colour on the field, with no surface between them.
         ink = colors.onBackground,
+        signature = signature,
     )
 }
 

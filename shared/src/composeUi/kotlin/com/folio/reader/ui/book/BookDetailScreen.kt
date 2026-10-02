@@ -58,6 +58,10 @@ fun BookDetailScreen(
     onCollectionClick: (Collection) -> Unit = {},
     viewModel: BookDetailViewModel
 ) {
+    // Cosmic art direction: Book Details sits at Atmospheric, and its ground is now
+    // transparent (was an opaque `background` slab) so the field's skyscape frames the
+    // cover and content instead of a flat fill.
+    com.folio.reader.ui.theme.CosmicIntensitySource(com.folio.reader.ui.theme.CosmicIntensity.Atmospheric)
     // No `initial`: book is a StateFlow, so this resolves to the overload that reads
     // its current value on the first frame — the seeded book from the tapped cover,
     // when there is one — so the header (and the shared cover/title the morph flies
@@ -121,7 +125,7 @@ fun BookDetailScreen(
     }
 
     Scaffold(
-        containerColor = FolioTheme.colors.background,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // No bar: the controls sit directly on the artwork as small glass discs, so
         // the cover reads as the top of the screen instead of starting under a panel.
         topBar = {

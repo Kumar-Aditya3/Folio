@@ -17,10 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -34,6 +30,7 @@ import com.folio.reader.model.ReadingSession
 import com.folio.reader.model.Series
 import com.folio.reader.model.Tag
 import com.folio.reader.ui.components.FigureScale
+import com.folio.reader.ui.components.FolioChip
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedElementOrNoop
@@ -50,6 +47,7 @@ import com.folio.reader.ui.theme.FolioCoverLightSource
 import com.folio.reader.ui.theme.FolioShapeFamily
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.rememberFolioShape
+import com.folio.reader.ui.theme.tameCover
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -94,12 +92,20 @@ internal fun BookHeaderSection(
     sessions: List<ReadingSession> = emptyList(),
 ) {
     val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
+    // Phase 7 — per-book identity by coordination. The accent painted onto the page
+    // (author line, progress figure and seam, the metadata well's rim) and the room
+    // the book lights (FolioAmbientSource) key off ONE tamed cover accent, the same
+    // chroma envelope the hero's wash/mesh ride (tameCover). So a loud jacket reads as
+    // the book's colour everywhere at once without any single channel out-saturating
+    // the palette — the halo keeps the raw accent because FolioCoverPlate already reins
+    // it through lampColor, and the lamp has its own measured light below.
+    val pageAccent = tameCover(accent, FolioTheme.colors.primary)
     // Opening a book brings its colour with it. The detail page is the step between
     // the shelf and the reader, so this is where the room starts wearing the book:
     // the morph into the reader leaves the shelf in this hue and the way back finds
     // it again. Ungated here because the app root withholds the holder outright when
     // the appearance switch is off.
-    FolioAmbientSource(accent)
+    FolioAmbientSource(pageAccent)
     FolioCoverLightSource(rememberCoverLight(book.coverPath))
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -169,7 +175,7 @@ internal fun BookHeaderSection(
                 Text(
                     text = book.displayAuthor,
                     style = FolioTheme.typography.titleSmall,
-                    color = accent,
+                    color = pageAccent,
                     modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookAuthor(book.id))
                 )
 
@@ -181,18 +187,18 @@ internal fun BookHeaderSection(
                     value = book.progressPercent.toString(),
                     unit = "%",
                     caption = remainingTimeCaption(book, wordsRead, sessions),
-                    accent = accent,
+                    accent = pageAccent,
                     emphasis = FigureScale.Quiet,
                 )
                 Spacer(Modifier.height(FolioTokens.space1))
                 FolioProgressBar(
                     progress = book.normalizedProgress.toFloat(),
-                    color = accent,
+                    color = pageAccent,
                 )
             }
         }
 
-        BookMetadataGrid(book = book, accent = accent)
+        BookMetadataGrid(book = book, accent = pageAccent)
 
         Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
             BookChipsRow(
@@ -281,61 +287,30 @@ private fun BookChipsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // The book's own associations and the two add-actions, as the same Folio pills
+        // the manga detail's rail and every filter row use — assigned facts read as lit
+        // (selected), the "add" affordances as quiet outlines. Material's three chip
+        // species on one editorial page were the last stock surface on this screen.
         series?.let {
-            AssistChip(
-                onClick = { onSeriesClick(it) },
-                label = { Text("Series: ${it.name}") },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = FolioTheme.colors.primaryContainer,
-                    labelColor = FolioTheme.colors.onPrimaryContainer
-                )
-            )
+            FolioChip(selected = true, onClick = { onSeriesClick(it) }, label = "Series: ${it.name}")
         }
 
         collections.forEach { collection ->
-            AssistChip(
-                onClick = { onCollectionClick(collection) },
-                label = { Text(collection.name) },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = FolioTheme.colors.tertiaryContainer,
-                    labelColor = FolioTheme.colors.onTertiaryContainer
-                )
-            )
+            FolioChip(selected = true, onClick = { onCollectionClick(collection) }, label = collection.name)
         }
 
         tags.forEach { tag ->
-            SuggestionChip(
-                onClick = { onTagClick(tag) },
-                label = { Text(tag.name) },
-                colors = SuggestionChipDefaults.suggestionChipColors(
-                    containerColor = FolioTheme.colors.secondaryContainer,
-                    labelColor = FolioTheme.colors.onSecondaryContainer
-                )
-            )
+            FolioChip(selected = true, onClick = { onTagClick(tag) }, label = tag.name)
         }
 
-        SuggestionChip(
-            onClick = onAddTags,
-            label = { Text("+ Tag") },
-            colors = SuggestionChipDefaults.suggestionChipColors(
-                containerColor = FolioTheme.colors.surface,
-                labelColor = FolioTheme.colors.onSurfaceVariant
-            )
-        )
+        FolioChip(selected = false, onClick = onAddTags, label = "+ Tag")
 
         // "Suggest" sits next to "+ Tag" because it is the same errand — the reader wants
         // this book categorised and is deciding whether to do it themselves or look at a
         // proposal first. It is only drawn when a tagger is actually wired, and its result
         // opens a panel rather than writing anything: a suggestion is not an assignment.
         onSuggestTags?.let { suggest ->
-            SuggestionChip(
-                onClick = suggest,
-                label = { Text("Suggest") },
-                colors = SuggestionChipDefaults.suggestionChipColors(
-                    containerColor = FolioTheme.colors.surface,
-                    labelColor = FolioTheme.colors.onSurfaceVariant
-                )
-            )
+            FolioChip(selected = false, onClick = suggest, label = "Suggest")
         }
     }
 }
