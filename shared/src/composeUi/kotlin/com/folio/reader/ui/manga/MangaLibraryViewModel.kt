@@ -1,0 +1,439 @@
+package com.folio.reader.ui.manga
+
+import com.folio.reader.manga.ChapterNumberParser
+import com.folio.reader.manga.MangaBackend
+import com.folio.reader.manga.MangaCategory
+import com.folio.reader.manga.MangaCategoryRepository
+import com.folio.reader.manga.MangaChapterRepository
+import com.folio.reader.manga.MangaDownloadStatus
+import com.folio.reader.manga.MangaEntry
+import com.folio.reader.manga.MangaRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+// ---------- Manga library ----------
+
+enum class MangaViewMode { GRID, LIST, COMPACT }
+enum class MangaSearchScope { LIBRARY, SOURCES }
+enum class MangaSortBy(val label: String) {
+    RECENT("Recently opened"),
+    TITLE("Title"),
+    UNREAD("Unread count"),
+}
+enum class MangaLibFilter(val label: String) {
+    UNREAD("Unread"),
+    READING("Reading"),
+    COMPLETED("Completed"),
+    DOWNLOADED("Downloaded"),
+}
+
+private const val KEY_LIBRARY_CATEGORY = "manga.library.category"
+
+class MangaLibraryViewModel(
+    private val backend: MangaBackend,
+    private val mangaRepo: MangaRepository,
+    private val categoryRepo: MangaCategoryRepository,
+    private val chapterRepo: MangaChapterRepository,
+    private val settingsRepo: com.folio.reader.database.SettingsRepository,
+    downloadRepo: com.folio.reader.manga.MangaDownloadRepository? = null,
+) {
+    val scope = mangaVmScope()
+
+    /**
+     * The manga table, with "not read yet" kept distinct from "no manga". `null` means the
+     * read has not answered; the shared flow's placeholder used to be `emptyList()`, which is
+     * how [ready] below came to be true on the very first frame of every cold start.
+     */
+    private val librarySnapshot: StateFlow<List<MangaEntry>?> = mangaRepo.observeLibrary()
+        .map<List<MangaEntry>, List<MangaEntry>?> { it }
+        .catch { println("⚠️ Manga library read failed: $it") }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    val library: StateFlow<List<MangaEntry>> = librarySnapshot
+        .map { it.orEmpty() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** True once the library flow has landed its *first real* emission. The shelf's
+     *  first frame after a mode switch renders the loading placeholder instead
+     *  of flashing the empty state ("another version of the same screen").
+     *
+     *  Derived from [librarySnapshot], not from a second `observeLibrary()`: each `stateIn` on a
+     *  cold source is its own subscription, so two together queried the table twice for the same
+     *  fact. Mapping the shared value keeps one subscription — and `null → list` is monotone, so
+     *  conflated StateFlow emissions cannot lose "it landed". The previous form of this,
+     *  `library.map { true }`, replayed the placeholder and so reported "landed" immediately,
+     *  which is why it could not gate anything. */
+    val ready: StateFlow<Boolean> = librarySnapshot
+        .map { it != null }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+    // One query per data revision backs all three count maps: unread / progress / downloaded now
+    // derive from a single shared aggregates flow instead of three separate whole-table scans that
+    // each re-ran on every page-turn (mangaDataRevision) bump.
+    private val chapterAggregates = chapterRepo.observeChapterAggregates()
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    val unreadCounts: StateFlow<Map<String, Int>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.unread } }
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    val progress: StateFlow<Map<String, Float>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.progress } }
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    val lastRead: StateFlow<Map<String, com.folio.reader.manga.MangaLastRead>> = chapterRepo.observeLastRead()
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    val downloadedCounts: StateFlow<Map<String, Int>> = chapterAggregates
+        .map { agg -> agg.mapValues { it.value.downloaded } }
+        .stateIn(scope, SharingStarted.Lazily, emptyMap())
+    /** The categories, with "not read yet" kept distinct from "none". `null` = unanswered. */
+    private val categorySnapshot: StateFlow<List<MangaCategory>?> = categoryRepo.observeCategories()
+        .map<List<MangaCategory>, List<MangaCategory>?> { it }
+        .catch { println("⚠️ Manga category read failed: $it") }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    val categories: StateFlow<List<MangaCategory>> = categorySnapshot
+        .map { it.orEmpty() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** Chapters queued or actively downloading; drives the library Downloads chip count. */
+    val activeDownloadCount: StateFlow<Int> = downloadRepo?.observeQueue()
+        ?.map { list -> list.count { it.status == MangaDownloadStatus.QUEUED || it.status == MangaDownloadStatus.DOWNLOADING } }
+        ?.stateIn(scope, SharingStarted.Lazily, 0)
+        ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    val query = MutableStateFlow("")
+    val searchActive = MutableStateFlow(false)
+    /** One query shared by both scopes so the text survives library/source switches. */
+    val searchScope = MutableStateFlow(MangaSearchScope.LIBRARY)
+
+    // Scroll position holders: survive composition loss when navigating to detail and back.
+    // Index + offset for LIST/COMPACT (LazyColumn); index + offset for GRID (LazyVerticalGrid).
+    var listScrollIndex: Int = 0
+    var listScrollOffset: Int = 0
+    var gridScrollIndex: Int = 0
+    var gridScrollOffset: Int = 0
+
+    val sortBy = MutableStateFlow(MangaSortBy.RECENT)
+    val activeFilters = MutableStateFlow<Set<MangaLibFilter>>(emptySet())
+    val selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    val isSelectionMode = MutableStateFlow(false)
+    val selectedCategoryId = MutableStateFlow<String?>(null)
+    private data class CategoryMembership(val categoryId: String, val ids: Set<String>)
+
+    /**
+     * Selection and category-table state as one value, so the shelf's filter can ask "is there
+     * a category to show at all" without a sixth `combine` source. `first` is the selected id;
+     * `second` is the category list, or null while that read has not answered — the distinction
+     * whose absence let [categoryReady] open on frame 1 of every cold start.
+     */
+    private val categorySelection: StateFlow<Pair<String?, List<MangaCategory>?>> =
+        combine(selectedCategoryId, categorySnapshot) { id, snapshot -> id to snapshot }
+            .stateIn(scope, SharingStarted.Lazily, null to null)
+
+    /** Live membership of the selected category, tagged with the id it was computed
+     *  for. The tag lets [baseList] and [categoryReady] tell "the current category's
+     *  membership" apart from a set still left over from the previous category during a
+     *  switch — showing another category's manga before the real set arrives was the
+     *  "manga bled through until it reset to their own categories" report. A stale
+     *  snapshot here is also what made freshly added manga invisible until re-entry. */
+    private val categoryMembership: StateFlow<CategoryMembership?> = categorySelection
+        .map { it.first }
+        .flatMapLatest { id ->
+            if (id == null) flowOf<CategoryMembership?>(null)
+            else categoryRepo.observeMangaIdsInCategory(id).map { ids -> CategoryMembership(id, ids) }
+        }
+        .stateIn(scope, SharingStarted.Lazily, null)
+
+    /**
+     * False until the shelf's category selection has settled AND that category's
+     * membership has actually resolved.
+     *
+     * The remembered category (`KEY_LIBRARY_CATEGORY`) is restored from a *suspend*
+     * settings read, so at construction `selectedCategoryId == null` and no membership
+     * set is known. Gating only on "a category is selected" still let the shelf draw for
+     * a frame or two while the id-filter was empty or still belonged to the previous
+     * category — the whole library, or another category, flashing through. Requiring the
+     * membership to have resolved *for the selected category* closes that window. "No
+     * category to select" stays a stable first-frame answer so a library with no
+     * categories does not hang on the loading placeholder — but it has to be a *loaded*
+     * empty answer, which is why the hatch reads [categorySnapshot] and not the shared
+     * list the old version keyed off.
+     */
+    val categoryReady: StateFlow<Boolean> = combine(categorySelection, categoryMembership) { selection, membership ->
+        val (selected, snapshot) = selection
+        (selected != null && membership != null && membership.categoryId == selected) ||
+            (snapshot != null && snapshot.isEmpty())
+    }.stateIn(scope, SharingStarted.Lazily, false)
+
+    private val baseList: StateFlow<List<MangaEntry>> =
+        combine(library, query, searchActive, categorySelection, categoryMembership) { list, q, searching, selection, membership ->
+            val (selectedCat, snapshot) = selection
+            // Effective category id-filter for the CURRENT selection:
+            //  - membership resolved for exactly this category → that set
+            //  - a category is selected but its membership hasn't landed yet, or the set
+            //    still belongs to the previous category mid-switch → empty, so other
+            //    categories' manga never bleed through before the real set arrives.
+            //  - no category selected yet → also empty. This used to be *no filter at all*,
+            //    which made the shelf flow itself a source of the bleed and left the host's
+            //    gate as the only thing hiding it.
+            //  - a loaded table with no categories in it → no filter, because there is no
+            //    category to bleed from and that is the pre-category library.
+            val ids: Set<String>? = when {
+                selectedCat == null ->
+                    if (snapshot != null && snapshot.isEmpty()) null else emptySet()
+                membership != null && membership.categoryId == selectedCat -> membership.ids
+                else -> emptySet()
+            }
+            list.filter { manga ->
+                ((!searching || q.isBlank()) || manga.title.contains(q, ignoreCase = true)) &&
+                    (ids == null || manga.id in ids)
+            }
+        }.stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    private val counts = combine(unreadCounts, progress, downloadedCounts) { u, p, d ->
+        Triple(u, p, d)
+    }
+
+    val visible: StateFlow<List<MangaEntry>> =
+        combine(baseList, counts, activeFilters, sortBy) { list, c, filters, sort ->
+            val (unread, prog, downloaded) = c
+            val filtered = list.filter { manga ->
+                filters.all { f ->
+                    val p = prog[manga.id] ?: 0f
+                    when (f) {
+                        MangaLibFilter.UNREAD -> p == 0f && (unread[manga.id] ?: 0) > 0
+                        MangaLibFilter.READING -> p > 0f && p < 1f
+                        MangaLibFilter.COMPLETED -> p >= 1f
+                        // Shelf filter: keep only manga that have at least one
+                        // downloaded chapter.
+                        MangaLibFilter.DOWNLOADED -> (downloaded[manga.id] ?: 0) > 0
+                    }
+                }
+            }
+            when (sort) {
+                MangaSortBy.TITLE -> filtered.sortedBy { it.title.lowercase() }
+                MangaSortBy.UNREAD -> filtered.sortedByDescending { unread[it.id] ?: 0 }
+                MangaSortBy.RECENT -> filtered.sortedByDescending { it.lastReadAt?.toEpochMilliseconds() ?: 0L }
+            }
+        }.stateIn(scope, SharingStarted.Lazily, emptyList())
+
+    /** No virtual All bucket: the library always shows one real category. */
+    fun selectCategory(categoryId: String) {
+        selectedCategoryId.value = categoryId
+        scope.launch { settingsRepo.setRaw(KEY_LIBRARY_CATEGORY, categoryId) }
+    }
+
+    /** Selects Main when present, otherwise the first category; used at startup and after deletes. */
+    fun selectDefaultCategory() {
+        scope.launch {
+            // The snapshot is already loaded, so it answers the same question without a second
+            // read. Without this fallback a failed `defaultCategory()` would leave the selection
+            // null against a non-empty list, and the gate would then hold the shelf on its
+            // loading placeholder for the rest of the session.
+            val target = runCatching { categoryRepo.defaultCategory() }.getOrNull()
+                ?: categorySnapshot.value?.firstOrNull()
+            if (target != null && selectedCategoryId.value != target.id) selectCategory(target.id)
+        }
+    }
+
+    init {
+        // Self-heal exactly like the books and document shelves: seed Main and
+        // shelve every in-library manga the moment this screen is reached, so the
+        // rail never depends on the app-start hook having run (or survived) — and
+        // a membership wipe (a stale remote category doc, a crashed seed) repairs
+        // on the next visit instead of leaving the shelf blank under a selected
+        // category.
+        scope.launch {
+            runCatching { categoryRepo.ensureSeeded() }
+                .onFailure { println("⚠️ Manga category seed failed: $it") }
+        }
+        // Follow the category list so a fresh default selection lands as soon as Main
+        // exists, and a deleted selection falls back to the default instead of nothing.
+        scope.launch {
+            categorySnapshot.collect { snapshot ->
+                // An unanswered table is not "no categories". Acting on the placeholder let
+                // the default race the suspend remembered-id read, and because `selectCategory`
+                // writes its choice back, the start that lost overwrote the category the reader
+                // left. Waiting for a real answer removes the race instead of outrunning it.
+                val list = snapshot ?: return@collect
+                val current = selectedCategoryId.value
+                if (list.none { it.id == current }) {
+                    // First selection of the session: reopen the shelf the reader left,
+                    // but only while it still exists; a gone/dirty remembered id degrades
+                    // to the default rather than resurrecting a deleted category.
+                    val remembered = if (current == null) settingsRepo.getRaw(KEY_LIBRARY_CATEGORY) else null
+                    if (remembered != null && list.any { it.id == remembered }) selectCategory(remembered)
+                    else selectDefaultCategory()
+                }
+            }
+        }
+    }
+
+    fun toggleFilter(filter: MangaLibFilter) {
+        activeFilters.value = if (filter in activeFilters.value) activeFilters.value - filter else activeFilters.value + filter
+    }
+
+    fun setQuickFilter(filter: MangaLibFilter?) {
+        activeFilters.value = if (filter == null) emptySet() else setOf(filter)
+    }
+
+    suspend fun createCategory(name: String): String? =
+        runCatching { categoryRepo.create(name).id }.getOrNull()
+
+    fun renameCategory(id: String, name: String) {
+        scope.launch { categoryRepo.rename(id, name) }
+    }
+
+    fun deleteCategory(id: String) {
+        scope.launch {
+            if (categoryRepo.delete(id) && selectedCategoryId.value == id) selectDefaultCategory()
+        }
+    }
+
+    suspend fun categoriesFor(mangaId: String): Set<String> = categoryRepo.categoriesFor(mangaId)
+
+    /** Picker apply for one manga (library item overflow menu); empty keeps the default shelf. */
+    fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
+        scope.launch {
+            val target = categoryIds.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
+            }
+            categoryRepo.assign(mangaId, target)
+        }
+    }
+
+    /**
+     * Bulk category picker, opened from the selection top bar. The initial selection is
+     * the categories shared by every selected manga; saving replaces each one's set.
+     */
+    val bulkPickerInitial = MutableStateFlow<Set<String>?>(null)
+
+    fun requestBulkCategories() {
+        val ids = selectedIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            val lists = ids.map { categoryRepo.categoriesFor(it) }
+            bulkPickerInitial.value = lists.reduceOrNull { a, b -> a.intersect(b) } ?: emptySet()
+        }
+    }
+
+    fun closeBulkPicker() {
+        bulkPickerInitial.value = null
+    }
+
+    /** Live-applies the picker's current set to every selected manga; selection stays. */
+    fun applyBulkCategories(categoryIds: Set<String>) {
+        val ids = selectedIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            val target = categoryIds.ifEmpty {
+                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
+            }
+            ids.forEach { categoryRepo.assign(it, target) }
+        }
+    }
+
+    fun toggleSelection(mangaId: String) {
+        val next = if (mangaId in selectedIds.value) selectedIds.value - mangaId else selectedIds.value + mangaId
+        selectedIds.value = next
+        isSelectionMode.value = next.isNotEmpty()
+    }
+
+    fun clearSelection() {
+        selectedIds.value = emptySet()
+        isSelectionMode.value = false
+    }
+
+    fun removeFromLibrary(mangaId: String) {
+        scope.launch { mangaRepo.setInLibrary(mangaId, false) }
+    }
+
+    fun removeSelected() {
+        val ids = selectedIds.value
+        scope.launch { ids.forEach { mangaRepo.setInLibrary(it, false) }; clearSelection() }
+    }
+
+    fun markSelectedRead(read: Boolean) {
+        val ids = selectedIds.value
+        scope.launch { ids.forEach { chapterRepo.markAllReadForManga(it, read) }; clearSelection() }
+    }
+
+    /** Marks every chapter of one series read/unread (library item overflow menu). */
+    fun markOneRead(mangaId: String, read: Boolean) {
+        scope.launch { chapterRepo.markAllReadForManga(mangaId, read) }
+    }
+
+    fun toggleInLibrary(manga: MangaEntry) {
+        scope.launch { mangaRepo.setInLibrary(manga.id, !manga.inLibrary) }
+    }
+
+    // ---------- Library chapter updates ----------
+
+    val updating = MutableStateFlow(false)
+    val lastNewChapters = MutableStateFlow(0)
+    val recentlyUpdated = MutableStateFlow<Set<String>>(emptySet())
+
+    init {
+        // Periodic new-chapter checks while the manga library is on screen.
+        scope.launch {
+            while (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == true) {
+                updateLibrary()
+                kotlinx.coroutines.delay(UPDATE_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * Polls each favourited manga's source for its chapter list, merges it with the
+     * local catalog (preserving read/bookmark/progress by url) and surfaces how many
+     * new chapters arrived, mirroring Mihon's library update.
+     */
+    fun updateLibrary() {
+        if (updating.value) return
+        scope.launch {
+            updating.value = true
+            var newTotal = 0
+            val updated = mutableSetOf<String>()
+            for (manga in library.value.filter { it.inLibrary }) {
+                try {
+                    val existing = chapterRepo.getChapters(manga.id).map { it.url }.toSet()
+                    val refs = backend.fetchChapterList(manga.sourceId, manga.url)
+                    val newCount = refs.count { it.url !in existing }
+                    if (newCount > 0) {
+                        val mapped = refs.mapIndexed { index, ref ->
+                            com.folio.reader.manga.MangaChapter(
+                                id = com.folio.reader.manga.chapterId(manga.id, ref.url),
+                                mangaId = manga.id,
+                                url = ref.url,
+                                name = ref.name,
+                                scanlator = ref.scanlator,
+                                chapterNumber =
+                                    if (ref.chapterNumber >= 0f) ref.chapterNumber
+                                    else ChapterNumberParser.parse(ref.name),
+                                dateUpload = ref.dateUpload,
+                                sortOrder = index,
+                            )
+                        }
+                        chapterRepo.replaceChapters(manga.id, mapped)
+                        newTotal += newCount
+                        updated += manga.id
+                    }
+                } catch (_: Throwable) {
+                    // A single dead source must not abort the whole library update.
+                }
+            }
+            lastNewChapters.value = newTotal
+            recentlyUpdated.value = updated
+            updating.value = false
+        }
+    }
+
+    companion object {
+        private const val UPDATE_INTERVAL_MS = 30 * 60 * 1000L
+    }
+}

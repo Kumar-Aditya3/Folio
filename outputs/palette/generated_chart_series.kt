@@ -1,0 +1,1 @@
+Color(0xFFCA6067), Color(0xFFB07B00), Color(0xFF4B9B50), Color(0xFF009D9A), Color(0xFF3D8AD4), Color(0xFF6A7FD7), Color(0xFF9F6DC2), Color(0xFFC16192)

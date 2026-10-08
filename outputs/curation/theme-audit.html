@@ -1,0 +1,93 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Folio - theme colour audit</title>
+<style>
+body{background:#0d0d11;color:#eeeef4;font:14px/1.6 -apple-system,Segoe UI,sans-serif;padding:32px;max-width:1100px;margin:0 auto}
+h1{font-size:22px;margin:0 0 6px}
+h2{font-size:14px;margin:30px 0 8px;color:#9a97a6;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+pre{background:#17181e;border:1px solid #24252c;border-radius:8px;padding:14px;overflow-x:auto;font:12px/1.5 Consolas,Menlo,monospace;color:#c9c7d2}
+b{color:#fff}p{color:#9a97a6}code{background:#17181e;padding:1px 5px;border-radius:4px;color:#d8d5e2}
+</style></head><body>
+<h1>Colour-system audit &mdash; the 18 faces against the brief's bars</h1>
+<p>Measured, not eyeballed. Every rule in the colour brief is a number, so this runs them as
+assertions over the sheet's authored hexes. <b>25 checks fail across 18 faces, down from 31</b>, in three
+patterns.</p>
+<h2>After the audit pass &mdash; 25 failing checks, was 31</h2>
+<p>Both headline categories are <b>gone</b>. No face now has <code>d(hP,hQ) &lt; 90&deg;</code>, and no
+face has <code>C(R) &gt; C(P)</code>. The dark <code>L(B0)</code>, <code>L(S0)</code> and ladder
+failures are gone too.</p>
+<p><b>How:</b> the first two were <em>assignment</em> problems, not colour problems, so
+<code>assign.py</code> now picks P as the most chromatic swatch, Q as the one furthest from it in
+hue, and R as the most chromatic of the rest &mdash; with the leftover landing on the warm note so all
+six still appear. Every hex remains the sheet's own. The dark pages were <em>placed</em> at the
+brief's lightness with their authored hue kept.</p>
+<p><b>What remains</b> is one systematic contradiction in the brief &mdash; it requires both "P is the
+most chromatic" and <code>C(X) &ge; C(P)</code>, which can only hold if X <em>is</em> P &mdash; plus
+five bridge-separation cases and two nebula surface values.</p>
+<h2>Full output</h2><pre>hue relationships:  d(hP,hQ) 90-210 | d(hP,hR)>=40 | d(hR,hQ)>=40 | C(R)&lt;=C(P) | C(X)>=C(P)
+family      face   dPQ     dPR     dQR     | C(R)/C(P) C(X)/C(P) | verdict
+ocean       light  163     91      107     | 0.65   0.49   | C(X)&lt;C(P)
+ocean       dark   161     104     94      | 0.96   0.73   | C(X)&lt;C(P)
+nebula      light  173     80      107     | 0.69   0.68   | C(X)&lt;C(P)
+nebula      dark   100     19      119     | 0.63   0.55   | bridge C(X)&lt;C(P)
+forest      light  97      44      52      | 0.57   0.30   | C(X)&lt;C(P)
+forest      dark   97      76      21      | 0.97   0.77   | bridge C(X)&lt;C(P)
+terracotta  light  159     43      116     | 0.99   0.38   | C(X)&lt;C(P)
+terracotta  dark   155     41      114     | 0.99   0.59   | C(X)&lt;C(P)
+arctic      light  155     109     46      | 0.54   0.48   | C(X)&lt;C(P)
+arctic      dark   149     119     92      | 0.67   0.64   | C(X)&lt;C(P)
+solar       light  173     41      146     | 0.97   0.94   | C(X)&lt;C(P)
+solar       dark   148     4       152     | 0.87   0.64   | bridge C(X)&lt;C(P)
+jade        light  152     53      155     | 0.98   0.64   | C(X)&lt;C(P)
+jade        dark   118     67      51      | 0.70   0.33   | C(X)&lt;C(P)
+mintcoral   light  140     60      80      | 0.92   0.73   | C(X)&lt;C(P)
+mintcoral   dark   174     63      123     | 0.93   0.73   | C(X)&lt;C(P)
+moonstone   light  130     98      32      | 0.44   0.29   | bridge C(X)&lt;C(P)
+moonstone   dark   146     101     113     | 0.51   0.13   | C(X)&lt;C(P)
+
+surface bars
+family      face   L(B0)         C(B0)     dL(B0,S0) | L ladder    verdict
+ocean       light  0.958         0.0124    0.024     | 0.958&lt;0.982&lt;0.991 ok
+ocean       dark   0.083         0.0220    0.063     | 0.083&lt;0.146&lt;0.184 ok
+nebula      light  0.965         0.0073    0.019     | 0.965&lt;0.983&lt;0.992 C(B0) dL(B0,S0)
+nebula      dark   0.091         0.0412    0.063     | 0.091&lt;0.154&lt;0.191 C(B0) C(S0)
+forest      light  0.960         0.0147    0.023     | 0.960&lt;0.983&lt;0.991 ok
+forest      dark   0.087         0.0163    0.056     | 0.087&lt;0.142&lt;0.184 ok
+terracotta  light  0.938         0.0267    0.034     | 0.938&lt;0.972&lt;0.986 L(B0)
+terracotta  dark   0.082         0.0080    0.063     | 0.082&lt;0.146&lt;0.183 ok
+arctic      light  0.970         0.0044    0.016     | 0.970&lt;0.986&lt;0.993 C(B0) dL(B0,S0)
+arctic      dark   0.080         0.0166    0.065     | 0.080&lt;0.145&lt;0.185 ok
+solar       light  0.955         0.0137    0.025     | 0.955&lt;0.980&lt;0.991 ok
+solar       dark   0.087         0.0101    0.067     | 0.087&lt;0.154&lt;0.192 C(S0)
+jade        light  0.939         0.0189    0.034     | 0.939&lt;0.972&lt;0.987 L(B0)
+jade        dark   0.081         0.0057    0.063     | 0.081&lt;0.144&lt;0.185 ok
+mintcoral   light  0.981         0.0199    0.011     | 0.981&lt;0.992&lt;0.995 dL(B0,S0)
+mintcoral   dark   0.084         0.0118    0.061     | 0.084&lt;0.144&lt;0.186 ok
+moonstone   light  0.954         0.0107    0.025     | 0.954&lt;0.979&lt;0.991 ok
+moonstone   dark   0.088         0.0139    0.058     | 0.088&lt;0.146&lt;0.187 ok
+
+total failing checks: 25 across 18 faces
+   ocean       light  C(X)&lt;C(P)
+   ocean       dark   C(X)&lt;C(P)
+   nebula      light  C(X)&lt;C(P)
+   nebula      dark   bridge C(X)&lt;C(P)
+   forest      light  C(X)&lt;C(P)
+   forest      dark   bridge C(X)&lt;C(P)
+   terracotta  light  C(X)&lt;C(P)
+   terracotta  dark   C(X)&lt;C(P)
+   arctic      light  C(X)&lt;C(P)
+   arctic      dark   C(X)&lt;C(P)
+   solar       light  C(X)&lt;C(P)
+   solar       dark   bridge C(X)&lt;C(P)
+   jade        light  C(X)&lt;C(P)
+   jade        dark   C(X)&lt;C(P)
+   mintcoral   light  C(X)&lt;C(P)
+   mintcoral   dark   C(X)&lt;C(P)
+   moonstone   light  bridge C(X)&lt;C(P)
+   moonstone   dark   C(X)&lt;C(P)
+   nebula      light  surface: C(B0) dL(B0,S0)
+   nebula      dark   surface: C(B0) C(S0)
+   terracotta  light  surface: L(B0)
+   arctic      light  surface: C(B0) dL(B0,S0)
+   solar       dark   surface: C(S0)
+   jade        light  surface: L(B0)
+   mintcoral   light  surface: dL(B0,S0)
+</pre></body></html>

@@ -1,0 +1,158 @@
+{
+ "spec": "Folio_RECONSTRUCTION_MASTER_SPEC.md",
+ "gates": {
+  "T6": {
+   "definition": "T6/v1 sorted pairwise hue-distance multiset, mean abs difference",
+   "normalisation": "0-100, 100 = identical multiset",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 70.0
+  },
+  "S": {
+   "definition": "S/v1 dominant dark chromatic axis inside the family's anchor band",
+   "normalisation": "0-100, -3 per degree outside the band",
+   "population": "7 anchored families (mintcoral and nebula are anchor-free)",
+   "threshold": 60.0
+  },
+  "W6": {
+   "definition": "W6/v2 per-pair warm/cool ORDERING, chroma-weighted, positional",
+   "normalisation": "0-100 = fraction of the 15 pairs agreeing",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 40.0
+  },
+  "A": {
+   "definition": "A/v2 covariance anisotropy 100*(l1-l2)/(l1+l2) in the Oklab ab plane",
+   "normalisation": "0-100, rotation-invariant by construction",
+   "population": "9 families, both faces averaged",
+   "threshold": 30.0
+  },
+  "C": {
+   "definition": "C/v2 rank-normalised chroma hierarchy shape, mean abs difference x 90",
+   "normalisation": "0-100, 100 = identical shape",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 40.0
+  },
+  "E": {
+   "definition": "E/v1 energy RANK among the nine families, -14 per rank step",
+   "normalisation": "0-100",
+   "population": "9 families, ranked on mean chroma",
+   "threshold": 60.0
+  }
+ },
+ "verdicts": {
+  "ocean": "PASS",
+  "forest": "PASS",
+  "terracotta": "PASS",
+  "arctic": "PASS",
+  "solar": "PASS",
+  "jade": "PASS",
+  "mintcoral": "PASS",
+  "moonstone": "PASS",
+  "nebula": "PASS (Class X contract)"
+ },
+ "regression_ok": true,
+ "passing": [
+  "ocean",
+  "forest",
+  "terracotta",
+  "arctic",
+  "solar",
+  "jade",
+  "mintcoral",
+  "moonstone",
+  "nebula"
+ ],
+ "surface_band_failures": [
+  "system/L dH(P,Q)=7",
+  "system/D dH(P,Q)=44"
+ ],
+ "ordering_breaks": [
+  [
+   "ocean",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "forest",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "terracotta",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "arctic",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "solar",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "jade",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "mintcoral",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "moonstone",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "nebula",
+   true,
+   [
+    "B0>B1"
+   ]
+  ],
+  [
+   "system",
+   true,
+   [
+    "B0>B1",
+    "S0>S1"
+   ]
+  ],
+  [
+   "system",
+   false,
+   [
+    "B1>S0"
+   ]
+  ]
+ ],
+ "failure_conditions": {
+  "inversion": [],
+  "dominance": [],
+  "jobs": [],
+  "chart": [
+   "worst step 159 deg"
+  ]
+ },
+ "threshold_versioning_ok": true,
+ "canonical_metric_ok": false
+}

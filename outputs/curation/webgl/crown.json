@@ -1,0 +1,138 @@
+{
+ "floor": 4.2,
+ "rows": [
+  {
+   "capture": "shot116_home.png",
+   "face": "nebula/dark",
+   "ground": [
+    30,
+    13,
+    34
+   ],
+   "glyph": [
+    240,
+    231,
+    255
+   ],
+   "ink": 16.603885491196497,
+   "accent": 6.793521312406709,
+   "measured": 15.476583390898114,
+   "textPrimary": "0xFFF4F1FE",
+   "accentProgress": "0xFFA78BFA"
+  },
+  {
+   "capture": ".dbg/shots/after_install.png",
+   "face": "nebula/dark",
+   "ground": [
+    21,
+    16,
+    37
+   ],
+   "glyph": [
+    248,
+    247,
+    255
+   ],
+   "ink": 16.650139340577038,
+   "accent": 6.812446190665725,
+   "measured": 17.426774834006657,
+   "textPrimary": "0xFFF4F1FE",
+   "accentProgress": "0xFFA78BFA"
+  },
+  {
+   "capture": ".dbg/phone_home.png",
+   "face": "ocean/dark",
+   "ground": [
+    13,
+    34,
+    51
+   ],
+   "glyph": [
+    245,
+    252,
+    255
+   ],
+   "ink": 14.357775522361178,
+   "accent": 9.10796292475321,
+   "measured": 15.652955582095299,
+   "textPrimary": "0xFFE6F4F1",
+   "accentProgress": "0xFFA0CE99"
+  },
+  {
+   "capture": ".dbg/now2.png",
+   "face": "nebula/dark",
+   "ground": [
+    70,
+    20,
+    17
+   ],
+   "glyph": [
+    255,
+    248,
+    243
+   ],
+   "ink": 13.780679083973656,
+   "accent": 5.638399343698802,
+   "measured": 14.594141479725584,
+   "textPrimary": "0xFFF4F1FE",
+   "accentProgress": "0xFFA78BFA"
+  },
+  {
+   "capture": "shot_home.png",
+   "face": "ocean/dark",
+   "ground": [
+    6,
+    42,
+    54
+   ],
+   "glyph": [
+    200,
+    250,
+    255
+   ],
+   "ink": 13.342248063848519,
+   "accent": 8.463755441024485,
+   "measured": 13.341578515041627,
+   "textPrimary": "0xFFE6F4F1",
+   "accentProgress": "0xFFA0CE99"
+  },
+  {
+   "capture": "shot_lib.png",
+   "face": "ocean/dark",
+   "ground": [
+    6,
+    40,
+    52
+   ],
+   "glyph": [
+    200,
+    250,
+    255
+   ],
+   "ink": 13.649622047866961,
+   "accent": 8.658740440345136,
+   "measured": 13.648937074231863,
+   "textPrimary": "0xFFE6F4F1",
+   "accentProgress": "0xFFA0CE99"
+  },
+  {
+   "capture": ".dbg/shot_first.png",
+   "face": "ocean/dark",
+   "ground": [
+    31,
+    28,
+    23
+   ],
+   "glyph": [
+    250,
+    247,
+    240
+   ],
+   "ink": 15.019421488741038,
+   "accent": 9.527683021485105,
+   "measured": 15.870300097788366,
+   "textPrimary": "0xFFE6F4F1",
+   "accentProgress": "0xFFA0CE99"
+  }
+ ]
+}

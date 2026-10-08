@@ -1,0 +1,2195 @@
+{
+ "derived": {
+  "ocean:light": {
+   "crown": {
+    "rgb": [
+     0.9913374286011288,
+     0.6622417785272199,
+     0.5924001873526842
+    ],
+    "hex": "0xFDA997",
+    "hue": 32.52035486965525,
+    "C": 0.10306576162576676,
+    "CS": 0.17543289672948384
+   },
+   "nav": {
+    "rgb": [
+     0.8360270046058549,
+     0.7405012115451808,
+     0.9920103664737691
+    ],
+    "hex": "0xD5BDFD",
+    "hue": 301.84389799532397,
+    "C": 0.09162099248170855,
+    "CS": 0.15628698499336616,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 11.281606422565279
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 12.516943934051998
+   }
+  },
+  "ocean:dark": {
+   "crown": {
+    "rgb": [
+     0.25357880491149715,
+     0.008508349558210376,
+     0.1469913395797806
+    ],
+    "hex": "0x410225",
+    "hue": 352.5547562980708,
+    "C": 0.09848638111352921,
+    "CS": 0.19664697599629627
+   },
+   "nav": {
+    "rgb": [
+     0.007105375408901783,
+     0.14317098787682742,
+     0.2548385777041105
+    ],
+    "hex": "0x022541",
+    "hue": 248.00259232044255,
+    "C": 0.06616475075483322,
+    "CS": 0.17895682172538713,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 16.67709718969388
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 15.704649309116338
+   }
+  },
+  "forest:light": {
+   "crown": {
+    "rgb": [
+     0.9932213975278142,
+     0.8070326674918291,
+     0.17065426129363884
+    ],
+    "hex": "0xFDCE2C",
+    "hue": 90.70226758390574,
+    "C": 0.1681233125925064,
+    "CS": 0.17993130410402902
+   },
+   "nav": {
+    "rgb": [
+     0.18094692072788698,
+     0.9946073373846384,
+     0.9381180976384419
+    ],
+    "hex": "0x2EFEEF",
+    "hue": 187.30564765329558,
+    "C": 0.15067651444673535,
+    "CS": 0.15851027506882237,
+    "from": "secondaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 14.031007247077953
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 16.494980183917306
+   }
+  },
+  "forest:dark": {
+   "crown": {
+    "rgb": [
+     0.20087642413483636,
+     0.15415571832831204,
+     0.008121960105858528
+    ],
+    "hex": "0x332702",
+    "hue": 90.35025163428622,
+    "C": 0.054939377725124354,
+    "CS": 0.20136419131022154
+   },
+   "nav": {
+    "rgb": [
+     0.0711353282240412,
+     0.16522309580924924,
+     0.006458182425395664
+    ],
+    "hex": "0x122A02",
+    "hue": 135.0449676464357,
+    "C": 0.07184041017293931,
+    "CS": 0.17985955535755427,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 14.612502884463535
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 15.443775245216546
+   }
+  },
+  "terracotta:light": {
+   "crown": {
+    "rgb": [
+     0.9905055888893902,
+     0.6268556766120138,
+     0.5080204770442045
+    ],
+    "hex": "0xFDA082",
+    "hue": 38.84806780566278,
+    "C": 0.11890108269453048,
+    "CS": 0.17712578235008056
+   },
+   "nav": {
+    "rgb": [
+     0.9922888369474764,
+     0.7562521999717612,
+     0.25309846487164905
+    ],
+    "hex": "0xFDC141",
+    "hue": 82.20114400125001,
+    "C": 0.1533032054901123,
+    "CS": 0.15763327774459268,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 10.498445908714112
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 12.867287141338272
+   }
+  },
+  "terracotta:dark": {
+   "crown": {
+    "rgb": [
+     0.2546253322493334,
+     0.08524679062241922,
+     0.006528875226059087
+    ],
+    "hex": "0x411602",
+    "hue": 43.769811231503645,
+    "C": 0.07403603535890578,
+    "CS": 0.19923700977076406
+   },
+   "nav": {
+    "rgb": [
+     0.17698932900339664,
+     0.12428479642505902,
+     0.005892829417192268
+    ],
+    "hex": "0x2D2002",
+    "hue": 84.38383072097626,
+    "C": 0.04962888550758361,
+    "CS": 0.1790342105917566,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 15.69762219081628
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 15.955676302865172
+   }
+  },
+  "arctic:light": {
+   "crown": {
+    "rgb": [
+     0.9920198513071637,
+     0.7168649234945849,
+     0.48908871597598386
+    ],
+    "hex": "0xFDB77D",
+    "hue": 60.07352692864851,
+    "C": 0.110296357691288,
+    "CS": 0.17795951176035474
+   },
+   "nav": {
+    "rgb": [
+     0.41358160508885394,
+     0.9955317614408269,
+     0.8153980693611912
+    ],
+    "hex": "0x69FED0",
+    "hue": 169.55333787972816,
+    "C": 0.14355858564376833,
+    "CS": 0.1539739263443715,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 12.22686053632262
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 16.675402808757305
+   }
+  },
+  "arctic:dark": {
+   "crown": {
+    "rgb": [
+     0.17364550366576026,
+     0.14952606976655342,
+     0.007166723266189043
+    ],
+    "hex": "0x2C2602",
+    "hue": 99.57898459146445,
+    "C": 0.053420123040676115,
+    "CS": 0.1995137393795824
+   },
+   "nav": {
+    "rgb": [
+     0.17235515751231106,
+     0.007295453569274856,
+     0.24216283907198938
+    ],
+    "hex": "0x2C023E",
+    "hue": 312.7776747248007,
+    "C": 0.10718013560771943,
+    "CS": 0.17865290328849037,
+    "from": "secondaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 15.129267078983013
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 17.73696047141907
+   }
+  },
+  "solar:light": {
+   "crown": {
+    "rgb": [
+     0.992755195267046,
+     0.7816196000296639,
+     0.22343337555318032
+    ],
+    "hex": "0xFDC739",
+    "hue": 86.52267971985671,
+    "C": 0.1594670489430428,
+    "CS": 0.17616921890030174
+   },
+   "nav": {
+    "rgb": [
+     0.9919374075173012,
+     0.7004436932109311,
+     0.5680622222709656
+    ],
+    "hex": "0xFDB391",
+    "hue": 45.32509461494287,
+    "C": 0.09856355470418932,
+    "CS": 0.15539174138692333,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 13.439498739487169
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 11.999474868195234
+   }
+  },
+  "solar:dark": {
+   "crown": {
+    "rgb": [
+     0.27944182089044045,
+     0.00987572569287414,
+     0.06644066469381474
+    ],
+    "hex": "0x470311",
+    "hue": 16.940607859849877,
+    "C": 0.09837152355909348,
+    "CS": 0.19585117276787048
+   },
+   "nav": {
+    "rgb": [
+     0.18418703356496754,
+     0.008037986100517341,
+     0.252603288074894
+    ],
+    "hex": "0x2F0240",
+    "hue": 313.695070987599,
+    "C": 0.11047279125452042,
+    "CS": 0.17698746769700213,
+    "from": "warmAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 16.29342952802932
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 17.433288232133695
+   }
+  },
+  "jade:light": {
+   "crown": {
+    "rgb": [
+     0.9906944666769814,
+     0.6310017254570267,
+     0.551291644627995
+    ],
+    "hex": "0xFDA18D",
+    "hue": 33.18595948433517,
+    "C": 0.11381193226575852,
+    "CS": 0.17815214102086427
+   },
+   "nav": {
+    "rgb": [
+     0.9929463698079671,
+     0.7882753119817252,
+     0.26499650378436895
+    ],
+    "hex": "0xFDC944",
+    "hue": 86.47145156362251,
+    "C": 0.15453890991210936,
+    "CS": 0.15709300738465032,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 10.636002181843136
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 13.622134665728568
+   }
+  },
+  "jade:dark": {
+   "crown": {
+    "rgb": [
+     0.010251265261654893,
+     0.18556339324614976,
+     0.16353476065118625
+    ],
+    "hex": "0x032F2A",
+    "hue": 182.25056679846446,
+    "C": 0.04739497929811477,
+    "CS": 0.19955741347407202
+   },
+   "nav": {
+    "rgb": [
+     0.13022971275203632,
+     0.14492583047073265,
+     0.006030016193972616
+    ],
+    "hex": "0x212502",
+    "hue": 115.44664001164888,
+    "C": 0.05503092902898789,
+    "CS": 0.17954340127521504,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 14.501745298461904
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 15.788144658636057
+   }
+  },
+  "mintcoral:light": {
+   "crown": {
+    "rgb": [
+     0.9918250675984471,
+     0.6855816028941369,
+     0.6195383894982321
+    ],
+    "hex": "0xFDAF9E",
+    "hue": 32.62847400260636,
+    "C": 0.0953994149565697,
+    "CS": 0.17815287285092324
+   },
+   "nav": {
+    "rgb": [
+     0.9943682332021689,
+     0.8480360079175778,
+     0.35818068152081783
+    ],
+    "hex": "0xFED85B",
+    "hue": 92.46599508331354,
+    "C": 0.14685663574934008,
+    "CS": 0.15510364199553792,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 11.785197803789318
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 15.197860425406484
+   }
+  },
+  "mintcoral:dark": {
+   "crown": {
+    "rgb": [
+     0.27030593517281,
+     0.02401408289642769,
+     0.005543617672998007
+    ],
+    "hex": "0x450601",
+    "hue": 31.136135463656263,
+    "C": 0.09390993762016298,
+    "CS": 0.19715013701703277
+   },
+   "nav": {
+    "rgb": [
+     0.1646201760240266,
+     0.13067570796243114,
+     0.005932069034379733
+    ],
+    "hex": "0x2A2102",
+    "hue": 93.88091499377376,
+    "C": 0.0495919064283371,
+    "CS": 0.17901618013385925,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 16.40981892068699
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 15.9071966911596
+   }
+  },
+  "moonstone:light": {
+   "crown": {
+    "rgb": [
+     0.9925927116679435,
+     0.7735192461546425,
+     0.2240311429043534
+    ],
+    "hex": "0xFDC539",
+    "hue": 85.40101768385475,
+    "C": 0.1586038663387299,
+    "CS": 0.17986301821264528
+   },
+   "nav": {
+    "rgb": [
+     0.9925712797984362,
+     0.6859925967036588,
+     0.846011718376717
+    ],
+    "hex": "0xFDAFD8",
+    "hue": 346.95914433532516,
+    "C": 0.1041245110630989,
+    "CS": 0.15742794395496007,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 13.249031574258177
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 12.295704192494261
+   }
+  },
+  "moonstone:dark": {
+   "crown": {
+    "rgb": [
+     0.2790828662169705,
+     0.009960094921376618,
+     0.12370162655946376
+    ],
+    "hex": "0x470320",
+    "hue": 2.681883743940655,
+    "C": 0.10065979921817779,
+    "CS": 0.1980905177074372
+   },
+   "nav": {
+    "rgb": [
+     0.004309441485365241,
+     0.10634008781588425,
+     0.31044584887550836
+    ],
+    "hex": "0x011B4F",
+    "hue": 261.01526501638784,
+    "C": 0.10133898764848707,
+    "CS": 0.1789994092667144,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 16.14679096793925
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 16.501078354243074
+   }
+  },
+  "nebula:light": {
+   "crown": {
+    "rgb": [
+     0.8647958893947462,
+     0.9978298452179019,
+     0.49734030055821205
+    ],
+    "hex": "0xDDFE7F",
+    "hue": 121.7877827367281,
+    "C": 0.15854493123292923,
+    "CS": 0.16661390251576133
+   },
+   "nav": {
+    "rgb": [
+     0.9922877489410385,
+     0.7134109662632959,
+     0.6067318762616163
+    ],
+    "hex": "0xFDB69B",
+    "hue": 41.81138211601847,
+    "C": 0.09129672145843505,
+    "CS": 0.15806809447967535,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "black",
+    "contrast": 18.598492253361403
+   },
+   "navOnActive": {
+    "name": "black",
+    "contrast": 12.33380254472281
+   }
+  },
+  "nebula:dark": {
+   "crown": {
+    "rgb": [
+     0.22271274567424815,
+     0.012029539248327151,
+     0.31245655578354903
+    ],
+    "hex": "0x390350",
+    "hue": 312.0862263551671,
+    "C": 0.12677689272165296,
+    "CS": 0.19624497881929878
+   },
+   "nav": {
+    "rgb": [
+     0.15284023246752176,
+     0.011729034231227764,
+     0.3373074410891903
+    ],
+    "hex": "0x270356",
+    "hue": 293.5411992313726,
+    "C": 0.12974433267116547,
+    "CS": 0.17701798410732972,
+    "from": "tertiaryAccent"
+   },
+   "chromeOnFill": {
+    "name": "white",
+    "contrast": 16.142039717828045
+   },
+   "navOnActive": {
+    "name": "white",
+    "contrast": 17.023728597266537
+   }
+  }
+ },
+ "clauses": {
+  "ocean": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": false,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6,c7",
+   "dom_light": {
+    "rank_crown": 16,
+    "rank_nav": 18,
+    "ok": false,
+    "order": [
+     "accentProgress",
+     "accentAnnotation",
+     "accentDiscovery",
+     "accentStreak",
+     "secondaryAccent",
+     "guillochePrimary",
+     "glowPrimary",
+     "textSecondary",
+     "progress",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheHighlight",
+     "textTertiary",
+     "crown",
+     "border",
+     "nav",
+     "warmAccent",
+     "glowSecondary"
+    ],
+    "values": {
+     "primaryAccent": 0.2832799765573321,
+     "secondaryAccent": 0.37538576724567446,
+     "tertiaryAccent": 0.35458319959950513,
+     "warmAccent": 0.1330524706255568,
+     "progress": 0.3699020710552626,
+     "navigationSelected": 0.2832799765573321,
+     "accentProgress": 0.43463614527159966,
+     "accentStreak": 0.4089516090614207,
+     "accentDiscovery": 0.41700032305077767,
+     "accentAnnotation": 0.42691228744793747,
+     "guillochePrimary": 0.37538576724567446,
+     "guillocheSecondary": 0.35458319959950513,
+     "guillocheHighlight": 0.2832799765573321,
+     "glowPrimary": 0.37538576724567446,
+     "glowSecondary": 0.1330524706255568,
+     "textSecondary": 0.37237740576566214,
+     "textTertiary": 0.23819435265667163,
+     "border": 0.16006306390179126,
+     "crown": 0.17543289672948384,
+     "nav": 0.15628698499336616
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "warmAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentStreak",
+     "guillocheHighlight",
+     "textSecondary",
+     "accentAnnotation",
+     "secondaryAccent",
+     "accentDiscovery",
+     "glowSecondary",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.7225040506925557,
+     "secondaryAccent": 0.5074350463811922,
+     "tertiaryAccent": 0.464540743678394,
+     "warmAccent": 0.7287695938567288,
+     "progress": 0.7225040506925557,
+     "navigationSelected": 0.7225040506925557,
+     "accentProgress": 0.7287695938567288,
+     "accentStreak": 0.7225040506925557,
+     "accentDiscovery": 0.5074350463811922,
+     "accentAnnotation": 0.5265867921463461,
+     "guillochePrimary": 0.7287695938567288,
+     "guillocheSecondary": 0.464540743678394,
+     "guillocheHighlight": 0.7225040506925557,
+     "glowPrimary": 0.7287695938567288,
+     "glowSecondary": 0.5074350463811922,
+     "textSecondary": 0.5570466815992194,
+     "textTertiary": 0.3938857889767802,
+     "border": 0.2891973968868623,
+     "crown": 0.19664697599629627,
+     "nav": 0.17895682172538713
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 8,
+     "rank_nav": 10,
+     "ok": false,
+     "order": [
+      "guillochePrimary",
+      "glowPrimary",
+      "textSecondary",
+      "guillocheSecondary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "textTertiary",
+      "crown",
+      "border",
+      "nav",
+      "glowSecondary",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 11,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillochePrimary",
+      "glowPrimary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "textSecondary",
+      "glowSecondary",
+      "guillocheSecondary",
+      "textTertiary",
+      "border",
+      "progressTrack",
+      "crown",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 90.67645687433128,
+    "de": 0.14150592739774423,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 104.55216397762825,
+    "de": 0.13196947647814627,
+    "ok": true
+   }
+  },
+  "forest": {
+   "c1": false,
+   "c2": false,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": true,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c1,c2,c5,c6",
+   "dom_light": {
+    "rank_crown": 18,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "accentAnnotation",
+     "accentProgress",
+     "accentStreak",
+     "accentDiscovery",
+     "textSecondary",
+     "progress",
+     "tertiaryAccent",
+     "guillochePrimary",
+     "glowPrimary",
+     "secondaryAccent",
+     "guillocheSecondary",
+     "glowSecondary",
+     "textTertiary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheHighlight",
+     "warmAccent",
+     "crown",
+     "border",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.19830347894721637,
+     "secondaryAccent": 0.25807520868198247,
+     "tertiaryAccent": 0.35913420614391345,
+     "warmAccent": 0.18764545493242196,
+     "progress": 0.3603316863720333,
+     "navigationSelected": 0.19830347894721637,
+     "accentProgress": 0.421135792960412,
+     "accentStreak": 0.42083847546091685,
+     "accentDiscovery": 0.40581827650110835,
+     "accentAnnotation": 0.4320142193454999,
+     "guillochePrimary": 0.35913420614391345,
+     "guillocheSecondary": 0.25807520868198247,
+     "guillocheHighlight": 0.19830347894721637,
+     "glowPrimary": 0.35913420614391345,
+     "glowSecondary": 0.25807520868198247,
+     "textSecondary": 0.3777461155509365,
+     "textTertiary": 0.24015950048936405,
+     "border": 0.16236421825531536,
+     "crown": 0.17993130410402902,
+     "nav": 0.15851027506882237
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentStreak",
+     "guillocheHighlight",
+     "tertiaryAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "warmAccent",
+     "accentAnnotation",
+     "textSecondary",
+     "secondaryAccent",
+     "accentDiscovery",
+     "guillocheSecondary",
+     "glowSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.7588799163287393,
+     "secondaryAccent": 0.513011420168102,
+     "tertiaryAccent": 0.699724372647897,
+     "warmAccent": 0.6205524392783646,
+     "progress": 0.7588799163287393,
+     "navigationSelected": 0.7588799163287393,
+     "accentProgress": 0.699724372647897,
+     "accentStreak": 0.7588799163287393,
+     "accentDiscovery": 0.513011420168102,
+     "accentAnnotation": 0.617456652351386,
+     "guillochePrimary": 0.699724372647897,
+     "guillocheSecondary": 0.513011420168102,
+     "guillocheHighlight": 0.7588799163287393,
+     "glowPrimary": 0.699724372647897,
+     "glowSecondary": 0.513011420168102,
+     "textSecondary": 0.5650001654570547,
+     "textTertiary": 0.3961255187324681,
+     "border": 0.29054565236789237,
+     "crown": 0.20136419131022154,
+     "nav": 0.17985955535755427
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "textSecondary",
+      "guillochePrimary",
+      "glowPrimary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "textTertiary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "crown",
+      "border",
+      "nav",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 11,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "navigationSelected",
+      "guillochePrimary",
+      "glowPrimary",
+      "textSecondary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "textTertiary",
+      "border",
+      "progressTrack",
+      "crown",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 96.60338006938984,
+    "de": 0.24045593674343274,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 44.694716012149485,
+    "de": 0.056071427853599906,
+    "ok": true
+   }
+  },
+  "terracotta": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": true,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6",
+   "dom_light": {
+    "rank_crown": 18,
+    "rank_nav": 19,
+    "ok": false,
+    "order": [
+     "accentAnnotation",
+     "secondaryAccent",
+     "guillochePrimary",
+     "glowSecondary",
+     "accentDiscovery",
+     "accentProgress",
+     "accentStreak",
+     "progress",
+     "textSecondary",
+     "primaryAccent",
+     "navigationSelected",
+     "glowPrimary",
+     "warmAccent",
+     "guillocheHighlight",
+     "textTertiary",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "crown",
+     "nav",
+     "border"
+    ],
+    "values": {
+     "primaryAccent": 0.33894331118971127,
+     "secondaryAccent": 0.4587782271943342,
+     "tertiaryAccent": 0.21685126770673155,
+     "warmAccent": 0.2850597784478625,
+     "progress": 0.3779826214636293,
+     "navigationSelected": 0.33894331118971127,
+     "accentProgress": 0.39762056969561804,
+     "accentStreak": 0.3940907144812679,
+     "accentDiscovery": 0.4088183663071716,
+     "accentAnnotation": 0.4631064255912706,
+     "guillochePrimary": 0.4587782271943342,
+     "guillocheSecondary": 0.21685126770673155,
+     "guillocheHighlight": 0.2850597784478625,
+     "glowPrimary": 0.33894331118971127,
+     "glowSecondary": 0.4587782271943342,
+     "textSecondary": 0.35639879291436094,
+     "textTertiary": 0.22894111731756717,
+     "border": 0.1552444973875918,
+     "crown": 0.17712578235008056,
+     "nav": 0.15763327774459268
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "accentAnnotation",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentProgress",
+     "glowPrimary",
+     "warmAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "textSecondary",
+     "accentDiscovery",
+     "secondaryAccent",
+     "guillochePrimary",
+     "glowSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.6453195803478499,
+     "secondaryAccent": 0.4564057178804477,
+     "tertiaryAccent": 0.7266562828557164,
+     "warmAccent": 0.6195526846270087,
+     "progress": 0.6453195803478499,
+     "navigationSelected": 0.6453195803478499,
+     "accentProgress": 0.6453195803478499,
+     "accentStreak": 0.6195526846270087,
+     "accentDiscovery": 0.5011791989812732,
+     "accentAnnotation": 0.7106396916241805,
+     "guillochePrimary": 0.4564057178804477,
+     "guillocheSecondary": 0.7266562828557164,
+     "guillocheHighlight": 0.6195526846270087,
+     "glowPrimary": 0.6453195803478499,
+     "glowSecondary": 0.4564057178804477,
+     "textSecondary": 0.5649693096342586,
+     "textTertiary": 0.39866934682199934,
+     "border": 0.29132677752093306,
+     "crown": 0.19923700977076406,
+     "nav": 0.1790342105917566
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 10,
+     "ok": false,
+     "order": [
+      "guillochePrimary",
+      "glowSecondary",
+      "textSecondary",
+      "glowPrimary",
+      "navigationSelected",
+      "guillocheHighlight",
+      "textTertiary",
+      "guillocheSecondary",
+      "crown",
+      "nav",
+      "border",
+      "progressTrack",
+      "borderHighlight"
+     ]
+    },
+    "dark": {
+     "rank_crown": 10,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillocheSecondary",
+      "glowPrimary",
+      "navigationSelected",
+      "guillocheHighlight",
+      "textSecondary",
+      "guillochePrimary",
+      "glowSecondary",
+      "textTertiary",
+      "border",
+      "crown",
+      "progressTrack",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 43.353076195587235,
+    "de": 0.11762206375529964,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 40.61401948947262,
+    "de": 0.050099007491133246,
+    "ok": true
+   }
+  },
+  "arctic": {
+   "c1": true,
+   "c2": false,
+   "c3": true,
+   "c4": false,
+   "c5": false,
+   "c6": false,
+   "c7": false,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c2,c4,c5,c6,c7",
+   "dom_light": {
+    "rank_crown": 14,
+    "rank_nav": 16,
+    "ok": false,
+    "order": [
+     "accentDiscovery",
+     "accentStreak",
+     "accentAnnotation",
+     "accentProgress",
+     "progress",
+     "textSecondary",
+     "textTertiary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheHighlight",
+     "warmAccent",
+     "guillochePrimary",
+     "glowSecondary",
+     "crown",
+     "border",
+     "nav",
+     "secondaryAccent",
+     "glowPrimary",
+     "tertiaryAccent",
+     "guillocheSecondary"
+    ],
+    "values": {
+     "primaryAccent": 0.2244032653041307,
+     "secondaryAccent": 0.14874987187515126,
+     "tertiaryAccent": 0.1414328214731272,
+     "warmAccent": 0.2068376360984351,
+     "progress": 0.3826202656016692,
+     "navigationSelected": 0.2244032653041307,
+     "accentProgress": 0.42130173753936023,
+     "accentStreak": 0.4247930855896693,
+     "accentDiscovery": 0.4356625167499076,
+     "accentAnnotation": 0.4218368203150447,
+     "guillochePrimary": 0.2068376360984351,
+     "guillocheSecondary": 0.1414328214731272,
+     "guillocheHighlight": 0.2244032653041307,
+     "glowPrimary": 0.14874987187515126,
+     "glowSecondary": 0.2068376360984351,
+     "textSecondary": 0.36084882556337555,
+     "textTertiary": 0.23155636462356888,
+     "border": 0.1571030257120239,
+     "crown": 0.17795951176035474,
+     "nav": 0.1539739263443715
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "accentAnnotation",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "secondaryAccent",
+     "accentDiscovery",
+     "guillochePrimary",
+     "glowSecondary",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentStreak",
+     "guillocheHighlight",
+     "warmAccent",
+     "accentProgress",
+     "glowPrimary",
+     "textSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.7313296986967922,
+     "secondaryAccent": 0.7439727147762761,
+     "tertiaryAccent": 0.7591275472352693,
+     "warmAccent": 0.6829798352188671,
+     "progress": 0.7313296986967922,
+     "navigationSelected": 0.7313296986967922,
+     "accentProgress": 0.6829798352188671,
+     "accentStreak": 0.7313296986967922,
+     "accentDiscovery": 0.7439727147762761,
+     "accentAnnotation": 0.7621686633275558,
+     "guillochePrimary": 0.7439727147762761,
+     "guillocheSecondary": 0.7591275472352693,
+     "guillocheHighlight": 0.7313296986967922,
+     "glowPrimary": 0.6829798352188671,
+     "glowSecondary": 0.7439727147762761,
+     "textSecondary": 0.5710121365297661,
+     "textTertiary": 0.4033236316458657,
+     "border": 0.29683910626146,
+     "crown": 0.1995137393795824,
+     "nav": 0.17865290328849037
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 7,
+     "rank_nav": 9,
+     "ok": false,
+     "order": [
+      "textSecondary",
+      "textTertiary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "guillochePrimary",
+      "glowSecondary",
+      "crown",
+      "border",
+      "nav",
+      "glowPrimary",
+      "guillocheSecondary",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 11,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillocheSecondary",
+      "guillochePrimary",
+      "glowSecondary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "glowPrimary",
+      "textSecondary",
+      "textTertiary",
+      "border",
+      "progressTrack",
+      "crown",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 109.47981095107966,
+    "de": 0.2202698821196606,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 146.80130986666376,
+    "de": 0.1608084285485637,
+    "ok": false
+   }
+  },
+  "solar": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": true,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6",
+   "dom_light": {
+    "rank_crown": 18,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "secondaryAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "accentAnnotation",
+     "accentDiscovery",
+     "warmAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "textSecondary",
+     "progress",
+     "tertiaryAccent",
+     "glowSecondary",
+     "textTertiary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheSecondary",
+     "crown",
+     "border",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.23673215865006442,
+     "secondaryAccent": 0.5390672361668196,
+     "tertiaryAccent": 0.3500819622660426,
+     "warmAccent": 0.41659198431281835,
+     "progress": 0.3656277180513317,
+     "navigationSelected": 0.23673215865006442,
+     "accentProgress": 0.5390672361668196,
+     "accentStreak": 0.41659198431281835,
+     "accentDiscovery": 0.4246791978209978,
+     "accentAnnotation": 0.4285660539361631,
+     "guillochePrimary": 0.5390672361668196,
+     "guillocheSecondary": 0.23673215865006442,
+     "guillocheHighlight": 0.41659198431281835,
+     "glowPrimary": 0.5390672361668196,
+     "glowSecondary": 0.3500819622660426,
+     "textSecondary": 0.3994266681210507,
+     "textTertiary": 0.25594358542409945,
+     "border": 0.17230392407205805,
+     "crown": 0.17616921890030174,
+     "nav": 0.15539174138692333
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "accentAnnotation",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "glowSecondary",
+     "accentDiscovery",
+     "textSecondary",
+     "accentStreak",
+     "accentProgress",
+     "warmAccent",
+     "guillocheHighlight",
+     "secondaryAccent",
+     "guillochePrimary",
+     "glowPrimary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.6223380403695814,
+     "secondaryAccent": 0.4061145125707399,
+     "tertiaryAccent": 0.646346659276043,
+     "warmAccent": 0.4695084441330853,
+     "progress": 0.6223380403695814,
+     "navigationSelected": 0.6223380403695814,
+     "accentProgress": 0.4979180365291605,
+     "accentStreak": 0.5140045701979884,
+     "accentDiscovery": 0.5891503717615499,
+     "accentAnnotation": 0.6347818827958386,
+     "guillochePrimary": 0.4061145125707399,
+     "guillocheSecondary": 0.646346659276043,
+     "guillocheHighlight": 0.4695084441330853,
+     "glowPrimary": 0.4061145125707399,
+     "glowSecondary": 0.6223380403695814,
+     "textSecondary": 0.5424633566839638,
+     "textTertiary": 0.38322183442542634,
+     "border": 0.28062728241510404,
+     "crown": 0.19585117276787048,
+     "nav": 0.17698746769700213
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillochePrimary",
+      "glowPrimary",
+      "guillocheHighlight",
+      "textSecondary",
+      "glowSecondary",
+      "textTertiary",
+      "guillocheSecondary",
+      "navigationSelected",
+      "crown",
+      "border",
+      "nav",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 10,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillocheSecondary",
+      "glowSecondary",
+      "navigationSelected",
+      "textSecondary",
+      "guillocheHighlight",
+      "guillochePrimary",
+      "glowPrimary",
+      "textTertiary",
+      "border",
+      "crown",
+      "nav",
+      "progressTrack",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 41.19758510491384,
+    "de": 0.11079381569625979,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 63.24553687225085,
+    "de": 0.11257399369567916,
+    "ok": true
+   }
+  },
+  "jade": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": false,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6,c7",
+   "dom_light": {
+    "rank_crown": 18,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "secondaryAccent",
+     "accentDiscovery",
+     "guillocheHighlight",
+     "warmAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "accentAnnotation",
+     "accentStreak",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "textSecondary",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "glowSecondary",
+     "textTertiary",
+     "crown",
+     "border",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.3866252708817412,
+     "secondaryAccent": 0.5518937204343393,
+     "tertiaryAccent": 0.252345733573564,
+     "warmAccent": 0.42376216490739205,
+     "progress": 0.3866252708817412,
+     "navigationSelected": 0.3866252708817412,
+     "accentProgress": 0.42376216490739205,
+     "accentStreak": 0.40566694574238094,
+     "accentDiscovery": 0.5518937204343393,
+     "accentAnnotation": 0.40961648868340617,
+     "guillochePrimary": 0.42376216490739205,
+     "guillocheSecondary": 0.252345733573564,
+     "guillocheHighlight": 0.5518937204343393,
+     "glowPrimary": 0.42376216490739205,
+     "glowSecondary": 0.252345733573564,
+     "textSecondary": 0.37944189589937244,
+     "textTertiary": 0.24376824540422845,
+     "border": 0.16528430743307893,
+     "crown": 0.17815214102086427,
+     "nav": 0.15709300738465032
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "tertiaryAccent",
+     "accentDiscovery",
+     "glowSecondary",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "textSecondary",
+     "secondaryAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "accentAnnotation",
+     "warmAccent",
+     "guillocheSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.6601597310876604,
+     "secondaryAccent": 0.5633162241826342,
+     "tertiaryAccent": 0.704732692287425,
+     "warmAccent": 0.5422070519958313,
+     "progress": 0.6601597310876604,
+     "navigationSelected": 0.6601597310876604,
+     "accentProgress": 0.6601597310876604,
+     "accentStreak": 0.5633162241826342,
+     "accentDiscovery": 0.704732692287425,
+     "accentAnnotation": 0.5475163526608127,
+     "guillochePrimary": 0.6601597310876604,
+     "guillocheSecondary": 0.5422070519958313,
+     "guillocheHighlight": 0.5633162241826342,
+     "glowPrimary": 0.6601597310876604,
+     "glowSecondary": 0.704732692287425,
+     "textSecondary": 0.564397563475018,
+     "textTertiary": 0.39833404580263093,
+     "border": 0.2928261568674318,
+     "crown": 0.19955741347407202,
+     "nav": 0.17954340127521504
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "guillochePrimary",
+      "glowPrimary",
+      "navigationSelected",
+      "textSecondary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "textTertiary",
+      "crown",
+      "border",
+      "nav",
+      "progressTrack",
+      "borderHighlight"
+     ]
+    },
+    "dark": {
+     "rank_crown": 10,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "glowSecondary",
+      "guillochePrimary",
+      "glowPrimary",
+      "navigationSelected",
+      "textSecondary",
+      "guillocheHighlight",
+      "guillocheSecondary",
+      "textTertiary",
+      "border",
+      "crown",
+      "progressTrack",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 53.28549207928734,
+    "de": 0.14107368164008763,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 66.80392678681558,
+    "de": 0.061612216398848924,
+    "ok": true
+   }
+  },
+  "mintcoral": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": true,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6",
+   "dom_light": {
+    "rank_crown": 17,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "warmAccent",
+     "accentDiscovery",
+     "guillocheHighlight",
+     "accentProgress",
+     "accentStreak",
+     "accentAnnotation",
+     "progress",
+     "textSecondary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheSecondary",
+     "glowSecondary",
+     "textTertiary",
+     "secondaryAccent",
+     "guillochePrimary",
+     "glowPrimary",
+     "crown",
+     "tertiaryAccent",
+     "border",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.3061146966958382,
+     "secondaryAccent": 0.20207246132997175,
+     "tertiaryAccent": 0.17215745134082366,
+     "warmAccent": 0.451263056253975,
+     "progress": 0.3912564215938677,
+     "navigationSelected": 0.3061146966958382,
+     "accentProgress": 0.44232504705644315,
+     "accentStreak": 0.4277725316567527,
+     "accentDiscovery": 0.451263056253975,
+     "accentAnnotation": 0.42418464045851223,
+     "guillochePrimary": 0.20207246132997175,
+     "guillocheSecondary": 0.3061146966958382,
+     "guillocheHighlight": 0.451263056253975,
+     "glowPrimary": 0.20207246132997175,
+     "glowSecondary": 0.3061146966958382,
+     "textSecondary": 0.3780578384372915,
+     "textTertiary": 0.2429091921866722,
+     "border": 0.16367330992965995,
+     "crown": 0.17815287285092324,
+     "nav": 0.15510364199553792
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "tertiaryAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "warmAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentDiscovery",
+     "guillocheSecondary",
+     "glowSecondary",
+     "secondaryAccent",
+     "accentAnnotation",
+     "textSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.6969144087431961,
+     "secondaryAccent": 0.6799451053149732,
+     "tertiaryAccent": 0.8032643179565364,
+     "warmAccent": 0.7220346244498178,
+     "progress": 0.6969144087431961,
+     "navigationSelected": 0.6969144087431961,
+     "accentProgress": 0.7220346244498178,
+     "accentStreak": 0.8032643179565364,
+     "accentDiscovery": 0.6969144087431961,
+     "accentAnnotation": 0.6787510776157799,
+     "guillochePrimary": 0.7220346244498178,
+     "guillocheSecondary": 0.6969144087431961,
+     "guillocheHighlight": 0.8032643179565364,
+     "glowPrimary": 0.7220346244498178,
+     "glowSecondary": 0.6969144087431961,
+     "textSecondary": 0.5695376640461655,
+     "textTertiary": 0.4010802532901049,
+     "border": 0.2930654888050579,
+     "crown": 0.19715013701703277,
+     "nav": 0.17901618013385925
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "textSecondary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "navigationSelected",
+      "textTertiary",
+      "guillochePrimary",
+      "glowPrimary",
+      "crown",
+      "border",
+      "nav",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 11,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "guillochePrimary",
+      "glowPrimary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "navigationSelected",
+      "textSecondary",
+      "textTertiary",
+      "border",
+      "progressTrack",
+      "crown",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 59.837521080707184,
+    "de": 0.14564726646940263,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 62.7447795301175,
+    "de": 0.08374295746254172,
+    "ok": true
+   }
+  },
+  "moonstone": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": true,
+   "c5": false,
+   "c6": false,
+   "c7": false,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c5,c6,c7",
+   "dom_light": {
+    "rank_crown": 18,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "secondaryAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "accentDiscovery",
+     "accentAnnotation",
+     "accentProgress",
+     "progress",
+     "textSecondary",
+     "tertiaryAccent",
+     "guillochePrimary",
+     "glowSecondary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheSecondary",
+     "warmAccent",
+     "glowPrimary",
+     "textTertiary",
+     "crown",
+     "border",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.2435059680681434,
+     "secondaryAccent": 0.5446996101475464,
+     "tertiaryAccent": 0.27679634079459803,
+     "warmAccent": 0.24307001800289607,
+     "progress": 0.376661718557922,
+     "navigationSelected": 0.2435059680681434,
+     "accentProgress": 0.4053770182223972,
+     "accentStreak": 0.5446996101475464,
+     "accentDiscovery": 0.4164833065881294,
+     "accentAnnotation": 0.4097730195565736,
+     "guillochePrimary": 0.27679634079459803,
+     "guillocheSecondary": 0.2435059680681434,
+     "guillocheHighlight": 0.5446996101475464,
+     "glowPrimary": 0.24307001800289607,
+     "glowSecondary": 0.27679634079459803,
+     "textSecondary": 0.36613433627423786,
+     "textTertiary": 0.23465575888508983,
+     "border": 0.15868079103912994,
+     "crown": 0.17986301821264528,
+     "nav": 0.15742794395496007
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "warmAccent",
+     "accentStreak",
+     "guillocheHighlight",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentAnnotation",
+     "secondaryAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "tertiaryAccent",
+     "accentDiscovery",
+     "guillocheSecondary",
+     "glowSecondary",
+     "textSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.7524191617586398,
+     "secondaryAccent": 0.6664737980710316,
+     "tertiaryAccent": 0.6536383429796186,
+     "warmAccent": 0.884720798284991,
+     "progress": 0.7524191617586398,
+     "navigationSelected": 0.7524191617586398,
+     "accentProgress": 0.6664737980710316,
+     "accentStreak": 0.884720798284991,
+     "accentDiscovery": 0.6536383429796186,
+     "accentAnnotation": 0.7484464326000559,
+     "guillochePrimary": 0.6664737980710316,
+     "guillocheSecondary": 0.6536383429796186,
+     "guillocheHighlight": 0.884720798284991,
+     "glowPrimary": 0.6664737980710316,
+     "glowSecondary": 0.6536383429796186,
+     "textSecondary": 0.5639476854248329,
+     "textTertiary": 0.3969516535854219,
+     "border": 0.28806301245570165,
+     "crown": 0.1980905177074372,
+     "nav": 0.1789994092667144
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 9,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "textSecondary",
+      "guillochePrimary",
+      "glowSecondary",
+      "guillocheSecondary",
+      "navigationSelected",
+      "glowPrimary",
+      "textTertiary",
+      "crown",
+      "border",
+      "nav",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 11,
+     "rank_nav": 12,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "navigationSelected",
+      "guillochePrimary",
+      "glowPrimary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "textSecondary",
+      "textTertiary",
+      "border",
+      "progressTrack",
+      "crown",
+      "nav",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 98.44187334852961,
+    "de": 0.20245980005620143,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 101.66661872755282,
+    "de": 0.1574278087531623,
+    "ok": true
+   }
+  },
+  "nebula": {
+   "c1": true,
+   "c2": true,
+   "c3": true,
+   "c4": false,
+   "c5": false,
+   "c6": false,
+   "c7": true,
+   "c8": true,
+   "c9": true,
+   "verdict": "fail c4,c5,c6",
+   "dom_light": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "secondaryAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "accentStreak",
+     "accentDiscovery",
+     "accentAnnotation",
+     "textSecondary",
+     "progress",
+     "textTertiary",
+     "warmAccent",
+     "tertiaryAccent",
+     "guillocheSecondary",
+     "glowSecondary",
+     "primaryAccent",
+     "navigationSelected",
+     "guillocheHighlight",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.21951556148110177,
+     "secondaryAccent": 0.4488383841513758,
+     "tertiaryAccent": 0.22873720136804476,
+     "warmAccent": 0.23756110991281265,
+     "progress": 0.3904288785450336,
+     "navigationSelected": 0.21951556148110177,
+     "accentProgress": 0.4488383841513758,
+     "accentStreak": 0.44516566321906537,
+     "accentDiscovery": 0.43291848642209946,
+     "accentAnnotation": 0.4177443289854774,
+     "guillochePrimary": 0.4488383841513758,
+     "guillocheSecondary": 0.22873720136804476,
+     "guillocheHighlight": 0.21951556148110177,
+     "glowPrimary": 0.4488383841513758,
+     "glowSecondary": 0.22873720136804476,
+     "textSecondary": 0.3929723753669562,
+     "textTertiary": 0.25223654179690014,
+     "border": 0.16985052861666664,
+     "crown": 0.16661390251576133,
+     "nav": 0.15806809447967535
+    }
+   },
+   "dom_dark": {
+    "rank_crown": 19,
+    "rank_nav": 20,
+    "ok": false,
+    "order": [
+     "secondaryAccent",
+     "guillocheHighlight",
+     "accentAnnotation",
+     "warmAccent",
+     "accentDiscovery",
+     "guillocheSecondary",
+     "glowSecondary",
+     "tertiaryAccent",
+     "accentProgress",
+     "guillochePrimary",
+     "glowPrimary",
+     "primaryAccent",
+     "progress",
+     "navigationSelected",
+     "accentStreak",
+     "textSecondary",
+     "textTertiary",
+     "border",
+     "crown",
+     "nav"
+    ],
+    "values": {
+     "primaryAccent": 0.6071399983642058,
+     "secondaryAccent": 0.750029330971627,
+     "tertiaryAccent": 0.628918945519153,
+     "warmAccent": 0.7305624361325133,
+     "progress": 0.6071399983642058,
+     "navigationSelected": 0.6071399983642058,
+     "accentProgress": 0.628918945519153,
+     "accentStreak": 0.6071399983642058,
+     "accentDiscovery": 0.7305624361325133,
+     "accentAnnotation": 0.7349260672947304,
+     "guillochePrimary": 0.628918945519153,
+     "guillocheSecondary": 0.7305624361325133,
+     "guillocheHighlight": 0.750029330971627,
+     "glowPrimary": 0.628918945519153,
+     "glowSecondary": 0.7305624361325133,
+     "textSecondary": 0.5550547231563872,
+     "textTertiary": 0.3904206295503768,
+     "border": 0.2839967196352076,
+     "crown": 0.19624497881929878,
+     "nav": 0.17701798410732972
+    }
+   },
+   "c5_quiet": {
+    "ok": false,
+    "light": {
+     "rank_crown": 10,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillochePrimary",
+      "glowPrimary",
+      "textSecondary",
+      "textTertiary",
+      "guillocheSecondary",
+      "glowSecondary",
+      "guillocheHighlight",
+      "navigationSelected",
+      "border",
+      "crown",
+      "nav",
+      "borderHighlight",
+      "progressTrack"
+     ]
+    },
+    "dark": {
+     "rank_crown": 10,
+     "rank_nav": 11,
+     "ok": false,
+     "order": [
+      "guillocheHighlight",
+      "guillocheSecondary",
+      "glowSecondary",
+      "guillochePrimary",
+      "glowPrimary",
+      "navigationSelected",
+      "textSecondary",
+      "textTertiary",
+      "border",
+      "crown",
+      "nav",
+      "progressTrack",
+      "borderHighlight"
+     ]
+    }
+   },
+   "frame_light": {
+    "dh": 79.97640062070963,
+    "de": 0.20242741309623907,
+    "ok": true
+   },
+   "frame_dark": {
+    "dh": 18.54502712379451,
+    "de": 0.046011127871919584,
+    "ok": false
+   }
+  }
+ },
+ "area": {
+  "ocean:light": {
+   "hot": 136974,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.10403299307327743,
+   "ok": true
+  },
+  "ocean:dark": {
+   "hot": 147703,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.11218176570664723,
+   "ok": true
+  },
+  "forest:light": {
+   "hot": 165247,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12550659253858307,
+   "ok": false
+  },
+  "forest:dark": {
+   "hot": 1032,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.0007838133430550492,
+   "ok": true
+  },
+  "terracotta:light": {
+   "hot": 161448,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12262121764491432,
+   "ok": false
+  },
+  "terracotta:dark": {
+   "hot": 1636,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.0012425568112771905,
+   "ok": true
+  },
+  "arctic:light": {
+   "hot": 160060,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12156701907886742,
+   "ok": false
+  },
+  "arctic:dark": {
+   "hot": 11824,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.008980435046785758,
+   "ok": true
+  },
+  "solar:light": {
+   "hot": 164980,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12530380362133917,
+   "ok": false
+  },
+  "solar:dark": {
+   "hot": 157088,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.11930975817231741,
+   "ok": true
+  },
+  "jade:light": {
+   "hot": 157018,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.11925659253858306,
+   "ok": true
+  },
+  "jade:dark": {
+   "hot": 1592,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.0012091384129298821,
+   "ok": true
+  },
+  "mintcoral:light": {
+   "hot": 104082,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.07905122129055778,
+   "ok": true
+  },
+  "mintcoral:dark": {
+   "hot": 127936,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.09716855024911897,
+   "ok": true
+  },
+  "moonstone:light": {
+   "hot": 164427,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12488379511483777,
+   "ok": false
+  },
+  "moonstone:dark": {
+   "hot": 158729,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12055611252886135,
+   "ok": false
+  },
+  "nebula:light": {
+   "hot": 164754,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.12513215457528254,
+   "ok": false
+  },
+  "nebula:dark": {
+   "hot": 164730,
+   "chrome_px": 233328,
+   "viewport": 1316640,
+   "fraction": 0.1251139263580022,
+   "ok": false
+  }
+ }
+}

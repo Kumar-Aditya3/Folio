@@ -1,0 +1,161 @@
+package com.folio.reader.ui.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.FolioSliderRow
+import com.folio.reader.ui.theme.FolioTokens
+import kotlin.math.roundToInt
+
+@Composable
+fun ReadingSettingsPanel(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
+    ) {
+        // Show chapter title toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showChapterTitle,
+                    onValueChange = { onSettingsChange(settings.copy(showChapterTitle = it)) },
+                    role = Role.Switch
+                ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Show chapter title", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Display chapter heading at top of page",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.showChapterTitle,
+                onCheckedChange = null
+            )
+        }
+
+        // Show progress toggle — now the page block: position drawn as the block of
+        // pages at the foot of the reader, and the band that takes the drag to jump.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showProgress,
+                    onValueChange = { onSettingsChange(settings.copy(showProgress = it)) },
+                    role = Role.Switch
+                ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Show page block", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Draw position as a block of pages at the foot of the screen; drag it to jump",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.showProgress,
+                onCheckedChange = null
+            )
+        }
+
+        // Show clock toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.showClock,
+                    onValueChange = { onSettingsChange(settings.copy(showClock = it)) },
+                    role = Role.Switch
+                ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Show clock", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Display current time while reading",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.showClock,
+                onCheckedChange = null
+            )
+        }
+
+        // §17 morph into the EPUB reader. Off by default — see the field's own
+        // comment for why this one morph is opt-in when every other is not.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = settings.morphIntoReader,
+                    onValueChange = { onSettingsChange(settings.copy(morphIntoReader = it)) },
+                    role = Role.Switch
+                ),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Cover morph into reader", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Fly the tapped cover onto the page while the first chapter loads. " +
+                        "Turn off if the handover flickers on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = settings.morphIntoReader,
+                onCheckedChange = null
+            )
+        }
+
+        // The device's own screen brightness. Hidden where unsupported: dimming the
+        // page to imitate a brightness control washed the paper, and brightness is a
+        // property of the hardware rather than a reading preference to store or sync.
+        val brightness = com.folio.reader.ui.components.rememberScreenBrightness()
+        if (brightness.supported) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    "Sets the screen brightness for this app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FolioSliderRow(
+                    label = "Light",
+                    valueLabel = "${(brightness.value * 100).roundToInt()}%",
+                    value = brightness.value,
+                    onValueChange = { brightness.set(it) },
+                    valueRange = 0.05f..1f
+                )
+            }
+        }
+    }
+}

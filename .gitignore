@@ -1,0 +1,170 @@
+# Gradle
+.gradle/
+build/
+*/build/
+*/build.gradle.kts.d/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Android
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jar
+*.aar
+*.so
+*.o
+*.obj
+*.orig
+*.pyc
+*.log
+
+# Kotlin
+*.kt.metadata
+
+# Firebase
+google-services.json
+**/google-services.json
+
+# Local config
+local.properties
+gradle.properties.local
+
+# Folio local data generated at the repository root. The app's actual store is
+# ~/.folio, outside the repo; these must stay root-anchored or they swallow the
+# com.folio.reader.database and ui.library source packages.
+/folio-data/
+/library/
+/database/
+/thumbnails/
+/fonts/
+settings.json
+
+# Test reports
+**/reports/
+**/test-results/
+
+# Coverage
+coverage/
+*.ec
+*.exec
+
+# Build logs and temporary files
+build_*.txt
+*.log
+
+# Test books (large EPUB files for testing)
+testbooks/
+*.epub
+
+# Thorium reader (separate project, should not be in this repo)
+thorium-reader-develop/
+
+# Local credentials / signing material
+.env
+keystore.properties
+*.keystore
+*.jks
+*.db
+*.db-shm
+*.db-wal
+
+# One-off diagnostics and session artifacts
+.kotlin/
+graphify-out/
+bin/
+*.ps1
+*.err
+probe*
+shot*.png
+screen_*.png
+phone_*.png
+desktop_*.png
+folio_*_launch.png
+review-findings.md
+current_phone.png
+crash_log*.txt
+logcat_output.txt
+desktop_run*
+*_dump.txt
+detail_*.txt
+current_*.txt
+current_*.png
+ui_*.txt
+ui_*.xml
+ui_after.txt
+after_import_fixed.txt
+crash.txt
+logcat.txt
+
+# Release artifacts are published out of band; the folder stays local.
+/releases/
+
+# Downloaded ML model files (ONNX + tokenizer vocab). Large binaries fetched on
+# demand, never bundled in the APK and never committed — the app downloads them
+# into the models dir at runtime. ~152 MB as of the Phase 0b comparison.
+/.models/
+
+# Local debug harnesses (A/B measurement scripts, APKs, probes, screenshots).
+# Kept locally for reference only.
+/.dbg/
+
+# Upstream Mihon checkout used only as vendoring reference; the runtime itself
+# lives under shared/src/androidMain/kotlin/{eu,mihon,tachiyomi,logcat}.
+mihon-main/
+
+# Device database pulls (adb) used for local debugging; *.db alone misses the
+# SQLite -shm/-wal companions.
+dbpull/
+
+# Personal bug-report captures (own library, highlights, stats). Kept locally
+# for reference; they are the reader's private reading life, not repo assets.
+screenshot/
+
+# Local AI-assistant tooling and scratch. These are per-developer editor/agent
+# working dirs and notes; they are not project sources and stay out of the repo.
+.kilo/
+.qoder/
+.cursor/
+.trae/
+.workbuddy-ai/
+.clinerules
+.aider*
+.windsurf/
+.roo/
+.continue/
+.github/copilot-instructions.md
+AGENTS.md
+
+# AI/agent-generated plan, spec, report and handoff docs (root and docs/). The
+# code is the source of truth; these were session artifacts, not documentation.
+ML_PLAN.md
+PHASES.md
+PROGRESS_*.md
+SETTINGS_FIX_*.md
+ANDROID_ISSUES.md
+ADVERTISED_PRODUCT_GAP_REPORT.md
+BOOK_DETAIL_UPDATE.md
+TROUBLESHOOTING.md
+debug-*.md
+FOLIO_*_PLAN.md
+FOLIO_*_SPEC.md
+docs/ML_PLAN_STATUS.md
+docs/HANDOFF-*.md
+docs/BUGS-*.md
+docs/TROUBLESHOOTING.md
+docs/FOLIO_*_PLAN.md
+docs/FOLIO_*_SPEC.md

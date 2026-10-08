@@ -1,0 +1,466 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
+package com.folio.reader.ui.manga
+
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.components.FolioDialog
+import com.folio.reader.ui.components.FolioSlider
+import com.folio.reader.ui.components.folioGlassEffect
+import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.settings.readableLabel
+import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.sharedTextOrNoop
+import com.folio.reader.ui.theme.FolioTokens
+
+@Composable
+internal fun ReaderSettingsDialog(
+    mode: MangaReaderMode,
+    onModeChange: (MangaReaderMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = FolioTheme.colors
+    // §16 issue 3: an in-window glass pane rather than Material's `AlertDialog`, which is a
+    // separate window and therefore an opaque slab over the art. See FolioDialog.
+    FolioDialog(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        title = "Reader settings",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Reading mode",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReaderModeChip(
+                    label = MangaReaderMode.WEBTOON.readableLabel(),
+                    selected = mode == MangaReaderMode.WEBTOON,
+                    onClick = { onModeChange(MangaReaderMode.WEBTOON) },
+                )
+                ReaderModeChip(
+                    label = MangaReaderMode.PAGED_LTR.readableLabel(),
+                    selected = mode == MangaReaderMode.PAGED_LTR,
+                    onClick = { onModeChange(MangaReaderMode.PAGED_LTR) },
+                )
+                ReaderModeChip(
+                    label = MangaReaderMode.PAGED_RTL.readableLabel(),
+                    selected = mode == MangaReaderMode.PAGED_RTL,
+                    onClick = { onModeChange(MangaReaderMode.PAGED_RTL) },
+                )
+                ReaderModeChip(
+                    label = MangaReaderMode.PAGED_VERTICAL.readableLabel(),
+                    selected = mode == MangaReaderMode.PAGED_VERTICAL,
+                    onClick = { onModeChange(MangaReaderMode.PAGED_VERTICAL) },
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    }
+}
+
+@Composable
+private fun ReaderModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = FolioTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.RadioButton(
+            selected = selected,
+            onClick = onClick,
+            colors = androidx.compose.material3.RadioButtonDefaults.colors(
+                selectedColor = colors.primary,
+                unselectedColor = colors.onSurfaceVariant,
+            ),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (selected) colors.onSurface else colors.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+internal fun ReaderControls(
+    mangaTitle: String,
+    /** §17: the manga's id, so this title pairs with the shelf tile's. Null disables the pairing. */
+    mangaId: String? = null,
+    chapterName: String,
+    pageCount: Int,
+    currentPage: Int,
+    mode: MangaReaderMode,
+    rtl: Boolean,
+    bookmarked: Boolean,
+    onToggleBookmark: () -> Unit,
+    onShowNotes: () -> Unit,
+    onShowSettings: () -> Unit,
+    onSeek: (Int) -> Unit,
+    onBack: () -> Unit,
+) {
+    // Immersive glass over the art, not a flat black lid. The base is a vertical
+    // gradient — heavier at the OS-status edge for icon legibility, lighter toward
+    // the page — and the mirror finish is a thin white specular band along the crown,
+    // since the light source is above and both bars catch it at their top edge. The
+    // art stays perceivable through the ~0.70 glass while the bar still dominates.
+    // §16: the pages are a Compose backdrop, so the bars blur the art underneath
+    // when the device can carry it; the gradients above still govern the fill.
+    val glassTop = Brush.verticalGradient(
+        0f to Color.Black.copy(alpha = 0.86f),
+        1f to Color.Black.copy(alpha = 0.70f),
+    )
+    val glassBottom = Brush.verticalGradient(
+        0f to Color.Black.copy(alpha = 0.70f),
+        1f to Color.Black.copy(alpha = 0.86f),
+    )
+    val sheen = Brush.verticalGradient(
+        0f to Color.White.copy(alpha = 0.16f),
+        0.55f to Color.Transparent,
+    )
+    val hairline = Color.White.copy(alpha = 0.10f)
+    val glassCaps = com.folio.reader.ui.components.LocalGlassCapabilities.current
+    val glassBackdrop = com.folio.reader.ui.components.LocalGlassBackdrop.current
+    val blurLayer = if (glassCaps.blur && glassBackdrop != null) {
+        Modifier.folioGlassEffect(
+            backdrop = glassBackdrop,
+            backgroundColor = Color.Black,
+            // §16 cost model: these are full-bleed chrome bands over a page the reader is
+            // panning and zooming, which is the worst possible frame budget in the app —
+            // the manga backdrop changes every frame of a fling, so the band re-captures
+            // and re-blurs its whole area every frame. The bar class budget is a quarter
+            // of that fill cost at the same visual radius. See FolioGlassCost.
+            inputScale = com.folio.reader.ui.components.FolioGlassCost.resolve(
+                com.folio.reader.ui.components.FolioGlassCost.bar,
+                glassCaps,
+            ),
+        )
+    } else {
+        Modifier
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(blurLayer)
+                .background(glassTop)
+                .background(sheen)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    mangaTitle,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // §17: arrives with the cover rather than appearing once the
+                    // reader has already opened, when the shelf's tile is where the
+                    // reader came from.
+                    modifier = if (mangaId != null) {
+                        Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(mangaId))
+                    } else {
+                        Modifier
+                    },
+                )
+                Text(
+                    chapterName,
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onToggleBookmark) {
+                Icon(
+                    imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                    contentDescription = "Bookmark chapter",
+                    tint = if (bookmarked) Color(0xFF8B9DC3) else Color.White,
+                )
+            }
+            IconButton(onClick = onShowNotes) {
+                Icon(
+                    imageVector = Icons.Filled.EditNote,
+                    contentDescription = "Notes",
+                    tint = Color.White,
+                )
+            }
+            IconButton(onClick = onShowSettings) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Reader settings",
+                    tint = Color.White,
+                )
+            }
+        }
+
+        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
+
+        Spacer(Modifier.weight(1f))
+
+        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(blurLayer)
+                .background(glassBottom)
+                .background(sheen)
+                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val lastPage = (pageCount - 1).coerceAtLeast(0)
+            // Progress runs in the reading direction: RTL mirrors the slider and
+            // swaps the end labels so the filled side is where the reader is going.
+            Text(
+                if (rtl) "$pageCount" else "${currentPage + 1}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+            )
+            FolioSlider(
+                value = if (rtl) (lastPage - currentPage).toFloat() else currentPage.toFloat(),
+                onValueChange = { onSeek(if (rtl) lastPage - it.toInt() else it.toInt()) },
+                valueRange = 0f..lastPage.toFloat(),
+                modifier = Modifier.weight(1f).padding(horizontal = FolioTokens.space2),
+                accent = Color.White,
+                background = Color.Black,
+                inactive = Color.White.copy(alpha = 0.28f),
+            )
+            Text(
+                if (rtl) "${currentPage + 1}" else "$pageCount",
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun PageActionsDialog(
+    pageIndex: Int,
+    onNote: () -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    FolioDialog(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        title = "Page ${pageIndex + 1}",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onNote)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.EditNote,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("Add a note", style = MaterialTheme.typography.bodyLarge)
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onSave)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Download,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("Save page to Downloads", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    }
+}
+
+@Composable
+internal fun NoteDialog(
+    pageIndex: Int,
+    existing: com.folio.reader.manga.MangaNote?,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(existing?.content ?: "") }
+    FolioDialog(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        title = "Note — page ${pageIndex + 1}",
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Note") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    onSave(text.trim())
+                    onDismiss()
+                },
+                enabled = text.isNotBlank(),
+            ) { Text("Save") }
+        }
+    }
+}
+
+@Composable
+internal fun NotesListDialog(
+    viewModel: MangaReaderViewModel,
+    onDismiss: () -> Unit,
+) {
+    var notes by remember { mutableStateOf<List<com.folio.reader.manga.MangaNote>>(emptyList()) }
+    val revision by viewModel.notesRevision.collectAsState()
+    val colors = FolioTheme.colors
+
+    LaunchedEffect(revision) { notes = viewModel.chapterNotes() }
+
+    FolioDialog(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        title = "Chapter notes",
+    ) {
+        if (notes.isEmpty()) {
+            Text(
+                "No notes yet. Long-press a page to add one.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        } else {
+            Column(
+                // No inner `verticalScroll` / `heightIn`: the host already scrolls the pane
+                // (FolioOverlayHost), and a second scrollable in the same direction only puts
+                // the two in competition for the drag.
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                notes.forEach { note ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Was `.background(colors.surfaceVariant, …)`: an opaque row inside a
+                            // glass pane, which is the same defect as the pane itself one level
+                            // down. `folioSunken` is the app's own nested-well material and the
+                            // host already quiets it (FolioSurfaceContents).
+                            .folioSunken(FolioShapes.inset)
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Page ${note.pageIndex + 1}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.primary,
+                            )
+                            Text(note.content, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        IconButton(onClick = { viewModel.deleteNote(note.id) }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete note",
+                                tint = colors.error,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    }
+}

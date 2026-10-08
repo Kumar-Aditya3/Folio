@@ -1,0 +1,160 @@
+package com.folio.reader.manga
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+
+/** Per-manga chapter roll-up computed in one query: unread/progress/downloaded from one scan. */
+data class MangaChapterAggregate(val unread: Int, val progress: Float, val downloaded: Int)
+
+interface MangaRepository {
+    suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean = true)
+    suspend fun delete(mangaId: String, emitSyncEvent: Boolean = true)
+    suspend fun get(mangaId: String): MangaEntry?
+    suspend fun findBySourceUrl(sourceId: Long, url: String): MangaEntry?
+    fun observeLibrary(): Flow<List<MangaEntry>>
+    fun observeAll(): Flow<List<MangaEntry>>
+    suspend fun setInLibrary(mangaId: String, inLibrary: Boolean)
+    suspend fun setCoverPath(mangaId: String, coverPath: String?)
+    suspend fun touchLastRead(mangaId: String)
+}
+
+interface MangaChapterRepository {
+    suspend fun replaceChapters(mangaId: String, chapters: List<MangaChapter>)
+    suspend fun getChapters(mangaId: String): List<MangaChapter>
+    suspend fun getChapter(chapterId: String): MangaChapter?
+    suspend fun markRead(chapterIds: List<String>, read: Boolean, emitSyncEvent: Boolean = true)
+    suspend fun setBookmarked(chapterId: String, bookmarked: Boolean, emitSyncEvent: Boolean = true)
+    suspend fun saveProgress(chapterId: String, lastPage: Int, totalPages: Int = 0, emitSyncEvent: Boolean = true)
+    suspend fun applyRemoteState(
+        chapterId: String,
+        read: Boolean,
+        bookmarked: Boolean,
+        lastPageRead: Int,
+        updatedAt: kotlinx.datetime.Instant,
+        emitSyncEvent: Boolean = false,
+        totalPages: Int = 0,
+    )
+    suspend fun setDownloadedPages(chapterId: String, pages: Int)
+    fun observeUnreadCounts(): Flow<Map<String, Int>>
+    fun observeProgress(): Flow<Map<String, Float>>
+    fun observeLastRead(): Flow<Map<String, MangaLastRead>>
+    fun observeDownloadedCounts(): Flow<Map<String, Int>>
+
+    /**
+     * Unread count, read fraction and downloaded count per manga in one pass. The default derives
+     * it from the three separate flows (keeps fakes working); [JdbcMangaChapterRepository] backs it
+     * with a single GROUP BY so a page turn re-runs one whole-table scan instead of three.
+     */
+    fun observeChapterAggregates(): Flow<Map<String, MangaChapterAggregate>> =
+        combine(observeUnreadCounts(), observeProgress(), observeDownloadedCounts()) { unread, prog, down ->
+            val ids = HashSet<String>().apply { addAll(unread.keys); addAll(prog.keys); addAll(down.keys) }
+            ids.associateWith { id ->
+                MangaChapterAggregate(unread[id] ?: 0, prog[id] ?: 0f, down[id] ?: 0)
+            }
+        }
+
+    suspend fun markAllReadForManga(mangaId: String, read: Boolean)
+}
+
+interface MangaStatisticsRepository {
+    /**
+     * §11.2: the raw stats-exclusion set is passed *in* — the implementation
+     * computes with it (SQL filters here), never applies it after the fact.
+     */
+    suspend fun getStatistics(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>> = emptySet()
+    ): MangaStatistics
+}
+
+interface MangaNoteRepository {
+    suspend fun upsert(note: MangaNote, emitSyncEvent: Boolean = true)
+    suspend fun delete(noteId: String, emitSyncEvent: Boolean = true)
+    suspend fun get(noteId: String): MangaNote?
+    suspend fun notesForChapter(chapterId: String): List<MangaNote>
+    fun observeNotesForChapter(chapterId: String): Flow<List<MangaNote>>
+
+    /** Every note in the library, newest first — used by the annotation hub. */
+    fun observeAllNotes(): Flow<List<MangaNote>>
+}
+
+interface MangaCategoryRepository {
+    suspend fun create(name: String, emitSyncEvent: Boolean = true): MangaCategory
+    suspend fun rename(id: String, name: String, emitSyncEvent: Boolean = true)
+
+    /** Returns false when the delete was refused (Main survives while it is the only category). */
+    suspend fun delete(id: String, emitSyncEvent: Boolean = true): Boolean
+
+    fun observeCategories(): Flow<List<MangaCategory>>
+    suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean = true)
+    suspend fun categoriesFor(mangaId: String): Set<String>
+    suspend fun get(id: String): MangaCategory?
+    suspend fun getCategoryByName(name: String): MangaCategory?
+    fun observeCategoriesFor(mangaId: String): Flow<Set<String>>
+    fun observeMangaIdsInCategory(categoryId: String): Flow<Set<String>>
+    suspend fun mangaIdsInCategory(categoryId: String): Set<String>
+
+    /** Applies a remote category document (membership included) without re-emitting sync events. */
+    suspend fun applyRemote(category: MangaCategory, mangaIds: Set<String>)
+
+    /** Main if it exists, otherwise the first category by sort order; null when there are none. */
+    suspend fun defaultCategory(): MangaCategory?
+
+    /** Gives the manga the default category when it belongs to no category yet. */
+    suspend fun ensureMembership(mangaId: String)
+
+    /**
+     * Startup repair: creates Main when the table is empty and moves every uncategorized
+     * library manga into the default category, so nothing is invisible now that the
+     * virtual "All" bucket is gone.
+     */
+    suspend fun ensureSeeded()
+}
+
+interface MangaHistoryRepository {
+    suspend fun record(
+        mangaId: String,
+        chapterId: String?,
+        title: String = "",
+        coverUrl: String? = null,
+        coverPath: String? = null,
+        sourceName: String? = null,
+        chapterName: String? = null,
+    )
+    fun observeRecent(limit: Int = 25): Flow<List<MangaHistoryItem>>
+    fun observeHistory(): Flow<List<MangaHistoryEntry>>
+    suspend fun clear()
+    suspend fun clearHistory()
+}
+
+interface MangaDownloadRepository {
+    suspend fun enqueue(download: MangaDownload)
+    suspend fun update(download: MangaDownload)
+    suspend fun remove(id: String)
+    suspend fun clearFinished()
+    fun observeQueue(): Flow<List<MangaDownload>>
+    suspend fun isChapterDownloaded(chapterId: String): Boolean
+
+    /**
+     * Atomically takes the next QUEUED row: it flips to DOWNLOADING and is returned,
+     * or null when the queue has nothing to hand out. The default is observe-then-
+     * conditional-update so in-memory fakes stay correct under a single-threaded
+     * test runner; the JDBC repo overrides it with one SELECT+UPDATE under the
+     * database's write mutex, which is what makes concurrent workers safe.
+     */
+    suspend fun claimNextQueued(): MangaDownload? {
+        // Snapshot (first()), never a suspending predicate: a fake's flow only
+        // re-emits on writes, so waiting for "a queue that has a QUEUED row" would
+        // park a worker forever on an empty queue.
+        val next = observeQueue().first().firstOrNull { it.status == MangaDownloadStatus.QUEUED }
+            ?: return null
+        // Re-snapshot before flipping: another caller may have taken this row since
+        // the first read. Fakes are single-threaded, so the check is exact there;
+        // real atomicity is the JDBC override's job.
+        val current = observeQueue().first().firstOrNull { it.id == next.id } ?: return null
+        if (current.status != MangaDownloadStatus.QUEUED) return null
+        val claimed = current.copy(status = MangaDownloadStatus.DOWNLOADING, error = null)
+        update(claimed)
+        return claimed
+    }
+}

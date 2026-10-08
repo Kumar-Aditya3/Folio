@@ -1,0 +1,1677 @@
+package com.folio.reader.database
+
+import com.folio.reader.model.Book
+import com.folio.reader.model.BookStatus
+import com.folio.reader.model.Bookmark
+import com.folio.reader.model.Chapter
+import com.folio.reader.model.CloudState
+import com.folio.reader.model.Collection
+import com.folio.reader.model.Document
+import com.folio.reader.model.DocumentBookmark
+import com.folio.reader.model.DocumentFormat
+import com.folio.reader.model.DocumentLocator
+import com.folio.reader.model.DocumentPosition
+import com.folio.reader.model.Highlight
+import com.folio.reader.model.Note
+import com.folio.reader.model.NoteType
+import com.folio.reader.model.ReadingPosition
+import com.folio.reader.model.ReadingSession
+import com.folio.reader.model.Series
+import com.folio.reader.settings.BookReaderSettings
+import com.folio.reader.settings.ReaderSettings
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.Json
+import java.sql.SQLException
+import java.sql.Connection
+import java.sql.ResultSet
+
+private val repoJson = Json { ignoreUnknownKeys = true }
+
+// ---------- Books ----------
+
+class JdbcBookRepository(private val db: Database) : BookRepository {
+    override suspend fun insertBook(book: Book, emitSyncEvent: Boolean) {
+        db.insertBook(book)
+        db.bumpBookData()
+        if (emitSyncEvent) db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
+    }
+    override suspend fun updateBook(book: Book, emitSyncEvent: Boolean) {
+        db.updateBook(book)
+        db.bumpBookData()
+        if (emitSyncEvent) db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
+    }
+    override suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean) {
+        db.deleteBook(bookId)
+        db.bumpBookData()
+        // deleteBook now also deletes chapter_chunks/chapter_vectors for the book, so honour the
+        // documented chunkDataRevision invariant (bumped after every write to those tables). This
+        // refreshes the "N of M chapters indexed" readout, which keys on chunkDataRevision.
+        db.bumpChunkData()
+        if (emitSyncEvent) db.onEntityChanged?.invoke("book", bookId, "DELETE", "{}")
+    }
+    override suspend fun getBook(bookId: String): Book? = db.getBook(bookId)
+    override suspend fun getBookByEpubHash(hash: String): Book? = db.getBookByEpubHash(hash)
+    override suspend fun getBookByIsbn(isbn: String): Book? = db.getBookByIsbn(isbn)
+    override suspend fun markOpened(bookId: String) {
+        db.markOpened(bookId)
+        db.bumpBookData()
+        db.getBook(bookId)?.let { book ->
+            db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
+        }
+    }
+
+    override suspend fun setBookStatus(bookId: String, status: com.folio.reader.model.BookStatus) {
+        db.setBookStatus(bookId, status)
+        db.bumpBookData()
+        db.getBook(bookId)?.let { book ->
+            db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
+        }
+    }
+
+    override suspend fun setCloudState(bookId: String, cloudState: CloudState) {
+        db.setCloudState(bookId, cloudState)
+        db.bumpBookData()
+        db.getBook(bookId)?.let { book ->
+            db.onEntityChanged?.invoke("book", book.id, "UPSERT", repoJson.encodeToString(Book.serializer(), book))
+        }
+    }
+
+    override suspend fun updateNormalizedProgress(bookId: String, progress: Double) {
+        db.updateNormalizedProgress(bookId, progress)
+        // Progress-only signal, NOT bookDataRevision: this fires ~every 1.2s while reading, and
+        // bumping bookData re-ran getAllBooks() + the whole Statistics pipeline each tick. Lists
+        // re-read fresh on resubscription; the Continue-reading shelf also merges progressRevision.
+        db.bumpProgress()
+    }
+
+    // The observe flows re-query on bookDataRevision, mirroring the manga and
+    // document repositories: every write to the book tables emits a fresh list
+    // so screens update in place instead of waiting for a remount.
+    // distinctUntilChanged stops a revision bump that did not change the queried
+    // subset (e.g. markOpened on book-open) from re-emitting an equal list and
+    // re-running the Home/Statistics combines + recomposition downstream.
+
+    override fun getAllBooks(): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getAllBooks() }.distinctUntilChanged()
+
+    override fun getBooksByStatus(status: BookStatus): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(status)) }.distinctUntilChanged()
+
+    override fun getBooksBySeries(seriesId: String): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksInSeriesId(seriesId) }.distinctUntilChanged()
+
+    override fun getBooksByCollection(collectionId: String): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksInCollectionId(collectionId) }.distinctUntilChanged()
+
+    override fun getCurrentlyReading(): Flow<List<Book>> =
+        // Merges progressRevision so the Continue-reading shelf's progress bars stay live; other
+        // book flows stay on bookDataRevision only and re-read fresh on resubscription.
+        combine(db.bookDataRevision, db.progressRevision) { _, _ -> }
+            .map { db.getBooksByStatuses(listOf(BookStatus.READING, BookStatus.PAUSED)) }
+            .distinctUntilChanged()
+
+    override fun getFinishedBooks(): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(BookStatus.FINISHED)) }.distinctUntilChanged()
+
+    override fun getUnreadBooks(): Flow<List<Book>> =
+        db.bookDataRevision.map { db.getBooksByStatuses(listOf(BookStatus.UNREAD)) }.distinctUntilChanged()
+
+    override fun searchBooks(query: String): Flow<List<Book>> = db.bookDataRevision.map {
+        val q = query.trim()
+        if (q.isEmpty()) emptyList()
+        else db.getAllBooks().filter {
+            it.title.contains(q, ignoreCase = true) ||
+                it.displayAuthor.contains(q, ignoreCase = true) ||
+                (it.subtitle?.contains(q, ignoreCase = true) ?: false)
+        }
+    }.distinctUntilChanged()
+
+    override suspend fun insertChapters(bookId: String, chapters: List<Chapter>) {
+        // Use withTransaction for atomic DELETE + batch INSERT
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM chapters WHERE book_id = ?").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO chapters
+                    (id, book_id, title, href, spine_index, level, character_count, word_count, start_offset, end_offset)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                for (c in chapters) {
+                    stmt.setString(1, c.id)
+                    stmt.setString(2, bookId)
+                    stmt.setString(3, c.title)
+                    stmt.setString(4, c.href)
+                    stmt.setInt(5, c.spineIndex)
+                    stmt.setInt(6, c.level)
+                    stmt.setLong(7, c.characterCount)
+                    stmt.setLong(8, c.wordCount)
+                    stmt.setLong(9, c.startOffset)
+                    stmt.setLong(10, c.endOffset)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+    }
+
+    override suspend fun getChaptersForBook(bookId: String): List<Chapter> {
+        return db.withConnection { conn ->
+            val chapters = mutableListOf<Chapter>()
+            conn.prepareStatement(
+                "SELECT * FROM chapters WHERE book_id = ? ORDER BY spine_index"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        chapters.add(
+                            Chapter(
+                                id = rs.getString("id"),
+                                bookId = rs.getString("book_id"),
+                                title = rs.getString("title"),
+                                href = rs.getString("href"),
+                                spineIndex = rs.getInt("spine_index"),
+                                level = rs.getInt("level"),
+                                characterCount = rs.getLong("character_count"),
+                                wordCount = rs.getLong("word_count"),
+                                startOffset = rs.getLong("start_offset"),
+                                endOffset = rs.getLong("end_offset")
+                            )
+                        )
+                    }
+                }
+            }
+            chapters
+        }
+    }
+}
+
+// ---------- Documents ----------
+
+class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
+
+    private fun mapDocument(rs: ResultSet) = Document(
+        id = rs.getString("id"),
+        title = rs.getString("title"),
+        originalFilename = rs.getString("original_filename"),
+        format = DocumentFormat.valueOf(rs.getString("format")),
+        mimeType = rs.getString("mime_type"),
+        contentHash = rs.getString("content_hash"),
+        byteSize = rs.getLong("byte_size"),
+        localPath = rs.getString("local_path"),
+        author = rs.getString("author"),
+        description = rs.getString("description"),
+        pageCount = (rs.getObject("page_count") as? Number)?.toInt(),
+        sectionCount = (rs.getObject("section_count") as? Number)?.toInt(),
+        importedAt = Instant.fromEpochMilliseconds(rs.getLong("imported_at")),
+        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
+        lastOpenedAt = (rs.getObject("last_opened_at") as? Number)?.toLong()?.let(Instant::fromEpochMilliseconds),
+        normalizedProgress = rs.getDouble("normalized_progress").coerceIn(0.0, 1.0)
+    )
+
+    // A malformed/legacy locator_json (schema drift, partial write, cross-version restore) must not
+    // throw out of a row map and kill the whole positions/bookmarks query on every revision, the
+    // way every sibling decode in this codebase already guards. Bad rows are skipped instead.
+    private fun decodeLocator(value: String): DocumentLocator? =
+        runCatching { repoJson.decodeFromString(DocumentLocator.serializer(), value) }.getOrNull()
+
+    private fun locatorKind(locator: DocumentLocator) = when (locator) {
+        is DocumentLocator.FixedPage -> "FIXED_PAGE"
+        is DocumentLocator.Reflowable -> "REFLOWABLE"
+    }
+
+    private fun java.sql.PreparedStatement.bindLocator(start: Int, locator: DocumentLocator) {
+        setString(start, locatorKind(locator))
+        setString(start + 1, repoJson.encodeToString(DocumentLocator.serializer(), locator))
+        when (locator) {
+            is DocumentLocator.FixedPage -> {
+                setInt(start + 2, locator.pageIndex)
+                setNull(start + 3, java.sql.Types.VARCHAR)
+            }
+            is DocumentLocator.Reflowable -> {
+                setNull(start + 2, java.sql.Types.INTEGER)
+                setString(start + 3, locator.sectionId)
+            }
+        }
+    }
+
+    private suspend fun queryDocuments(
+        sql: String,
+        bind: (java.sql.PreparedStatement) -> Unit = {}
+    ): List<Document> = db.withConnection { conn ->
+        conn.prepareStatement(sql).use { stmt ->
+            bind(stmt)
+            stmt.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(mapDocument(rs)) }
+            }
+        }
+    }
+
+    override fun observeDocuments(): Flow<List<Document>> = db.documentDataRevision.map {
+        queryDocuments("SELECT * FROM documents ORDER BY COALESCE(last_opened_at, imported_at) DESC")
+    }
+
+    override suspend fun getDocument(documentId: String): Document? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM documents WHERE id = ?").use { stmt ->
+            stmt.setString(1, documentId)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapDocument(rs) else null }
+        }
+    }
+
+    override suspend fun getDocumentByHash(contentHash: String): Document? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM documents WHERE content_hash = ?").use { stmt ->
+            stmt.setString(1, contentHash)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapDocument(rs) else null }
+        }
+    }
+
+    override fun searchDocuments(query: String): Flow<List<Document>> = db.documentDataRevision.map {
+        val term = query.trim()
+        if (term.isEmpty()) emptyList() else queryDocuments(
+            """
+            SELECT * FROM documents
+            WHERE title LIKE ? COLLATE NOCASE OR original_filename LIKE ? COLLATE NOCASE
+               OR COALESCE(author, '') LIKE ? COLLATE NOCASE OR COALESCE(description, '') LIKE ? COLLATE NOCASE
+            ORDER BY title COLLATE NOCASE
+            """.trimIndent()
+        ) { stmt -> repeat(4) { stmt.setString(it + 1, "%$term%") } }
+    }
+
+    override suspend fun upsertDocument(document: Document) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO documents
+                    (id, title, original_filename, format, mime_type, content_hash, byte_size, local_path,
+                     author, description, page_count, section_count, imported_at, updated_at, last_opened_at,
+                     normalized_progress)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    original_filename = excluded.original_filename,
+                    format = excluded.format,
+                    mime_type = excluded.mime_type,
+                    content_hash = excluded.content_hash,
+                    byte_size = excluded.byte_size,
+                    local_path = excluded.local_path,
+                    author = excluded.author,
+                    description = excluded.description,
+                    page_count = excluded.page_count,
+                    section_count = excluded.section_count,
+                    imported_at = excluded.imported_at,
+                    updated_at = excluded.updated_at,
+                    last_opened_at = excluded.last_opened_at,
+                    normalized_progress = excluded.normalized_progress
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, document.id)
+                stmt.setString(2, document.title)
+                stmt.setString(3, document.originalFilename)
+                stmt.setString(4, document.format.name)
+                stmt.setString(5, document.mimeType)
+                stmt.setString(6, document.contentHash)
+                stmt.setLong(7, document.byteSize)
+                stmt.setString(8, document.localPath)
+                stmt.setString(9, document.author)
+                stmt.setString(10, document.description)
+                if (document.pageCount != null) stmt.setInt(11, document.pageCount) else stmt.setNull(11, java.sql.Types.INTEGER)
+                if (document.sectionCount != null) stmt.setInt(12, document.sectionCount) else stmt.setNull(12, java.sql.Types.INTEGER)
+                stmt.setLong(13, document.importedAt.toEpochMilliseconds())
+                stmt.setLong(14, document.updatedAt.toEpochMilliseconds())
+                if (document.lastOpenedAt != null) stmt.setLong(15, document.lastOpenedAt.toEpochMilliseconds()) else stmt.setNull(15, java.sql.Types.INTEGER)
+                stmt.setDouble(16, document.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun markOpened(documentId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE documents SET last_opened_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                val now = Clock.System.now().toEpochMilliseconds()
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, documentId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun upsertPosition(position: DocumentPosition) {
+        db.withTransaction { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO document_positions
+                    (document_id, locator_kind, locator_json, page_index, section_id, normalized_progress, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, position.documentId)
+                stmt.bindLocator(2, position.locator)
+                stmt.setDouble(6, position.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.setLong(7, position.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement("UPDATE documents SET normalized_progress = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setDouble(1, position.normalizedProgress.coerceIn(0.0, 1.0))
+                stmt.setLong(2, position.updatedAt.toEpochMilliseconds())
+                stmt.setString(3, position.documentId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override fun observePosition(documentId: String): Flow<DocumentPosition?> = db.documentDataRevision.map {
+        db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM document_positions WHERE document_id = ?").use { stmt ->
+                stmt.setString(1, documentId)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) null else {
+                        val locator = decodeLocator(rs.getString("locator_json"))
+                        if (locator == null) null else DocumentPosition(
+                            documentId = rs.getString("document_id"),
+                            locator = locator,
+                            normalizedProgress = rs.getDouble("normalized_progress"),
+                            updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun upsertBookmark(bookmark: DocumentBookmark) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO document_bookmarks
+                    (id, document_id, locator_kind, locator_json, page_index, section_id, label, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookmark.id)
+                stmt.setString(2, bookmark.documentId)
+                stmt.bindLocator(3, bookmark.locator)
+                stmt.setString(7, bookmark.label)
+                stmt.setLong(8, bookmark.createdAt.toEpochMilliseconds())
+                stmt.setLong(9, bookmark.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    private fun mapBookmark(rs: ResultSet): DocumentBookmark? {
+        val locator = decodeLocator(rs.getString("locator_json")) ?: return null
+        return DocumentBookmark(
+            id = rs.getString("id"),
+            documentId = rs.getString("document_id"),
+            locator = locator,
+            label = rs.getString("label"),
+            createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+            updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at"))
+        )
+    }
+
+    override suspend fun getBookmark(bookmarkId: String): DocumentBookmark? = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM document_bookmarks WHERE id = ?").use { stmt ->
+            stmt.setString(1, bookmarkId)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapBookmark(rs) else null }
+        }
+    }
+
+    override fun observeBookmarks(documentId: String): Flow<List<DocumentBookmark>> = db.documentDataRevision.map {
+        db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM document_bookmarks WHERE document_id = ? ORDER BY created_at").use { stmt ->
+                stmt.setString(1, documentId)
+                stmt.executeQuery().use { rs -> buildList { while (rs.next()) mapBookmark(rs)?.let { add(it) } } }
+            }
+        }
+    }
+
+    override suspend fun deleteBookmark(bookmarkId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM document_bookmarks WHERE id = ?").use { stmt ->
+                stmt.setString(1, bookmarkId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpDocumentData()
+    }
+
+    override suspend fun deleteDocument(documentId: String) {
+        db.withTransaction { conn ->
+            for (sql in listOf(
+                "DELETE FROM document_bookmarks WHERE document_id = ?",
+                "DELETE FROM document_positions WHERE document_id = ?",
+                "DELETE FROM documents WHERE id = ?"
+            )) {
+                conn.prepareStatement(sql).use { stmt ->
+                    stmt.setString(1, documentId)
+                    stmt.executeUpdate()
+                }
+            }
+        }
+        db.bumpDocumentData()
+    }
+}
+
+// ---------- Positions ----------
+
+class JdbcReadingPositionRepository(private val db: Database) : ReadingPositionRepository {
+    override suspend fun upsertPosition(position: ReadingPosition, emitSyncEvent: Boolean) {
+        db.upsertPosition(position)
+        if (emitSyncEvent) db.onEntityChanged?.invoke("position", "${position.bookId}_${position.deviceId}", "UPSERT", repoJson.encodeToString(ReadingPosition.serializer(), position))
+    }
+    override suspend fun getPosition(bookId: String, deviceId: String): ReadingPosition? =
+        db.getPosition(bookId, deviceId)
+    override suspend fun getLatestPositionAcrossDevices(bookId: String): ReadingPosition? =
+        db.getLatestPositionAcrossDevices(bookId)
+    override suspend fun getAllPositionsForBook(bookId: String): List<ReadingPosition> =
+        db.getAllPositionsForBook(bookId)
+    override suspend fun deletePosition(bookId: String, deviceId: String) {
+        db.deletePosition(bookId, deviceId)
+        db.onEntityChanged?.invoke("position", "${bookId}_${deviceId}", "DELETE", "{}")
+    }
+    override fun observePosition(bookId: String, deviceId: String): Flow<ReadingPosition?> =
+        flow { emit(db.getPosition(bookId, deviceId)) }
+}
+
+// ---------- Sessions ----------
+
+class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRepository {
+
+    private fun mapRow(rs: ResultSet): ReadingSession = ReadingSession(
+        id = rs.getString("id"),
+        bookId = rs.getString("book_id"),
+        cycleId = rs.getString("cycle_id")?.takeIf { it.isNotBlank() },
+        deviceId = rs.getString("device_id"),
+        startedAt = Instant.fromEpochMilliseconds(rs.getLong("started_at")),
+        endedAt = rs.getLong("ended_at").takeIf { !rs.wasNull() && it > 0 }?.let { Instant.fromEpochMilliseconds(it) },
+        durationMs = rs.getLong("duration_ms"),
+        startPosition = decodePosition(rs.getString("start_position")),
+        endPosition = rs.getString("end_position")?.takeIf { it.isNotBlank() }?.let { decodePosition(it) },
+        startProgress = rs.getDouble("start_progress"),
+        endProgress = rs.getDouble("end_progress"),
+        wordsRead = rs.getLong("words_read"),
+        isActive = rs.getInt("is_active") == 1
+    )
+
+    private fun decodePosition(jsonText: String): ReadingPosition =
+        runCatching { repoJson.decodeFromString(ReadingPosition.serializer(), jsonText) }
+            .getOrElse { ReadingPosition(bookId = "", deviceId = "", chapterId = "", spineIndex = 0, contentLocator = "") }
+
+    override suspend fun insertSession(session: ReadingSession, emitSyncEvent: Boolean) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO reading_sessions (id, book_id, cycle_id, device_id, started_at, ended_at,
+                    duration_ms, start_position, end_position, start_progress, end_progress, words_read, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, session.id)
+                stmt.setString(2, session.bookId)
+                stmt.setString(3, session.cycleId)
+                stmt.setString(4, session.deviceId)
+                stmt.setLong(5, session.startedAt.toEpochMilliseconds())
+                stmt.setLong(6, session.endedAt?.toEpochMilliseconds() ?: 0L)
+                stmt.setLong(7, session.durationMs)
+                stmt.setString(8, repoJson.encodeToString(ReadingPosition.serializer(), session.startPosition))
+                stmt.setString(9, session.endPosition?.let { repoJson.encodeToString(ReadingPosition.serializer(), it) })
+                stmt.setDouble(10, session.startProgress)
+                stmt.setDouble(11, session.endProgress)
+                stmt.setLong(12, session.wordsRead)
+                stmt.setInt(13, if (session.isActive) 1 else 0)
+                stmt.executeUpdate()
+            }
+        }
+        if (emitSyncEvent) db.onEntityChanged?.invoke("session", session.id, "UPSERT", repoJson.encodeToString(ReadingSession.serializer(), session))
+        db.bumpSessionData()
+    }
+
+    override suspend fun updateSession(session: ReadingSession, emitSyncEvent: Boolean) = insertSession(session, emitSyncEvent)
+
+    override suspend fun getActiveSession(bookId: String): ReadingSession? {
+        return db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM reading_sessions WHERE book_id = ? AND is_active = 1 ORDER BY started_at DESC LIMIT 1"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getSessionsForDateRange(start: Instant, end: Instant): List<ReadingSession> {
+        return db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM reading_sessions WHERE started_at >= ? AND started_at < ? ORDER BY started_at"
+            ).use { stmt ->
+                stmt.setLong(1, start.toEpochMilliseconds())
+                stmt.setLong(2, end.toEpochMilliseconds())
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<ReadingSession>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+
+    override suspend fun getSessionsByDevice(deviceId: String): List<ReadingSession> {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM reading_sessions WHERE device_id = ? ORDER BY started_at").use { stmt ->
+                stmt.setString(1, deviceId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<ReadingSession>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+
+    override suspend fun maxStartedAtExcludingDevice(deviceId: String): Instant? {
+        return db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT MAX(started_at) FROM reading_sessions WHERE device_id != ?"
+            ).use { stmt ->
+                stmt.setString(1, deviceId)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val max = rs.getLong(1)
+                        if (!rs.wasNull() && max > 0) Instant.fromEpochMilliseconds(max) else null
+                    } else null
+                }
+            }
+        }
+    }
+
+    override fun observeSessionsSince(from: Instant): Flow<List<ReadingSession>> =
+        // Revision-driven (was a one-shot emit): re-queries when a session is written so Statistics
+        // refreshes on reader close without relying on the old per-tick progress bookData bump.
+        db.sessionDataRevision.map {
+            db.withConnection { conn ->
+                conn.prepareStatement(
+                    "SELECT * FROM reading_sessions WHERE started_at >= ? ORDER BY started_at"
+                ).use { stmt ->
+                    stmt.setLong(1, from.toEpochMilliseconds())
+                    stmt.executeQuery().use { rs ->
+                        val out = mutableListOf<ReadingSession>()
+                        while (rs.next()) out.add(mapRow(rs))
+                        out
+                    }
+                }
+            }
+        }
+
+    override suspend fun getSessionsForBook(bookId: String): Flow<List<ReadingSession>> = flow {
+        emit(
+            db.withConnection { conn ->
+                conn.prepareStatement("SELECT * FROM reading_sessions WHERE book_id = ? ORDER BY started_at").use { stmt ->
+                    stmt.setString(1, bookId)
+                    stmt.executeQuery().use { rs ->
+                        val out = mutableListOf<ReadingSession>()
+                        while (rs.next()) out.add(mapRow(rs))
+                        out
+                    }
+                }
+            }
+        )
+    }
+}
+
+// ---------- Highlights / Notes / Bookmarks ----------
+
+class JdbcHighlightRepository(private val db: Database) : HighlightRepository {
+    override suspend fun insertHighlight(highlight: Highlight, emitSyncEvent: Boolean) {
+        db.insertHighlight(highlight)
+        if (emitSyncEvent) db.onEntityChanged?.invoke("highlight", highlight.id, "UPSERT", repoJson.encodeToString(Highlight.serializer(), highlight))
+    }
+    override suspend fun updateHighlight(highlight: Highlight, emitSyncEvent: Boolean) = insertHighlight(highlight, emitSyncEvent)
+
+    override suspend fun deleteHighlight(highlightId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "UPDATE highlights SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?"
+            ).use { stmt ->
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, highlightId)
+                stmt.executeUpdate()
+            }
+        }
+        if (emitSyncEvent) db.getHighlight(highlightId)?.let { highlight ->
+            db.onEntityChanged?.invoke("highlight", highlight.id, "UPSERT", repoJson.encodeToString(Highlight.serializer(), highlight))
+        }
+    }
+
+    override suspend fun restoreHighlight(highlightId: String) {
+        db.restoreHighlight(highlightId)
+        db.getHighlight(highlightId)?.let { highlight ->
+            db.onEntityChanged?.invoke("highlight", highlight.id, "UPSERT", repoJson.encodeToString(Highlight.serializer(), highlight))
+        }
+    }
+
+    private fun queryList(conn: Connection, sql: String, bind: (java.sql.PreparedStatement) -> Unit): List<Highlight> {
+        return conn.prepareStatement(sql).use { stmt ->
+            bind(stmt)
+            stmt.executeQuery().use { rs ->
+                val out = mutableListOf<Highlight>()
+                while (rs.next()) out.add(db.mapRowToHighlight(rs))
+                out
+            }
+        }
+    }
+
+    override fun getHighlightsForBook(bookId: String): Flow<List<Highlight>> = flow {
+        emit(db.withConnection { conn ->
+            queryList(conn, "SELECT * FROM highlights WHERE book_id = ? AND is_deleted = 0 ORDER BY created_at") {
+                it.setString(1, bookId)
+            }
+        })
+    }
+
+    override fun getHighlightsForChapter(bookId: String, chapterId: String): Flow<List<Highlight>> = flow {
+        emit(db.withConnection { conn ->
+            queryList(conn, "SELECT * FROM highlights WHERE book_id = ? AND chapter_id = ? AND is_deleted = 0 ORDER BY created_at") {
+                it.setString(1, bookId)
+                it.setString(2, chapterId)
+            }
+        })
+    }
+
+    override suspend fun getHighlight(highlightId: String): Highlight? {
+        return db.withConnection { conn ->
+            queryList(conn, "SELECT * FROM highlights WHERE id = ?") { it.setString(1, highlightId) }
+        }.firstOrNull()
+    }
+
+    override suspend fun getDeletedHighlights(bookId: String): List<Highlight> {
+        return db.withConnection { conn ->
+            queryList(conn, "SELECT * FROM highlights WHERE book_id = ? AND is_deleted = 1") { it.setString(1, bookId) }
+        }
+    }
+}
+
+class JdbcNoteRepository(private val db: Database) : NoteRepository {
+
+    private fun mapRow(rs: ResultSet): Note = Note(
+        id = rs.getString("id"),
+        bookId = rs.getString("book_id"),
+        chapterId = rs.getString("chapter_id")?.takeIf { it.isNotBlank() },
+        spineIndex = rs.getInt("spine_index").takeIf { !rs.wasNull() },
+        locator = rs.getString("locator")?.takeIf { it.isNotBlank() },
+        content = rs.getString("content"),
+        type = NoteType.fromValue(rs.getInt("type")),
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
+        deviceId = rs.getString("device_id"),
+        isDeleted = rs.getInt("is_deleted") == 1,
+        deletedAt = rs.getLong("deleted_at").takeIf { !rs.wasNull() && it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+    )
+
+    private fun write(conn: Connection, note: Note) {
+        conn.prepareStatement(
+            """
+            INSERT OR REPLACE INTO notes (id, book_id, chapter_id, spine_index, locator, content, type,
+                created_at, updated_at, device_id, is_deleted, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, note.id)
+            stmt.setString(2, note.bookId)
+            stmt.setString(3, note.chapterId)
+            stmt.setInt(4, note.spineIndex ?: -1)
+            stmt.setString(5, note.locator)
+            stmt.setString(6, note.content)
+            stmt.setInt(7, note.type.value)
+            stmt.setLong(8, note.createdAt.toEpochMilliseconds())
+            stmt.setLong(9, note.updatedAt.toEpochMilliseconds())
+            stmt.setString(10, note.deviceId)
+            stmt.setInt(11, if (note.isDeleted) 1 else 0)
+            stmt.setLong(12, note.deletedAt?.toEpochMilliseconds() ?: 0L)
+            stmt.executeUpdate()
+        }
+    }
+
+    override suspend fun insertNote(note: Note, emitSyncEvent: Boolean) {
+        db.withConnection { write(it, note) }
+        if (emitSyncEvent) db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
+    }
+    override suspend fun updateNote(note: Note, emitSyncEvent: Boolean) {
+        db.withConnection { write(it, note) }
+        if (emitSyncEvent) db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
+    }
+
+    override suspend fun deleteNote(noteId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE notes SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, noteId)
+                stmt.executeUpdate()
+            }
+        }
+        if (emitSyncEvent) getNote(noteId)?.let { note ->
+            db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
+        }
+    }
+
+    override suspend fun restoreNote(noteId: String) {
+        // updated_at advances too: without it, sync's last-write-wins can
+        // re-delete the restored note against its own older tombstone.
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE notes SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
+                stmt.setString(2, noteId)
+                stmt.executeUpdate()
+            }
+        }
+        getNote(noteId)?.let { note ->
+            db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
+        }
+    }
+
+    override fun getNotesForBook(bookId: String): Flow<List<Note>> = flow {
+        emit(db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM notes WHERE book_id = ? AND is_deleted = 0 ORDER BY created_at").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<Note>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        })
+    }
+
+    override suspend fun getNote(noteId: String): Note? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM notes WHERE id = ?").use { stmt ->
+                stmt.setString(1, noteId)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getDeletedNotes(bookId: String): List<Note> {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM notes WHERE book_id = ? AND is_deleted = 1").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<Note>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+}
+
+class JdbcBookmarkRepository(private val db: Database) : BookmarkRepository {
+
+    private fun mapRow(rs: ResultSet): Bookmark = Bookmark(
+        id = rs.getString("id"),
+        bookId = rs.getString("book_id"),
+        chapterId = rs.getString("chapter_id"),
+        spineIndex = rs.getInt("spine_index"),
+        locator = rs.getString("locator"),
+        label = rs.getString("label")?.takeIf { it.isNotBlank() },
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        updatedAt = Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
+        deviceId = rs.getString("device_id"),
+        isDeleted = rs.getInt("is_deleted") == 1,
+        deletedAt = rs.getLong("deleted_at").takeIf { !rs.wasNull() && it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+    )
+
+    private fun write(conn: Connection, bookmark: Bookmark) {
+        conn.prepareStatement(
+            """
+            INSERT OR REPLACE INTO bookmarks (id, book_id, chapter_id, spine_index, locator, label,
+                created_at, updated_at, device_id, is_deleted, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, bookmark.id)
+            stmt.setString(2, bookmark.bookId)
+            stmt.setString(3, bookmark.chapterId)
+            stmt.setInt(4, bookmark.spineIndex)
+            stmt.setString(5, bookmark.locator)
+            stmt.setString(6, bookmark.label)
+            stmt.setLong(7, bookmark.createdAt.toEpochMilliseconds())
+            stmt.setLong(8, bookmark.updatedAt.toEpochMilliseconds())
+            stmt.setString(9, bookmark.deviceId)
+            stmt.setInt(10, if (bookmark.isDeleted) 1 else 0)
+            stmt.setLong(11, bookmark.deletedAt?.toEpochMilliseconds() ?: 0L)
+            stmt.executeUpdate()
+        }
+    }
+
+    override suspend fun insertBookmark(bookmark: Bookmark, emitSyncEvent: Boolean) {
+        db.withConnection { write(it, bookmark) }
+        if (emitSyncEvent) db.onEntityChanged?.invoke("bookmark", bookmark.id, "UPSERT", repoJson.encodeToString(Bookmark.serializer(), bookmark))
+    }
+    override suspend fun updateBookmark(bookmark: Bookmark, emitSyncEvent: Boolean) {
+        db.withConnection { write(it, bookmark) }
+        if (emitSyncEvent) db.onEntityChanged?.invoke("bookmark", bookmark.id, "UPSERT", repoJson.encodeToString(Bookmark.serializer(), bookmark))
+    }
+
+    override suspend fun deleteBookmark(bookmarkId: String, emitSyncEvent: Boolean) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, now)
+                stmt.setLong(2, now)
+                stmt.setString(3, bookmarkId)
+                stmt.executeUpdate()
+            }
+        }
+        if (emitSyncEvent) getBookmark(bookmarkId)?.let { bookmark ->
+            db.onEntityChanged?.invoke("bookmark", bookmark.id, "UPSERT", repoJson.encodeToString(Bookmark.serializer(), bookmark))
+        }
+    }
+
+    override suspend fun restoreBookmark(bookmarkId: String) {
+        // updated_at advances too: without it, sync's last-write-wins can
+        // re-delete the restored bookmark against its own older tombstone.
+        db.withConnection { conn ->
+            conn.prepareStatement("UPDATE bookmarks SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE id = ?").use { stmt ->
+                stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
+                stmt.setString(2, bookmarkId)
+                stmt.executeUpdate()
+            }
+        }
+        getBookmark(bookmarkId)?.let { bookmark ->
+            db.onEntityChanged?.invoke("bookmark", bookmark.id, "UPSERT", repoJson.encodeToString(Bookmark.serializer(), bookmark))
+        }
+    }
+
+    override fun getBookmarksForBook(bookId: String): Flow<List<Bookmark>> = flow {
+        emit(db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM bookmarks WHERE book_id = ? AND is_deleted = 0 ORDER BY created_at").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<Bookmark>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        })
+    }
+
+    override suspend fun getBookmark(bookmarkId: String): Bookmark? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM bookmarks WHERE id = ?").use { stmt ->
+                stmt.setString(1, bookmarkId)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getDeletedBookmarks(bookId: String): List<Bookmark> {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM bookmarks WHERE book_id = ? AND is_deleted = 1").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<Bookmark>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+}
+
+// ---------- Collections & Series ----------
+
+class JdbcCollectionRepository(private val db: Database) : CollectionRepository {
+
+    private fun mapRow(rs: ResultSet) = Collection(
+        id = rs.getString("id"),
+        name = rs.getString("name"),
+        color = (rs.getObject("color") as? Number)?.toInt(),
+        sortOrder = rs.getInt("sort_order"),
+        createdAt = Instant.fromEpochMilliseconds(rs.getLong("created_at")),
+        // Legacy rows carry 0 until first edited; treat that as "as old as creation".
+        updatedAt = rs.getLong("updated_at").takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+            ?: Instant.fromEpochMilliseconds(rs.getLong("created_at"))
+    )
+
+    override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO collections (id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, collection.id)
+                stmt.setString(2, collection.name)
+                if (collection.color != null) stmt.setInt(3, collection.color)
+                else stmt.setNull(3, java.sql.Types.INTEGER)
+                stmt.setInt(4, collection.sortOrder)
+                stmt.setLong(5, collection.createdAt.toEpochMilliseconds())
+                stmt.setLong(6, collection.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+        if (emitSyncEvent) db.onEntityChanged?.invoke("collection", collection.id, "UPSERT", repoJson.encodeToString(Collection.serializer(), collection))
+    }
+
+    override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) = insertCollection(collection, emitSyncEvent)
+
+    override suspend fun deleteCollection(collectionId: String): Boolean {
+        if (getCollection(collectionId) == null) return false
+        // Main is the guaranteed home shelf: it can only be removed while another
+        // collection exists, so the library never loses its last bucket.
+        if (collectionId == Collection.MAIN_ID && countCollections() <= 1) return false
+        val affectedBookIds = bookIdsInCollection(collectionId)
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE collection_id = ?").use { stmt ->
+                stmt.setString(1, collectionId); stmt.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM collections WHERE id = ?").use { stmt ->
+                stmt.setString(1, collectionId); stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+        // Members of the deleted collection land back on the (possibly new)
+        // default shelf — with one shelf at a time, an orphaned book would be
+        // invisible.
+        affectedBookIds.forEach { ensureMembership(it) }
+        db.onEntityChanged?.invoke(
+            "collection", collectionId, "DELETE", "{}"
+        )
+        return true
+    }
+
+    override fun getAllCollections(): Flow<List<Collection>> = db.bookDataRevision.map {
+        db.withConnection { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT * FROM collections ORDER BY sort_order, name").use { rs ->
+                    val out = mutableListOf<Collection>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+
+    override suspend fun getCollectionByName(name: String): Collection? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM collections WHERE name = ? COLLATE NOCASE").use { stmt ->
+                stmt.setString(1, name.trim())
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getCollection(id: String): Collection? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM collections WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getCollectionsForBook(bookId: String): List<Collection> {
+        return db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT c.* FROM collections c JOIN book_collections bc ON bc.collection_id = c.id WHERE bc.book_id = ? ORDER BY c.sort_order"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    val out = mutableListOf<Collection>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+
+    override suspend fun getBookCollectionLinks(): Map<String, Set<String>> {
+        return db.withConnection { conn ->
+            val out = HashMap<String, MutableSet<String>>()
+            conn.prepareStatement("SELECT book_id, collection_id FROM book_collections").use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        out.getOrPut(rs.getString(1)) { mutableSetOf() }.add(rs.getString(2))
+                    }
+                }
+            }
+            out
+        }
+    }
+
+    override suspend fun addBookToCollection(bookId: String, collectionId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT OR IGNORE INTO book_collections (book_id, collection_id, added_at) VALUES (?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.setString(2, collectionId)
+                stmt.setLong(3, Clock.System.now().toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+    }
+
+    override suspend fun removeBookFromCollection(bookId: String, collectionId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE book_id = ? AND collection_id = ?").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.setString(2, collectionId)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+    }
+
+    // ── The manga category model (§ collections as shelves) ─────────────────
+
+    override suspend fun createCollection(name: String): Collection {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Collection name must not be empty" }
+        val collection = Collection(
+            id = java.util.UUID.randomUUID().toString(),
+            name = trimmed,
+            sortOrder = nextSortOrder()
+        )
+        insertCollection(collection)
+        return collection
+    }
+
+    override suspend fun renameCollection(id: String, name: String) {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Collection name must not be empty" }
+        val existing = getCollection(id) ?: return
+        val renamed = existing.copy(name = trimmed, updatedAt = Clock.System.now())
+        insertCollection(renamed)
+    }
+
+    override suspend fun defaultCollection(): Collection? {
+        getCollection(Collection.MAIN_ID)?.let { return it }
+        // A pre-Feature library may already have a "Main" under another id —
+        // prefer it over reshuffling the reader's existing sort order.
+        getCollectionByName(Collection.MAIN_NAME)?.let { return it }
+        return db.withConnection { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT * FROM collections ORDER BY sort_order, name LIMIT 1").use { rs ->
+                    if (rs.next()) mapRow(rs) else null
+                }
+            }
+        }
+    }
+
+    override suspend fun assign(bookId: String, collectionIds: Set<String>) {
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE book_id = ?").use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement(
+                "INSERT OR IGNORE INTO book_collections (book_id, collection_id, added_at) VALUES (?, ?, ?)"
+            ).use { stmt ->
+                collectionIds.forEach { collectionId ->
+                    stmt.setString(1, bookId)
+                    stmt.setString(2, collectionId)
+                    stmt.setLong(3, Clock.System.now().toEpochMilliseconds())
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpBookData()
+    }
+
+    override fun observeCollectionsFor(bookId: String): Flow<Set<String>> =
+        db.bookDataRevision.map { getCollectionsForBook(bookId).mapTo(HashSet()) { it.id } }
+
+    override fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>> =
+        db.bookDataRevision.map { bookIdsInCollection(collectionId) }
+
+    override suspend fun bookIdsInCollection(collectionId: String): Set<String> {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT book_id FROM book_collections WHERE collection_id = ?").use { stmt ->
+                stmt.setString(1, collectionId)
+                stmt.executeQuery().use { rs ->
+                    buildSet {
+                        while (rs.next()) add(rs.getString(1))
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun ensureMembership(bookId: String) {
+        if (getCollectionsForBook(bookId).isNotEmpty()) return
+        val target = defaultCollection() ?: run {
+            ensureSeeded()
+            defaultCollection()
+        } ?: return
+        assign(bookId, setOf(target.id))
+    }
+
+    override suspend fun ensureSeeded() {
+        // Seed Main whenever it is missing (not only on an empty table): a
+        // pre-Feature library keeps its collections and gains the default
+        // shelf, with Main sorting ahead of them. A user-created "Main" under
+        // another id is adopted by setting its sortOrder to -1.
+        val existingMain = getCollectionByName(Collection.MAIN_NAME)
+        if (existingMain == null) {
+            val main = Collection(
+                id = Collection.MAIN_ID,
+                name = Collection.MAIN_NAME,
+                sortOrder = -1
+            )
+            insertCollection(main)
+        } else if (existingMain.sortOrder != -1) {
+            // Adopt existing "Main" as the default shelf by giving it priority sortOrder
+            insertCollection(existingMain.copy(sortOrder = -1, updatedAt = Clock.System.now()))
+        }
+        // Pre-collection libraries: give every collection-less book the default
+        // shelf so nothing disappears now that the rail shows one shelf at a time.
+        val orphaned = db.withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT b.id FROM books b WHERE NOT EXISTS " +
+                    "(SELECT 1 FROM book_collections bc WHERE bc.book_id = b.id)"
+            ).use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add(rs.getString(1))
+                    }
+                }
+            }
+        }
+        orphaned.forEach { ensureMembership(it) }
+    }
+
+    private suspend fun nextSortOrder(): Int = db.withConnection { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM collections").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+
+    private suspend fun countCollections(): Int = db.withConnection { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT COUNT(*) FROM collections").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+}
+
+class JdbcSeriesRepository(private val db: Database) : SeriesRepository {
+
+    private fun mapRow(rs: ResultSet) = Series(
+        id = rs.getString("id"),
+        name = rs.getString("name"),
+        sortOrder = rs.getInt("sort_order"),
+        updatedAt = rs.getLong("updated_at").takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it) }
+            ?: Clock.System.now()
+    )
+
+    override suspend fun insertSeries(series: Series, emitSyncEvent: Boolean) {
+        db.withConnection { conn ->
+            conn.prepareStatement("INSERT OR REPLACE INTO series (id, name, sort_order, updated_at) VALUES (?, ?, ?, ?)").use { stmt ->
+                stmt.setString(1, series.id)
+                stmt.setString(2, series.name)
+                stmt.setInt(3, series.sortOrder)
+                stmt.setLong(4, series.updatedAt.toEpochMilliseconds())
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+        if (emitSyncEvent) db.onEntityChanged?.invoke("series", series.id, "UPSERT", repoJson.encodeToString(Series.serializer(), series))
+    }
+
+    override suspend fun updateSeries(series: Series, emitSyncEvent: Boolean) = insertSeries(series, emitSyncEvent)
+
+    override suspend fun deleteSeries(seriesId: String) {
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM series WHERE id = ?").use { stmt ->
+                stmt.setString(1, seriesId); stmt.executeUpdate()
+            }
+            // Books pointed at the deleted series would dangle (D6); they go
+            // back to being unseriesed rather than referencing a missing row.
+            conn.prepareStatement("UPDATE books SET series_id = NULL WHERE series_id = ?").use { stmt ->
+                stmt.setString(1, seriesId); stmt.executeUpdate()
+            }
+        }
+        db.bumpBookData()
+        db.onEntityChanged?.invoke("series", seriesId, "DELETE", "{}")
+    }
+
+    override fun getAllSeries(): Flow<List<Series>> = db.bookDataRevision.map {
+        db.withConnection { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT * FROM series ORDER BY sort_order, name").use { rs ->
+                    val out = mutableListOf<Series>()
+                    while (rs.next()) out.add(mapRow(rs))
+                    out
+                }
+            }
+        }
+    }
+
+    override suspend fun getSeries(seriesId: String): Series? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM series WHERE id = ?").use { stmt ->
+                stmt.setString(1, seriesId)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getSeriesByName(name: String): Series? {
+        return db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM series WHERE name = ? COLLATE NOCASE").use { stmt ->
+                stmt.setString(1, name.trim())
+                stmt.executeQuery().use { rs -> if (rs.next()) mapRow(rs) else null }
+            }
+        }
+    }
+
+    override suspend fun getBooksInSeries(seriesId: String): Flow<List<Book>> = db.bookDataRevision.map {
+        db.getAllBooks().filter { it.seriesId == seriesId }.sortedBy { it.seriesNumber ?: Double.MAX_VALUE }
+    }
+}
+
+// ---------- Search ----------
+
+class JdbcLikeSearchRepository(private val db: Database) : SearchRepository {
+
+    override suspend fun indexChapter(bookId: String, chapterId: String, spineIndex: Int, title: String, content: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO search_index (book_id, chapter_id, spine_index, title, content) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.setString(2, chapterId)
+                stmt.setInt(3, spineIndex)
+                stmt.setString(4, title)
+                stmt.setString(5, content)
+                stmt.executeUpdate()
+            }
+        }
+        // The searchable-chapter count caches on searchTextRevision; the text just changed.
+        db.bumpSearchText()
+    }
+
+    override suspend fun indexChaptersBulk(bookId: String, chapters: List<com.folio.reader.database.ChapterIndexEntry>) {
+        if (chapters.isEmpty()) return
+        // Use withTransaction for atomic batch insert
+        db.withTransaction { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO search_index (book_id, chapter_id, spine_index, title, content) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                for (c in chapters) {
+                    stmt.setString(1, bookId)
+                    stmt.setString(2, c.chapterId)
+                    stmt.setInt(3, c.spineIndex)
+                    stmt.setString(4, c.title)
+                    stmt.setString(5, c.content)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpSearchText()
+    }
+
+    override suspend fun deleteIndexForBook(bookId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM search_index WHERE book_id = ?").use { stmt ->
+                stmt.setString(1, bookId); stmt.executeUpdate()
+            }
+        }
+        db.bumpSearchText()
+    }
+
+    /**
+     * One query for the whole book, in spine order.
+     *
+     * `spine_index` ordering is what makes the mean-of-chapters vector stable: the caller
+     * averages whatever comes back, and averaging is order-independent, but a stable order
+     * keeps the truncation in [com.folio.reader.ml.ZeroShotTagger] (first N chapters)
+     * deterministic instead of database-dependent.
+     *
+     * Content is read as-is — this is the same extracted plain text the semantic index was
+     * built from, so a tag vector and a chunk vector describe the same words.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT chapter_id, spine_index, title, content
+                FROM search_index
+                WHERE book_id = ?
+                ORDER BY spine_index
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(
+                                ChapterIndexEntry(
+                                    chapterId = rs.getString("chapter_id"),
+                                    spineIndex = rs.getInt("spine_index"),
+                                    title = rs.getString("title").orEmpty(),
+                                    content = rs.getString("content").orEmpty(),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+    private fun query(conn: Connection, sql: String, term: String?): List<SearchResult> {
+        return conn.prepareStatement(sql).use { stmt ->
+            if (term != null) {
+                stmt.setString(1, "%$term%")
+                stmt.setString(2, "%$term%")
+            }
+            stmt.executeQuery().use { rs ->
+                val out = mutableListOf<SearchResult>()
+                while (rs.next()) {
+                    val content = rs.getString("content")
+                    val idx = term?.let { content.indexOf(it, ignoreCase = true) } ?: 0
+                    val start = maxOf(0, idx - 40)
+                    val snippet = if (idx >= 0 && term != null) content.substring(start, minOf(content.length, idx + term.length + 40)) else ""
+                    out.add(
+                        SearchResult(
+                            bookId = rs.getString("book_id"),
+                            chapterId = rs.getString("chapter_id"),
+                            spineIndex = rs.getInt("spine_index"),
+                            title = rs.getString("title"),
+                            context = snippet
+                        )
+                    )
+                }
+                out
+            }
+        }
+    }
+
+    override fun search(queryText: String): Flow<List<SearchResult>> = flow {
+        // A blank query would leave the two LIKE placeholders unbound (query() only binds a non-null
+        // term) and throw SQLException on this fallback path, so short-circuit to empty.
+        val q = queryText.trim()
+        if (q.isEmpty()) {
+            emit(emptyList())
+            return@flow
+        }
+        emit(db.withConnection { conn ->
+            query(conn, "SELECT * FROM search_index WHERE content LIKE ? OR title LIKE ?", q)
+        })
+    }
+
+    override fun searchInBook(bookId: String, queryText: String): Flow<List<SearchResult>> = flow {
+        emit(db.withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM search_index WHERE book_id = ? AND (content LIKE ? OR title LIKE ?)").use { outer ->
+                outer.setString(1, bookId)
+                outer.setString(2, "%$queryText%")
+                outer.setString(3, "%$queryText%")
+                outer.executeQuery().use { rs ->
+                    val out = mutableListOf<SearchResult>()
+                    while (rs.next()) {
+                        val content = rs.getString("content")
+                        val idx = content.indexOf(queryText, ignoreCase = true)
+                        val start = maxOf(0, idx - 40)
+                        val snippet = if (idx >= 0) content.substring(start, minOf(content.length, idx + queryText.length + 40)) else ""
+                        out.add(
+                            SearchResult(
+                                bookId = bookId,
+                                chapterId = rs.getString("chapter_id"),
+                                spineIndex = rs.getInt("spine_index"),
+                                title = rs.getString("title"),
+                                context = snippet
+                            )
+                        )
+                    }
+                    out
+                }
+            }
+        })
+    }
+}
+
+class JdbcFtsSearchRepository(private val db: Database) : SearchRepository {
+
+    override suspend fun indexChapter(bookId: String, chapterId: String, spineIndex: Int, title: String, content: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO search_index (book_id, chapter_id, spine_index, title, content) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.setString(2, chapterId)
+                stmt.setInt(3, spineIndex)
+                stmt.setString(4, title)
+                stmt.setString(5, content)
+                stmt.executeUpdate()
+            }
+        }
+        db.bumpSearchText()
+    }
+
+    override suspend fun indexChaptersBulk(bookId: String, chapters: List<com.folio.reader.database.ChapterIndexEntry>) {
+        if (chapters.isEmpty()) return
+        // Use withTransaction for atomic batch insert
+        db.withTransaction { conn ->
+            conn.prepareStatement(
+                "INSERT OR REPLACE INTO search_index (book_id, chapter_id, spine_index, title, content) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                for (c in chapters) {
+                    stmt.setString(1, bookId)
+                    stmt.setString(2, c.chapterId)
+                    stmt.setInt(3, c.spineIndex)
+                    stmt.setString(4, c.title)
+                    stmt.setString(5, c.content)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpSearchText()
+    }
+
+    override suspend fun deleteIndexForBook(bookId: String) {
+        db.withConnection { conn ->
+            conn.prepareStatement("DELETE FROM search_index WHERE book_id = ?").use { stmt ->
+                stmt.setString(1, bookId); stmt.executeUpdate()
+            }
+        }
+        db.bumpSearchText()
+    }
+
+    private val ftsWhitespace = Regex("\\s+")
+
+    private fun tokenizeForFts(query: String): String {
+        return query.trim()
+            .split(ftsWhitespace)
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { "${it.trim()}*" }
+    }
+
+    private fun mapRows(rs: ResultSet): List<SearchResult> {
+        val out = mutableListOf<SearchResult>()
+        while (rs.next()) {
+            out.add(
+                SearchResult(
+                    bookId = rs.getString("book_id"),
+                    chapterId = rs.getString("chapter_id"),
+                    spineIndex = rs.getInt("spine_index"),
+                    title = rs.getString("title"),
+                    context = rs.getString("snippet")
+                )
+            )
+        }
+        return out
+    }
+
+    override fun search(queryText: String): Flow<List<SearchResult>> = flow {
+        val q = queryText.trim()
+        if (q.isBlank()) {
+            emit(emptyList())
+            return@flow
+        }
+        val ftsQuery = tokenizeForFts(q)
+        emit(db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT book_id, chapter_id, spine_index, title,
+                       snippet(search_index, 4, '<<', '>>', '…', 12) AS snippet
+                FROM search_index
+                WHERE search_index MATCH ?
+                ORDER BY bm25(search_index)
+                LIMIT 200
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, ftsQuery)
+                stmt.executeQuery().use { rs -> mapRows(rs) }
+            }
+        })
+    }
+
+    override fun searchInBook(bookId: String, queryText: String): Flow<List<SearchResult>> = flow {
+        val q = queryText.trim()
+        if (q.isBlank()) {
+            emit(emptyList())
+            return@flow
+        }
+        val ftsQuery = tokenizeForFts(q)
+        emit(db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT book_id, chapter_id, spine_index, title,
+                       snippet(search_index, 4, '<<', '>>', '…', 12) AS snippet
+                FROM search_index
+                WHERE book_id = ? AND search_index MATCH ?
+                ORDER BY bm25(search_index)
+                LIMIT 200
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.setString(2, ftsQuery)
+                stmt.executeQuery().use { rs -> mapRows(rs) }
+            }
+        })
+    }
+
+    /**
+     * Plain select, deliberately not a MATCH.
+     *
+     * There is no query here — the caller wants the whole book — so FTS5's index is not
+     * involved and a `MATCH ''` would raise rather than return everything. `chapter_id` is
+     * selected alongside `spine_index` because a caller that needs to join chapter text to
+     * chunk rows needs both halves of the `(book_id, chapter_id)` key; `spine_index` alone
+     * cannot identify a chapter.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        db.withConnection { conn ->
+            conn.prepareStatement(
+                """
+                SELECT chapter_id, spine_index, title, content
+                FROM search_index
+                WHERE book_id = ?
+                ORDER BY spine_index
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, bookId)
+                stmt.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(
+                                ChapterIndexEntry(
+                                    chapterId = rs.getString("chapter_id"),
+                                    spineIndex = rs.getInt("spine_index"),
+                                    title = rs.getString("title").orEmpty(),
+                                    content = rs.getString("content").orEmpty(),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+}
+
+class JdbcSearchRepository(private val db: Database) : SearchRepository {
+
+    private val fts = JdbcFtsSearchRepository(db)
+    private val like = JdbcLikeSearchRepository(db)
+
+    private suspend fun <T> tryFts(block: suspend () -> T, fallback: suspend () -> T): T {
+        return try {
+            block()
+        } catch (_: SQLException) {
+            fallback()
+        } catch (_: Exception) {
+            fallback()
+        }
+    }
+
+    override suspend fun indexChapter(bookId: String, chapterId: String, spineIndex: Int, title: String, content: String) {
+        tryFts(
+            block = { fts.indexChapter(bookId, chapterId, spineIndex, title, content) },
+            fallback = { like.indexChapter(bookId, chapterId, spineIndex, title, content) }
+        )
+    }
+
+    override suspend fun deleteIndexForBook(bookId: String) {
+        tryFts(
+            block = { fts.deleteIndexForBook(bookId) },
+            fallback = { like.deleteIndexForBook(bookId) }
+        )
+    }
+
+    override fun search(queryText: String): Flow<List<SearchResult>> {
+        return fts.search(queryText).catch { _ ->
+            emitAll(like.search(queryText))
+        }
+    }
+
+    override fun searchInBook(bookId: String, queryText: String): Flow<List<SearchResult>> {
+        return fts.searchInBook(bookId, queryText).catch { _ ->
+            emitAll(like.searchInBook(bookId, queryText))
+        }
+    }
+
+    /**
+     * Same table, same fallback as everything else here: FTS first, then the plain-table
+     * variant. The two have different schemas (FTS5 virtual table vs. an ordinary table) but
+     * both carry `content`, so one read serves both.
+     */
+    override suspend fun getChapterTexts(bookId: String): List<ChapterIndexEntry> =
+        tryFts(
+            block = { fts.getChapterTexts(bookId) },
+            fallback = { like.getChapterTexts(bookId) }
+        )
+}
+
+// ---------- Settings ----------
+
+// The settings repository lives in JdbcSettingsRepository.kt (§6 split).
+

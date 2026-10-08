@@ -1,0 +1,109 @@
+package com.folio.reader.statistics
+
+import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.model.BookStatus
+
+/**
+ * What kind of entity a stats-exclusion row targets (§11.2). Stored as its name
+ * in the `stats_exclusions.scope` column. `BOOK_STATUS` rows carry the enum
+ * name as their target id, so "exclude every DNF book" is one row that keeps
+ * working as more books are abandoned. `EXTENSION` rows carry the extension's
+ * package name and are resolved to `MANGA_SOURCE` rows by
+ * [expandExtensionExclusions] before any consumer sees them.
+ */
+enum class Scope { BOOK, BOOK_TAG, BOOK_COLLECTION, BOOK_SERIES, BOOK_STATUS, MANGA, MANGA_CATEGORY, MANGA_SOURCE, EXTENSION }
+
+/**
+ * The one resolver for stats exclusions (§11.2) — the single place that answers
+ * "does this title count toward the statistics?".
+ *
+ * Resolution rule (v1, deliberately one-way): an entity is excluded if it is
+ * listed directly **or** any group it belongs to is listed. There is no
+ * per-entity "include anyway" override — two-way overrides are what make these
+ * systems unexplainable; a user who needs one removes the group exclusion.
+ *
+ * The same instance feeds [StatisticsViewModel], Home and the manga statistics,
+ * so the three surfaces can never drift apart on this question.
+ */
+class StatsScope(private val excluded: Set<Pair<Scope, String>>) {
+
+    /** Target ids indexed by scope so the common empty-exclusions case is one map miss. */
+    private val idsByScope: Map<Scope, Set<String>> =
+        excluded.groupBy({ it.first }, { it.second }).mapValues { (_, ids) -> ids.toSet() }
+
+    private fun isExcluded(scope: Scope, targetId: String): Boolean =
+        idsByScope[scope]?.contains(targetId) == true
+
+    /**
+     * True when at least one exclusion rule of [scope] exists. Resolving a book's
+     * tags and collections costs two repository roundtrips per book — on a
+     * several-hundred-title library that is the single slowest step on Home's
+     * first emission — and the answers are only ever *matched against* BOOK_TAG
+     * and BOOK_COLLECTION rules. A reader with no such rules (the default) can
+     * skip the resolution entirely, which is what this lets callers do.
+     */
+    fun hasRules(scope: Scope): Boolean = !idsByScope[scope].isNullOrEmpty()
+
+    /**
+     * True when the book counts toward the statistics. A book is excluded when
+     * listed directly, when any of its tags or collections is listed, when its
+     * series is listed (which removes every book sharing that seriesId), or
+     * when its status is listed.
+     */
+    fun includesBook(
+        bookId: String,
+        tagIds: Set<String>,
+        collectionIds: Set<String>,
+        seriesId: String?,
+        status: BookStatus
+    ): Boolean {
+        if (isExcluded(Scope.BOOK, bookId)) return false
+        if (tagIds.any { isExcluded(Scope.BOOK_TAG, it) }) return false
+        if (collectionIds.any { isExcluded(Scope.BOOK_COLLECTION, it) }) return false
+        if (seriesId != null && isExcluded(Scope.BOOK_SERIES, seriesId)) return false
+        if (isExcluded(Scope.BOOK_STATUS, status.name)) return false
+        return true
+    }
+
+    /**
+     * True when the manga counts toward the statistics, under the same one-way
+     * rule: listed directly, in an excluded category, or from an excluded source.
+     */
+    fun includesManga(
+        mangaId: String,
+        categoryIds: Set<String>,
+        sourceId: Long
+    ): Boolean {
+        if (isExcluded(Scope.MANGA, mangaId)) return false
+        if (categoryIds.any { isExcluded(Scope.MANGA_CATEGORY, it) }) return false
+        if (isExcluded(Scope.MANGA_SOURCE, sourceId.toString())) return false
+        return true
+    }
+}
+
+/**
+ * Resolves `EXTENSION` rows (target id = extension package name) into
+ * `MANGA_SOURCE` rows (target id = decimal source id).
+ *
+ * The database stores only numeric source ids on its manga rows, while
+ * extension identity (the package name) lives in the runtime's source list —
+ * so the expansion runs once, where both are available (the view models that
+ * hold a [com.folio.reader.manga.MangaBackend]), and every downstream consumer
+ * (`StatsScope`, the manga-statistics SQL, the new-chapter badges and Discover)
+ * keeps answering a single question about source ids. An excluded extension
+ * with no installed sources simply contributes nothing.
+ */
+fun expandExtensionExclusions(
+    exclusions: Set<Pair<Scope, String>>,
+    sources: List<MangaSourceInfo>
+): Set<Pair<Scope, String>> {
+    val pkgs = exclusions.asSequence()
+        .filter { it.first == Scope.EXTENSION }
+        .mapTo(HashSet()) { it.second }
+    if (pkgs.isEmpty()) return exclusions
+    val sourceRows = sources
+        .filter { source -> source.extensionPkg?.let { it in pkgs } == true }
+        .map { Scope.MANGA_SOURCE to it.id.toString() }
+    if (sourceRows.isEmpty()) return exclusions
+    return exclusions + sourceRows
+}

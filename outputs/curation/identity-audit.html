@@ -1,0 +1,95 @@
+<!doctype html><html><head><meta charset='utf-8'><title>theme identity - two classes</title>
+<style>
+body{background:#0d0d11;color:#eeeef4;font:14px/1.7 -apple-system,'Segoe UI',sans-serif;
+padding:36px;max-width:1000px;margin:0 auto}
+h1{font-size:22px;margin:0 0 12px;letter-spacing:-.01em}
+h2{font-size:12.5px;margin:32px 0 10px;color:#9a97a6;text-transform:uppercase;letter-spacing:.08em}
+p{color:#9a97a6;max-width:820px;margin:0 0 12px}b,strong{color:#fff}
+code{background:#17181e;padding:1px 5px;border-radius:4px;color:#d8d5e2;
+font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+pre{background:#131318;border:1px solid #21222a;border-radius:10px;padding:18px;overflow-x:auto;
+color:#c9c7d2;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;
+white-space:pre;margin:0}
+table{border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #21222a}
+th{color:#9a97a6;font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+.row{display:flex;gap:20px;align-items:flex-start}
+img{width:100%;display:block;border:1px solid #21222a;border-radius:10px}
+.cap{font-size:12px;color:#c9c7d2;margin:9px 0 0}
+.cap span{color:#6f6d7a;font-family:ui-monospace,Consolas,monospace}
+.good{color:#7ddca4}.bad{color:#e88a8a}
+</style></head><body>
+<h1>Theme identity: two formally different classes</h1>
+<p><b>Class P</b> (paired, 8 families) constrains the dark face by the light face's relational
+structure &mdash; <code>P_D &asymp; f(P_L)</code> &mdash; gated on <code>T6/S/W6/A/C/E</code>.
+<b>Class X</b> (transformative, Nebula) permits the dark face to reorganise its topology and is held
+to a semantic envelope instead.</p>
+<p>All 8 Class P families pass. Nebula passes its Class X contract. <code>T6/W6/C</code> are retained
+in the matrix as diagnostics for Class X, but they are not gates for it.</p>
+<h2>Full output</h2><pre>  anchor repair ocean       dark rotated 319 deg
+  hierarchy repair forest      dark chroma ranking restored
+  topology repair forest      dark hue relationships realigned by rank
+  anchor repair arctic      dark rotated 43 deg
+  hierarchy repair arctic      dark chroma ranking restored
+  anchor repair solar       dark rotated 329 deg
+  anchor repair jade        dark rotated 28 deg
+  anchor repair moonstone   dark rotated 273 deg
+9 x 6 DIAGNOSTIC MATRIX   (gates: T>=70 S>=60 W>=40 A>=30 C>=40 E>=60)
+T6/W6 = full authored-key audit (this matrix). T4/W4 = the 4 chromatic-swatch
+diagnostic in forest_repair.py -- different projections, NOT interchangeable.
+class P = paired (gated on T/S/W/A/C/E).  class X = transformative (gated on its own
+semantic envelope; T/S/W/C are diagnostics for it, not gates).
+family      cls T6    S     W6    A     C     E     | I      gate
+ocean       P   81    61    53    40    41    72    | 62     PASS
+nebula      X   58    100   7     54    4     100   | 59     PASS-X
+forest      P   90    100   53    55    86    72    | 79     PASS
+terracotta  P   81    100   100   48    59    86    | 83     PASS
+arctic      P   90    100   53    52    72    86    | 79     PASS
+solar       P   80    80    100   57    44    100   | 80     PASS
+jade        P   89    91    40    34    58    86    | 71     PASS
+mintcoral   P   85    100   87    45    78    100   | 85     PASS
+moonstone   P   87    100   53    63    57    86    | 78     PASS
+
+failure classes (Class P only -- Class X is not gated on these):
+  none -- all 8 Class P families pass
+
+anchors:
+  ocean       teal MIGRATED (dark axis 223 deg)
+  nebula      free (no anchor by design)
+  forest      green held (dark axis 133 deg)
+  terracotta  earth held (dark axis 62 deg)
+  arctic      cool held (dark axis 185 deg)
+  solar       warm MIGRATED (dark axis 343 deg)
+  jade        jade MIGRATED (dark axis 137 deg)
+  mintcoral   free (no anchor by design)
+  moonstone   mauve held (dark axis 319 deg)
+
+energy rank (quiet -> loud), light then dark:
+  light: arctic &lt; moonstone &lt; jade &lt; ocean &lt; forest &lt; terracotta &lt; mintcoral &lt; solar &lt; nebula
+  dark:  moonstone &lt; arctic &lt; forest &lt; jade &lt; terracotta &lt; ocean &lt; mintcoral &lt; solar &lt; nebula
+
+==============================================================================
+NEBULA
+  class: TRANSFORMATIVE
+
+  T6: 58
+  W6: 7
+  C:  4
+
+  structural correspondence: TRANSFORMED
+  semantic envelope:       PASS
+                             every role inside its authored band
+  vocabulary membership:   PASS
+                             every hue is a member of the authored set
+  relational signature:    PASS
+                             authored separations held
+  energy class:            PASS
+                             primary C 25.4, secondary C 10.8 (floor 8.0)
+  axis coherence:          PASS
+                             3 of 4 hues inside a 60 deg arc
+
+  status: PASS -- TRANSFORMATIVE CONTRACT
+  (T6/W6/C retained as diagnostics; they are not gates for this class)
+==============================================================================
+</pre>
+</body></html>

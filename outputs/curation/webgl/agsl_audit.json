@@ -1,0 +1,303 @@
+{
+ "bounds": {
+  "substrate": {
+   "dE": 3.0,
+   "dH": 3.0,
+   "dC": 0.02
+  },
+  "accent": {
+   "dE": 8.0,
+   "dH": 12.0,
+   "dC": 0.06
+  }
+ },
+ "violations": [
+  [
+   "nebula-dark",
+   "backgroundBase",
+   1.3564959584136398,
+   4.295971435059926,
+   0.001130657209176024,
+   0.0
+  ],
+  [
+   "terracotta-light",
+   "backgroundBase",
+   0.20757538638811984,
+   3.256511264202217,
+   0.00019780395883508758,
+   0.0
+  ],
+  [
+   "solar-light",
+   "backgroundBase",
+   0.5353004367790901,
+   3.2910998804620846,
+   -0.0006221945646444661,
+   0.0
+  ],
+  [
+   "solar-dark",
+   "surface",
+   0.7137471910366505,
+   3.4359451467424833,
+   -0.0004595433856710851,
+   0.0
+  ],
+  [
+   "mintcoral-light",
+   "backgroundBase",
+   0.7436888515430683,
+   4.419771050509645,
+   0.00015684724653329193,
+   0.0
+  ],
+  [
+   "moonstone-light",
+   "backgroundBase",
+   0.2645766374541624,
+   4.139253212554706,
+   -0.0008519871099208591,
+   0.0
+  ]
+ ],
+ "metrics": {
+  "ocean": {
+   "T6_src": 80.96353115134247,
+   "T6_agsl": 83.63200496162361,
+   "W6_src": 53.333333333333336,
+   "W6_agsl": 60.0,
+   "C_src": 41.427864730584105,
+   "C_agsl": 51.027027398612,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "nebula": {
+   "T6_src": 57.95933295161329,
+   "T6_agsl": 52.380341653925505,
+   "W6_src": 6.666666666666667,
+   "W6_agsl": 13.333333333333334,
+   "C_src": 4.496876109809747,
+   "C_agsl": 14.194940246492493,
+   "gate_src": "n/a (X)",
+   "gate_agsl": "n/a (X)"
+  },
+  "forest": {
+   "T6_src": 90.44750839873134,
+   "T6_agsl": 90.68658603881923,
+   "W6_src": 53.333333333333336,
+   "W6_agsl": 73.33333333333333,
+   "C_src": 86.38308338074718,
+   "C_agsl": 83.3993367507085,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "terracotta": {
+   "T6_src": 81.27895677012646,
+   "T6_agsl": 82.90610104632111,
+   "W6_src": 100.0,
+   "W6_agsl": 100.0,
+   "C_src": 58.75705454255178,
+   "C_agsl": 44.96642559696663,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "arctic": {
+   "T6_src": 90.44793736036412,
+   "T6_agsl": 82.16569121481768,
+   "W6_src": 53.333333333333336,
+   "W6_agsl": 66.66666666666667,
+   "C_src": 72.31348318589414,
+   "C_agsl": 87.33494355818723,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "solar": {
+   "T6_src": 80.33518107323154,
+   "T6_agsl": 75.69716721782359,
+   "W6_src": 100.0,
+   "W6_agsl": 93.33333333333333,
+   "C_src": 43.92940891138057,
+   "C_agsl": 58.210960031228076,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "jade": {
+   "T6_src": 88.93136213109011,
+   "T6_agsl": 87.05376741283233,
+   "W6_src": 40.0,
+   "W6_agsl": 46.666666666666664,
+   "C_src": 58.294086503014746,
+   "C_agsl": 50.070785726592035,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "mintcoral": {
+   "T6_src": 85.3975664551023,
+   "T6_agsl": 93.9723174333511,
+   "W6_src": 86.66666666666667,
+   "W6_agsl": 80.0,
+   "C_src": 78.35342901936863,
+   "C_agsl": 72.15352366004889,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  },
+  "moonstone": {
+   "T6_src": 87.42709682683162,
+   "T6_agsl": 77.17098198276085,
+   "W6_src": 53.333333333333336,
+   "W6_agsl": 40.0,
+   "C_src": 57.46969794768205,
+   "C_agsl": 59.69037258052266,
+   "gate_src": "PASS",
+   "gate_agsl": "PASS"
+  }
+ },
+ "regression_source_ok": true,
+ "regression_agsl_ok": true,
+ "crown": {
+  "ocean-light": {
+   "crown": "0xDED4CC",
+   "ink": 9.975356818370711,
+   "accentProgress": 3.507770526388961,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "ocean-dark": {
+   "crown": "0x0A0F10",
+   "ink": 17.06140020136511,
+   "accentProgress": 10.823027580866876,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "nebula-light": {
+   "crown": "0xD7DBD2",
+   "ink": 11.796984619392774,
+   "accentProgress": 3.767540739179892,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "nebula-dark": {
+   "crown": "0x120D1D",
+   "ink": 17.129301147790603,
+   "accentProgress": 7.00849644354916,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "forest-light": {
+   "crown": "0xDBDBC6",
+   "ink": 10.690949567363107,
+   "accentProgress": 3.5083687956147096,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "forest-dark": {
+   "crown": "0x0D0F0C",
+   "ink": 17.78977121524987,
+   "accentProgress": 9.969561226199911,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "terracotta-light": {
+   "crown": "0xDDCAB8",
+   "ink": 8.980318292011798,
+   "accentProgress": 3.1824036031297522,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "terracotta-dark": {
+   "crown": "0x0E0D0E",
+   "ink": 17.464569495709267,
+   "accentProgress": 7.383051283026637,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "arctic-light": {
+   "crown": "0xDEDCD6",
+   "ink": 9.516077286534612,
+   "accentProgress": 3.50924171514996,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "arctic-dark": {
+   "crown": "0x0B1011",
+   "ink": 17.702249742167275,
+   "accentProgress": 9.160556319412382,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "solar-light": {
+   "crown": "0xDED1BD",
+   "ink": 11.680149304550984,
+   "accentProgress": 5.56881970808935,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "solar-dark": {
+   "crown": "0x0D090D",
+   "ink": 16.558073497099375,
+   "accentProgress": 4.72656085535426,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "jade-light": {
+   "crown": "0xCEC5B6",
+   "ink": 9.645727907142689,
+   "accentProgress": 3.120531632774693,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "jade-dark": {
+   "crown": "0x0B0D0D",
+   "ink": 17.64591992096775,
+   "accentProgress": 8.637541459582444,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "mintcoral-light": {
+   "crown": "0xE5D6C9",
+   "ink": 10.025357950616991,
+   "accentProgress": 3.4765678354923018,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "mintcoral-dark": {
+   "crown": "0x0C110E",
+   "ink": 17.831232707231333,
+   "accentProgress": 10.606274056776401,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "moonstone-light": {
+   "crown": "0xDBD4C6",
+   "ink": 9.865825494889716,
+   "accentProgress": 3.341004387784858,
+   "best": "ink",
+   "accent_clears": false
+  },
+  "moonstone-dark": {
+   "crown": "0x111215",
+   "ink": 17.25736814074609,
+   "accentProgress": 8.635408975187897,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "system-light": {
+   "crown": "0xDAD9D8",
+   "ink": 12.584893572187463,
+   "accentProgress": 5.257714095638411,
+   "best": "ink",
+   "accent_clears": true
+  },
+  "system-dark": {
+   "crown": "0x1C1D19",
+   "ink": 16.19743349608033,
+   "accentProgress": 7.896134695234401,
+   "best": "ink",
+   "accent_clears": true
+  }
+ },
+ "crown_floor": 4.2,
+ "crown_ink_clears": 20,
+ "crown_accent_clears": 12
+}

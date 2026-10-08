@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules for Folio's EPUB sync bucket.
+//
+// Object layout used by the wired-up storage client
+// (shared/src/commonJvm/kotlin/com/folio/reader/sync/RestFirebaseStorageSync.kt):
+//
+//   users/{uid}/books/{bookId}/book.epub   the synced EPUB body - downloaded
+//                                           with an MD5 checksum verify and
+//                                           deleted on book removal
+//   users/{uid}/books/{bookId}/cover.jpg   the extracted cover image -
+//                                           deleted alongside the book
+//
+// Type/size note: book.epub is an EPUB (application/epub+zip) and cover.jpg is
+// a JPEG, but the client sets NO explicit size or content-type limits, so
+// these rules deliberately do not enforce any - a wrong ceiling or MIME check
+// would reject legitimate large EPUBs or an uploader that omits the header.
+// Add a request.resource.size / contentType guard only after confirming a real
+// limit against the app.
+//
+// Owner-scoping mirrors firestore.rules: a user may read and write only the
+// objects under their own users/{uid}/ prefix. Everything else is denied by
+// default because no other match block grants access.
+service firebase.storage {
+  match /b/{bucket}/o {
+    // True when the request is authenticated and its uid owns this path.
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // All Folio storage objects live under users/{uid}/... Grant the owner
+    // full read/write over that subtree (write covers both uploads and the
+    // deleteBook() DELETE calls).
+    match /users/{uid}/{allPaths=**} {
+      allow read, write: if isOwner(uid);
+    }
+  }
+}

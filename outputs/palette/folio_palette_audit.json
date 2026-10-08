@@ -1,0 +1,2332 @@
+[
+  {
+    "id": "ocean",
+    "light": true,
+    "concept": "Aurora Ocean",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.3,
+          "secondary": 4.87
+        },
+        "card": {
+          "primary": 13.96,
+          "secondary": 5.12
+        },
+        "panel": {
+          "primary": 14.64,
+          "secondary": 5.37
+        },
+        "nav": {
+          "primary": 13.0,
+          "secondary": 4.76
+        },
+        "topbar": {
+          "primary": 8.25,
+          "secondary": 3.02
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.956,
+        "card": 0.975,
+        "panel": 0.991
+      },
+      "cohesion": {
+        "page": [
+          0.956,
+          0.029,
+          224.7
+        ],
+        "card": [
+          0.975,
+          0.005,
+          29.9
+        ],
+        "panel": [
+          0.991,
+          0.001,
+          43.7
+        ],
+        "nav": [
+          0.946,
+          0.037,
+          185.7
+        ],
+        "topbar": [
+          0.812,
+          0.037,
+          358.2
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 170.7,
+          "dE": 57.5
+        },
+        "primary~tertiary": {
+          "hue_gap": 95.2,
+          "dE": 32.4
+        },
+        "primary~warm": {
+          "hue_gap": 138.6,
+          "dE": 56.4
+        },
+        "secondary~tertiary": {
+          "hue_gap": 94.1,
+          "dE": 32.3
+        },
+        "secondary~warm": {
+          "hue_gap": 32.1,
+          "dE": 16.6
+        },
+        "tertiary~warm": {
+          "hue_gap": 126.2,
+          "dE": 39.7
+        }
+      },
+      "accent_min_hue_gap": 32.1,
+      "accent_min_dE": 16.6,
+      "animation": {
+        "mirage": "MeshGradient",
+        "pools": [
+          {
+            "hex": "#fbf997",
+            "dE_vs_field": 26.5,
+            "dL_vs_field": 0.101
+          },
+          {
+            "hex": "#35c99e",
+            "dE_vs_field": 16.4,
+            "dL_vs_field": -0.113
+          },
+          {
+            "hex": "#7ab591",
+            "dE_vs_field": 15.3,
+            "dL_vs_field": -0.14
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 15.3,
+        "deutan": 12.9,
+        "tritan": 13.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "ocean",
+    "light": false,
+    "concept": "Aurora Ocean",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.88,
+          "secondary": 7.9
+        },
+        "card": {
+          "primary": 13.3,
+          "secondary": 6.22
+        },
+        "panel": {
+          "primary": 12.4,
+          "secondary": 5.8
+        },
+        "nav": {
+          "primary": 16.64,
+          "secondary": 7.79
+        },
+        "topbar": {
+          "primary": 10.28,
+          "secondary": 4.81
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.159,
+        "card": 0.275,
+        "panel": 0.297
+      },
+      "cohesion": {
+        "page": [
+          0.159,
+          0.012,
+          224.0
+        ],
+        "card": [
+          0.275,
+          0.08,
+          19.0
+        ],
+        "panel": [
+          0.297,
+          0.079,
+          19.1
+        ],
+        "nav": [
+          0.165,
+          0.03,
+          180.1
+        ],
+        "topbar": [
+          0.346,
+          0.06,
+          12.7
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 172.1,
+          "dE": 59.2
+        },
+        "primary~tertiary": {
+          "hue_gap": 96.8,
+          "dE": 32.7
+        },
+        "primary~warm": {
+          "hue_gap": 144.6,
+          "dE": 64.0
+        },
+        "secondary~tertiary": {
+          "hue_gap": 91.2,
+          "dE": 34.3
+        },
+        "secondary~warm": {
+          "hue_gap": 27.4,
+          "dE": 15.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 118.6,
+          "dE": 43.0
+        }
+      },
+      "accent_min_hue_gap": 27.4,
+      "accent_min_dE": 15.8,
+      "animation": {
+        "mirage": "MeshGradient",
+        "pools": [
+          {
+            "hex": "#faff8c",
+            "dE_vs_field": 66.2,
+            "dL_vs_field": 0.599
+          },
+          {
+            "hex": "#00cea4",
+            "dE_vs_field": 57.4,
+            "dL_vs_field": 0.384
+          },
+          {
+            "hex": "#70e6b2",
+            "dE_vs_field": 62.2,
+            "dL_vs_field": 0.469
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 12.5,
+        "deutan": 8.7,
+        "tritan": 8.7
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "nebula",
+    "light": true,
+    "concept": "Nebula Electric",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.17,
+          "secondary": 4.84
+        },
+        "card": {
+          "primary": 14.1,
+          "secondary": 5.18
+        },
+        "panel": {
+          "primary": 12.64,
+          "secondary": 4.65
+        },
+        "nav": {
+          "primary": 12.78,
+          "secondary": 4.7
+        },
+        "topbar": {
+          "primary": 8.69,
+          "secondary": 3.2
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.953,
+        "card": 0.975,
+        "panel": 0.937
+      },
+      "cohesion": {
+        "page": [
+          0.953,
+          0.024,
+          291.0
+        ],
+        "card": [
+          0.975,
+          0.023,
+          83.4
+        ],
+        "panel": [
+          0.937,
+          0.061,
+          90.5
+        ],
+        "nav": [
+          0.946,
+          0.036,
+          329.2
+        ],
+        "topbar": [
+          0.82,
+          0.027,
+          81.0
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 172.8,
+          "dE": 56.3
+        },
+        "primary~tertiary": {
+          "hue_gap": 66.7,
+          "dE": 36.7
+        },
+        "primary~warm": {
+          "hue_gap": 97.6,
+          "dE": 38.3
+        },
+        "secondary~tertiary": {
+          "hue_gap": 120.4,
+          "dE": 39.7
+        },
+        "secondary~warm": {
+          "hue_gap": 75.3,
+          "dE": 33.7
+        },
+        "tertiary~warm": {
+          "hue_gap": 164.3,
+          "dE": 56.1
+        }
+      },
+      "accent_min_hue_gap": 66.7,
+      "accent_min_dE": 33.7,
+      "animation": {
+        "mirage": "NeuroNoise",
+        "pools": [
+          {
+            "hex": "#7dcf56",
+            "dE_vs_field": 52.9,
+            "dL_vs_field": -0.086
+          },
+          {
+            "hex": "#8cd5fe",
+            "dE_vs_field": 34.1,
+            "dL_vs_field": -0.022
+          },
+          {
+            "hex": "#00ab9f",
+            "dE_vs_field": 44.7,
+            "dL_vs_field": -0.195
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 18.1,
+        "deutan": 9.9,
+        "tritan": 9.1
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "nebula",
+    "light": false,
+    "concept": "Nebula Electric",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.84,
+          "secondary": 7.81
+        },
+        "card": {
+          "primary": 12.87,
+          "secondary": 5.97
+        },
+        "panel": {
+          "primary": 11.98,
+          "secondary": 5.55
+        },
+        "nav": {
+          "primary": 16.92,
+          "secondary": 7.84
+        },
+        "topbar": {
+          "primary": 9.79,
+          "secondary": 4.54
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.156,
+        "card": 0.273,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.156,
+          0.024,
+          330.2
+        ],
+        "card": [
+          0.273,
+          0.039,
+          81.4
+        ],
+        "panel": [
+          0.295,
+          0.039,
+          79.9
+        ],
+        "nav": [
+          0.157,
+          0.052,
+          330.8
+        ],
+        "topbar": [
+          0.349,
+          0.049,
+          82.4
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 169.1,
+          "dE": 56.3
+        },
+        "primary~tertiary": {
+          "hue_gap": 70.5,
+          "dE": 40.1
+        },
+        "primary~warm": {
+          "hue_gap": 95.3,
+          "dE": 39.6
+        },
+        "secondary~tertiary": {
+          "hue_gap": 120.4,
+          "dE": 39.5
+        },
+        "secondary~warm": {
+          "hue_gap": 73.8,
+          "dE": 31.5
+        },
+        "tertiary~warm": {
+          "hue_gap": 165.8,
+          "dE": 57.0
+        }
+      },
+      "accent_min_hue_gap": 70.5,
+      "accent_min_dE": 31.5,
+      "animation": {
+        "mirage": "NeuroNoise",
+        "pools": [
+          {
+            "hex": "#61d629",
+            "dE_vs_field": 60.7,
+            "dL_vs_field": 0.4
+          },
+          {
+            "hex": "#84d7ff",
+            "dE_vs_field": 61.9,
+            "dL_vs_field": 0.463
+          },
+          {
+            "hex": "#21d1c3",
+            "dE_vs_field": 59.7,
+            "dL_vs_field": 0.399
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 18.2,
+        "deutan": 13.1,
+        "tritan": 7.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "forest",
+    "light": true,
+    "concept": "Bioluminescent Forest",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.14,
+          "secondary": 4.81
+        },
+        "card": {
+          "primary": 13.75,
+          "secondary": 5.03
+        },
+        "panel": {
+          "primary": 14.47,
+          "secondary": 5.3
+        },
+        "nav": {
+          "primary": 12.71,
+          "secondary": 4.65
+        },
+        "topbar": {
+          "primary": 8.29,
+          "secondary": 3.03
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.955,
+        "card": 0.974,
+        "panel": 0.991
+      },
+      "cohesion": {
+        "page": [
+          0.955,
+          0.029,
+          150.1
+        ],
+        "card": [
+          0.974,
+          0.012,
+          63.1
+        ],
+        "panel": [
+          0.991,
+          0.005,
+          72.1
+        ],
+        "nav": [
+          0.945,
+          0.036,
+          109.5
+        ],
+        "topbar": [
+          0.814,
+          0.049,
+          69.6
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 140.1,
+          "dE": 47.4
+        },
+        "primary~tertiary": {
+          "hue_gap": 137.4,
+          "dE": 55.5
+        },
+        "primary~warm": {
+          "hue_gap": 40.8,
+          "dE": 26.0
+        },
+        "secondary~tertiary": {
+          "hue_gap": 82.5,
+          "dE": 38.3
+        },
+        "secondary~warm": {
+          "hue_gap": 179.1,
+          "dE": 56.0
+        },
+        "tertiary~warm": {
+          "hue_gap": 96.6,
+          "dE": 38.2
+        }
+      },
+      "accent_min_hue_gap": 40.8,
+      "accent_min_dE": 26.0,
+      "animation": {
+        "mirage": "Voronoi",
+        "pools": [
+          {
+            "hex": "#f79f75",
+            "dE_vs_field": 27.2,
+            "dL_vs_field": -0.08
+          },
+          {
+            "hex": "#e78cfe",
+            "dE_vs_field": 51.4,
+            "dL_vs_field": -0.085
+          },
+          {
+            "hex": "#cb8836",
+            "dE_vs_field": 27.0,
+            "dL_vs_field": -0.18
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 17.9,
+        "deutan": 10.2,
+        "tritan": 14.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "forest",
+    "light": false,
+    "concept": "Bioluminescent Forest",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.96,
+          "secondary": 7.9
+        },
+        "card": {
+          "primary": 13.19,
+          "secondary": 6.15
+        },
+        "panel": {
+          "primary": 12.28,
+          "secondary": 5.72
+        },
+        "nav": {
+          "primary": 16.88,
+          "secondary": 7.87
+        },
+        "topbar": {
+          "primary": 10.15,
+          "secondary": 4.73
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.155,
+        "card": 0.274,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.155,
+          0.021,
+          108.9
+        ],
+        "card": [
+          0.274,
+          0.065,
+          50.7
+        ],
+        "panel": [
+          0.295,
+          0.067,
+          52.2
+        ],
+        "nav": [
+          0.159,
+          0.034,
+          108.8
+        ],
+        "topbar": [
+          0.348,
+          0.071,
+          52.1
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 140.7,
+          "dE": 44.7
+        },
+        "primary~tertiary": {
+          "hue_gap": 141.8,
+          "dE": 55.0
+        },
+        "primary~warm": {
+          "hue_gap": 44.8,
+          "dE": 28.7
+        },
+        "secondary~tertiary": {
+          "hue_gap": 77.5,
+          "dE": 35.2
+        },
+        "secondary~warm": {
+          "hue_gap": 174.6,
+          "dE": 57.7
+        },
+        "tertiary~warm": {
+          "hue_gap": 97.0,
+          "dE": 42.8
+        }
+      },
+      "accent_min_hue_gap": 44.8,
+      "accent_min_dE": 28.7,
+      "animation": {
+        "mirage": "Voronoi",
+        "pools": [
+          {
+            "hex": "#ff9f61",
+            "dE_vs_field": 47.5,
+            "dL_vs_field": 0.405
+          },
+          {
+            "hex": "#eb84ff",
+            "dE_vs_field": 59.6,
+            "dL_vs_field": 0.387
+          },
+          {
+            "hex": "#f7a200",
+            "dE_vs_field": 48.2,
+            "dL_vs_field": 0.395
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 16.3,
+        "deutan": 10.8,
+        "tritan": 10.9
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "terracotta",
+    "light": true,
+    "concept": "Terracotta Tide",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.07,
+          "secondary": 4.8
+        },
+        "card": {
+          "primary": 14.11,
+          "secondary": 5.18
+        },
+        "panel": {
+          "primary": 14.76,
+          "secondary": 5.42
+        },
+        "nav": {
+          "primary": 13.14,
+          "secondary": 4.82
+        },
+        "topbar": {
+          "primary": 8.29,
+          "secondary": 3.04
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.951,
+        "card": 0.975,
+        "panel": 0.99
+      },
+      "cohesion": {
+        "page": [
+          0.951,
+          0.027,
+          47.2
+        ],
+        "card": [
+          0.975,
+          0.006,
+          53.6
+        ],
+        "panel": [
+          0.99,
+          0.002,
+          77.8
+        ],
+        "nav": [
+          0.946,
+          0.038,
+          164.8
+        ],
+        "topbar": [
+          0.814,
+          0.069,
+          28.1
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 170.7,
+          "dE": 53.9
+        },
+        "primary~tertiary": {
+          "hue_gap": 50.0,
+          "dE": 30.5
+        },
+        "primary~warm": {
+          "hue_gap": 84.8,
+          "dE": 33.9
+        },
+        "secondary~tertiary": {
+          "hue_gap": 120.7,
+          "dE": 41.6
+        },
+        "secondary~warm": {
+          "hue_gap": 104.4,
+          "dE": 35.4
+        },
+        "tertiary~warm": {
+          "hue_gap": 134.9,
+          "dE": 53.9
+        }
+      },
+      "accent_min_hue_gap": 50.0,
+      "accent_min_dE": 30.5,
+      "animation": {
+        "mirage": "GrainGradient(Wave)",
+        "pools": [
+          {
+            "hex": "#fb90d5",
+            "dE_vs_field": 34.9,
+            "dL_vs_field": -0.075
+          },
+          {
+            "hex": "#3171c9",
+            "dE_vs_field": 44.4,
+            "dL_vs_field": -0.309
+          },
+          {
+            "hex": "#a07cdb",
+            "dE_vs_field": 39.7,
+            "dL_vs_field": -0.203
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 16.9,
+        "deutan": 9.1,
+        "tritan": 8.8
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "terracotta",
+    "light": false,
+    "concept": "Terracotta Tide",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.98,
+          "secondary": 7.96
+        },
+        "card": {
+          "primary": 13.32,
+          "secondary": 6.24
+        },
+        "panel": {
+          "primary": 12.4,
+          "secondary": 5.81
+        },
+        "nav": {
+          "primary": 16.72,
+          "secondary": 7.83
+        },
+        "topbar": {
+          "primary": 10.21,
+          "secondary": 4.79
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.156,
+        "card": 0.274,
+        "panel": 0.296
+      },
+      "cohesion": {
+        "page": [
+          0.156,
+          0.012,
+          90.8
+        ],
+        "card": [
+          0.274,
+          0.082,
+          29.5
+        ],
+        "panel": [
+          0.296,
+          0.081,
+          30.3
+        ],
+        "nav": [
+          0.162,
+          0.039,
+          156.7
+        ],
+        "topbar": [
+          0.348,
+          0.069,
+          28.9
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 170.3,
+          "dE": 55.1
+        },
+        "primary~tertiary": {
+          "hue_gap": 54.6,
+          "dE": 32.3
+        },
+        "primary~warm": {
+          "hue_gap": 85.3,
+          "dE": 32.1
+        },
+        "secondary~tertiary": {
+          "hue_gap": 115.7,
+          "dE": 43.2
+        },
+        "secondary~warm": {
+          "hue_gap": 104.4,
+          "dE": 37.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 140.0,
+          "dE": 54.8
+        }
+      },
+      "accent_min_hue_gap": 54.6,
+      "accent_min_dE": 32.1,
+      "animation": {
+        "mirage": "GrainGradient(Wave)",
+        "pools": [
+          {
+            "hex": "#ff86d6",
+            "dE_vs_field": 54.6,
+            "dL_vs_field": 0.405
+          },
+          {
+            "hex": "#0059ce",
+            "dE_vs_field": 37.4,
+            "dL_vs_field": 0.123
+          },
+          {
+            "hex": "#c4a4fe",
+            "dE_vs_field": 55.9,
+            "dL_vs_field": 0.407
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 18.1,
+        "deutan": 11.0,
+        "tritan": 6.8
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "arctic",
+    "light": true,
+    "concept": "Arctic Glass",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.26,
+          "secondary": 4.87
+        },
+        "card": {
+          "primary": 13.81,
+          "secondary": 5.08
+        },
+        "panel": {
+          "primary": 14.54,
+          "secondary": 5.35
+        },
+        "nav": {
+          "primary": 12.75,
+          "secondary": 4.69
+        },
+        "topbar": {
+          "primary": 8.26,
+          "secondary": 3.04
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.954,
+        "card": 0.972,
+        "panel": 0.989
+      },
+      "cohesion": {
+        "page": [
+          0.954,
+          0.03,
+          209.6
+        ],
+        "card": [
+          0.972,
+          0.007,
+          34.1
+        ],
+        "panel": [
+          0.989,
+          0.002,
+          42.0
+        ],
+        "nav": [
+          0.943,
+          0.03,
+          240.4
+        ],
+        "topbar": [
+          0.811,
+          0.033,
+          47.2
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 118.3,
+          "dE": 58.4
+        },
+        "primary~tertiary": {
+          "hue_gap": 114.7,
+          "dE": 43.5
+        },
+        "primary~warm": {
+          "hue_gap": 149.8,
+          "dE": 53.7
+        },
+        "secondary~tertiary": {
+          "hue_gap": 127.1,
+          "dE": 46.1
+        },
+        "secondary~warm": {
+          "hue_gap": 31.5,
+          "dE": 17.1
+        },
+        "tertiary~warm": {
+          "hue_gap": 95.5,
+          "dE": 37.0
+        }
+      },
+      "accent_min_hue_gap": 31.5,
+      "accent_min_dE": 17.1,
+      "animation": {
+        "mirage": "Swirl",
+        "pools": [
+          {
+            "hex": "#eaf97c",
+            "dE_vs_field": 42.0,
+            "dL_vs_field": 0.086
+          },
+          {
+            "hex": "#64c88f",
+            "dE_vs_field": 31.1,
+            "dL_vs_field": -0.103
+          },
+          {
+            "hex": "#00ab75",
+            "dE_vs_field": 34.3,
+            "dL_vs_field": -0.204
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 13.0,
+        "deutan": 14.3,
+        "tritan": 7.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "arctic",
+    "light": false,
+    "concept": "Arctic Glass",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.93,
+          "secondary": 7.88
+        },
+        "card": {
+          "primary": 13.2,
+          "secondary": 6.15
+        },
+        "panel": {
+          "primary": 12.29,
+          "secondary": 5.72
+        },
+        "nav": {
+          "primary": 16.93,
+          "secondary": 7.88
+        },
+        "topbar": {
+          "primary": 10.28,
+          "secondary": 4.79
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.157,
+        "card": 0.273,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.157,
+          0.022,
+          262.6
+        ],
+        "card": [
+          0.273,
+          0.059,
+          34.3
+        ],
+        "panel": [
+          0.295,
+          0.057,
+          34.3
+        ],
+        "nav": [
+          0.157,
+          0.051,
+          254.4
+        ],
+        "topbar": [
+          0.344,
+          0.059,
+          33.8
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 119.9,
+          "dE": 56.0
+        },
+        "primary~tertiary": {
+          "hue_gap": 114.5,
+          "dE": 40.7
+        },
+        "primary~warm": {
+          "hue_gap": 163.8,
+          "dE": 53.2
+        },
+        "secondary~tertiary": {
+          "hue_gap": 125.5,
+          "dE": 43.9
+        },
+        "secondary~warm": {
+          "hue_gap": 43.9,
+          "dE": 25.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 81.6,
+          "dE": 35.8
+        }
+      },
+      "accent_min_hue_gap": 43.9,
+      "accent_min_dE": 25.8,
+      "animation": {
+        "mirage": "Swirl",
+        "pools": [
+          {
+            "hex": "#e5ff6a",
+            "dE_vs_field": 71.2,
+            "dL_vs_field": 0.585
+          },
+          {
+            "hex": "#41ce87",
+            "dE_vs_field": 61.9,
+            "dL_vs_field": 0.391
+          },
+          {
+            "hex": "#00fdc9",
+            "dE_vs_field": 71.6,
+            "dL_vs_field": 0.517
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 8.7,
+        "deutan": 11.6,
+        "tritan": 9.9
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "solar",
+    "light": true,
+    "concept": "Solar Eclipse",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.28,
+          "secondary": 4.84
+        },
+        "card": {
+          "primary": 14.02,
+          "secondary": 5.11
+        },
+        "panel": {
+          "primary": 14.76,
+          "secondary": 5.37
+        },
+        "nav": {
+          "primary": 12.94,
+          "secondary": 4.71
+        },
+        "topbar": {
+          "primary": 8.48,
+          "secondary": 3.09
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.955,
+        "card": 0.973,
+        "panel": 0.991
+      },
+      "cohesion": {
+        "page": [
+          0.955,
+          0.029,
+          75.7
+        ],
+        "card": [
+          0.973,
+          0.007,
+          44.9
+        ],
+        "panel": [
+          0.991,
+          0.002,
+          65.7
+        ],
+        "nav": [
+          0.944,
+          0.031,
+          235.5
+        ],
+        "topbar": [
+          0.818,
+          0.067,
+          54.5
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 155.4,
+          "dE": 48.6
+        },
+        "primary~tertiary": {
+          "hue_gap": 37.1,
+          "dE": 28.5
+        },
+        "primary~warm": {
+          "hue_gap": 72.9,
+          "dE": 36.4
+        },
+        "secondary~tertiary": {
+          "hue_gap": 118.2,
+          "dE": 43.1
+        },
+        "secondary~warm": {
+          "hue_gap": 82.5,
+          "dE": 33.7
+        },
+        "tertiary~warm": {
+          "hue_gap": 35.8,
+          "dE": 14.9
+        }
+      },
+      "accent_min_hue_gap": 35.8,
+      "accent_min_dE": 14.9,
+      "animation": {
+        "mirage": "GodRays",
+        "pools": [
+          {
+            "hex": "#f7758d",
+            "dE_vs_field": 40.8,
+            "dL_vs_field": -0.139
+          },
+          {
+            "hex": "#8c73fa",
+            "dE_vs_field": 24.0,
+            "dL_vs_field": -0.215
+          },
+          {
+            "hex": "#c392bc",
+            "dE_vs_field": 29.1,
+            "dL_vs_field": -0.14
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 11.5,
+        "deutan": 20.9,
+        "tritan": 12.5
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "solar",
+    "light": false,
+    "concept": "Solar Eclipse",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.98,
+          "secondary": 7.9
+        },
+        "card": {
+          "primary": 13.14,
+          "secondary": 6.12
+        },
+        "panel": {
+          "primary": 12.23,
+          "secondary": 5.7
+        },
+        "nav": {
+          "primary": 16.86,
+          "secondary": 7.85
+        },
+        "topbar": {
+          "primary": 10.18,
+          "secondary": 4.74
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.155,
+        "card": 0.274,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.155,
+          0.01,
+          310.0
+        ],
+        "card": [
+          0.274,
+          0.053,
+          39.8
+        ],
+        "panel": [
+          0.295,
+          0.051,
+          39.9
+        ],
+        "nav": [
+          0.159,
+          0.048,
+          251.9
+        ],
+        "topbar": [
+          0.347,
+          0.067,
+          42.3
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 154.9,
+          "dE": 46.8
+        },
+        "primary~tertiary": {
+          "hue_gap": 37.7,
+          "dE": 24.2
+        },
+        "primary~warm": {
+          "hue_gap": 71.2,
+          "dE": 30.8
+        },
+        "secondary~tertiary": {
+          "hue_gap": 117.2,
+          "dE": 34.1
+        },
+        "secondary~warm": {
+          "hue_gap": 83.8,
+          "dE": 32.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 33.4,
+          "dE": 15.8
+        }
+      },
+      "accent_min_hue_gap": 33.4,
+      "accent_min_dE": 15.8,
+      "animation": {
+        "mirage": "GodRays",
+        "pools": [
+          {
+            "hex": "#ff6179",
+            "dE_vs_field": 41.0,
+            "dL_vs_field": 0.332
+          },
+          {
+            "hex": "#7b5fff",
+            "dE_vs_field": 36.4,
+            "dL_vs_field": 0.233
+          },
+          {
+            "hex": "#c095b8",
+            "dE_vs_field": 41.1,
+            "dL_vs_field": 0.351
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 13.7,
+        "deutan": 17.1,
+        "tritan": 13.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "jade",
+    "light": true,
+    "concept": "Jade Noir",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.23,
+          "secondary": 4.87
+        },
+        "card": {
+          "primary": 13.77,
+          "secondary": 5.07
+        },
+        "panel": {
+          "primary": 14.53,
+          "secondary": 5.35
+        },
+        "nav": {
+          "primary": 12.79,
+          "secondary": 4.71
+        },
+        "topbar": {
+          "primary": 8.21,
+          "secondary": 3.02
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.955,
+        "card": 0.973,
+        "panel": 0.991
+      },
+      "cohesion": {
+        "page": [
+          0.955,
+          0.03,
+          164.3
+        ],
+        "card": [
+          0.973,
+          0.006,
+          8.8
+        ],
+        "panel": [
+          0.991,
+          0.001,
+          33.9
+        ],
+        "nav": [
+          0.945,
+          0.036,
+          221.7
+        ],
+        "topbar": [
+          0.812,
+          0.036,
+          30.8
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 130.5,
+          "dE": 44.3
+        },
+        "primary~tertiary": {
+          "hue_gap": 66.3,
+          "dE": 38.3
+        },
+        "primary~warm": {
+          "hue_gap": 98.2,
+          "dE": 37.6
+        },
+        "secondary~tertiary": {
+          "hue_gap": 163.1,
+          "dE": 52.1
+        },
+        "secondary~warm": {
+          "hue_gap": 32.4,
+          "dE": 18.2
+        },
+        "tertiary~warm": {
+          "hue_gap": 164.5,
+          "dE": 57.7
+        }
+      },
+      "accent_min_hue_gap": 32.4,
+      "accent_min_dE": 18.2,
+      "animation": {
+        "mirage": "SmokeRing",
+        "pools": [
+          {
+            "hex": "#fb97e0",
+            "dE_vs_field": 30.8,
+            "dL_vs_field": -0.06
+          },
+          {
+            "hex": "#738cfa",
+            "dE_vs_field": 22.9,
+            "dL_vs_field": -0.191
+          },
+          {
+            "hex": "#a297ff",
+            "dE_vs_field": 19.6,
+            "dL_vs_field": -0.133
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 9.2,
+        "deutan": 11.1,
+        "tritan": 12.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "jade",
+    "light": false,
+    "concept": "Jade Noir",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.83,
+          "secondary": 7.9
+        },
+        "card": {
+          "primary": 13.29,
+          "secondary": 6.24
+        },
+        "panel": {
+          "primary": 12.38,
+          "secondary": 5.81
+        },
+        "nav": {
+          "primary": 16.7,
+          "secondary": 7.84
+        },
+        "topbar": {
+          "primary": 10.25,
+          "secondary": 4.81
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.159,
+        "card": 0.275,
+        "panel": 0.297
+      },
+      "cohesion": {
+        "page": [
+          0.159,
+          0.012,
+          227.2
+        ],
+        "card": [
+          0.275,
+          0.081,
+          16.2
+        ],
+        "panel": [
+          0.297,
+          0.079,
+          15.5
+        ],
+        "nav": [
+          0.164,
+          0.037,
+          239.0
+        ],
+        "topbar": [
+          0.346,
+          0.06,
+          14.1
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 129.7,
+          "dE": 43.9
+        },
+        "primary~tertiary": {
+          "hue_gap": 70.3,
+          "dE": 40.3
+        },
+        "primary~warm": {
+          "hue_gap": 97.5,
+          "dE": 31.7
+        },
+        "secondary~tertiary": {
+          "hue_gap": 160.0,
+          "dE": 52.4
+        },
+        "secondary~warm": {
+          "hue_gap": 32.1,
+          "dE": 19.2
+        },
+        "tertiary~warm": {
+          "hue_gap": 167.9,
+          "dE": 48.0
+        }
+      },
+      "accent_min_hue_gap": 32.1,
+      "accent_min_dE": 19.2,
+      "animation": {
+        "mirage": "SmokeRing",
+        "pools": [
+          {
+            "hex": "#ff8de5",
+            "dE_vs_field": 50.6,
+            "dL_vs_field": 0.42
+          },
+          {
+            "hex": "#5f85ff",
+            "dE_vs_field": 38.8,
+            "dL_vs_field": 0.276
+          },
+          {
+            "hex": "#c6c3f8",
+            "dE_vs_field": 53.4,
+            "dL_vs_field": 0.464
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 9.5,
+        "deutan": 12.6,
+        "tritan": 9.9
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "mintcoral",
+    "light": true,
+    "concept": "Mint & Coral Editorial",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.16,
+          "secondary": 4.84
+        },
+        "card": {
+          "primary": 14.19,
+          "secondary": 5.22
+        },
+        "panel": {
+          "primary": 14.87,
+          "secondary": 5.47
+        },
+        "nav": {
+          "primary": 13.22,
+          "secondary": 4.86
+        },
+        "topbar": {
+          "primary": 8.34,
+          "secondary": 3.07
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.952,
+        "card": 0.975,
+        "panel": 0.991
+      },
+      "cohesion": {
+        "page": [
+          0.952,
+          0.024,
+          17.6
+        ],
+        "card": [
+          0.975,
+          0.005,
+          37.5
+        ],
+        "panel": [
+          0.991,
+          0.001,
+          62.1
+        ],
+        "nav": [
+          0.946,
+          0.037,
+          168.1
+        ],
+        "topbar": [
+          0.814,
+          0.069,
+          12.7
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 152.0,
+          "dE": 65.6
+        },
+        "primary~tertiary": {
+          "hue_gap": 77.0,
+          "dE": 43.5
+        },
+        "primary~warm": {
+          "hue_gap": 138.7,
+          "dE": 55.8
+        },
+        "secondary~tertiary": {
+          "hue_gap": 75.0,
+          "dE": 33.5
+        },
+        "secondary~warm": {
+          "hue_gap": 69.3,
+          "dE": 37.0
+        },
+        "tertiary~warm": {
+          "hue_gap": 144.3,
+          "dE": 58.4
+        }
+      },
+      "accent_min_hue_gap": 69.3,
+      "accent_min_dE": 33.5,
+      "animation": {
+        "mirage": "ColorPanels",
+        "pools": [
+          {
+            "hex": "#de96fa",
+            "dE_vs_field": 35.7,
+            "dL_vs_field": -0.083
+          },
+          {
+            "hex": "#52cab8",
+            "dE_vs_field": 12.4,
+            "dL_vs_field": -0.096
+          },
+          {
+            "hex": "#00cdff",
+            "dE_vs_field": 24.9,
+            "dL_vs_field": -0.075
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 16.4,
+        "deutan": 9.7,
+        "tritan": 13.1
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "mintcoral",
+    "light": false,
+    "concept": "Mint & Coral Editorial",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.96,
+          "secondary": 7.95
+        },
+        "card": {
+          "primary": 13.31,
+          "secondary": 6.24
+        },
+        "panel": {
+          "primary": 12.39,
+          "secondary": 5.81
+        },
+        "nav": {
+          "primary": 16.68,
+          "secondary": 7.82
+        },
+        "topbar": {
+          "primary": 10.22,
+          "secondary": 4.79
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.156,
+        "card": 0.275,
+        "panel": 0.297
+      },
+      "cohesion": {
+        "page": [
+          0.156,
+          0.008,
+          66.6
+        ],
+        "card": [
+          0.275,
+          0.08,
+          18.1
+        ],
+        "panel": [
+          0.297,
+          0.078,
+          18.9
+        ],
+        "nav": [
+          0.163,
+          0.036,
+          160.8
+        ],
+        "topbar": [
+          0.348,
+          0.069,
+          16.8
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 154.8,
+          "dE": 65.5
+        },
+        "primary~tertiary": {
+          "hue_gap": 80.0,
+          "dE": 44.9
+        },
+        "primary~warm": {
+          "hue_gap": 109.5,
+          "dE": 33.9
+        },
+        "secondary~tertiary": {
+          "hue_gap": 74.8,
+          "dE": 34.6
+        },
+        "secondary~warm": {
+          "hue_gap": 95.8,
+          "dE": 32.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 170.5,
+          "dE": 45.0
+        }
+      },
+      "accent_min_hue_gap": 74.8,
+      "accent_min_dE": 32.8,
+      "animation": {
+        "mirage": "ColorPanels",
+        "pools": [
+          {
+            "hex": "#f78cff",
+            "dE_vs_field": 55.0,
+            "dL_vs_field": 0.42
+          },
+          {
+            "hex": "#04b6cf",
+            "dE_vs_field": 49.4,
+            "dL_vs_field": 0.338
+          },
+          {
+            "hex": "#b6cbf2",
+            "dE_vs_field": 55.5,
+            "dL_vs_field": 0.465
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 13.3,
+        "deutan": 9.5,
+        "tritan": 11.5
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "moonstone",
+    "light": true,
+    "concept": "Moonstone",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.2,
+          "secondary": 4.83
+        },
+        "card": {
+          "primary": 13.99,
+          "secondary": 5.12
+        },
+        "panel": {
+          "primary": 14.76,
+          "secondary": 5.41
+        },
+        "nav": {
+          "primary": 12.87,
+          "secondary": 4.71
+        },
+        "topbar": {
+          "primary": 8.68,
+          "secondary": 3.18
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.955,
+        "card": 0.972,
+        "panel": 0.99
+      },
+      "cohesion": {
+        "page": [
+          0.955,
+          0.03,
+          320.9
+        ],
+        "card": [
+          0.972,
+          0.016,
+          83.8
+        ],
+        "panel": [
+          0.99,
+          0.006,
+          90.3
+        ],
+        "nav": [
+          0.943,
+          0.028,
+          250.9
+        ],
+        "topbar": [
+          0.822,
+          0.035,
+          54.2
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 176.1,
+          "dE": 54.1
+        },
+        "primary~tertiary": {
+          "hue_gap": 61.0,
+          "dE": 35.1
+        },
+        "primary~warm": {
+          "hue_gap": 79.0,
+          "dE": 37.8
+        },
+        "secondary~tertiary": {
+          "hue_gap": 115.1,
+          "dE": 38.3
+        },
+        "secondary~warm": {
+          "hue_gap": 104.9,
+          "dE": 44.9
+        },
+        "tertiary~warm": {
+          "hue_gap": 140.0,
+          "dE": 64.9
+        }
+      },
+      "accent_min_hue_gap": 61.0,
+      "accent_min_dE": 35.1,
+      "animation": {
+        "mirage": "PerlinNoise",
+        "pools": [
+          {
+            "hex": "#9adb55",
+            "dE_vs_field": 42.4,
+            "dL_vs_field": -0.039
+          },
+          {
+            "hex": "#8ce4fe",
+            "dE_vs_field": 13.7,
+            "dL_vs_field": 0.012
+          },
+          {
+            "hex": "#23ac74",
+            "dE_vs_field": 35.1,
+            "dL_vs_field": -0.199
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 16.0,
+        "deutan": 6.3,
+        "tritan": 8.2
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "moonstone",
+    "light": false,
+    "concept": "Moonstone",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.98,
+          "secondary": 7.89
+        },
+        "card": {
+          "primary": 12.92,
+          "secondary": 6.01
+        },
+        "panel": {
+          "primary": 12.02,
+          "secondary": 5.59
+        },
+        "nav": {
+          "primary": 16.92,
+          "secondary": 7.87
+        },
+        "topbar": {
+          "primary": 9.93,
+          "secondary": 4.62
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.154,
+        "card": 0.273,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.154,
+          0.02,
+          291.5
+        ],
+        "card": [
+          0.273,
+          0.033,
+          86.7
+        ],
+        "panel": [
+          0.295,
+          0.032,
+          86.7
+        ],
+        "nav": [
+          0.157,
+          0.052,
+          260.0
+        ],
+        "topbar": [
+          0.347,
+          0.046,
+          81.0
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 179.0,
+          "dE": 54.4
+        },
+        "primary~tertiary": {
+          "hue_gap": 65.1,
+          "dE": 38.3
+        },
+        "primary~warm": {
+          "hue_gap": 90.1,
+          "dE": 42.3
+        },
+        "secondary~tertiary": {
+          "hue_gap": 115.8,
+          "dE": 38.6
+        },
+        "secondary~warm": {
+          "hue_gap": 89.0,
+          "dE": 39.9
+        },
+        "tertiary~warm": {
+          "hue_gap": 155.2,
+          "dE": 66.7
+        }
+      },
+      "accent_min_hue_gap": 65.1,
+      "accent_min_dE": 38.3,
+      "animation": {
+        "mirage": "PerlinNoise",
+        "pools": [
+          {
+            "hex": "#74e328",
+            "dE_vs_field": 58.2,
+            "dL_vs_field": 0.446
+          },
+          {
+            "hex": "#84daff",
+            "dE_vs_field": 59.6,
+            "dL_vs_field": 0.476
+          },
+          {
+            "hex": "#00f1c6",
+            "dE_vs_field": 60.0,
+            "dL_vs_field": 0.483
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 19.1,
+        "deutan": 15.1,
+        "tritan": 7.6
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "system",
+    "light": true,
+    "concept": "System (achromatic)",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 13.11,
+          "secondary": 4.79
+        },
+        "card": {
+          "primary": 13.88,
+          "secondary": 5.07
+        },
+        "panel": {
+          "primary": 14.57,
+          "secondary": 5.32
+        },
+        "nav": {
+          "primary": 12.64,
+          "secondary": 4.62
+        },
+        "topbar": {
+          "primary": 8.55,
+          "secondary": 3.12
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.953,
+        "card": 0.974,
+        "panel": 0.99
+      },
+      "cohesion": {
+        "page": [
+          0.953,
+          0.024,
+          242.3
+        ],
+        "card": [
+          0.974,
+          0.011,
+          270.8
+        ],
+        "panel": [
+          0.99,
+          0.004,
+          277.1
+        ],
+        "nav": [
+          0.945,
+          0.034,
+          311.9
+        ],
+        "topbar": [
+          0.818,
+          0.071,
+          251.7
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 106.2,
+          "dE": 42.6
+        },
+        "primary~tertiary": {
+          "hue_gap": 140.2,
+          "dE": 44.9
+        },
+        "primary~warm": {
+          "hue_gap": 62.8,
+          "dE": 28.4
+        },
+        "secondary~tertiary": {
+          "hue_gap": 113.7,
+          "dE": 48.1
+        },
+        "secondary~warm": {
+          "hue_gap": 169.0,
+          "dE": 36.2
+        },
+        "tertiary~warm": {
+          "hue_gap": 77.3,
+          "dE": 32.5
+        }
+      },
+      "accent_min_hue_gap": 62.8,
+      "accent_min_dE": 28.4,
+      "animation": {
+        "mirage": "Metaballs",
+        "pools": [
+          {
+            "hex": "#82d5ff",
+            "dE_vs_field": 30.4,
+            "dL_vs_field": -0.026
+          },
+          {
+            "hex": "#64c8ad",
+            "dE_vs_field": 35.0,
+            "dL_vs_field": -0.098
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 12.4,
+        "deutan": 12.7,
+        "tritan": 12.5
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  },
+  {
+    "id": "system",
+    "light": false,
+    "concept": "System (achromatic)",
+    "report": {
+      "contrast": {
+        "page": {
+          "primary": 16.82,
+          "secondary": 7.8
+        },
+        "card": {
+          "primary": 12.91,
+          "secondary": 5.98
+        },
+        "panel": {
+          "primary": 12.0,
+          "secondary": 5.56
+        },
+        "nav": {
+          "primary": 16.92,
+          "secondary": 7.84
+        },
+        "topbar": {
+          "primary": 9.78,
+          "secondary": 4.53
+        }
+      },
+      "hierarchy_L": {
+        "page": 0.157,
+        "card": 0.273,
+        "panel": 0.295
+      },
+      "cohesion": {
+        "page": [
+          0.157,
+          0.034,
+          283.9
+        ],
+        "card": [
+          0.273,
+          0.07,
+          258.8
+        ],
+        "panel": [
+          0.295,
+          0.07,
+          259.8
+        ],
+        "nav": [
+          0.157,
+          0.052,
+          308.9
+        ],
+        "topbar": [
+          0.35,
+          0.083,
+          256.7
+        ]
+      },
+      "accents": {
+        "primary~secondary": {
+          "hue_gap": 104.7,
+          "dE": 39.8
+        },
+        "primary~tertiary": {
+          "hue_gap": 143.6,
+          "dE": 44.5
+        },
+        "primary~warm": {
+          "hue_gap": 66.9,
+          "dE": 28.6
+        },
+        "secondary~tertiary": {
+          "hue_gap": 111.7,
+          "dE": 46.7
+        },
+        "secondary~warm": {
+          "hue_gap": 171.7,
+          "dE": 35.8
+        },
+        "tertiary~warm": {
+          "hue_gap": 76.7,
+          "dE": 28.9
+        }
+      },
+      "accent_min_hue_gap": 66.9,
+      "accent_min_dE": 28.6,
+      "animation": {
+        "mirage": "Metaballs",
+        "pools": [
+          {
+            "hex": "#79d5ff",
+            "dE_vs_field": 55.5,
+            "dL_vs_field": 0.453
+          },
+          {
+            "hex": "#41ceac",
+            "dE_vs_field": 57.9,
+            "dL_vs_field": 0.39
+          }
+        ]
+      },
+      "cvd": {
+        "protan": 11.1,
+        "deutan": 10.9,
+        "tritan": 11.0
+      },
+      "issues": [],
+      "ok": true
+    },
+    "suggestions": []
+  }
+]

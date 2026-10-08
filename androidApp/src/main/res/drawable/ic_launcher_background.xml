@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The plate the mark sits on: paper, not brand colour. The source artwork puts
+  the gradient ink on a near-white field, and keeping that here is what stops the
+  icon reading as "another dark app tile" on a launcher page.
+
+  Two passes: a cool paper wash top-left to bottom-right, then one very low-alpha
+  teal pool in the bottom-left corner — the same "field plus pools" atmosphere the
+  app's own surfaces use, at icon scale.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0" android:color="#FFFDFDFC" />
+                <item android:offset="1" android:color="#FFE3EAE9" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="14"
+                android:centerY="104"
+                android:gradientRadius="86">
+                <item android:offset="0" android:color="#2627378E" />
+                <item android:offset="1" android:color="#0027378E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

@@ -1,0 +1,254 @@
+package com.folio.reader.ui.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.folio.reader.security.SyncCredentials
+import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.FolioRule
+import com.folio.reader.ui.theme.FolioTokens
+
+@Composable
+fun CloudSyncSettingsPanel(
+    settings: ReaderSettings,
+    syncState: com.folio.reader.sync.SyncState,
+    onSettingsChange: (ReaderSettings) -> Unit,
+    onSyncNow: () -> Unit,
+    // Credentials live in the no-backup SecureCredentialStore, not in the backed-up settings blob,
+    // so they are supplied and saved separately from the rest of the sync preferences.
+    credentials: SyncCredentials = SyncCredentials(),
+    onCredentialsChange: (SyncCredentials) -> Unit = {}
+) {
+    var apiKey by remember(credentials.firebaseApiKey) { mutableStateOf(credentials.firebaseApiKey) }
+    var projectId by remember(credentials.firebaseProjectId) { mutableStateOf(credentials.firebaseProjectId) }
+    var accountEmail by remember(credentials.syncAccountEmail) { mutableStateOf(credentials.syncAccountEmail) }
+    var accountPassword by remember(credentials.syncAccountPassword) { mutableStateOf(credentials.syncAccountPassword) }
+    val isConnected = credentials.firebaseApiKey.isNotBlank() && credentials.firebaseProjectId.isNotBlank()
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
+    ) {
+        // Real-time sync status card
+        com.folio.reader.ui.components.SyncStatusCard(
+            syncState = syncState,
+            isConnected = isConnected,
+            onSyncNow = onSyncNow
+        )
+
+        // No inner surface: the category scaffold already wraps this whole panel in a
+        // single glass veil. A folioPanel here stacked an opaque, hard-rimmed slab inside
+        // that glass — the "box within the glass" that also made Cloud Sync read opaque.
+        // The form groups itself on the veil directly; a FolioRule separates it from the
+        // status card above.
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Icon(
+                        imageVector = if (isConnected) androidx.compose.material.icons.Icons.Filled.CheckCircle
+                        else androidx.compose.material.icons.Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            if (isConnected) "Cloud sync is active" else "Cloud sync is off",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            if (isConnected)
+                                "Syncing via project \"${credentials.firebaseProjectId}\""
+                            else
+                                "Connect your Firebase account to sync books, progress and annotations across devices.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = projectId,
+                    onValueChange = { projectId = it },
+                    label = { Text("Firebase Project ID") },
+                    placeholder = { Text("my-folio-project") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("Firebase Web API Key") },
+                    placeholder = { Text("AIza...") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = accountEmail,
+                    onValueChange = { accountEmail = it },
+                    label = { Text("Sync Account Email (Optional)") },
+                    placeholder = { Text("Same email on all devices to link sync") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = accountPassword,
+                    onValueChange = { accountPassword = it },
+                    label = { Text("Sync Account Password (Optional)") },
+                    placeholder = { Text("Same password across devices") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            // Credentials go to the no-backup store; only the enable flag lands in settings.
+                            onCredentialsChange(
+                                SyncCredentials(
+                                    firebaseApiKey = apiKey.trim(),
+                                    firebaseProjectId = projectId.trim(),
+                                    syncAccountEmail = accountEmail.trim(),
+                                    syncAccountPassword = accountPassword.trim()
+                                )
+                            )
+                            onSettingsChange(
+                                settings.copy(
+                                    cloudSyncEnabled = true // Enable cloud sync when credentials saved
+                                )
+                            )
+                        },
+                        enabled = apiKey.isNotBlank() && projectId.isNotBlank() &&
+                                (apiKey != credentials.firebaseApiKey || projectId != credentials.firebaseProjectId ||
+                                        accountEmail != credentials.syncAccountEmail || accountPassword != credentials.syncAccountPassword)
+                    ) {
+                        Text("Save")
+                    }
+                    if (isConnected) {
+                        OutlinedButton(onClick = {
+                            apiKey = ""
+                            projectId = ""
+                            accountEmail = ""
+                            accountPassword = ""
+                            // Clear the credentials in the no-backup store; keep the flag in settings.
+                            onCredentialsChange(SyncCredentials())
+                            onSettingsChange(
+                                settings.copy(
+                                    cloudSyncEnabled = false
+                                )
+                            )
+                        }) {
+                            Text("Disconnect")
+                        }
+                    }
+                }
+
+                // Cloud sync opt-in toggle and granular controls
+                if (isConnected) {
+                    FolioRule(modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Sync Preferences", style = MaterialTheme.typography.titleSmall)
+
+                    // Master cloud sync toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Enable cloud sync", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Sync your data across devices",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = settings.cloudSyncEnabled,
+                            onCheckedChange = { onSettingsChange(settings.copy(cloudSyncEnabled = it)) }
+                        )
+                    }
+
+                    // Granular sync options (only shown when cloud sync enabled)
+                    if (settings.cloudSyncEnabled) {
+                        Spacer(Modifier.height(8.dp))
+
+                        SyncToggleRow(
+                            label = "Reading progress",
+                            description = "Sync position across sessions & devices",
+                            checked = settings.syncPositions,
+                            onCheckedChange = { onSettingsChange(settings.copy(syncPositions = it)) }
+                        )
+                        SyncToggleRow(
+                            label = "Annotations",
+                            description = "Highlights, notes & bookmarks",
+                            checked = settings.syncAnnotations,
+                            onCheckedChange = { onSettingsChange(settings.copy(syncAnnotations = it)) }
+                        )
+                        SyncToggleRow(
+                            label = "Reading settings",
+                            description = "Typography & appearance preferences",
+                            checked = settings.syncSettings,
+                            onCheckedChange = { onSettingsChange(settings.copy(syncSettings = it)) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+@Composable
+private fun SyncToggleRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}

@@ -1,0 +1,156 @@
+[versions]
+kotlin = "2.1.20"
+agp = "8.5.0"
+composeMultiplatform = "1.7.3"
+koin = "4.0.0"
+ktor = "3.0.3"
+serialization = "1.7.3"
+coroutines = "1.9.0"
+datetime = "0.6.1"
+okio = "3.9.1"
+coil = "2.7.0"
+junit = "5.11.0"
+lifecycle = "2.8.6"
+slf4j = "2.0.13"
+sqliteJdbc = "3.46.1.0"
+jcef = "jcef-1770317+cef-132.3.1+g144febe+chromium-132.0.6834.83"
+jcefmaven = "132.3.1"
+xmlpull = "1.1.3.1"
+kxml2 = "2.3.0"
+# Kotlin 2.1 can read 5.3.0's Kotlin 2.2 metadata; it provides CompressionInterceptor
+# and the brotli/zstd modules extensions reference. 5.4.0+ demand compileSdk 36+.
+okhttp = "5.3.0"
+quickjs = "547f5b1597"
+jsoup = "1.23.2"
+rxjava1 = "1.3.8"
+injekt = "91edab2317"
+preference = "1.2.1"
+pdfbox = "3.0.3"
+skiko = "0.8.18"
+# §16 liquid glass: newest Haze whose metadata declares Compose Multiplatform 1.7.3
+# exactly (verified in its .module). 1.3+ targets Compose 1.8; do not bump past the
+# pinned Compose version to accommodate it (FOLIO_DEPENDENCY_PLAN §14.1).
+haze = "1.2.2"
+# Mirage — Androidpoet's AGSL shader-field library (29 animated shader kinds) used by the
+# per-theme animated background (MeshField.android.kt). Android-only; its published metadata
+# imports Compose BOM 2025.01.01 (androidx.compose 1.7.6), compatible with the pinned
+# Compose Multiplatform 1.7.3. On Maven Central as io.github.androidpoet:mirage.
+mirage = "0.1.0"
+# ONNX Runtime for on-device embedding inference. 1.20.0 is the last line verified
+# against this project's minSdk 24 / compileSdk 34 combination, and its Java API already
+# exposes addXnnpack/addNnapi, which Phase 0a needs to compare execution providers.
+onnxruntime = "1.20.0"
+# Desktop-only, test-only: the reference Rust tokenizers, used by TokenizerParityTest to
+# prove the hand-rolled WordPiece implementation has not drifted. It ships no Android
+# natives (ai.djl.android:tokenizer-native is stranded at 0.33.0), which is exactly why
+# the shipped tokenizer is hand-rolled instead.
+djlTokenizers = "0.38.0"
+# ML Kit — Phase 6 (OCR + translation). Android-only, no desktop equivalent, which is why
+# every entry point is `expect`/`actual` with a desktop no-op. Text recognition is split into
+# per-script modules on purpose: each one carries its own model, so bundling all five would
+# add tens of MB to an APK for scripts a given reader never opens. Latin is the default;
+# the others are opt-in downloads.
+mlkitTextRecognition = "16.0.1"
+mlkitTextRecognitionChinese = "16.0.1"
+mlkitTextRecognitionDevanagari = "16.0.1"
+mlkitTextRecognitionJapanese = "16.0.1"
+mlkitTextRecognitionKorean = "16.0.1"
+mlkitTranslate = "17.0.3"
+
+[libraries]
+# Kotlin
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+kotlinx-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-serialization-protobuf", version.ref = "serialization" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
+
+# SQLite
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+jcefmaven = { module = "me.friwi:jcefmaven", version.ref = "jcefmaven" }
+jcef-natives-windows-amd64 = { module = "me.friwi:jcef-natives-windows-amd64", version.ref = "jcef" }
+xmlpull = { module = "xmlpull:xmlpull", version.ref = "xmlpull" }
+kxml2 = { module = "net.sf.kxml:kxml2", version.ref = "kxml2" }
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+skiko-awt-runtime-windows-x64 = { module = "org.jetbrains.skiko:skiko-awt-runtime-windows-x64", version.ref = "skiko" }
+
+# §16 liquid glass — the blur seam (FOLIO_DEPENDENCY_PLAN §14.3: one import, one owner)
+haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
+
+# Mirage AGSL shader fields (Android-only animated background kinds).
+mirage = { module = "io.github.androidpoet:mirage", version.ref = "mirage" }
+
+# On-device ML: embedding inference (desktop + Android artifacts are NOT interchangeable)
+onnxruntime = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+djl-tokenizers = { module = "ai.djl.huggingface:tokenizers", version.ref = "djlTokenizers" }
+
+# On-device ML: OCR + translation (Phase 6). Android-only — see the desktop decision in
+# shared/src/desktopMain/.../ml/OnDeviceTextTools.desktop.kt.
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
+mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextRecognitionChinese" }
+mlkit-text-recognition-devanagari = { module = "com.google.mlkit:text-recognition-devanagari", version.ref = "mlkitTextRecognitionDevanagari" }
+mlkit-text-recognition-japanese = { module = "com.google.mlkit:text-recognition-japanese", version.ref = "mlkitTextRecognitionJapanese" }
+mlkit-text-recognition-korean = { module = "com.google.mlkit:text-recognition-korean", version.ref = "mlkitTextRecognitionKorean" }
+mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkitTranslate" }
+
+# Mihon manga backend (extension runtime + source engine)
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-dnsoverhttps = { module = "com.squareup.okhttp3:okhttp-dnsoverhttps", version.ref = "okhttp" }
+okhttp-brotli = { module = "com.squareup.okhttp3:okhttp-brotli", version.ref = "okhttp" }
+okhttp-zstd = { module = "com.squareup.okhttp3:okhttp-zstd", version.ref = "okhttp" }
+quickjs = { module = "com.github.zhanghai.quickjs-java:quickjs-android", version.ref = "quickjs" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+rxjava1 = { module = "io.reactivex:rxjava", version.ref = "rxjava1" }
+injekt = { module = "com.github.mihonapp:injekt", version.ref = "injekt" }
+androidx-preference = { module = "androidx.preference:preference-ktx", version.ref = "preference" }
+androidx-webkit = { module = "androidx.webkit:webkit", version = "1.11.0" }
+
+# Ktor
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-android = { module = "io.ktor:ktor-client-android", version.ref = "ktor" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-serialization-kotlinx = { module = "io.ktor:ktor-serialization-kotlinx", version.ref = "ktor" }
+ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
+
+# Coil
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+
+# AndroidX
+androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel = { module = "androidx.lifecycle:lifecycle-viewmodel", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-activity = { module = "androidx.activity:activity-ktx", version = "1.9.2" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version = "1.9.2" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.13.1" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version = "2.8.2" }
+
+# Compose Multiplatform (org.jetbrains.compose)
+compose-multiplatform-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
+compose-multiplatform-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
+compose-multiplatform-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
+compose-multiplatform-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "composeMultiplatform" }
+compose-multiplatform-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "composeMultiplatform" }
+compose-multiplatform-desktop = { module = "org.jetbrains.compose.desktop:desktop", version.ref = "composeMultiplatform" }
+
+# Logging
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+
+# Testing
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+kotlin-test-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlin" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+
+[plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }

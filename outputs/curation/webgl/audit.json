@@ -1,0 +1,200 @@
+{
+ "keys": [
+  "backgroundBase",
+  "surface",
+  "primaryAccent",
+  "secondaryAccent",
+  "tertiaryAccent",
+  "warmAccent"
+ ],
+ "gates": {
+  "T6": {
+   "definition": "T6/v1 sorted pairwise hue-distance multiset, mean abs difference",
+   "normalisation": "0-100, 100 = identical multiset",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 70.0
+  },
+  "S": {
+   "definition": "S/v1 dominant dark chromatic axis inside the family's anchor band",
+   "normalisation": "0-100, -3 per degree outside the band",
+   "population": "7 anchored families (mintcoral and nebula are anchor-free)",
+   "threshold": 60.0
+  },
+  "W6": {
+   "definition": "W6/v2 per-pair warm/cool ORDERING, chroma-weighted, positional",
+   "normalisation": "0-100 = fraction of the 15 pairs agreeing",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 40.0
+  },
+  "A": {
+   "definition": "A/v2 covariance anisotropy 100*(l1-l2)/(l1+l2) in the Oklab ab plane",
+   "normalisation": "0-100, rotation-invariant by construction",
+   "population": "9 families, both faces averaged",
+   "threshold": 30.0
+  },
+  "C": {
+   "definition": "C/v2 rank-normalised chroma hierarchy shape, mean abs difference x 90",
+   "normalisation": "0-100, 100 = identical shape",
+   "population": "9 families x {light,dark}, six authored keys",
+   "threshold": 40.0
+  },
+  "E": {
+   "definition": "E/v1 energy RANK among the nine families, -14 per rank step",
+   "normalisation": "0-100",
+   "population": "9 families, ranked on mean chroma",
+   "threshold": 60.0
+  }
+ },
+ "weights": {
+  "T": 0.3,
+  "S": 0.25,
+  "W": 0.2,
+  "A": 0.15,
+  "C": 0.1
+ },
+ "canonical_topology_module": "D:\\projects\\Folio\\outputs\\curation\\topology.py",
+ "nebula_contract": {
+  "id": "nebula-x/v1-reconstructed",
+  "tolerances_recovered": false,
+  "notes": "Frozen literal tolerances did not survive the wipe. Seeded from the role/hue facts in the spec's section 7 and the authored dark vocabulary.",
+  "signature_pair": [
+   "primaryAccent",
+   "warmAccent",
+   4.55,
+   12.0
+  ],
+  "forbidden": {
+   "primaryAccent": [
+    122.0,
+    12.0
+   ],
+   "secondaryAccent": [
+    226.0,
+    12.0
+   ]
+  },
+  "vocabulary": [
+   300.0,
+   20.0
+  ]
+ },
+ "regression_set": [
+  "ocean",
+  "terracotta",
+  "arctic",
+  "solar",
+  "jade",
+  "mintcoral"
+ ],
+ "regression_ok": true,
+ "faces": {
+  "ocean": {
+   "I": 62.15824008438262,
+   "T6": 80.96353115134247,
+   "S": 61.45504640679752,
+   "W6": 53.333333333333336,
+   "A": 39.72789890650598,
+   "C": 41.427864730584105,
+   "E": 72.0,
+   "X": 2.0031892421466324,
+   "anchor": "teal MIGRATED (dark axis 223 deg)",
+   "gate": "PASS"
+  },
+  "forest": {
+   "I": 78.50093804634798,
+   "T6": 90.44750839873134,
+   "S": 100.0,
+   "W6": 53.333333333333336,
+   "A": 54.72623255404955,
+   "C": 86.38308338074718,
+   "E": 72.0,
+   "X": 99.80491169028825,
+   "anchor": "green held (dark axis 133 deg)",
+   "gate": "PASS"
+  },
+  "terracotta": {
+   "I": 82.9777318209216,
+   "T6": 81.27895677012646,
+   "S": 100.0,
+   "W6": 100.0,
+   "A": 47.8999859484114,
+   "C": 58.75705454255178,
+   "E": 86.0,
+   "X": 99.96473173078392,
+   "anchor": "earth held (dark axis 62 deg)",
+   "gate": "PASS"
+  },
+  "arctic": {
+   "I": 79.00112445762363,
+   "T6": 90.44793736036412,
+   "S": 100.0,
+   "W6": 53.333333333333336,
+   "A": 51.557550535396985,
+   "C": 72.31348318589414,
+   "E": 86.0,
+   "X": 76.20227371936313,
+   "anchor": "cool held (dark axis 185 deg)",
+   "gate": "PASS"
+  },
+  "solar": {
+   "I": 80.49337301921258,
+   "T6": 80.33518107323154,
+   "S": 80.04784590161347,
+   "W6": 100.0,
+   "A": 56.97046928610459,
+   "C": 43.92940891138057,
+   "E": 100.0,
+   "X": 76.61271216308309,
+   "anchor": "warm MIGRATED (dark axis 343 deg)",
+   "gate": "PASS"
+  },
+  "jade": {
+   "I": 71.02124093161939,
+   "T6": 88.93136213109011,
+   "S": 90.93627670599918,
+   "W6": 40.0,
+   "A": 34.233626944394686,
+   "C": 58.294086503014746,
+   "E": 86.0,
+   "X": 83.53769914993154,
+   "anchor": "jade MIGRATED (dark axis 137 deg)",
+   "gate": "PASS"
+  },
+  "mintcoral": {
+   "I": 85.13700968294164,
+   "T6": 85.3975664551023,
+   "S": 100.0,
+   "W6": 86.66666666666667,
+   "A": 44.8412191130266,
+   "C": 78.35342901936863,
+   "E": 100.0,
+   "X": 87.41231476333537,
+   "anchor": "free (no anchor by design)",
+   "gate": "PASS"
+  },
+  "moonstone": {
+   "I": 78.4000407522631,
+   "T6": 87.42709682683162,
+   "S": 100.0,
+   "W6": 53.333333333333336,
+   "A": 62.780706425108875,
+   "C": 57.46969794768205,
+   "E": 86.0,
+   "X": 65.45001941620865,
+   "anchor": "mauve held (dark axis 319 deg)",
+   "gate": "PASS"
+  },
+  "nebula": {
+   "I": 59.423591270258385,
+   "T6": 57.95933295161329,
+   "S": 100.0,
+   "W6": 6.666666666666667,
+   "A": 53.948184822979066,
+   "C": 4.496876109809747,
+   "E": 100.0,
+   "X": 75.6711564316327,
+   "anchor": "free (no anchor by design)",
+   "gate": "PASS-X"
+  }
+ }
+}

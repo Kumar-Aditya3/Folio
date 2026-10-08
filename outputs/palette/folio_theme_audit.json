@@ -1,0 +1,27 @@
+{
+  "faces": 20,
+  "failures": [],
+  "warnings": [
+    "cross-theme light: gallery vs silver primaryAccent dE2000 = 13.4 (tight)",
+    "cross-theme light: silver vs dawn primaryAccent dE2000 = 13.5 (tight)",
+    "cross-theme dark: gallery vs arctic primaryAccent dE2000 = 12.9 (tight)",
+    "cross-theme dark: manuscript vs honey primaryAccent dE2000 = 13.5 (tight)",
+    "cross-theme dark: silver vs dawn primaryAccent dE2000 = 12.1 (tight)",
+    "cross-theme dark: arctic vs lagoon primaryAccent dE2000 = 13.6 (tight)",
+    "cross-theme dark: sakura vs dawn primaryAccent dE2000 = 13.6 (tight)",
+    "cross-theme dark: sakura vs rouge primaryAccent dE2000 = 13.5 (tight)",
+    "cross-theme dark: honey vs rouge primaryAccent dE2000 = 13.8 (tight)"
+  ],
+  "shaders": {
+    "gallery": "GrainGradient",
+    "manuscript": "Warp",
+    "silver": "Dithering",
+    "arctic": "Swirl",
+    "sakura": "DotOrbit",
+    "honey": "Metaballs",
+    "moss": "Voronoi",
+    "dawn": "GodRays",
+    "lagoon": "MeshGradient",
+    "rouge": "SmokeRing"
+  }
+}

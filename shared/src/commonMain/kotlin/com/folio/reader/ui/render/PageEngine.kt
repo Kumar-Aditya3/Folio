@@ -1,0 +1,634 @@
+package com.folio.reader.ui.render
+
+import com.folio.reader.settings.normalized
+
+/**
+ * Book-like pagination engine shared by the Android WebView and desktop JCEF
+ * surfaces. Lays the chapter out as discrete viewport pages by absolutely
+ * positioning content blocks into page columns — deliberately NOT CSS multicol,
+ * whose overflow painting is unreliable in embedded Chromium (JCEF 132). Pages
+ * turn by sliding the strip horizontally, the way a manga viewer moves panels.
+ *
+ * The engine talks to the app through the same document.title protocol as the
+ * continuous bridge: folio-progress:<fraction>:<current>:<total>:<crossed> and
+ * folio-link / folio-tap messages.
+ */
+object PageEngine {
+
+    /** Readable line-width cap in px for paged modes, mirroring the Compose readerWidth breakpoints. */
+    fun measurePx(textWidth: com.folio.reader.settings.TextWidth): Int = when (textWidth) {
+        com.folio.reader.settings.TextWidth.NARROW -> 560
+        com.folio.reader.settings.TextWidth.MEDIUM -> 720
+        com.folio.reader.settings.TextWidth.WIDE -> 960
+        com.folio.reader.settings.TextWidth.CUSTOM -> 1200
+        com.folio.reader.settings.TextWidth.FULL -> 0
+    }
+
+    /** Pages per screen for a layout mode; 0 = continuous scroll (engine off). Retired modes map onto their nearest living one. */
+    fun colsFor(layoutMode: com.folio.reader.settings.LayoutMode): Int = when (layoutMode.normalized) {
+        com.folio.reader.settings.LayoutMode.SPREAD -> 2
+        com.folio.reader.settings.LayoutMode.PAGINATED -> 1
+        else -> 0
+    }
+
+    /** Layout CSS for paged modes. */
+    fun css(marginTop: Float, marginBottom: Float): String {
+        // !important on geometry: publisher sheets set html/body heights that
+        // collapse the page box, and the whole engine measures off clientHeight.
+        // Widths get pinned for the same reason: the engine splits body.clientWidth
+        // into columns and the spread's centre rule sits at 50vw, so a publisher
+        // body{width|max-width|margin} would push the pages off-centre — reading
+        // as one page larger than the other.
+        return "html{height:100%!important;width:100%!important;margin:0!important;overflow:hidden!important;overflow-anchor:none;}" +
+                "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;}" +
+                "body{height:100vh!important;width:100%!important;max-width:none!important;min-width:0!important;margin:0!important;overflow-x:hidden!important;overflow-y:hidden!important;position:relative;left:0;transition:opacity .15s ease;" +
+                "padding:${marginTop.toInt()}px 0 ${marginBottom.toInt()}px 0 !important;}" +
+                "body img{max-width:100%;height:auto;}"
+    }
+
+    /**
+     * Selection watcher. The Highlight action used to float beside the selection,
+     * which is exactly where the OS selection toolbar lands — covered and untappable
+     * on phones — and it read as a foreign element on the page. The reader's own
+     * chrome owns the action now, so the page only reports the selection:
+     * folio-sel:<paragraphIndex>:<encodedText>:<nonce>, or folio-selclear:<nonce>.
+     * Assumes a `nonce` var in the surrounding IIFE; embedded by all three bridges
+     * (paged engine, desktop continuous, Android continuous).
+     */
+    val selectionWatchJs: String = """
+function folioReportSel(){
+  var sel=window.getSelection();
+  var text=sel?(sel.toString()||'').trim():'';
+  if(!sel||sel.isCollapsed||text.length<3){document.title='folio-selclear:'+(++nonce);return;}
+  // Read the paragraph now: a later tap collapses the selection and the anchor is gone.
+  var sc0=null;try{sc0=sel.getRangeAt(0).startContainer;}catch(e){return;}
+  var node=sc0?(sc0.nodeType===1?sc0:sc0.parentElement):null;
+  var idx=0,ps=document.querySelectorAll('p'),i;
+  if(node){
+    var p=null;for(var q=node;q;q=q.parentElement){if(q.tagName==='P'){p=q;break;}}
+    if(p){for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
+    else{var kids=document.body?document.body.children:[],blk=node;
+      while(blk&&blk.parentElement&&blk.parentElement!==document.body)blk=blk.parentElement;
+      for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}
+  }
+  document.title='folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
+}
+window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}catch(e){}};
+document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioReportSel,220);});
+"""
+
+    /**
+     * Publisher filler blocks — `<p><span>&nbsp;</span></p>` spacers and the like —
+     * read as holes once the reader owns spacing. Hidden in every bridge, paged and
+     * continuous alike.
+     */
+    val emptyHideJs: String = """
+document.querySelectorAll('p,div,section,blockquote').forEach(function(el){if(!el.querySelector('img,svg,canvas,video,hr,iframe')&&!(el.textContent||'').replace(/\s/g,'').length)el.style.display='none';});
+"""
+    fun js(fraction: Float, cols: Int, gutter: Float, measure: Int, desktopEvents: Boolean = true, diag: Boolean = false): String = """
+(function(){
+if(window.__folioEngine)return;window.__folioEngine=true;
+var COLS=$cols,G=$gutter,MEASURE=$measure,frac=$fraction,DESKTOP=$desktopEvents,DIAG=$diag;
+var body=document.body,docEl=document.documentElement;
+// Hide here, not in CSS: a document whose engine JS never lands must still paint
+// text instead of staying a solid blank page under a CSS opacity:0 gate.
+body.style.opacity='0';
+var page=0,animating=false,userActed=false,nonce=0,posFrac=frac;
+var totalCols=1,kids=[],dirty=true,stackReported=false;
+function vw(){return Math.max(1, body.clientWidth || window.innerWidth);}
+function colW(){return vw()/COLS;}
+function padY(){var cs=getComputedStyle(body);return (parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0);}
+function pageH(){return Math.max(1, window.innerHeight - padY());}
+// Some WebViews zero the vh/percent page box after a resume, collapsing body to
+// its padding and clipping the strip to a top sliver. Pin pixel heights instead.
+function pinBox(){
+  var VH=Math.max(1,window.innerHeight);
+  docEl.style.setProperty('height',VH+'px','important');
+  body.style.setProperty('height',Math.max(50,VH-padY())+'px','important');
+}
+function maxPage(){return Math.max(0,Math.ceil(totalCols/COLS)-1);}
+var strip=document.getElementById('folio-strip');
+if(!strip){
+  strip=document.createElement('div');strip.id='folio-strip';strip.style.willChange='transform';
+  while(body.firstChild)strip.appendChild(body.firstChild);
+  body.appendChild(strip);
+}
+function widthize(el,cw){
+  el.style.position='absolute';
+  el.style.boxSizing='border-box';
+  el.style.width=cw+'px';
+  var pad=G;
+  if(MEASURE>0&&cw>MEASURE){pad=Math.floor((cw-MEASURE)/2)+G;}
+  el.style.paddingLeft=pad+'px';
+  el.style.paddingRight=pad+'px';
+  el.style.margin='0';
+  el.style.textIndent='0';
+  // A stale scale() from a previous fit must not survive a relayout: the block would
+  // keep its old size while the packer measured the new one.
+  el.style.transform='';
+  el.style.left='0px';
+  el.style.top='0px';
+}
+// A block that is, or wraps, an element the line-splitter cannot break: an image,
+// table, canvas, video, svg, iframe or rule. querySelector only sees descendants,
+// so the element's own tag is checked too - a bare <img> has no descendants and
+// empty textContent, and would otherwise read as an empty hole.
+function atomicBlock(el){
+  var t=(el.tagName||'').toUpperCase();
+  if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO'||t==='TABLE'||t==='IFRAME'||t==='HR')return true;
+  return !!(el.querySelector&&el.querySelector('img,svg,canvas,video,hr,iframe,table'));
+}
+// The media inside a block that decides its height, own tag included.
+function atomicMedia(el){
+  var t=(el.tagName||'').toUpperCase();
+  if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO')return [el];
+  return el.querySelectorAll?el.querySelectorAll('img,svg,canvas,video'):[];
+}
+function flatten(el,out,cw,H){
+  // Publisher markup littered with empty <p>/<br> blocks reads as huge holes
+  // once absolute positioning stops margin collapsing; drop them in paged mode.
+  // Never drop a block that carries atomic media (even a bare <img>, which has
+  // no text of its own): that is the oversized-image-silently-vanishes path.
+  if(!atomicBlock(el)&&!(el.textContent||'').replace(/\s/g,'').length){el.style.display='none';return;}
+  widthize(el,cw);
+  if(el.offsetHeight>H*1.5&&el.children.length>0){
+    var par=el.parentNode,child;
+    while(el.children.length>0){
+      child=el.children[0];
+      par.insertBefore(child,el);
+      flatten(child,out,cw,H);
+    }
+    if(par)par.removeChild(el);
+  } else {
+    out.push(el);
+  }
+}
+var layoutTries=0;
+var imgTries=0,imagesSettled=false;
+// Every block is absolutely positioned, so one that grows AFTER it was measured paints over
+// its neighbour instead of pushing it down. Nothing re-paginated in that case: an image that
+// was already `complete` when we measured fires no load event at all, and a web font that
+// settles after the remeasure budget fires no resize — which is why the overlap stuck.
+var measuredHs=[],growWatch=null,growTries=0,lastGrowFix=0;
+function lineH(el){var v=parseFloat(getComputedStyle(el).lineHeight);return isFinite(v)&&v>4?v:0;}
+// The y of every real line box inside a block, relative to its top. Slicing at multiples of
+// the *computed* line-height cuts through glyphs whenever a line is actually taller than that
+// number — a superscript, an inline image, a larger span, CJK with a different strut — which
+// is the half-clipped text at a page boundary. The range's client rects are the lines the
+// browser actually laid out.
+function lineTops(el){
+  var out=[],base=el.getBoundingClientRect().top,i,r,y,last=-9999,rects;
+  try{var range=document.createRange();range.selectNodeContents(el);rects=range.getClientRects();}
+  catch(e){return out;}
+  for(i=0;i<rects.length;i++){
+    r=rects[i];if(r.height<1)continue;
+    y=r.top-base;
+    if(y>last+1){out.push(y);last=y;}
+  }
+  // RTL and multi-column inline content can hand back rects out of vertical order, and the
+  // cut search below walks this list assuming it ascends.
+  return out.sort(function(a,b){return a-b;});
+}
+// How far an element's content actually reaches below its own top. A cover built from
+// absolutely positioned layers measures nothing while painting a whole page, and a packer
+// working from that zero places every later block at the same y — text printed over the
+// artwork. Only short blocks are walked: page furniture is short, prose chapters are not,
+// and the cost would otherwise be a rect read per node per layout.
+function paintedBottom(el){
+  if(el.innerHTML.length>6000)return el.offsetHeight;
+  var base=el.getBoundingClientRect().top,h=el.offsetHeight;
+  var all=el.querySelectorAll('*'),i,r,max=0;
+  for(i=0;i<all.length;i++){
+    r=all[i].getBoundingClientRect();
+    if(r.bottom-base>max){max=r.bottom-base;if(max>h+2)break;}
+  }
+  return Math.max(h,max);
+}
+function addSlice(el,off,sh,c,top,cw){
+  var w=document.createElement('div');w.className='folio-slice';
+  w.style.position='absolute';
+  w.style.left=Math.round(c*cw)+'px';
+  w.style.top=Math.round(top)+'px';
+  w.style.width=cw+'px';
+  w.style.height=Math.ceil(sh)+'px';
+  w.style.overflow='hidden';
+  var inner=el;
+  if(off>0){
+    // Same tag AND same class: the publisher's class is what carries this block's font,
+    // indent and alignment, so a continuation rendered as a bare <div> with no class styles
+    // the second half of a paragraph differently from its first — the inconsistent alignment
+    // across a page break.
+    inner=document.createElement(el.tagName);
+    inner.className=el.className;
+    inner.innerHTML=el.innerHTML;
+    inner.style.position='absolute';
+    inner.style.boxSizing='border-box';
+    inner.style.width=el.style.width;
+    inner.style.paddingLeft=el.style.paddingLeft;
+    inner.style.paddingRight=el.style.paddingRight;
+    inner.style.margin='0';
+  } else {
+    w.setAttribute('data-origin','1');
+  }
+  inner.style.left='0px';
+  inner.style.top=(-off)+'px';
+  w.appendChild(inner);
+  strip.appendChild(w);
+}
+// Cut list at real line boundaries, or null when the block cannot be tiled that way.
+function lineCuts(el,rem,H,ch){
+  var tops=lineTops(el);if(tops.length<2)return null;
+  var cuts=[],off=0,guard=0;
+  while(off<ch-1&&guard++<80){
+    var budget=(cuts.length===0?rem:H),cut=ch,j;
+    for(j=0;j<tops.length;j++){
+      if(tops[j]<=off+1)continue;
+      if(tops[j]-off>budget)break;
+      cut=tops[j];
+    }
+    var sh=cut-off;
+    // Too thin to read as a line, or taller than the page: neither is a clean cut.
+    if(sh<10||sh>budget+1)return null;
+    cuts.push(sh);off+=sh;
+  }
+  return (off>=ch-1&&cuts.length>1)?cuts:null;
+}
+// The old computed-line-height cut, used only when no clean line boundary tiles the block.
+// Moving such a block whole instead empties the rest of the page, and a nearly blank page
+// reads as a worse defect than a line clipped at its descenders.
+function legacyCuts(el,rem,H,ch){
+  var lh=lineH(el);if(!lh)return null;
+  var cuts=[],off=0,guard=0;
+  while(off<ch-1&&guard++<80){
+    var budget=(cuts.length===0?rem:H);
+    var sh=Math.min(ch-off,Math.floor(budget/lh)*lh);
+    if(sh<lh)sh=Math.min(ch-off,budget);
+    if(sh<1)return null;
+    cuts.push(sh);off+=sh;
+  }
+  return cuts.length>1?cuts:null;
+}
+// A block that cannot fit in the column's remaining space is sliced at real line
+// boundaries instead of leaving a hole at the page bottom. Returns the column and y where
+// the next block should continue, or null to move the whole block on.
+function trySplit(el,col,y,cw,H){
+  if(atomicBlock(el))return null;
+  var ch=el.offsetHeight,rem=H-y;
+  if(ch<=rem)return null;
+  var tag=el.tagName+'.'+(el.className||''),cuts=lineCuts(el,rem,H,ch),i;
+  if(cuts==null){
+    cuts=legacyCuts(el,rem,H,ch);
+    if(cuts==null){
+      if(DIAG)console.log('folio-split MOVE '+tag+' h'+ch+' rem'+Math.round(rem)+' lines='+lineTops(el).length);
+      return null;
+    }
+    if(DIAG)console.log('folio-split legacy '+tag+' h'+ch+' pieces='+cuts.length);
+  } else if(DIAG)console.log('folio-split lines '+tag+' h'+ch+' pieces='+cuts.length);
+  var c=col,top=y,at=0;
+  for(i=0;i<cuts.length;i++){
+    addSlice(el,at,cuts[i],c,top,cw);
+    at+=cuts[i];
+    if(i<cuts.length-1){c++;top=0;}
+  }
+  return [c,cuts[cuts.length-1]];
+}
+// An atomic block taller than one page cannot be sliced, and paged mode clips at
+// the page box (body overflow:hidden) with no scroll, so anything past H would be
+// lost. Cap its media to the page box (aspect ratio preserved via object-fit); if
+// it is still taller than a page (e.g. a big table), scale the whole block down.
+// Returns the height the packer should treat it as, never more than one page.
+// A definite px max-height is what makes this work: the publisher's
+// `max-height:100%` resolves against an auto-height parent to ~0, which collapses
+// the art box and stacks the following text on top of it.
+function fitAtomic(el,H){
+  var media=atomicMedia(el);
+  for(var m=0;m<media.length;m++){
+    media[m].style.maxWidth='100%';
+    media[m].style.maxHeight=H+'px';
+    media[m].style.height='auto';
+    media[m].style.objectFit='contain';
+  }
+  if(el.offsetHeight>H){
+    var s=H/el.offsetHeight;
+    // top centre, not top left: the layout box stays column-wide, so scaling about the
+    // left edge would leave the shrunk plate hugging the left of the page.
+    if(s>0&&s<1){el.style.transformOrigin='top center';el.style.transform='scale('+s+')';}
+    return H;
+  }
+  return el.offsetHeight;
+}
+// Repaginate when a laid-out block turns out taller (or shorter) than the height the packer
+// used. Observing the blocks themselves is what catches the cases no event reports: a
+// `complete` image, a late-settling face, inline art that only lays out after first paint.
+function watchGrowth(){
+  if(!window.ResizeObserver||growTries>12)return;
+  if(!growWatch){
+    growWatch=new ResizeObserver(function(es){
+      if(dirty||animating)return;
+      // Relayout changes these boxes, so without a cooldown the observer feeds itself.
+      if(Date.now()-lastGrowFix<400)return;
+      for(var i=0;i<es.length;i++){
+        var el=es[i].target,idx=kids.indexOf(el);
+        if(idx<0)continue;
+        var was=measuredHs[idx];
+        if(was===undefined)continue;
+        if(Math.abs(el.getBoundingClientRect().height-was)>1.5){
+          growTries++;lastGrowFix=Date.now();dirty=true;relayout();return;
+        }
+      }
+    });
+  }
+  for(var i=0;i<kids.length;i++)growWatch.observe(kids[i]);
+}
+function layout(){
+  pinBox();
+  var cw=colW(),H=pageH();
+  if(H<50||cw<50){
+    // A collapsed page box means every block would land in its own off-screen
+    // column — the historical "blank page". Retry, then reveal + report.
+    if(layoutTries++<25){setTimeout(function(){dirty=true;relayout();},150);return;}
+    document.title='folio-engdiag:collapse:'+H+':'+cw+':'+(++nonce);
+    body.style.opacity='1';
+    return;
+  }
+  if(!imagesSettled){
+    // Paginating over an image that has no size yet is what puts text on top of
+    // artwork: the plate measures as a zero-height block, so every block after it
+    // is packed at the same y and the decoded art paints underneath the prose.
+    // Wait out the decode, bounded, then lay out with whatever sizes we have.
+    if(pendingImages()>0){
+      if(imgTries++<8){setTimeout(function(){dirty=true;relayout();},150);return;}
+    }
+    imagesSettled=true;
+  }
+  strip.style.position='relative';
+  strip.style.height=H+'px';
+  var j,oldSlices=strip.querySelectorAll('.folio-slice');
+  for(j=0;j<oldSlices.length;j++){
+    if(oldSlices[j].getAttribute('data-origin'))strip.appendChild(oldSlices[j].firstChild);
+    oldSlices[j].parentNode.removeChild(oldSlices[j]);
+  }
+  if(!kids.length){
+    var seed=[].slice.call(strip.children);
+    for(var s=0;s<seed.length;s++)flatten(seed[s],kids,cw,H);
+  }
+  if(!kids.length){totalCols=1;return;}
+  var i,k,cs;
+  for(i=0;i<kids.length;i++)widthize(kids[i],cw);
+  var hs=[];
+  for(i=0;i<kids.length;i++){
+    // Normalise every image in the block to fit one page. A definite px max-height avoids two
+    // failures: the publisher's `max-height:100%` collapsing to ~0 (which stacks the following
+    // text on top of the art), and an oversized plate overflowing the page box (which reads as
+    // a "jump to the bottom of the image" on the next page turn).
+    var ims=atomicMedia(kids[i]);
+    var pend=false;
+    for(var mi=0;mi<ims.length;mi++){
+      ims[mi].style.maxWidth='100%';
+      ims[mi].style.maxHeight=H+'px';
+      ims[mi].style.height='auto';
+      if(!ims[mi].complete||!ims[mi].naturalHeight)pend=true;
+    }
+    var kh0=kids[i].offsetHeight,kh=paintedBottom(kids[i]);
+    if(DIAG&&kh>kh0+2)console.log('folio-paint '+kids[i].tagName+'.'+(kids[i].className||'')+' '+kh0+'->'+kh+' len'+kids[i].innerHTML.length);
+    // Not decoded yet -> measures near-zero. Reserve a full page so nothing packs on top; the
+    // img-load relayout re-measures it at the real height.
+    if(ims.length&&pend&&kh<H*0.5)kh=H;
+    // Settled but still taller than the page box: it cannot be sliced and the overflow is
+    // unreachable, so scale it into one page and pack against the height it now occupies.
+    else if(kh>H&&atomicBlock(kids[i]))kh=fitAtomic(kids[i],H);
+    cs=getComputedStyle(kids[i]);
+    hs.push(kh+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom));
+  }
+  var col=0,y=0;
+  for(i=0;i<kids.length;i++){
+    if(y>0&&y+hs[i]>H){
+      var after=trySplit(kids[i],col,y,cw,H);
+      if(after){col=after[0];y=after[1];continue;}
+      col++;y=0;
+    }
+    kids[i].style.left=Math.round(col*cw)+'px';
+    kids[i].style.top=Math.round(y)+'px';
+    y+=hs[i];
+  }
+  totalCols=col+1;
+  strip.style.width=Math.round(totalCols*cw)+'px';
+  measuredHs=hs;
+  watchGrowth();
+  dirty=false;
+}
+function report(){
+  var total=maxPage()+1;
+  var p=maxPage()>0?page/maxPage():0;
+  document.title='folio-progress:'+p.toFixed(4)+':'+(page+1)+':'+total+':false';
+}
+function setScroll(animate){
+  strip.style.transition=animate?'transform .3s cubic-bezier(.3,.1,.2,1)':'none';
+  strip.style.transform='translateX('+(-(page*vw()))+'px)';
+}
+var settleT=null;
+function settle(){if(settleT)clearTimeout(settleT);settleT=setTimeout(function(){animating=false;settleT=null;report();},380);}
+// Both edges work identically: pushing past the page you are on emits a token from
+// the gesture itself. The forward hop used to ride on the progress report, which only
+// reached the host if a scroll event happened to follow — and scrolling past the last
+// page produces none, so it silently never registered.
+var lastEdgeHop=0;
+function edge(which){
+  var now=Date.now();
+  if(now-lastEdgeHop<600)return;
+  lastEdgeHop=now;
+  document.title='folio-edge:'+which+':'+(++nonce);
+}
+function goTo(p,instant){
+  if(p<0&&page<=0){edge('start');return;}
+  if(p>maxPage()&&page>=maxPage()){edge('end');return;}
+  p=Math.max(0,Math.min(maxPage(),p));
+  if(p===page){setScroll(false);report();return;}
+  if(animating)return;
+  // Raise the re-entrancy guard before the reduced-motion branch: that path has no
+  // animation, so without settling `animating` here a second near-simultaneous call
+  // (the synthetic mouseup after a touchend) would turn a second page. settle()
+  // drops the guard after a beat on both paths.
+  animating=true;
+  page=p;
+  posFrac=maxPage()>0?page/maxPage():0;
+  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);settle();report();return;}
+  setScroll(true);
+  settle();
+  report();
+}
+function relayout(){
+  if(dirty)layout();
+  // Still waiting on image sizes: layout() bailed and scheduled the retry, so keep
+  // the page hidden rather than revealing it unpaginated.
+  if(!imagesSettled)return;
+  page=Math.round(posFrac*maxPage());
+  setScroll(false);
+  body.style.opacity='1';
+  report();
+}
+window.__folioRelayout=function(){dirty=true;relayout();};
+window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll(false);body.style.opacity='1';report();};
+// Target grammar: "h:<markId>[:<paragraph>[:<fraction>]]" lands on a painted
+// highlight, "p:<paragraph>" on the Nth paragraph. A missing mark must never
+// degrade to paragraph 0 — that reads as "the jump took me to the chapter top".
+function folioTargetEl(t){
+  var parts=String(t).split(':'),isH=parts[0]==='h',el=null;
+  var id=isH?(parts[1]||''):'';
+  if(id){try{el=document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){el=null;}}
+  if(!el){
+    var pi=isH?parts[2]:parts[1];
+    if(pi===undefined||pi==='')return null;
+    var i=parseInt(pi,10);if(isNaN(i))return null;
+    var ps=document.querySelectorAll('p');if(!ps.length)return null;
+    el=ps[Math.min(Math.max(0,i),ps.length-1)];
+  }
+  return el;
+}
+function folioLandEl(el){
+  if(dirty)layout();
+  var x=el.getBoundingClientRect().left+page*vw();
+  var col=Math.floor((x+8)/colW());
+  var y=el.getBoundingClientRect().top;
+  if(y<0||y>pageH())col+=Math.floor(Math.abs(y)/pageH())*(y<0?-1:1);
+  var tt=Math.min(maxPage(),Math.floor(col/COLS));
+  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
+}
+window.__folioSeekTo=function(t){
+  // A paged document holds exactly one chapter, so the host's "c:<chapterId>|" scope carries
+  // no information here — and left on the string it parses as the paragraph number.
+  var str=String(t);if(str.indexOf('c:')===0){var bar=str.indexOf('|');if(bar>0)str=str.substring(bar+1);}
+  var parts=str.split(':'),isH=parts[0]==='h',f=parseFloat(isH?parts[3]:parts[2]);
+  var el=folioTargetEl(str);
+  if(el){folioLandEl(el);return;}
+  if(!isNaN(f))window.__folioSeek(f);
+};
+window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
+// Reflow-safe anchor: paged layout keeps a stable kids[] block list (relayout
+// only repositions), so the anchor is the index of the first block visible on
+// the current page. A font change reflows every column, but landing on the
+// same block keeps the same words in view.
+window.__folioAnchorSave=function(){
+  if(!kids.length)return '';
+  var cw=colW(),first=Math.floor(page*COLS),last=first+COLS;
+  for(var i=0;i<kids.length;i++){
+    var col=Math.floor((parseFloat(kids[i].style.left)||0)/cw);
+    if(col>=first&&col<last)return 'b:'+i;
+  }
+  return 'b:0';
+};
+window.__folioAnchorRestore=function(a){
+  var p=String(a||'').split(':');
+  if(p.length!==2||p[0]!=='b')return;
+  var idx=parseInt(p[1],10);if(isNaN(idx))return;
+  if(dirty)layout();
+  if(!kids.length)return;
+  var el=kids[Math.min(Math.max(0,idx),kids.length-1)];
+  var x=el.getBoundingClientRect().left+page*vw();
+  var col=Math.floor((x+8)/colW());
+  var tt=Math.min(maxPage(),Math.floor(col/COLS));
+  posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
+};
+// In-place stylesheet swap for typography/theme changes: anchor, swap, repaginate,
+// then land back on the same block. Repeated at 400ms for late font metrics.
+window.__folioRestyle=function(fc,sc){
+  var a=window.__folioAnchorSave();
+  var f=document.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
+  var st=document.getElementById('folio-reader-style');if(st)st.textContent=sc;
+  dirty=true;relayout();
+  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},80);
+  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},400);
+};
+
+window.addEventListener('resize',function(){dirty=true;relayout();});
+window.addEventListener('load',function(){dirty=true;relayout();});
+document.addEventListener('visibilitychange',function(){dirty=true;relayout();});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});
+// Block heights come from the page, and an image that decodes after a layout leaves
+// the packer working from the near-zero height it measured while the art was pending
+// — which is how a full-page title plate ends up underneath the following text.
+// Per-element listeners only cover images that existed when this script ran, and the
+// engine is injected after the WebView's own load event may already have fired, so
+// watch every image load in the capture phase and re-measure once nothing is pending.
+function pendingImages(){var im=document.images,n=0,q;for(q=0;q<im.length;q++){if(!im[q].complete)n++;}return n;}
+document.addEventListener('load',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
+document.addEventListener('error',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
+(function remeasure(tries,sawPending){
+  var p=pendingImages(),seen=sawPending||p>0;
+  if(!p){if(seen){dirty=true;relayout();}return;}
+  if(tries>20)return;
+  setTimeout(function(){remeasure(tries+1,seen);},250);
+})(0,false);
+window.addEventListener('wheel',function(e){
+  if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
+  e.preventDefault();userActed=true;
+  var d=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY;
+  if(animating)return;
+  goTo(page+(d>0?1:-1));
+},{passive:false});
+document.addEventListener('keydown',function(e){
+  var k=e.key;
+  if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='ArrowDown'){e.preventDefault();userActed=true;goTo(page+1);}
+  else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();userActed=true;goTo(page-1);}
+},true);
+var tX=0,tY=0,tT=0,lastTouchEnd=0;
+document.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY=t.clientY;tT=Date.now();},{passive:true});
+document.addEventListener('touchend',function(e){
+  lastTouchEnd=Date.now();
+  if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
+  var t=e.changedTouches[0];
+  var dx=t.clientX-tX,dy=t.clientY-tY;
+  if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4){userActed=true;goTo(page+(dx<0?1:-1));return;}
+  handleTap(t.clientX,t.clientY,Math.hypot(dx,dy),Date.now()-tT);
+},{passive:true});
+function handleTap(x,y,moved,ms){
+  var el=document.elementFromPoint(x,y);
+  var a=el&&el.closest?el.closest('a[href]'):null;
+  if(a){var href=a.getAttribute('href')||'';
+    if(href&&href.charAt(0)!=='#'){document.title='folio-link:'+(++nonce)+':'+encodeURIComponent(href);}
+    return;}
+  if(moved>24||ms>350)return;
+  var w=vw();
+  if(x>w*0.66){userActed=true;goTo(page+1);}
+  else if(x<w*0.33){userActed=true;goTo(page-1);}
+  else if(DESKTOP)document.title='folio-tap:'+(++nonce);
+}
+document.addEventListener('click',function(ev){
+  var el=ev.target;
+  var a=el&&el.closest?el.closest('a[href]'):null;
+  if(a){var h=a.getAttribute('href')||'';if(h&&h.charAt(0)!=='#')ev.preventDefault();}
+},true);
+document.addEventListener('mouseup',function(e){
+  if(e.button!==0)return;
+  // Suppress the compatibility mouse event a touch synthesizes right after
+  // touchend: without this one physical tap ran handleTap twice (touchend+mouseup).
+  if(Date.now()-lastTouchEnd<700)return;
+  if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
+  var sel=window.getSelection();
+  if(sel&&!sel.isCollapsed)return;
+  handleTap(e.clientX,e.clientY,0,0);
+});
+try{
+$emptyHideJs
+layout();
+console.log('folio-geom:H='+pageH()+' vw='+vw()+' cols='+totalCols+' kids='+kids.length+' stripW='+strip.style.width+' stripH='+strip.style.height+' bodyH='+body.clientHeight+' innerH='+window.innerHeight+' op='+getComputedStyle(body).opacity);
+$selectionWatchJs
+page=Math.round(posFrac*maxPage());
+setScroll(false);
+if(imagesSettled)body.style.opacity='1';
+document.title='folio-engdiag:ok:'+pageH()+':'+vw()+':'+totalCols+':'+kids.length+':'+(++nonce);
+setTimeout(function(){dirty=true;relayout();},250);
+setTimeout(function(){dirty=true;relayout();},700);
+setTimeout(function(){dirty=true;relayout();var r=strip.getBoundingClientRect();var k=kids&&kids.length?kids[0].getBoundingClientRect():null;var k2=kids&&kids.length>1?kids[1].getBoundingClientRect():null;console.log('folio-geom2:page='+page+' tx='+strip.style.transform+' strip='+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+' kid0='+(k?Math.round(k.left)+','+Math.round(k.top)+','+Math.round(k.width)+','+Math.round(k.height):'none')+' kid1='+(k2?Math.round(k2.left)+','+Math.round(k2.top)+','+Math.round(k2.width)+','+Math.round(k2.height):'none')+' vv='+(window.visualViewport?window.visualViewport.scale.toFixed(2)+'/'+window.visualViewport.offsetTop:'na'));
+if(String(navigator.userAgent).indexOf('Android')>=0){
+  console.log('folio-exp:android');
+}},1500);
+report();
+}catch(e){
+body.style.opacity='1';
+var m=e&&e.message?String(e.message).replace(/[:;,]/g,' ').slice(0,90):'err';
+document.title='folio-engdiag:throw:'+m+':'+(++nonce);
+}
+})();
+"""
+}

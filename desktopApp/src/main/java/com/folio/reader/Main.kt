@@ -1,0 +1,2163 @@
+package com.folio.reader
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import com.folio.reader.database.Database
+import com.folio.reader.database.JdbcBookRepository
+import com.folio.reader.database.JdbcBookmarkRepository
+import com.folio.reader.database.JdbcCollectionRepository
+import com.folio.reader.database.JdbcDeviceRepository
+import com.folio.reader.database.JdbcDocumentRepository
+import com.folio.reader.database.ThumbnailDocumentRepository
+import com.folio.reader.database.JdbcHighlightRepository
+import com.folio.reader.database.JdbcNoteRepository
+import com.folio.reader.database.JdbcReadingPositionRepository
+import com.folio.reader.database.JdbcReadingSessionRepository
+import com.folio.reader.database.JdbcSearchRepository
+import com.folio.reader.database.JdbcSeriesRepository
+import com.folio.reader.database.JdbcQuoteRepository
+import com.folio.reader.database.JdbcRevisitRepository
+import com.folio.reader.database.JdbcTagRepository
+import com.folio.reader.database.JdbcSettingsRepository
+import com.folio.reader.database.JdbcStatisticsRepository
+import com.folio.reader.database.JdbcSyncQueueRepository
+import com.folio.reader.epub.EpubParser
+import com.folio.reader.epub.JvmChapterContentProvider
+import com.folio.reader.epub.repairStoredChapterTitles
+import com.folio.reader.importer.BookImporter
+import com.folio.reader.importer.DocumentDeletionService
+import com.folio.reader.importer.DocumentFormatDetector
+import com.folio.reader.importer.DocumentImporter
+import com.folio.reader.importer.IncomingContent
+import com.folio.reader.importer.IncomingContentCoordinator
+import com.folio.reader.importer.IncomingContentResult
+import com.folio.reader.importer.isAlreadyInLibrary
+import com.folio.reader.importer.isNewImport
+import com.folio.reader.importer.SearchIndexer
+import com.folio.reader.model.Book
+import com.folio.reader.model.CloudState
+import com.folio.reader.platform.DesktopPlatform
+import com.folio.reader.platform.renderDesktopDocumentThumbnail
+import com.folio.reader.security.SecureCredentialStore
+import com.folio.reader.security.SyncCredentials
+import com.folio.reader.settings.diffFields
+import com.folio.reader.settings.normalized
+import com.folio.reader.settings.withFieldsFrom
+import com.folio.reader.sync.NoopStorageSync
+import com.folio.reader.sync.RestFirestoreSync
+import com.folio.reader.sync.SyncConfig
+import com.folio.reader.sync.SyncEngine
+import com.folio.reader.ui.library.LibraryScreen
+import com.folio.reader.ui.library.LibraryViewModel
+import com.folio.reader.ui.library.DocumentLibraryViewModel
+import com.folio.reader.ui.document.DocumentReaderScreen
+import com.folio.reader.ui.document.DocumentReaderViewModel
+import com.folio.reader.ui.reader.ReaderScreen
+import com.folio.reader.ui.reader.ReaderViewModel
+import com.folio.reader.ui.search.SearchScreen
+import com.folio.reader.ui.settings.SettingsScreen
+import com.folio.reader.ui.statistics.StatisticsTabContent
+import com.folio.reader.ui.statistics.StatisticsViewModel
+import com.folio.reader.ui.book.BookDetailScreen
+import com.folio.reader.ui.book.BookDetailViewModel
+import com.folio.reader.ui.tags.TagManagerScreen
+import com.folio.reader.ui.tags.TagManagerViewModel
+import com.folio.reader.ui.quotes.QuoteBrowserScreen
+import com.folio.reader.ui.quotes.QuoteBrowserViewModel
+import com.folio.reader.ui.revisit.RevisitItemsScreen
+import com.folio.reader.ui.revisit.RevisitItemsViewModel
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.ui.theme.toFolioColors
+import androidx.compose.animation.togetherWith
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/** Settings fields whose change means the sync loop must be rebuilt. */
+private val SETTINGS_CREDENTIAL_FIELDS =
+    setOf("firebaseApiKey", "firebaseProjectId", "syncAccountEmail", "syncAccountPassword")
+
+// Read once and memoized: .env does not change within a run, but loadEnvFile() was called on
+// every Settings-screen recomposition (via isSyncConfigured/storageConfigured), re-reading the
+// file from disk each time.
+private val envFileCache: Map<String, String> by lazy { readEnvFile() }
+
+private fun loadEnvFile(): Map<String, String> = envFileCache
+
+private fun readEnvFile(): Map<String, String> {
+    val envFile = java.io.File(".env")
+    if (!envFile.exists()) return emptyMap()
+    return envFile.readLines()
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("#") }
+        .mapNotNull { line ->
+            val eq = line.indexOf('=')
+            if (eq > 0) line.substring(0, eq).trim() to line.substring(eq + 1).trim() else null
+        }
+        .toMap()
+}
+
+/**
+ * Firebase project ID baked into the desktop build so cloud sync works out of the
+ * box once the user supplies a Web API key. User-entered credentials (Settings >
+ * Advanced), the .env file, or FOLIO_FB_PROJECT_ID take precedence.
+ */
+private const val BUNDLED_FIREBASE_PROJECT_ID = "folio-sync-53b90"
+
+class FolioDesktopAppDependencies(rootOverride: String? = null) {
+    val platform = DesktopPlatform(rootOverride?.let { java.io.File(it) })
+    val database = Database(platform.fileSystem.getDatabasePath())
+
+    val bookRepository = JdbcBookRepository(database)
+    val documentRepository = ThumbnailDocumentRepository(
+        database,
+        JdbcDocumentRepository(database)
+    )
+    val documentCategoryRepository =
+        com.folio.reader.database.JdbcDocumentCategoryRepository(database)
+    val positionRepository = JdbcReadingPositionRepository(database)
+    val sessionRepository = JdbcReadingSessionRepository(database)
+    val readingCycleRepository = com.folio.reader.database.JdbcReadingCycleRepository(database)
+    val bookmarkRepository = JdbcBookmarkRepository(database)
+    val highlightRepository = JdbcHighlightRepository(database)
+    val noteRepository = JdbcNoteRepository(database)
+    val collectionRepository = JdbcCollectionRepository(database)
+    val seriesRepository = JdbcSeriesRepository(database)
+    val tagRepository = JdbcTagRepository(database)
+    val quoteRepository = JdbcQuoteRepository(database)
+    val revisitRepository = JdbcRevisitRepository(database)
+    val settingsRepository = JdbcSettingsRepository(database)
+
+    /**
+     * Sync credentials live in a no-backup file store rather than the settings blob. Desktop has no
+     * cloud auto-backup, but this keeps the credential handling identical across platforms.
+     */
+    val secureCredentialStore = SecureCredentialStore(platform.fileSystem)
+    val statisticsRepository = JdbcStatisticsRepository(database)
+    val syncQueueRepository = JdbcSyncQueueRepository(database)
+    val deviceRepository = JdbcDeviceRepository(database)
+    val searchRepository = JdbcSearchRepository(database)
+    val searchIndexer = SearchIndexer(searchRepository)
+
+    // ── SEMANTIC SEARCH (ML_PLAN) ───────────────────────────────────────────
+    // Mirrors AppGraph on Android so the desktop build exercises the same retrieval
+    // stack, which is what makes the Phase 0b harness representative.
+    //
+    // The model is the reader's stored choice rather than a fixed constant; the holder
+    // keeps the embedder factory and every service derived from it in lockstep. See
+    // `EmbeddingModelSelection`.
+    val chunkRepository = com.folio.reader.database.JdbcChunkRepository(database)
+    val modelDownloader = com.folio.reader.ml.ModelDownloader(platform.fileSystem, platform.hasher)
+    val modelSelection = com.folio.reader.ml.EmbeddingModelSelection(
+        settingsRepository = settingsRepository,
+        searchRepository = searchRepository,
+        modelsDir = platform.fileSystem.getModelsDir(),
+        chunkRepository = chunkRepository,
+        bookRepository = bookRepository,
+    )
+
+    val embeddingModel: com.folio.reader.ml.EmbeddingModel
+        get() = modelSelection.model.value
+
+    val embedderFactory: com.folio.reader.ml.OnnxEmbedderFactory
+        get() = modelSelection.embedderFactory
+
+    val embeddingIndexer: com.folio.reader.ml.EmbeddingIndexer
+        get() = modelSelection.indexer
+
+    val semanticSearchRepository: com.folio.reader.ml.SemanticSearchRepository
+        get() = modelSelection.semanticSearch
+
+    /** Echoes data owner; reuses the searcher's embedder and resident index. */
+    val semanticDiscoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository
+        get() = modelSelection.discovery
+
+    // Phase 5 #2. Wired on desktop too — auto-tagging is pure embedding + cosine, so unlike
+    // Phase 6 there is nothing Android-specific about it.
+    val autoTaggerService: com.folio.reader.ml.AutoTaggerService
+        get() = com.folio.reader.ml.AutoTaggerService(
+            tagger = modelSelection.tagger,
+            embedderFactory = modelSelection.embedderFactory,
+            tagRepository = tagRepository,
+            bookRepository = bookRepository,
+            searchRepository = searchRepository,
+        )
+    // Phase 6 (OCR + translation): absent on desktop by decision, not by omission. The actual
+    // reports `UnsupportedOnThisPlatform`, which is what hides the affordance in the UI.
+    val onDeviceTextTools = com.folio.reader.ml.onDeviceTextTools()
+
+    // ---------- Manga category (local source on desktop) ----------
+    val mangaRepository = com.folio.reader.database.JdbcMangaRepository(
+        database,
+        onMangaDeleted = { mangaId ->
+            // Cascade delete also removes the manga's downloaded pages from disk.
+            mangaDownloadManager.deleteMangaDownloads(mangaId)
+        },
+        onRemovedFromLibrary = { mangaId ->
+            // Drop shelf memberships so a re-add starts on the default shelf.
+            mangaCategoryRepository.assign(mangaId, emptySet())
+        },
+    )
+    val mangaChapterRepository = com.folio.reader.database.JdbcMangaChapterRepository(database)
+    val mangaCategoryRepository = com.folio.reader.database.JdbcMangaCategoryRepository(database)
+    val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
+    val mangaDownloadRepository = com.folio.reader.database.JdbcMangaDownloadRepository(database)
+    val mangaNoteRepository = com.folio.reader.database.JdbcMangaNoteRepository(database)
+    val mangaBackend = com.folio.reader.manga.DesktopMangaBackend(platform.fileSystem)
+    val mangaDownloadManager = com.folio.reader.manga.MangaDownloadManager(
+        backend = mangaBackend,
+        downloadsRepo = mangaDownloadRepository,
+        chapterRepo = mangaChapterRepository,
+        initialStorage = com.folio.reader.manga.FileDownloadStorage(platform.fileSystem.mangaDownloadsDir),
+    ).apply { start() }
+
+    /** Restores a user-picked manga downloads folder from settings at startup. */
+    suspend fun applyStoredMangaDownloadsLocation() {
+        val raw = runCatching { settingsRepository.getRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION) }
+            .getOrNull()
+        if (raw.isNullOrBlank()) return
+        val dir = java.io.File(raw)
+        if (!dir.isDirectory) {
+            runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
+            return
+        }
+        runCatching {
+            val ok = mangaDownloadManager.switchStorage(com.folio.reader.manga.FileDownloadStorage(dir))
+            if (!ok) runCatching { settingsRepository.setRaw(com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION, "") }
+        }
+    }
+
+    val epubParser = EpubParser(platform)
+    val contentProvider = JvmChapterContentProvider(platform, epubParser)
+    val fontManager = com.folio.reader.font.FontManager(platform)
+    val bookImporter = BookImporter(
+        platform = platform,
+        epubParser = epubParser,
+        bookRepository = bookRepository,
+        positionRepository = positionRepository,
+        searchIndexer = searchIndexer,
+        hashUtil = platform.hasher,
+        // Imported books land on a real collection shelf (Main) right away.
+        collectionRepository = collectionRepository,
+        // Embeddings are written on the import path, right after the FTS5 index.
+        embeddingIndexer = embeddingIndexer,
+    )
+    val documentImporter = DocumentImporter(
+        platform,
+        documentRepository,
+        documentCategoryRepository,
+        ::renderDesktopDocumentThumbnail
+    )
+    val incomingContentCoordinator = IncomingContentCoordinator(
+        DocumentFormatDetector(),
+        bookImporter,
+        documentImporter
+    )
+    val libraryScanCoordinator = com.folio.reader.importer.LibraryScanCoordinator(incomingContentCoordinator)
+    val documentDeletionService = DocumentDeletionService(documentRepository, platform)
+
+    init {
+        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        // Resolve the reader's stored embedding model off the UI thread, matching Android:
+        // reading the settings row is a database round trip and desktop's window is built
+        // from this graph, so it must not block on it.
+        appScope.launch {
+            runCatching { modelSelection.start() }
+        }
+        // Move any credentials still in the backed-up settings blob into the no-backup store. This
+        // does not touch the cached snapshots below (which the constructor is still initializing);
+        // main()'s refreshSettingsSnapshot() and restartSync() pick up the migrated values, and the
+        // engine reads the store fresh (with an idempotent migration) regardless.
+        appScope.launch {
+            runCatching { secureCredentialStore.migrateFromSettings(settingsRepository) }
+        }
+        database.onEntityChanged = { type, id, op, payload ->
+            appScope.launch {
+                syncQueueRepository.enqueueSync(type, id, com.folio.reader.sync.SyncOperation.fromString(op), payload)
+                // Reading positions update on every scroll tick; a prompt sync per
+                // write hammers Firestore. They still enqueue and ride along on the
+                // next crucial sync. Only discrete edits schedule a prompt sync.
+                if (type != "position") syncEngine?.triggerSync(immediate = false)
+            }
+        }
+        // Seed the built-in Main category and adopt uncategorized library manga once
+        // the sync hook above is live, so the seed document reaches other devices too.
+        appScope.launch {
+            runCatching { mangaCategoryRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Manga category seed failed: $it") }
+        }
+        // Same repair for book collections: seed Main and give every
+        // collection-less book its shelf, so the rail never hides a book.
+        appScope.launch {
+            runCatching { collectionRepository.ensureSeeded() }
+                .onFailure { println("⚠️ Book collection seed failed: $it") }
+        }
+        appScope.launch {
+            runCatching { applyStoredMangaDownloadsLocation() }
+        }
+        // Quiet library scan when the user opted in: new ebooks/documents found
+        // in the scan scope simply appear in the shelves.
+        appScope.launch {
+            val enabled = runCatching {
+                settingsRepository.getRaw(com.folio.reader.importer.LibraryScanKeys.ON_START)
+            }.getOrNull() == "1"
+            if (enabled) runCatching { DesktopLibraryScanner.scan(libraryScanCoordinator, settingsRepository) }
+        }
+    }
+
+    val deviceId: String by lazy {
+        val file = File(platform.fileSystem.getDatabasePath()).resolveSibling("device_id")
+        if (file.exists()) {
+            file.readText().trim()
+        } else {
+            val id = "desktop-" + java.util.UUID.randomUUID().toString().take(8)
+            file.parentFile?.mkdirs()
+            file.writeText(id)
+            id
+        }
+    }
+
+    @Volatile
+    private var cachedSyncEngine: SyncEngine? = null
+
+    /**
+     * Composition-safe snapshot of the global settings, used by [firebaseCreds] so the Settings
+     * screen's isSyncConfigured/storageConfigured checks don't do a blocking DB read + JSON decode
+     * on every recomposition. Primed at startup and refreshed by [restartSync]; the sync *engine*
+     * itself still reads settings directly (createSyncEngine) so its credentials are always fresh.
+     */
+    @Volatile
+    private var cachedGlobalSettings: com.folio.reader.settings.ReaderSettings? = null
+
+    /** Composition-safe snapshot of the credentials read from [secureCredentialStore]. */
+    @Volatile
+    private var cachedSyncCredentials: SyncCredentials = SyncCredentials()
+
+    suspend fun refreshSettingsSnapshot() {
+        cachedGlobalSettings = runCatching { settingsRepository.getGlobalSettings() }.getOrNull()
+        cachedSyncCredentials = runCatching { secureCredentialStore.load() }.getOrDefault(SyncCredentials())
+    }
+
+    /**
+     * Compose-observable mirror of [cachedSyncEngine]. Updated every time the
+     * cache is written so `remember(syncEngineState.value)` recomputes and the
+     * UI picks up a rebuilt engine without an app restart.
+     */
+    val syncEngineState = mutableStateOf<SyncEngine?>(null)
+
+    /**
+     * The active sync engine, or null when Firebase credentials are absent.
+     * Built lazily from [firebaseCreds] and cached; rebuilt by [restartSync]
+     * whenever the user changes credentials in Settings > Advanced so new
+     * settings take effect immediately.
+     */
+    val syncEngine: SyncEngine?
+        get() {
+            cachedSyncEngine?.let { return it }
+            return synchronized(this) {
+                cachedSyncEngine ?: createSyncEngine()?.also {
+                    cachedSyncEngine = it
+                    syncEngineState.value = it
+                }
+            }
+        }
+
+    val isSyncConfigured: Boolean get() = firebaseCreds() != null
+    val storageConfigured: Boolean get() = loadEnvFile()["storageBucket"] != null || System.getenv("FOLIO_FB_STORAGE_BUCKET") != null
+
+    private fun firebaseCreds(creds: SyncCredentials = cachedSyncCredentials): Pair<String, String>? {
+        // User-entered credentials (from the no-backup store) take priority over the env fallback.
+        // Reads the primed snapshot instead of a per-recomposition runBlocking DB read.
+        val env = loadEnvFile()
+        val projectId = creds.firebaseProjectId.takeIf { it.isNotBlank() }
+            ?: env["projectId"]
+            ?: System.getenv("FOLIO_FB_PROJECT_ID")
+            ?: BUNDLED_FIREBASE_PROJECT_ID
+        val apiKey = creds.firebaseApiKey.takeIf { it.isNotBlank() }
+            ?: env["apiKey"]
+            ?: System.getenv("FOLIO_FB_API_KEY")
+            ?: return null
+        return if (projectId.isBlank() || apiKey.isBlank()) null else projectId to apiKey
+    }
+
+    val exportManager by lazy {
+        com.folio.reader.export.ExportManager(
+            bookRepository = bookRepository,
+            positionRepository = positionRepository,
+            sessionRepository = sessionRepository,
+            highlightRepository = highlightRepository,
+            noteRepository = noteRepository,
+            bookmarkRepository = bookmarkRepository,
+            tagRepository = tagRepository,
+            collectionRepository = collectionRepository,
+            seriesRepository = seriesRepository,
+            quoteRepository = quoteRepository,
+            revisitRepository = revisitRepository,
+            settingsRepository = settingsRepository,
+            statisticsRepository = statisticsRepository
+        )
+    }
+
+    private fun createSyncEngine(): SyncEngine? {
+        // Read credentials fresh from the no-backup store. The inline (idempotent) migration ensures
+        // a user upgrading from a build that kept credentials in the settings blob has them moved
+        // into the store before the engine reads them, with no first-launch sync gap.
+        val stored = runBlocking {
+            runCatching { secureCredentialStore.migrateFromSettings(settingsRepository) }
+            secureCredentialStore.load()
+        }
+        val (projectId, apiKey) = firebaseCreds(stored) ?: return null
+        val email = stored.syncAccountEmail.takeIf { it.isNotBlank() }
+        val password = stored.syncAccountPassword.takeIf { it.isNotBlank() }
+        val firestoreSync = RestFirestoreSync(
+            projectId = projectId,
+            apiKey = apiKey,
+            accountEmail = email,
+            accountPassword = password
+        )
+        // Real file/cover sync when a storage bucket is configured; metadata-only otherwise.
+        val bucket = loadEnvFile()["storageBucket"] ?: System.getenv("FOLIO_FB_STORAGE_BUCKET")
+        val storageSync: com.folio.reader.sync.StorageSync = if (!bucket.isNullOrBlank()) {
+            com.folio.reader.sync.RestFirebaseStorageSync(
+                projectId = projectId,
+                apiKey = apiKey,
+                bucket = bucket,
+                accountEmail = email,
+                accountPassword = password
+            )
+        } else {
+            NoopStorageSync
+        }
+        return SyncEngine(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            syncRepository = syncQueueRepository,
+            bookRepository = bookRepository,
+            positionRepository = positionRepository,
+            highlightRepository = highlightRepository,
+            noteRepository = noteRepository,
+            bookmarkRepository = bookmarkRepository,
+            sessionRepository = sessionRepository,
+            settingsRepository = settingsRepository,
+            deviceRepository = deviceRepository,
+            collectionRepository = collectionRepository,
+            seriesRepository = seriesRepository,
+            tagRepository = tagRepository,
+            quoteRepository = quoteRepository,
+            revisitRepository = revisitRepository,
+            firestoreSync = firestoreSync,
+            storageSync = storageSync,
+            config = SyncConfig(),
+            deviceId = deviceId,
+            mangaRepository = mangaRepository,
+            mangaChapterRepository = mangaChapterRepository,
+            mangaNoteRepository = mangaNoteRepository,
+            mangaCategoryRepository = mangaCategoryRepository,
+        )
+    }
+
+    fun startSync(appScope: CoroutineScope) {
+        syncEngine?.let { engine ->
+            appScope.launch { engine.start() }
+        }
+    }
+
+    /**
+     * Rebuilds the sync engine after the user saves/clears Firebase credentials in
+     * Settings > Advanced. Stops any running loop, drops the cached engine so the
+     * next access rebuilds from current credentials, then starts fresh. Safe to
+     * call from the UI thread.
+     */
+    fun restartSync(appScope: CoroutineScope) {
+        val old = syncEngine
+        cachedSyncEngine = null // next access rebuilds from current credentials
+        syncEngineState.value = null
+        // Refresh the display snapshot so isSyncConfigured reflects the just-saved credentials.
+        appScope.launch { refreshSettingsSnapshot() }
+        old?.stop()
+        startSync(appScope)
+        // syncEngine getter (called inside startSync -> syncEngine?.let) already
+        // wrote the new instance into syncEngineState, but if credentials were
+        // cleared the getter returns null and we need to reflect that too.
+        if (cachedSyncEngine == null) syncEngineState.value = null
+    }
+
+    fun shutdown() {
+        syncEngine?.syncOnAppClose()
+        syncEngine?.stop()
+        database.close()
+    }
+}
+
+private sealed interface Screen {
+    data object Library : Screen
+    data class Reader(
+        val book: Book,
+        val targetSpineIndex: Int? = null,
+        /** Intra-chapter landing as a fraction of the chapter, or null for the top. */
+        val targetFraction: Float? = null,
+    ) : Screen
+    data class DocumentReader(val documentId: String) : Screen
+    data object Settings : Screen
+    data object Stats : Screen
+    data object Search : Screen
+    data class BookDetail(val bookId: String) : Screen
+    data object TagManager : Screen
+    data object QuoteBrowser : Screen
+    data object RevisitItems : Screen
+
+    // Manga category (separate from books).
+    data object MangaBrowse : Screen
+    data class MangaSourceBrowse(val sourceId: Long, val query: String = "") : Screen
+    data object MangaExtensions : Screen
+    data object MangaDownloads : Screen
+    data object MangaHistory : Screen
+    data class MangaDetail(val mangaId: String) : Screen
+    data class MangaReader(val mangaId: String, val chapterId: String) : Screen
+}
+
+private val supportedIncomingExtensions = setOf("epub", "pdf", "txt", "html", "htm", "docx", "odt")
+
+private val incomingContentFilter: java.io.FilenameFilter = java.io.FilenameFilter { _, name ->
+    name.substringAfterLast('.', "").lowercase() in supportedIncomingExtensions
+}
+
+private fun IncomingContentResult.openScreen(): Screen? = when (this) {
+    is IncomingContentResult.ImportedBook -> Screen.Reader(book)
+    is IncomingContentResult.DuplicateBook -> Screen.Reader(book)
+    is IncomingContentResult.ImportedDocument -> Screen.DocumentReader(document.id)
+    is IncomingContentResult.DuplicateDocument -> Screen.DocumentReader(document.id)
+    else -> null
+}
+
+private fun IncomingContentResult.freshScreen(): Screen? = when (this) {
+    is IncomingContentResult.ImportedBook -> Screen.Reader(book)
+    is IncomingContentResult.ImportedDocument -> Screen.DocumentReader(document.id)
+    else -> null
+}
+
+/** The book this batch actually added; null for a duplicate, which needs no import handling. */
+private fun IncomingContentResult.importedBook(): Book? =
+    (this as? IncomingContentResult.ImportedBook)?.book
+
+private fun IncomingContentResult.failureReason(): String? = when (this) {
+    is IncomingContentResult.Unsupported -> reason
+    is IncomingContentResult.Unsafe -> reason
+    is IncomingContentResult.Corrupt -> reason
+    is IncomingContentResult.Encrypted -> reason
+    is IncomingContentResult.TooLarge -> reason
+    is IncomingContentResult.IoError -> reason
+    else -> null
+}
+
+private fun isComposeSceneClosedException(t: Throwable?): Boolean {
+    var curr = t
+    while (curr != null) {
+        val msg = curr.message
+        if (msg != null && (
+                    msg.contains("ComposeScene is closed", ignoreCase = true) ||
+                            msg.contains("size set after ComposeScene", ignoreCase = true) ||
+                            msg.contains("ComposeScene has been closed", ignoreCase = true)
+                    )
+        ) {
+            return true
+        }
+        curr = curr.cause
+    }
+    return false
+}
+
+fun main(args: Array<String>) {
+    val startupFiles = args
+        .map(::File)
+        .filter { it.isFile && it.extension.lowercase() in supportedIncomingExtensions }
+    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+        if (isComposeSceneClosedException(throwable)) {
+            return@setDefaultUncaughtExceptionHandler
+        }
+        defaultHandler?.uncaughtException(thread, throwable) ?: throwable.printStackTrace()
+    }
+
+    // Verify exact JAR loaded — helps diagnose stale installed package vs. latest build.
+    try {
+        val codeSource = object {}.javaClass.protectionDomain?.codeSource?.location
+        println("Folio startup: codeSource=$codeSource args=${args.joinToString()}")
+        val cfg = File("app/Folio.cfg").takeIf { it.isFile } ?: File("Folio.cfg").takeIf { it.isFile }
+        if (cfg != null && cfg.isFile) {
+            println("Folio.cfg first lines: ${cfg.readLines().take(5).joinToString(" | ")}")
+        }
+        // Also log shared-desktop JAR hash for verification
+        val sharedJar = codeSource?.toString() ?: "unknown"
+        (System.getenv("LOCALAPPDATA")?.let { File(it, "Folio/folio.log") } ?: File(System.getProperty("user.home"), ".folio/folio.log")).apply {
+            parentFile?.mkdirs()
+            appendText("${java.time.Instant.now()} Folio startup codeSource=$sharedJar\n")
+        }
+    } catch (e: Exception) {
+        println("Folio startup verification failed: ${e.message}")
+    }
+
+    val deps = FolioDesktopAppDependencies()
+    // Same directory holds the interface faces (Fraunces/Manrope); installed before
+    // the first frame so no screen opens in the system font.
+    com.folio.reader.ui.theme.UiFonts.install(deps.platform.fileSystem.getFontsDir())
+    // Network-fetched manga covers persist to disk from here on, so library
+    // thumbnails survive cold starts instead of refetching every launch.
+    com.folio.reader.ui.manga.MangaCoverDiskCache.directory =
+        deps.platform.fileSystem.mangaCoversDir
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Extract bundled reader fonts (Calluna, Comfortaa) off the main thread. This was a blocking
+    // 13-file write + two settings round-trips before the first window paint; the reader
+    // recomposes when the faces land, matching what Android already does (FolioApplication).
+    appScope.launch(Dispatchers.IO) {
+        runCatching {
+            com.folio.reader.font.BundledFonts.ensureInstalled(deps.platform, deps.settingsRepository) { path ->
+                runCatching {
+                    com.folio.reader.font.BundledFonts::class.java.getResourceAsStream("/$path")?.use { it.readBytes() }
+                }.getOrNull()
+            }
+        }.onFailure { it.printStackTrace() }
+    }
+    // Prime the settings snapshot used by the Settings screen's sync-config checks, off the main
+    // thread, so those checks never do a blocking DB read during composition.
+    appScope.launch { deps.refreshSettingsSnapshot() }
+
+    application {
+        // Navigation back stack: forward navigation pushes a screen onto the
+        // stack and Escape/back pops to wherever the user came from
+        // (e.g. Reader -> BookDetail -> Library) instead of always jumping
+        // straight to the library root.
+        val navStack = remember { androidx.compose.runtime.mutableStateListOf<Screen>(Screen.Library) }
+        val pushScreen: (Screen) -> Unit = { target ->
+            if (navStack.last() != target) navStack.add(target)
+        }
+        val popScreen: () -> Unit = {
+            if (navStack.size > 1) navStack.removeAt(navStack.size - 1)
+        }
+        var importStatus by remember { mutableStateOf("") }
+        // Imported books waiting for the collection picker; non-null shows the
+        // dialog, and the first imported screen opens once it is answered.
+        var pendingImportBooks by remember { mutableStateOf<List<com.folio.reader.model.Book>?>(null) }
+        var pendingImportScreen by remember { mutableStateOf<Screen?>(null) }
+        var globalSettings by remember { mutableStateOf(com.folio.reader.settings.ReaderSettings()) }
+        // Sync credentials come from the no-backup store, not the settings blob.
+        var syncCredentials by remember { mutableStateOf(SyncCredentials()) }
+        var libraryMode by remember { mutableStateOf(com.folio.reader.ui.library.LibraryMode.BOOKS) }
+        var libraryModeLoaded by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            runCatching {
+                val raw = deps.settingsRepository.getRaw("library.mode")
+                com.folio.reader.ui.library.LibraryMode.entries
+                    .firstOrNull { it.name == raw }
+                    ?.let { libraryMode = it }
+            }
+            libraryModeLoaded = true
+        }
+        LaunchedEffect(libraryMode, libraryModeLoaded) {
+            if (libraryModeLoaded) {
+                runCatching { deps.settingsRepository.setRaw("library.mode", libraryMode.name) }
+            }
+        }
+        var mangaSearchActive by remember { mutableStateOf(false) }
+        // Rail search state for the books and documents shelves: the field lives
+        // on the library rail, beside the mode switch, and survives navigation.
+        var bookSearchActive by remember { mutableStateOf(false) }
+        var documentSearchActive by remember { mutableStateOf(false) }
+        val bookSearchController = remember {
+            com.folio.reader.ui.search.BookSearchController(
+                searchRepository = deps.searchRepository,
+                highlightRepository = deps.highlightRepository,
+                noteRepository = deps.noteRepository,
+                bookmarkRepository = deps.bookmarkRepository,
+            )
+        }
+        // Hoisted so returning from an opened result restores the search
+        // screen exactly as it was left (query, results, scroll position).
+        val searchUiState = remember { com.folio.reader.ui.search.SearchUiState() }
+        val mangaLibVM = remember {
+            com.folio.reader.ui.manga.MangaLibraryViewModel(
+                backend = deps.mangaBackend,
+                mangaRepo = deps.mangaRepository,
+                categoryRepo = deps.mangaCategoryRepository,
+                chapterRepo = deps.mangaChapterRepository,
+                settingsRepo = deps.settingsRepository,
+                downloadRepo = deps.mangaDownloadRepository,
+            )
+        }
+        val mangaLibBrowseVM = remember {
+            com.folio.reader.ui.manga.BrowseViewModel(deps.mangaBackend, deps.mangaRepository)
+        }
+        // Hoisted so returning from a source/detail screen restores search state
+        // (query, results, scroll) instead of recreating the VM on pop-back.
+        val mangaBrowseVM = remember {
+            com.folio.reader.ui.manga.BrowseViewModel(deps.mangaBackend, deps.mangaRepository)
+        }
+        val sourceBrowseVmCache = remember {
+            mutableMapOf<Long, com.folio.reader.ui.manga.SourceBrowseViewModel>()
+        }
+        val statisticsVM = remember {
+            StatisticsViewModel(
+                bookRepository = deps.bookRepository,
+                sessionRepository = deps.sessionRepository,
+                quoteRepository = deps.quoteRepository,
+                highlightRepository = deps.highlightRepository
+            )
+        }
+        // Hoisted so Escape can close the stats tab and return to the shelf.
+        val libraryVM = remember {
+            LibraryViewModel(
+                bookRepository = deps.bookRepository,
+                collectionRepository = deps.collectionRepository,
+                seriesRepository = deps.seriesRepository,
+                settingsRepository = deps.settingsRepository
+            )
+        }
+        val documentLibraryVM = remember {
+            DocumentLibraryViewModel(
+                repository = deps.documentRepository,
+                categoryRepository = deps.documentCategoryRepository,
+                settingsRepository = deps.settingsRepository
+            )
+        }
+        DisposableEffect(documentLibraryVM) {
+            onDispose { documentLibraryVM.close() }
+        }
+        val windowState = rememberWindowState()
+
+        // Top-level sync state for library screen badge
+        val librarySyncState by remember(deps.syncEngineState.value) {
+            deps.syncEngine?.syncState ?: kotlinx.coroutines.flow.flowOf(null)
+        }.collectAsState(initial = null)
+
+        LaunchedEffect(Unit) {
+            runCatching { globalSettings = deps.settingsRepository.getGlobalSettings() }
+            // Migrate-then-load so an upgrading user sees their credentials in the panel on the very
+            // first launch (the store may not have been seeded yet at app start). Idempotent.
+            runCatching {
+                deps.secureCredentialStore.migrateFromSettings(deps.settingsRepository)
+                syncCredentials = deps.secureCredentialStore.load()
+            }
+            deps.startSync(appScope)
+        }
+
+        // Success statuses auto-clear after 3 seconds; in-progress and error messages
+        // persist until the next status replaces them.
+        LaunchedEffect(importStatus) {
+            if (com.folio.reader.ui.components.isTransientStatus(importStatus)) {
+                kotlinx.coroutines.delay(3000)
+                importStatus = ""
+            }
+        }
+
+        fun adoptBookProgress(book: com.folio.reader.model.Book) {
+            appScope.launch(Dispatchers.IO) {
+                val adopted = runCatching {
+                    deps.syncEngine?.adoptCloudProgressForBook(book.id, book.epubHash) ?: 0
+                }.getOrDefault(0)
+                if (adopted > 0) {
+                    appScope.launch(Dispatchers.Main) {
+                        importStatus = "Restored reading progress from cloud"
+                    }
+                }
+            }
+        }
+
+        fun importIncomingFiles(files: List<File>, openFirst: Boolean) {
+            if (files.isEmpty()) return
+            documentLibraryVM.setImporting(true)
+            appScope.launch(Dispatchers.IO) {
+                val results = deps.incomingContentCoordinator.importMany(
+                    files.map { file ->
+                        IncomingContent(
+                            path = file.absolutePath,
+                            filename = file.name
+                        )
+                    }
+                )
+                val importedBooks = results.mapNotNull { it.importedBook() }
+                val duplicates = results.count { it.isAlreadyInLibrary }
+                importedBooks.forEach(::adoptBookProgress)
+                // Open what was just added; otherwise fall back to the existing item.
+                val firstScreen = results.firstNotNullOfOrNull { it.freshScreen() }
+                    ?: results.firstNotNullOfOrNull { it.openScreen() }
+                val imported = results.count { it.isNewImport }
+                val failure = results.firstNotNullOfOrNull { it.failureReason() }
+                withContext(Dispatchers.Main) {
+                    documentLibraryVM.setImporting(false)
+                    importStatus = when {
+                        imported > 0 && duplicates > 0 ->
+                            "Imported $imported of ${files.size} file(s) • " +
+                                "$duplicates already in library"
+                        imported > 0 -> "Imported $imported of ${files.size} file(s)"
+                        duplicates > 0 -> "Already in library"
+                        failure != null -> "Import failed: $failure"
+                        else -> "No supported files were imported"
+                    }
+                    // Imported books get the shelf prompt before anything opens:
+                    // the batch already sits on Main, and this is the one moment
+                    // filing them elsewhere is a single tap.
+                    if (openFirst && importedBooks.isNotEmpty()) {
+                        pendingImportScreen = firstScreen
+                        pendingImportBooks = importedBooks
+                    } else if (openFirst && firstScreen != null) {
+                        pushScreen(firstScreen)
+                    }
+                }
+            }
+        }
+
+        fun pickAndImportFiles() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(
+                    null as java.awt.Frame?,
+                    "Choose books or documents",
+                    java.awt.FileDialog.LOAD
+                )
+                dialog.setMultipleMode(true)
+                dialog.filenameFilter = incomingContentFilter
+                dialog.isVisible = true
+                importIncomingFiles(dialog.files?.toList().orEmpty(), openFirst = true)
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            importIncomingFiles(startupFiles, openFirst = true)
+        }
+
+        val mangaBackupManager by lazy {
+            com.folio.reader.manga.backup.MangaBackupManager(
+                mangaRepo = deps.mangaRepository,
+                chapterRepo = deps.mangaChapterRepository,
+                categoryRepo = deps.mangaCategoryRepository,
+                historyRepo = deps.mangaHistoryRepository,
+            )
+        }
+
+        fun importMangaBackup() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose backup", java.awt.FileDialog.LOAD)
+                dialog.isVisible = true
+                val file = dialog.file?.let { File(dialog.directory, it) }
+                if (file != null && file.exists()) {
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching { mangaBackupManager.importFromMihonBackup(file) }
+                            .onSuccess { r -> appScope.launch(Dispatchers.Main) { importStatus = "Imported ${r.manga} manga, ${r.chapters} chapters" } }
+                            .onFailure { e -> appScope.launch(Dispatchers.Main) { importStatus = "Backup import failed: ${e.message}" } }
+                    }
+                }
+            }
+        }
+
+        fun exportMangaBackup() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Export backup", java.awt.FileDialog.SAVE)
+                dialog.setFile("folio_manga.backup")
+                dialog.isVisible = true
+                val file = dialog.file?.let { File(dialog.directory, it) }
+                if (file != null) {
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching { mangaBackupManager.exportToMihonBackup(file) }
+                            .onSuccess { c -> appScope.launch(Dispatchers.Main) { importStatus = "Exported $c manga to backup" } }
+                            .onFailure { e -> appScope.launch(Dispatchers.Main) { importStatus = "Backup export failed: ${e.message}" } }
+                    }
+                }
+            }
+        }
+
+        fun pickAndImportManga() {
+            java.awt.EventQueue.invokeLater {
+                val chooser = javax.swing.JFileChooser().apply {
+                    dialogTitle = "Choose CBZ/ZIP archives or a manga folder"
+                    fileSelectionMode = javax.swing.JFileChooser.FILES_AND_DIRECTORIES
+                    isMultiSelectionEnabled = true
+                    fileFilter = object : javax.swing.filechooser.FileFilter() {
+                        override fun accept(f: java.io.File): Boolean =
+                            f.isDirectory || f.extension.equals("cbz", ignoreCase = true) ||
+                                f.extension.equals("zip", ignoreCase = true)
+                        override fun getDescription(): String = "CBZ/ZIP archives"
+                    }
+                }
+                if (chooser.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return@invokeLater
+                val files = chooser.selectedFiles ?: return@invokeLater
+                appScope.launch(Dispatchers.IO) {
+                    var ok = 0
+                    for (file in files) {
+                        runCatching {
+                            val seriesName = if (file.isDirectory) {
+                                deps.mangaBackend.localSource.importFolder(file)
+                            } else {
+                                deps.mangaBackend.localSource.import(file)
+                            }
+                            val entryId = com.folio.reader.manga.mangaId(com.folio.reader.manga.LOCAL_SOURCE_ID, seriesName)
+                            deps.mangaRepository.upsert(
+                                com.folio.reader.manga.MangaEntry(
+                                    id = entryId,
+                                    sourceId = com.folio.reader.manga.LOCAL_SOURCE_ID,
+                                    sourceName = "Local manga",
+                                    url = seriesName,
+                                    title = seriesName,
+                                    thumbnailUrl = seriesName,
+                                    inLibrary = true,
+                                    initialized = true,
+                                )
+                            )
+                            runCatching {
+                                deps.mangaBackend.localSource.materializeCover(seriesName)?.let { cover ->
+                                    deps.mangaRepository.setCoverPath(entryId, cover.absolutePath)
+                                }
+                            }
+                            appScope.launch(Dispatchers.IO) {
+                                runCatching { deps.syncEngine?.adoptCloudProgressForManga(entryId) }
+                            }
+                            ok++
+                        }.onFailure { e ->
+                            appScope.launch(Dispatchers.Main) { importStatus = "Manga import failed: ${e.message}" }
+                        }
+                    }
+                    appScope.launch(Dispatchers.Main) {
+                        importStatus = "Imported $ok of ${files.size} manga"
+                    }
+                }
+            }
+        }
+
+        fun pickMangaDownloadsDir(onDone: () -> Unit = {}) {
+            java.awt.EventQueue.invokeLater {
+                val chooser = javax.swing.JFileChooser().apply {
+                    dialogTitle = "Choose where manga downloads are saved"
+                    fileSelectionMode = javax.swing.JFileChooser.DIRECTORIES_ONLY
+                }
+                if (chooser.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return@invokeLater
+                val dir = chooser.selectedFile ?: return@invokeLater
+                appScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        val storage = com.folio.reader.manga.FileDownloadStorage(dir)
+                        val ok = deps.mangaDownloadManager.switchStorage(storage) { done, total ->
+                            withContext(Dispatchers.Main) { importStatus = "Moving downloads... $done/$total" }
+                        }
+                        if (!ok) {
+                            appScope.launch(Dispatchers.Main) {
+                                importStatus = "Couldn't use that folder for downloads; keeping the current location"
+                            }
+                            return@runCatching
+                        }
+                        deps.settingsRepository.setRaw(
+                            com.folio.reader.manga.KEY_MANGA_DOWNLOADS_LOCATION,
+                            dir.absolutePath
+                        )
+                        withContext(Dispatchers.Main) {
+                            importStatus = "Downloads now save to ${dir.absolutePath}"
+                            onDone()
+                        }
+                    }.onFailure { e ->
+                        appScope.launch(Dispatchers.Main) { importStatus = "Could not use that folder: ${e.message}" }
+                    }
+                }
+            }
+        }
+
+        fun pickAndImportFont() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Import Font", java.awt.FileDialog.LOAD)
+                dialog.setFilenameFilter { _, name ->
+                    name.lowercase().endsWith(".ttf") || name.lowercase().endsWith(".otf")
+                }
+                dialog.isVisible = true
+                val file = dialog.file?.let { File(dialog.directory, it) }
+                if (file != null && file.exists()) {
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching { deps.fontManager.importFont(file, file.nameWithoutExtension) }
+                            .onSuccess { font ->
+                                if (font != null) {
+                                    runCatching {
+                                        deps.settingsRepository.mergeGlobalSettings {
+                                            it.copy(customFonts = it.customFonts + font)
+                                        }
+                                    }.onSuccess { merged ->
+                                        appScope.launch(Dispatchers.Main) {
+                                            globalSettings = merged
+                                            importStatus = "Font imported: ${font.name}"
+                                        }
+                                    }.onFailure { e ->
+                                        appScope.launch(Dispatchers.Main) {
+                                            importStatus = "Font save failed: ${e.message}"
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
+            }
+        }
+
+        fun pickBackupDestination() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Export Backup", java.awt.FileDialog.SAVE)
+                dialog.setFile("folio-backup.json")
+                dialog.isVisible = true
+                val file = dialog.file?.let { File(dialog.directory, it) }
+                if (file != null) {
+                    appScope.launch(Dispatchers.IO) {
+                        deps.exportManager.createFullBackup(file, deps.deviceId)
+                            .onSuccess { backup ->
+                                appScope.launch(Dispatchers.Main) {
+                                    importStatus =
+                                        "Backup saved: ${backup.books.size} books, ${backup.highlights.size} highlights"
+                                }
+                            }
+                            .onFailure { e ->
+                                appScope.launch(Dispatchers.Main) { importStatus = "Backup failed: ${e.message}" }
+                            }
+                    }
+                }
+            }
+        }
+
+        fun pickBackupSource() {
+            java.awt.EventQueue.invokeLater {
+                val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Restore Backup", java.awt.FileDialog.LOAD)
+                dialog.setFilenameFilter { _, name -> name.lowercase().endsWith(".json") }
+                dialog.isVisible = true
+                val file = dialog.file?.let { File(dialog.directory, it) }
+                if (file != null) {
+                    appScope.launch(Dispatchers.IO) {
+                        deps.exportManager.restoreBackup(file, com.folio.reader.export.RestoreMode.MERGE)
+                            .onSuccess { summary ->
+                                appScope.launch(Dispatchers.Main) {
+                                    importStatus =
+                                        "Restored: ${summary.booksRestored} books, ${summary.highlightsRestored} highlights, ${summary.errors.size} errors"
+                                }
+                            }
+                            .onFailure { e ->
+                                appScope.launch(Dispatchers.Main) { importStatus = "Restore failed: ${e.message}" }
+                            }
+                    }
+                }
+            }
+        }
+
+        fun exportAnnotations(format: String) {
+            appScope.launch(Dispatchers.IO) {
+                java.awt.EventQueue.invokeLater {
+                    val dialog =
+                        java.awt.FileDialog(null as java.awt.Frame?, "Export Annotations", java.awt.FileDialog.SAVE)
+                    dialog.setFile("annotations.$format")
+                    dialog.isVisible = true
+                    val file = dialog.file?.let { File(dialog.directory, it) } ?: return@invokeLater
+                    appScope.launch(Dispatchers.IO) {
+                        val result = when (format) {
+                            "markdown" -> deps.exportManager.exportAnnotationsMarkdown(file, null)
+                            "csv" -> deps.exportManager.exportAnnotationsCsv(file, null)
+                            else -> deps.exportManager.exportAnnotationsJson(file, null)
+                        }
+                        result.onSuccess {
+                            appScope.launch(Dispatchers.Main) { importStatus = "Annotations exported to ${file.name}" }
+                        }.onFailure { e ->
+                            appScope.launch(Dispatchers.Main) { importStatus = "Export failed: ${e.message}" }
+                        }
+                    }
+                }
+            }
+        }
+
+        fun exportLibraryFiles(bookIds: Set<String> = emptySet(), documentIds: Set<String> = emptySet()) {
+            appScope.launch(Dispatchers.IO) {
+                val sources = mutableListOf<Pair<File, String>>()
+                bookIds.forEach { id ->
+                    File(deps.platform.fileSystem.getBookEpubPath(id))
+                        .takeIf(File::isFile)
+                        ?.let { sources += it to "original.epub" }
+                }
+                documentIds.forEach { id ->
+                    val document = runCatching { deps.documentRepository.getDocument(id) }.getOrNull()
+                        ?: return@forEach
+                    document.localPath?.let(::File)?.takeIf(File::isFile)?.let { source ->
+                        val name = File(document.originalFilename).name.ifBlank { source.name }
+                        sources += source to name
+                    }
+                }
+
+                val downloads = File(System.getProperty("user.home"), "Downloads")
+                var exported = 0
+                var failed = 0
+                if (!downloads.exists() && !downloads.mkdirs()) failed = sources.size
+                if (downloads.isDirectory) {
+                    sources.forEach { (source, requestedName) ->
+                        runCatching {
+                            val name = deps.platform.fileSystem.uniqueFileName(requestedName) {
+                                File(downloads, it).exists()
+                            }
+                            source.inputStream().use { input ->
+                                File(downloads, name).outputStream().use { output -> input.copyTo(output) }
+                            }
+                        }.onSuccess { exported++ }.onFailure { failed++ }
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    importStatus = when {
+                        exported > 0 && failed == 0 -> "Exported $exported file(s) to Downloads"
+                        exported > 0 -> "Exported $exported file(s); $failed failed"
+                        sources.isEmpty() -> "No selected files are available"
+                        else -> "Export failed"
+                    }
+                }
+            }
+        }
+
+        Window(
+            onCloseRequest = {
+                runCatching { deps.shutdown() }
+                exitApplication()
+            },
+            onPreviewKeyEvent = { e ->
+                // Escape = back: pops to the previous screen in the navigation stack,
+                // and at the root closes the stats tab before giving up.
+                if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyUp && e.key == Key.Escape) {
+                    when {
+                        navStack.size > 1 -> {
+                            popScreen()
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            },
+            title = "Folio",
+            state = windowState
+        ) {
+            // The app chrome follows the app's own light/dark choice. A reading theme
+            // describes the page and nothing else — feeding themeId in here is what
+            // made the two bleed into each other.
+            val appPalette = com.folio.reader.ui.theme.AppPalette.byId(globalSettings.appThemeId)
+            // A custom theme replaces the pack's colours wholesale; its own
+            // background lightness, not the pack's, decides the app's polarity.
+            val customAppTheme = globalSettings.customAppTheme
+            FolioTheme.AppTheme(
+                palette = appPalette,
+                fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId),
+                colors = customAppTheme?.toFolioColors() ?: appPalette.colors,
+                isDark = customAppTheme?.isDark ?: appPalette.isDark,
+                opacity = globalSettings.surfaceOpacity()
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = FolioTheme.colors.background
+                ) {
+                    // No remount key: every list re-queries on its repository's
+                    // data revision, so imports and deletes update screens in place.
+                    androidx.compose.animation.AnimatedContent(
+                            targetState = navStack.last(),
+                            transitionSpec = {
+                                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            },
+                            label = "screen"
+                        ) { current ->
+                            when (current) {
+                                is Screen.Library -> {
+                                    LibraryScreen(
+                                        onBookClick = { book ->
+                                            pushScreen(Screen.BookDetail(book.id))
+                                        },
+                                        onBookDetailClick = { book ->
+                                            pushScreen(Screen.BookDetail(book.id))
+                                        },
+                                        onImportClick = { pickAndImportFiles() },
+                                        // One search contract for every shelf: the icon
+                                        // toggles the mode's rail search, which keeps the
+                                        // Books/Manga/Documents switch on screen.
+                                        onSearchClick = {
+                                            when (libraryMode) {
+                                                com.folio.reader.ui.library.LibraryMode.BOOKS ->
+                                                    bookSearchActive = !bookSearchActive
+                                                com.folio.reader.ui.library.LibraryMode.DOCUMENTS ->
+                                                    documentSearchActive = !documentSearchActive
+                                                com.folio.reader.ui.library.LibraryMode.MANGA ->
+                                                    mangaSearchActive = !mangaSearchActive
+                                            }
+                                        },
+                                        bookSearchActive = bookSearchActive,
+                                        onBookSearchActiveChange = { bookSearchActive = it },
+                                        bookSearchController = bookSearchController,
+                                        onOpenBookHit = { hit ->
+                                            appScope.launch(Dispatchers.IO) {
+                                                deps.bookRepository.getBook(hit.book.id)?.let { book ->
+                                                    val target = hit.spineIndex.takeIf { it >= 0 }
+                                                    val frac = hit.startFraction.takeIf { it >= 0f }
+                                                    appScope.launch(Dispatchers.Main) {
+                                                        pushScreen(
+                                                            Screen.Reader(
+                                                                book,
+                                                                target,
+                                                                frac
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        documentSearchActive = documentSearchActive,
+                                        onDocumentSearchActiveChange = { documentSearchActive = it },
+                                        onSettingsClick = { pushScreen(Screen.Settings) },
+                                        onTagManagerClick = { pushScreen(Screen.TagManager) },
+                                        onQuoteBrowserClick = { pushScreen(Screen.QuoteBrowser) },
+                                        onRevisitClick = { pushScreen(Screen.RevisitItems) },
+                                        onShareBooks = { exportLibraryFiles(bookIds = it) },
+                                        onShareDocuments = { exportLibraryFiles(documentIds = it) },
+                                        onDeleteBooks = { ids ->
+                                            appScope.launch(Dispatchers.IO) {
+                                                ids.forEach { id ->
+                                                    try {
+                                                        deps.bookRepository.deleteBook(id)
+                                                    } catch (_: Throwable) {
+                                                    }
+                                                    try {
+                                                        deps.platform.fileSystem.deleteBookFiles(id)
+                                                    } catch (_: Throwable) {
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onSetBookStatus = { ids, status ->
+                                            appScope.launch(Dispatchers.IO) {
+                                                ids.forEach { id ->
+                                                    runCatching {
+                                                        deps.bookRepository.setBookStatus(
+                                                            id,
+                                                            status
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        viewModel = libraryVM,
+                                        documentLibraryViewModel = documentLibraryVM,
+                                        onDocumentImportClick = { pickAndImportFiles() },
+                                        onDocumentOpen = { document ->
+                                            pushScreen(Screen.DocumentReader(document.id))
+                                        },
+                                        onDocumentDelete = { document ->
+                                            appScope.launch(Dispatchers.IO) {
+                                                val result = deps.documentDeletionService.delete(document.id)
+                                                withContext(Dispatchers.Main) {
+                                                    if (!result.filesDeleted) {
+                                                        importStatus = "Document removed; some local files could not be deleted"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        syncState = librarySyncState,
+                                        onSyncNow = { deps.syncEngine?.triggerSync(immediate = true) },
+                                        libraryMode = libraryMode,
+                                        onLibraryModeChange = { libraryMode = it },
+                                        mangaLibraryViewModel = mangaLibVM,
+                                        mangaExtensionsAvailable = false,
+                                        onMangaBrowseClick = { pushScreen(Screen.MangaBrowse) },
+                                        onMangaHistoryClick = { pushScreen(Screen.MangaHistory) },
+                                        onMangaImportClick = { pickAndImportManga() },
+                                        onMangaSearchClick = { mangaSearchActive = !mangaSearchActive },
+                                        mangaSearchActive = mangaSearchActive,
+                                        onMangaSearchActiveChange = { mangaSearchActive = it },
+                                        mangaSourcesAvailable = mangaLibBrowseVM != null,
+                                        onOpenMangaDownloads = { pushScreen(Screen.MangaDownloads) },
+                                        onMangaBackupImport = { importMangaBackup() },
+                                        onMangaBackupExport = { exportMangaBackup() },
+                                        mangaContent = {
+                                            com.folio.reader.ui.manga.MangaLibraryScreen(
+                                                viewModel = mangaLibVM,
+                                                backend = deps.mangaBackend,
+                                                supportsExtensions = deps.mangaBackend.supportsExtensions,
+                                                onOpenManga = { id -> pushScreen(Screen.MangaDetail(id)) },
+                                                onOpenBrowse = { pushScreen(Screen.MangaBrowse) },
+                                                onOpenExtensions = { pushScreen(Screen.MangaExtensions) },
+                                                onOpenSource = { source, q -> pushScreen(Screen.MangaSourceBrowse(source.id, q)) },
+                                                onImportLocal = { pickAndImportManga() },
+                                                searchActive = mangaSearchActive,
+                                                onSearchActiveChange = { mangaSearchActive = it },
+                                                browseViewModel = mangaLibBrowseVM,
+                                            )
+                                        },
+                                        onOpenStats = { pushScreen(Screen.Stats) }
+                                    )
+                                }
+
+                                is Screen.Stats -> {
+                                    // StatisticsTabContent supplies no chrome of its own: the host
+                                    // publishes the masthead's runway and the charts pay it as their
+                                    // own top contentPadding, so they run to the top of the window
+                                    // and travel *under* the glass.
+                                    val statsHeader =
+                                        com.folio.reader.ui.components.rememberFolioHeaderState()
+                                    // Desktop resolves `WindowInsets.statusBars` to zero, so this is
+                                    // the bar row's own height and nothing more.
+                                    val statsTopInset = com.folio.reader.ui.theme.folioBarTopInset()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .nestedScroll(statsHeader.nestedScrollConnection)
+                                    ) {
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            com.folio.reader.ui.theme.LocalFolioTopInset provides statsTopInset
+                                        ) {
+                                            StatisticsTabContent(
+                                                viewModel = statisticsVM,
+                                                onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
+                                                settingsRepository = deps.settingsRepository,
+                                                initialGoalMinutes = globalSettings.dailyGoalMinutes,
+                                                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
+                                            )
+                                        }
+                                        // Drawn last so it floats over the charts, and driven by their
+                                        // scroll — with no collapse value the bar never painted its
+                                        // glass at all.
+                                        com.folio.reader.ui.components.FolioTopBar(
+                                            title = "Stats",
+                                            collapse = statsHeader.collapse,
+                                            modifier = Modifier.align(Alignment.TopCenter)
+                                        )
+                                    }
+                                }
+
+                                is Screen.Reader -> ReaderRoute(
+                                    deps = deps,
+                                    book = current.book,
+                                    targetSpineIndex = current.targetSpineIndex,
+                                    targetFraction = current.targetFraction,
+                                    initialSettings = globalSettings,
+                                    onBackPress = { popScreen() },
+                                    onSearchClick = { pushScreen(Screen.Search) },
+                                    onSettingsClick = { pushScreen(Screen.Settings) },
+                                    onSettingsChanged = { globalSettings = it }
+                                )
+
+                                is Screen.DocumentReader -> DocumentReaderRoute(
+                                    deps = deps,
+                                    documentId = current.documentId,
+                                    settings = globalSettings,
+                                    onBack = { popScreen() }
+                                )
+
+                                is Screen.Settings -> {
+                                    // This screen edits the snapshot below and saves it back whole, so
+                                    // it must be current: a value captured at startup would revert every
+                                    // reading preference the reader changed since.
+                                    var mangaDefaultMode by remember {
+                                        mutableStateOf(com.folio.reader.ui.manga.MangaReaderMode.WEBTOON)
+                                    }
+                                    LaunchedEffect(Unit) {
+                                        runCatching {
+                                            globalSettings = deps.settingsRepository.getGlobalSettings()
+                                            mangaDefaultMode = com.folio.reader.ui.manga.MangaReaderMode.entries.firstOrNull {
+                                                it.name == deps.settingsRepository.getRaw(
+                                                    com.folio.reader.ui.manga.KEY_MANGA_READER_DEFAULT_MODE
+                                                )
+                                            } ?: com.folio.reader.ui.manga.MangaReaderMode.WEBTOON
+                                        }
+                                    }
+                                    var mangaDlLocation by remember {
+                                        mutableStateOf(deps.mangaDownloadManager.storageDescription())
+                                    }
+                                    // Library scanning state, loaded from the raw scan keys and
+                                    // refreshed after scope/folder changes and scans.
+                                    var scanPanelState by remember {
+                                        mutableStateOf(
+                                            com.folio.reader.ui.settings.LibraryScanPanelState(
+                                                deviceRootDescription = "Your Desktop, Documents and Downloads folders"
+                                            )
+                                        )
+                                    }
+                                    LaunchedEffect(Unit) {
+                                        val repo = deps.settingsRepository
+                                        val keys = com.folio.reader.importer.LibraryScanKeys
+                                        runCatching {
+                                            scanPanelState = scanPanelState.copy(
+                                                scope = com.folio.reader.importer.LibraryScanScope.fromRaw(
+                                                    repo.getRaw(keys.SCOPE)
+                                                ),
+                                                folderDescription = repo.getRaw(keys.FOLDER)
+                                                    ?.takeIf { it.isNotBlank() }
+                                                    ?.let(::File)?.takeIf { it.isDirectory }?.absolutePath,
+                                                scanOnStart = repo.getRaw(keys.ON_START) == "1",
+                                                lastScanSummary = repo.getRaw(keys.LAST),
+                                            )
+                                        }
+                                    }
+                                    fun pickScanFolder() {
+                                        java.awt.EventQueue.invokeLater {
+                                            val chooser = javax.swing.JFileChooser().apply {
+                                                dialogTitle = "Choose the folder Folio should scan"
+                                                fileSelectionMode = javax.swing.JFileChooser.DIRECTORIES_ONLY
+                                            }
+                                            if (chooser.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) {
+                                                return@invokeLater
+                                            }
+                                            val dir = chooser.selectedFile ?: return@invokeLater
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    deps.settingsRepository.setRaw(
+                                                        com.folio.reader.importer.LibraryScanKeys.FOLDER,
+                                                        dir.absolutePath
+                                                    )
+                                                }
+                                                appScope.launch(Dispatchers.Main) {
+                                                    scanPanelState = scanPanelState.copy(folderDescription = dir.absolutePath)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    fun runScanNow() {
+                                        scanPanelState = scanPanelState.copy(isScanning = true)
+                                        appScope.launch(Dispatchers.IO) {
+                                            val summary = runCatching {
+                                                DesktopLibraryScanner.scan(
+                                                    deps.libraryScanCoordinator,
+                                                    deps.settingsRepository
+                                                )
+                                            }.getOrNull()
+                                            val last = summary?.describe()
+                                            appScope.launch(Dispatchers.Main) {
+                                                scanPanelState = scanPanelState.copy(
+                                                    isScanning = false,
+                                                    lastScanSummary = last
+                                                        ?: "Nothing to scan — choose a folder first"
+                                                )
+                                            }
+                                        }
+                                    }
+                                    SettingsScreen(
+                                        settings = globalSettings,
+                                        syncCredentials = syncCredentials,
+                                        onSyncCredentialsChange = { updated ->
+                                            // Persist credentials to the no-backup store (never the
+                                            // settings blob) and rebuild the sync loop.
+                                            syncCredentials = updated
+                                            appScope.launch(Dispatchers.IO) {
+                                                deps.secureCredentialStore.save(updated)
+                                                withContext(Dispatchers.Main) { deps.restartSync(appScope) }
+                                            }
+                                        },
+                                        onSettingsChange = { updated ->
+                                            // Field-scoped patch: the screen's snapshot may be
+                                            // stale, so only the fields it actually changed are
+                                            // written — the rest keep their stored values.
+                                            val changed = updated.diffFields(globalSettings)
+                                            val credsChanged =
+                                                SETTINGS_CREDENTIAL_FIELDS.any { it in changed }
+                                            globalSettings = globalSettings.withFieldsFrom(changed, updated)
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    val merged = deps.settingsRepository.mergeGlobalSettings {
+                                                        it.withFieldsFrom(changed, updated)
+                                                    }
+                                                    withContext(Dispatchers.Main) { globalSettings = merged }
+                                                }
+                                            }
+                                            // Rebuild the sync loop so a newly saved/cleared API key takes effect immediately.
+                                            if (credsChanged) deps.restartSync(appScope)
+                                        },
+                                        onBackPress = { popScreen() },
+                                        syncState = librarySyncState
+                                            ?: com.folio.reader.sync.SyncState(isConfigured = deps.isSyncConfigured),
+                                        onSyncNow = { deps.syncEngine?.triggerSync(immediate = true) },
+                                        onImportFont = { pickAndImportFont() },
+                                        onExportBackup = { pickBackupDestination() },
+                                        onImportBackup = { pickBackupSource() },
+                                        onExportAnnotations = { format -> exportAnnotations(format) },
+                                        mangaDefaultMode = mangaDefaultMode,
+                                        onMangaDefaultModeChange = { mode ->
+                                            mangaDefaultMode = mode
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    deps.settingsRepository.setRaw(
+                                                        com.folio.reader.ui.manga.KEY_MANGA_READER_DEFAULT_MODE,
+                                                        mode.name,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        mangaDownloadsLocation = mangaDlLocation,
+                                        onPickMangaDownloadsLocation = {
+                                            pickMangaDownloadsDir {
+                                                mangaDlLocation = deps.mangaDownloadManager.storageDescription()
+                                            }
+                                        },
+                                        scanState = scanPanelState,
+                                        onScanScopeChange = { next ->
+                                            scanPanelState = scanPanelState.copy(scope = next)
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    deps.settingsRepository.setRaw(
+                                                        com.folio.reader.importer.LibraryScanKeys.SCOPE,
+                                                        next.name
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onPickScanFolder = { pickScanFolder() },
+                                        onScanOnStartChange = { enabled ->
+                                            scanPanelState = scanPanelState.copy(scanOnStart = enabled)
+                                            appScope.launch(Dispatchers.IO) {
+                                                runCatching {
+                                                    deps.settingsRepository.setRaw(
+                                                        com.folio.reader.importer.LibraryScanKeys.ON_START,
+                                                        if (enabled) "1" else ""
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onScanNow = { runScanNow() }
+                                    )
+                                }
+
+                                is Screen.Search -> SearchRoute(
+                                    deps = deps,
+                                    onBackPress = { popScreen() },
+                                    uiState = searchUiState,
+                                    onOpenBookAt = { hit ->
+                                        appScope.launch(Dispatchers.IO) {
+                                            deps.bookRepository.getBook(hit.book.id)?.let { book ->
+                                                val target = hit.spineIndex.takeIf { it >= 0 }
+                                                val frac = hit.startFraction.takeIf { it >= 0f }
+                                                appScope.launch(Dispatchers.Main) {
+                                                    pushScreen(
+                                                        Screen.Reader(
+                                                            book,
+                                                            target,
+                                                            frac
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+
+                                is Screen.BookDetail -> {
+                                    val book = remember(current.bookId) { mutableStateOf<Book?>(null) }
+                                    LaunchedEffect(current.bookId) {
+                                        book.value = deps.bookRepository.getBook(current.bookId)
+                                    }
+                                    book.value?.let { b ->
+                                        BookDetailScreen(
+                                            viewModel = remember {
+                                                BookDetailViewModel(
+                                                    bookRepository = deps.bookRepository,
+                                                    sessionRepository = deps.sessionRepository,
+                                                    bookmarkRepository = deps.bookmarkRepository,
+                                                    highlightRepository = deps.highlightRepository,
+                                                    noteRepository = deps.noteRepository,
+                                                    seriesRepository = deps.seriesRepository,
+                                                    collectionRepository = deps.collectionRepository,
+                                                    tagRepository = deps.tagRepository,
+                                                    autoTagger = deps.autoTaggerService,
+                                                )
+                                            }.also { vm -> LaunchedEffect(b.id) { vm.loadBook(b.id) } },
+                                            onBackPress = { popScreen() },
+                                            onStartReading = { pushScreen(Screen.Reader(b)) },
+                                            onDeleteClick = {
+                                                appScope.launch(Dispatchers.IO) {
+                                                    try {
+                                                        deps.bookRepository.deleteBook(b.id)
+                                                    } catch (_: Throwable) {
+                                                    }
+                                                    try {
+                                                        deps.platform.fileSystem.deleteBookFiles(b.id)
+                                                    } catch (_: Throwable) {
+                                                    }
+                                                }
+                                                popScreen()
+                                            },
+                                            onEditClick = { },
+                                            onTagClick = { pushScreen(Screen.TagManager) },
+                                            onSeriesClick = { },
+                                            onCollectionClick = { }
+                                        )
+                                    }
+                                }
+
+                                is Screen.TagManager -> TagManagerScreen(
+                                    onBack = { popScreen() },
+                                    onHighlightClick = { _, book ->
+                                        appScope.launch(Dispatchers.IO) {
+                                            deps.bookRepository.getBook(book.id)?.let { b ->
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(b)) }
+                                            }
+                                        }
+                                    },
+                                    onBookClick = { book ->
+                                        pushScreen(Screen.BookDetail(book.id))
+                                    },
+                                    viewModel = remember {
+                                        TagManagerViewModel(
+                                            getAllTags = { deps.tagRepository.getAllTags().first() },
+                                            insertTag = { deps.tagRepository.insertTag(it) },
+                                            updateTag = { deps.tagRepository.updateTag(it) },
+                                            deleteTagById = { deps.tagRepository.deleteTag(it) },
+                                            getTagsForBook = { deps.tagRepository.getTagsForBook(it) },
+                                            getTagsForHighlight = { deps.tagRepository.getTagsForHighlight(it) },
+                                            getBooksForTag = { deps.tagRepository.getBooksForTag(it) },
+                                            getHighlightsForTag = { deps.tagRepository.getHighlightsForTag(it) },
+                                            getBook = { deps.bookRepository.getBook(it) }
+                                        )
+                                    }
+                                )
+
+                                is Screen.QuoteBrowser -> {
+                                    // Hoisted out of the composable so the per-book chapter
+                                    // cache in the finder survives recomposition.
+                                    val quoteRelatedFinder = remember {
+                                        com.folio.reader.ui.quotes.QuoteRelatedFinder(
+                                            semanticSearch = deps.semanticSearchRepository,
+                                            bookRepository = deps.bookRepository,
+                                        )
+                                    }
+                                    QuoteBrowserScreen(
+                                    onBack = { popScreen() },
+                                    onQuoteClick = { item ->
+                                        appScope.launch(Dispatchers.IO) {
+                                            deps.bookRepository.getBook(item.book.id)?.let { book ->
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
+                                            }
+                                        }
+                                    },
+                                    onMangaNoteClick = { item ->
+                                        pushScreen(Screen.MangaDetail(item.mangaId))
+                                    },
+                                    viewModel = remember {
+                                        QuoteBrowserViewModel(
+                                            getAllQuotes = { deps.quoteRepository.getAllQuotes() },
+                                            getBook = { deps.bookRepository.getBook(it) },
+                                            getChaptersForBook = { deps.bookRepository.getChaptersForBook(it) },
+                                            getHighlight = { deps.highlightRepository.getHighlight(it) },
+                                            getNote = { deps.noteRepository.getNote(it) },
+                                            getTagsForHighlight = { deps.tagRepository.getTagsForHighlight(it) },
+                                            addTagToHighlight = { hl, tag -> deps.tagRepository.addTagToHighlight(hl, tag) },
+                                            removeTagFromHighlight = { hl, tag -> deps.tagRepository.removeTagFromHighlight(hl, tag) },
+                                            getAllBooks = { deps.bookRepository.getAllBooks() },
+                                            getAllTags = { deps.tagRepository.getAllTags().first() },
+                                            // ML_PLAN Phase 5 #3 — same finder as Android, so the
+                                            // suggestions cannot differ between platforms.
+                                            findRelated = { text, limit ->
+                                                quoteRelatedFinder.related(text, limit)
+                                            },
+                                            observeAllMangaNotes = { deps.mangaNoteRepository.observeAllNotes() },
+                                            getManga = { deps.mangaRepository.get(it) },
+                                            getMangaChapters = { deps.mangaChapterRepository.getChapters(it) }
+                                        )
+                                    }
+                                    )
+                                }
+
+                                is Screen.RevisitItems -> RevisitItemsScreen(
+                                    onBack = { popScreen() },
+                                    onItemClick = { item ->
+                                        val manga = item.manga
+                                        if (manga != null) {
+                                            pushScreen(Screen.MangaDetail(manga.id))
+                                        } else appScope.launch(Dispatchers.IO) {
+                                            val bookId = item.book?.id ?: return@launch
+                                            deps.bookRepository.getBook(bookId)?.let { book ->
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
+                                            }
+                                        }
+                                    },
+                                    viewModel = remember {
+                                        RevisitItemsViewModel(
+                                            getUnresolvedRevisitItems = { deps.revisitRepository.getUnresolvedRevisitItems() },
+                                            resolveRevisitItem = { deps.revisitRepository.resolveRevisitItem(it) },
+                                            getBook = { deps.bookRepository.getBook(it) },
+                                            getChaptersForBook = { deps.bookRepository.getChaptersForBook(it) },
+                                            getHighlight = { deps.highlightRepository.getHighlight(it) },
+                                            getBookmark = { deps.bookmarkRepository.getBookmark(it) },
+                                            getNote = { deps.noteRepository.getNote(it) },
+                                            getManga = { deps.mangaRepository.get(it) },
+                                            getMangaChapters = { deps.mangaChapterRepository.getChapters(it) },
+                                            getMangaNote = { deps.mangaNoteRepository.get(it) }
+                                        )
+                                    }
+                                )
+
+                                is Screen.MangaBrowse -> com.folio.reader.ui.manga.MangaBrowseScreen(
+                                    viewModel = mangaBrowseVM,
+                                    onOpenSource = { source, query -> pushScreen(Screen.MangaSourceBrowse(source.id, query)) },
+                                    onOpenExtensions = { pushScreen(Screen.MangaExtensions) },
+                                    onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
+                                    onBack = { popScreen() },
+                                )
+
+                                is Screen.MangaSourceBrowse -> {
+                                    val sources by remember { deps.mangaBackend.observeSources() }
+                                        .collectAsState(initial = emptyList())
+                                    val sourceInfo = sources.firstOrNull { it.id == current.sourceId }
+                                    if (sourceInfo == null) {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            androidx.compose.material3.CircularProgressIndicator()
+                                        }
+                                    } else {
+                                        val sbVm = sourceBrowseVmCache.getOrPut(sourceInfo.id) {
+                                            com.folio.reader.ui.manga.SourceBrowseViewModel(
+                                                backend = deps.mangaBackend,
+                                                source = sourceInfo,
+                                                mangaRepo = deps.mangaRepository,
+                                                categoryRepo = deps.mangaCategoryRepository,
+                                                initialQuery = current.query,
+                                                onAddedToLibrary = { id ->
+                                                    deps.syncEngine?.adoptCloudProgressForManga(id)
+                                                },
+                                            )
+                                        }
+                                        com.folio.reader.ui.manga.SourceBrowseScreen(
+                                            viewModel = sbVm,
+                                            onOpenManga = { mangaId -> pushScreen(Screen.MangaDetail(mangaId)) },
+                                            onBack = { popScreen() },
+                                        )
+                                    }
+                                }
+
+                                is Screen.MangaExtensions -> com.folio.reader.ui.manga.ExtensionsScreen(
+                                    viewModel = remember {
+                                        com.folio.reader.ui.manga.BrowseViewModel(
+                                            deps.mangaBackend,
+                                            deps.mangaRepository,
+                                        )
+                                    },
+                                    onBack = { popScreen() },
+                                )
+
+                                is Screen.MangaDownloads -> {
+                                    val downloadsVM = remember {
+                                        com.folio.reader.ui.manga.DownloadsViewModel(
+                                            downloadRepo = deps.mangaDownloadRepository,
+                                            mangaRepo = deps.mangaRepository,
+                                            chapterRepo = deps.mangaChapterRepository,
+                                            downloadManager = deps.mangaDownloadManager,
+                                        )
+                                    }
+                                    com.folio.reader.ui.manga.DownloadsScreen(
+                                        viewModel = downloadsVM,
+                                        onBack = { popScreen() },
+                                        onPickLocation = { pickMangaDownloadsDir { downloadsVM.refreshStorageDescription() } },
+                                    )
+                                }
+
+                                is Screen.MangaHistory -> com.folio.reader.ui.manga.MangaHistoryScreen(
+                                    backend = deps.mangaBackend,
+                                    historyRepo = deps.mangaHistoryRepository,
+                                    onOpenManga = { entry -> pushScreen(Screen.MangaDetail(entry.mangaId)) },
+                                    onBack = { popScreen() },
+                                )
+
+                                is Screen.MangaDetail -> com.folio.reader.ui.manga.MangaDetailScreen(
+                                    viewModel = remember(current.mangaId) {
+                                        com.folio.reader.ui.manga.MangaDetailViewModel(
+                                            backend = deps.mangaBackend,
+                                            mangaRepo = deps.mangaRepository,
+                                            chapterRepo = deps.mangaChapterRepository,
+                                            historyRepo = deps.mangaHistoryRepository,
+                                            downloadManager = deps.mangaDownloadManager,
+                                            downloadRepo = deps.mangaDownloadRepository,
+                                            categoryRepo = deps.mangaCategoryRepository,
+                                            settingsRepo = deps.settingsRepository,
+                                            sessionRepo = deps.sessionRepository,
+                                            tagRepo = deps.tagRepository,
+                                            cycleRepo = deps.readingCycleRepository,
+                                        )
+                                    }.also { vm -> LaunchedEffect(current.mangaId) { vm.open(current.mangaId) } },
+                                    backend = deps.mangaBackend,
+                                    downloadsAvailable = false,
+                                    onRead = { manga, chapter ->
+                                        pushScreen(Screen.MangaReader(manga.id, chapter.id))
+                                    },
+                                    onBack = { popScreen() },
+                                )
+
+                                is Screen.MangaReader -> MangaReaderRoute(
+                                    deps = deps,
+                                    mangaId = current.mangaId,
+                                    chapterId = current.chapterId,
+                                    onBack = { popScreen() },
+                                    onNextChapter = { nextChapterId ->
+                                        pushScreen(Screen.MangaReader(current.mangaId, nextChapterId))
+                                    },
+                                )
+                            }
+                        }
+
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(FolioTokens.space3),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        com.folio.reader.ui.components.FolioStatusBanner(importStatus)
+                    }
+
+                    // Post-import shelf prompt: file the batch into collections
+                    // (Main pre-checked — that is where the imports already are),
+                    // then open the first imported item.
+                    pendingImportBooks?.let { books ->
+                        var shelfCollections by remember {
+                            mutableStateOf(emptyList<com.folio.reader.model.Collection>())
+                        }
+                        LaunchedEffect(Unit) {
+                            shelfCollections = runCatching {
+                                deps.collectionRepository.getAllCollections().first()
+                            }.getOrDefault(emptyList())
+                        }
+                        if (shelfCollections.isNotEmpty()) {
+                            com.folio.reader.ui.library.BookImportCollectionsDialog(
+                                bookCount = books.size,
+                                collections = shelfCollections,
+                                onCreate = { name ->
+                                    runCatching {
+                                        deps.collectionRepository.getCollectionByName(name)?.id
+                                            ?: deps.collectionRepository.createCollection(name).id
+                                    }.getOrNull()
+                                },
+                                onSave = { ids ->
+                                    appScope.launch(Dispatchers.IO) {
+                                        if (ids.isNotEmpty()) {
+                                            books.forEach { book ->
+                                                runCatching {
+                                                    deps.collectionRepository.assign(book.id, ids)
+                                                }
+                                            }
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            pendingImportBooks = null
+                                            pendingImportScreen?.let { pushScreen(it) }
+                                            pendingImportScreen = null
+                                        }
+                                    }
+                                },
+                                onDismiss = {
+                                    pendingImportBooks = null
+                                    pendingImportScreen?.let { pushScreen(it) }
+                                    pendingImportScreen = null
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocumentReaderRoute(
+    deps: FolioDesktopAppDependencies,
+    documentId: String,
+    settings: com.folio.reader.settings.ReaderSettings,
+    onBack: () -> Unit
+) {
+    // Same contract as Android: the persisted documentReaderMode seeds the
+    // reader and a mode change writes back through the host's settings path.
+    // The desktop host passes a settings snapshot (no live row), so the
+    // persistence callback merges into the stored row directly.
+    val initialMode = remember(documentId) {
+        runCatching {
+            com.folio.reader.ui.document.DocumentReaderMode.valueOf(settings.documentReaderMode)
+        }.getOrDefault(com.folio.reader.ui.document.DocumentReaderMode.SINGLE_PAGE)
+    }
+    val viewModel = remember(documentId) {
+        DocumentReaderViewModel(
+            repository = deps.documentRepository,
+            fileSystem = deps.platform.fileSystem,
+            initialMode = initialMode,
+            onModeChanged = { mode ->
+                deps.settingsRepository.mergeGlobalSettings {
+                    it.copy(documentReaderMode = mode.name)
+                }
+            }
+        )
+    }
+    val vmScope = viewModel.scope
+    LaunchedEffect(documentId) {
+        viewModel.open(documentId)
+    }
+    // close() is suspend now; launch it on the VM scope, which outlives the
+    // composition, so the final position write cannot block the UI thread here.
+    DisposableEffect(viewModel) {
+        onDispose { vmScope.launch { viewModel.close() } }
+    }
+    DocumentReaderScreen(
+        viewModel = viewModel,
+        settings = settings,
+        onBack = onBack
+    )
+}
+
+@Composable
+private fun ReaderRoute(
+    deps: FolioDesktopAppDependencies,
+    book: Book,
+    targetSpineIndex: Int? = null,
+    targetFraction: Float? = null,
+    initialSettings: com.folio.reader.settings.ReaderSettings,
+    onBackPress: () -> Unit,
+    onSearchClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {}
+) {
+    val viewModel = remember {
+        ReaderViewModel(
+            bookRepository = deps.bookRepository,
+            positionRepository = deps.positionRepository,
+            sessionRepository = deps.sessionRepository,
+            bookmarkRepository = deps.bookmarkRepository,
+            highlightRepository = deps.highlightRepository,
+            noteRepository = deps.noteRepository,
+            settingsRepository = deps.settingsRepository,
+            chapterContentProvider = { bookId, href -> deps.contentProvider.getHtml(bookId, href) },
+            bookTocProvider = { bookId, chs ->
+                deps.epubParser.parseBookToc(deps.platform.fileSystem.getBookEpubPath(bookId), chs)
+            },
+            syncEngine = deps.syncEngine
+        )
+    }
+
+    val chapters by viewModel.chapters.collectAsState(initial = emptyList())
+    val bookToc by viewModel.bookToc.collectAsState()
+    val position by viewModel.position.collectAsState(initial = null)
+    val chapterIndex by viewModel.currentChapterIndex.collectAsState(initial = 0)
+    val html by viewModel.chapterHtml.collectAsState(initial = "")
+    val loadingContent by viewModel.isLoadingContent.collectAsState(initial = true)
+    val settings by viewModel.effectiveSettings.collectAsState(initial = initialSettings)
+    val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
+    val highlights by viewModel.highlights.collectAsState(initial = emptyList())
+    val notes by viewModel.notes.collectAsState(initial = emptyList())
+    val showControls by viewModel.showControls.collectAsState(initial = true)
+    val showToc by viewModel.showToc.collectAsState(initial = false)
+    val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
+    val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
+    val loadError by viewModel.loadError.collectAsState(initial = null)
+    val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
+    // Continuous-mode chapter window.
+    val windowSections by viewModel.windowSections.collectAsState(initial = emptyList())
+    val windowLoad by viewModel.windowLoad.collectAsState(initial = emptyList())
+    val windowRange by viewModel.windowRange.collectAsState(initial = null)
+    val windowOp by viewModel.windowOp.collectAsState(initial = null)
+    // A window only renders while continuous layout is actually in effect; a
+    // stale window from a layout switch must not bleed into paged mode.
+    val windowed = windowRange != null &&
+        settings.layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS
+    val syncState: com.folio.reader.sync.SyncState? by remember(deps.syncEngineState.value) {
+        deps.syncEngine?.syncState ?: kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
+
+    LaunchedEffect(Unit) {
+        // Re-derive chapter titles stored before the labeling fixes (see ChapterTitleRepair).
+        repairStoredChapterTitles(
+            bookId = book.id,
+            epubPath = deps.platform.fileSystem.getBookEpubPath(book.id),
+            parser = deps.epubParser,
+            repository = deps.bookRepository,
+            settings = deps.settingsRepository
+        )
+        viewModel.openBook(
+            book.id,
+            deps.deviceId,
+            initialSettings,
+            startChapterOverride = targetSpineIndex?.takeIf { it >= 0 })
+    }
+
+    LaunchedEffect(linkResult) {
+        when (val r = linkResult) {
+            is com.folio.reader.ui.render.LinkClickResult.InternalChapter -> viewModel.goToChapter(r.chapterIndex)
+            is com.folio.reader.ui.render.LinkClickResult.ExternalUrl -> runCatching {
+                java.awt.Desktop.getDesktop().browse(java.net.URI(r.url))
+            }
+
+            is com.folio.reader.ui.render.LinkClickResult.InlineContent -> {
+                // Fallback: try to find chapter by href ignoring fragment
+                val idx = chapters.indexOfFirst { it.href.substringBefore("#") == r.resolvedHref.substringBefore("#") }
+                if (idx >= 0) viewModel.goToChapter(idx)
+            }
+
+            null -> {}
+        }
+        if (linkResult != null) viewModel.clearLinkClickResult()
+    }
+
+    androidx.compose.runtime.DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.closeBook()
+        }
+    }
+
+    ReaderScreen(
+        bookTitle = book.title,
+        chapters = chapters,
+        bookToc = bookToc,
+        currentChapterIndex = chapterIndex,
+        chapterHtml = html,
+        isLoadingContent = loadingContent,
+        loadError = loadError,
+        coverPath = book.coverPath,
+        position = position,
+        settings = settings,
+        bookmarks = bookmarks,
+        highlights = highlights,
+        notes = notes,
+        showControls = showControls,
+        showToc = showToc,
+        showAnnotations = showAnnotations,
+        onChapterChange = { viewModel.goToChapter(it) },
+        onBackPress = {
+            viewModel.closeBook { onBackPress() }
+        },
+        onSearchClick = {
+            viewModel.closeBook { onSearchClick() }
+        },
+        onBookmarkClick = { viewModel.toggleBookmark() },
+        onSettingsClick = {
+            viewModel.closeBook { onSettingsClick() }
+        },
+        onSettingsChange = { updated ->
+            viewModel.updateSettings(updated)
+            onSettingsChanged(viewModel.global())
+        },
+        // Global-only rows in the panel (Eye protection) have no per-book
+        // counterpart, so they must reach the defaults row. Without this the
+        // panel fell back to `onSettingsChange`, whose per-book snapshot has no
+        // such field — the write was dropped and the toggle would not stick.
+        onWriteGlobal = { updated ->
+            viewModel.updateGlobalSettings(updated)
+            onSettingsChanged(viewModel.global())
+        },
+        onToggleControls = { viewModel.toggleControls() },
+        onShowControls = { viewModel.showControlsFn() },
+        onToggleToc = { viewModel.toggleToc() },
+        onToggleAnnotations = { viewModel.toggleAnnotations() },
+        onRemoveBookmark = { viewModel.removeBookmark(it) },
+        onRemoveHighlight = { viewModel.removeHighlight(it) },
+        onRemoveNote = { viewModel.removeNote(it) },
+        onAddNote = { viewModel.addNote(it) },
+        onSetHighlightNote = { id, text -> viewModel.setHighlightNote(id, text) },
+        onScrollProgress = { fraction -> viewModel.updateScrollProgress(fraction) },
+        onHighlightParagraph = { chapterId, paragraphIndex, snippet ->
+            // The paragraph may sit in a windowed chapter that is not the anchor,
+            // so the locator's spine comes from the selection's own chapter.
+            val spine = chapters.firstOrNull { it.id == chapterId }?.spineIndex
+                ?: position?.spineIndex ?: 0
+            viewModel.addHighlight(
+                startLocator = "/$spine/$paragraphIndex:0",
+                endLocator = "/$spine/$paragraphIndex:end",
+                selectedText = snippet
+            )
+            viewModel.showControlsFn()
+        },
+        onRetryChapter = { viewModel.reloadChapter() },
+        onLinkClick = { href -> viewModel.handleLinkClick(href) },
+        onChapterEnd = { viewModel.onChapterEnd() },
+        onChapterStart = { viewModel.onChapterStart() },
+        sections = if (windowed) windowSections else emptyList(),
+        documentSections = if (windowed) windowLoad else emptyList(),
+        windowed = windowed,
+        windowOp = windowOp,
+        onVisibleSection = { spine -> viewModel.onVisibleSection(spine) },
+        onExtendForward = { viewModel.extendWindow(forward = true) },
+        onExtendBackward = { viewModel.extendWindow(forward = false) },
+        onWindowOpApplied = { nonce -> viewModel.onWindowOpApplied(nonce) },
+        chapterChip = chapterChip,
+        onDismissChapterChip = { viewModel.dismissChapterChip() },
+        onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
+        onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
+        syncState = syncState,
+        initialSeekFraction = targetFraction
+    )
+}
+
+@Composable
+private fun SearchRoute(
+    deps: FolioDesktopAppDependencies,
+    onBackPress: () -> Unit,
+    onOpenBookAt: (com.folio.reader.ui.search.BookHit) -> Unit,
+    uiState: com.folio.reader.ui.search.SearchUiState
+) {
+    val books by remember { deps.bookRepository.getAllBooks() }.collectAsState(initial = emptyList())
+    SearchScreen(
+        books = books,
+        searchRepository = deps.searchRepository,
+        highlightRepository = deps.highlightRepository,
+        noteRepository = deps.noteRepository,
+        bookmarkRepository = deps.bookmarkRepository,
+        quoteRepository = deps.quoteRepository,
+        onBackPress = onBackPress,
+        uiState = uiState,
+        semanticSearchRepository = deps.semanticSearchRepository,
+        onResultClick = { onOpenBookAt(it) }
+    )
+}
+
+@Composable
+private fun MangaReaderRoute(
+    deps: FolioDesktopAppDependencies,
+    mangaId: String,
+    chapterId: String,
+    onBack: () -> Unit,
+    onNextChapter: (String) -> Unit,
+) {
+    var manga by remember(mangaId) { mutableStateOf<com.folio.reader.manga.MangaEntry?>(null) }
+    var chapter by remember(chapterId) { mutableStateOf<com.folio.reader.manga.MangaChapter?>(null) }
+
+    LaunchedEffect(mangaId, chapterId) {
+        manga = deps.mangaRepository.get(mangaId)
+        chapter = deps.mangaChapterRepository.getChapter(chapterId)
+    }
+
+    val m = manga
+    val c = chapter
+    if (m == null || c == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator()
+        }
+        return
+    }
+
+    com.folio.reader.ui.manga.MangaReaderScreen(
+        viewModel = remember(c.id) {
+            com.folio.reader.ui.manga.MangaReaderViewModel(
+                backend = deps.mangaBackend,
+                downloadManager = deps.mangaDownloadManager,
+                chapterRepo = deps.mangaChapterRepository,
+                mangaRepo = deps.mangaRepository,
+                historyRepo = deps.mangaHistoryRepository,
+                noteRepo = deps.mangaNoteRepository,
+                settingsRepo = deps.settingsRepository,
+                fileSystem = deps.platform.fileSystem,
+                sessionRepo = deps.sessionRepository,
+                cycleRepo = deps.readingCycleRepository,
+            )
+        },
+        manga = m,
+        chapter = c,
+        onOpenChapter = { onNextChapter(it.id) },
+        onBack = onBack,
+    )
+}

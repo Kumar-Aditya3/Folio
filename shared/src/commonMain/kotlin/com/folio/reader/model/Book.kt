@@ -1,0 +1,272 @@
+package com.folio.reader.model
+
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlin.math.roundToInt
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.CompositeEncoder
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class Book(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val authors: List<String> = emptyList(),
+    val publisher: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val description: String? = null,
+    val publicationDate: Instant? = null,
+    val coverPath: String? = null,
+    val epubHash: String,
+    val epubFileSize: Long,
+    val addedAt: Instant = Clock.System.now(),
+    val updatedAt: Instant = Clock.System.now(),
+    val lastOpenedAt: Instant? = null,
+    val totalCharacters: Long = 0,
+    val totalWords: Long = 0,
+    val chapterCount: Int = 0,
+    val seriesId: String? = null,
+    val seriesNumber: Double? = null,
+    val status: BookStatus = BookStatus.UNREAD,
+    val cloudState: CloudState = CloudState.LOCAL_ONLY,
+    val formattingMode: FormattingMode = FormattingMode.HYBRID
+) {
+    val displayTitle: String
+        get() = if (subtitle.isNullOrBlank()) title else "$title: $subtitle"
+
+    val displayAuthor: String
+        get() = authors.joinToString(", ")
+
+    val hasSeries: Boolean
+        get() = seriesId != null
+
+    val progressPercent: Int
+        get() = (normalizedProgress * 100).roundToInt()
+
+    var normalizedProgress: Double = 0.0
+        private set
+
+    fun updateProgress(progress: Double) {
+        normalizedProgress = progress.coerceIn(0.0, 1.0)
+    }
+}
+
+enum class BookStatus(val value: Int) {
+    UNREAD(0),
+    READING(1),
+    PAUSED(2),
+    FINISHED(3),
+    ABANDONED(4);
+
+    companion object {
+        fun fromValue(value: Int): BookStatus = values().firstOrNull { it.value == value } ?: UNREAD
+    }
+}
+
+enum class CloudState(val value: Int) {
+    LOCAL_ONLY(0),
+    UPLOADING(1),
+    SYNCED(2),
+    REMOTE_ONLY(3),
+    DOWNLOADING(4),
+    SYNC_ERROR(5),
+    UPLOADING_PROGRESS(6),
+    DOWNLOADING_PROGRESS(7);
+
+    companion object {
+        fun fromValue(value: Int): CloudState = values().firstOrNull { it.value == value } ?: LOCAL_ONLY
+    }
+}
+
+enum class FormattingMode(val value: Int) {
+    ORIGINAL(0),
+    HYBRID(1),
+    NORMALIZED(2);
+
+    companion object {
+        fun fromValue(value: Int): FormattingMode = values().firstOrNull { it.value == value } ?: HYBRID
+    }
+}
+
+@Serializable
+data class Chapter(
+    val id: String,
+    val bookId: String,
+    val title: String,
+    val href: String,
+    val spineIndex: Int,
+    val level: Int = 0,
+    val children: List<Chapter> = emptyList(),
+    val characterCount: Long = 0,
+    val wordCount: Long = 0,
+    val startOffset: Long = 0,
+    val endOffset: Long = 0
+) {
+    val isLeaf: Boolean
+        get() = children.isEmpty()
+
+    val hasChildren: Boolean
+        get() = children.isNotEmpty()
+}
+
+@Serializable
+data class Series(
+    val id: String,
+    val name: String,
+    val sortOrder: Int = 0,
+    val updatedAt: Instant = Clock.System.now()
+)
+
+@Serializable
+data class Collection(
+    val id: String,
+    val name: String,
+    val color: Int? = null,
+    val sortOrder: Int = 0,
+    val createdAt: Instant = Clock.System.now(),
+    val updatedAt: Instant = Clock.System.now()
+) {
+    companion object {
+        /**
+         * Stable id of the built-in default collection, the books counterpart of
+         * the manga library's Main category. Every device seeds it with this
+         * same id, so sync merges all devices' defaults into one collection.
+         */
+        const val MAIN_ID = "main"
+        const val MAIN_NAME = "Main"
+    }
+}
+
+@Serializable
+data class Tag(
+    val id: String,
+    val name: String,
+    val color: Int? = null,
+    val createdAt: Instant = Clock.System.now(),
+    val updatedAt: Instant = Clock.System.now()
+)
+
+@Serializable
+data class EpubMetadata(
+    val title: String,
+    val subtitle: String? = null,
+    val authors: List<String> = emptyList(),
+    val publisher: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val description: String? = null,
+    val publicationDate: Instant? = null,
+    val coverHref: String? = null,
+    val subject: List<String> = emptyList(),
+    val contributor: List<String> = emptyList(),
+    val date: String? = null,
+    val format: String? = null,
+    val identifier: List<String> = emptyList(),
+    val rights: String? = null,
+    val source: String? = null,
+    val type: String? = null
+)
+
+@Serializable
+data class EpubManifestItem(
+    val id: String,
+    val href: String,
+    val mediaType: String,
+    val properties: String? = null
+)
+
+@Serializable
+data class EpubSpineItem(
+    val idref: String,
+    val linear: Boolean = true,
+    val properties: String? = null
+)
+
+@Serializable
+data class EpubTocItem(
+    val label: String,
+    val href: String,
+    val children: List<EpubTocItem> = emptyList(),
+    val playOrder: Int? = null,
+    val level: Int = 0
+)
+
+/**
+ * One Contents row: the book's own navigation label aimed at an index into the
+ * spine-derived chapter list. A book that splits each chapter across several
+ * spine files has far more chapters than Contents entries, so the index is part
+ * of the row rather than assumed to be the row position.
+ *
+ * [paragraph] is a sub-position within that chapter, expressed as a 0-based ordinal
+ * into the chapter's `<p>` elements (the same grammar the reader's `p:<n>` seek uses).
+ * 0 means the chapter top. It is only non-zero for books with no real per-chapter
+ * files, where several chapters share one spine document and the Contents is
+ * recovered by scanning that document's own chapter headings.
+ */
+data class BookTocRow(
+    val title: String,
+    val chapterIndex: Int,
+    val paragraph: Int = 0,
+    /**
+     * Start of this row within its chapter as a 0..1 fraction, used only to light the current row
+     * as you read. It matches the reader's chapter-progress fraction, so when several rows share
+     * one spine file (heading-less books) the right one stays lit. 0 for an ordinary one-row chapter.
+     */
+    val fraction: Float = 0f
+)
+
+/**
+ * Index of the Contents row the reader is currently within, or -1 when the position is ahead of
+ * every row. Position-aware: for an ordinary Contents (one row per chapter, [BookTocRow.fraction]
+ * 0) it reduces to "the current chapter's row"; when several rows share one spine file it advances
+ * row-by-row as [fraction] within that chapter grows.
+ *
+ * A row is allowed a little slack: the page reports a scroll fraction while [BookTocRow.fraction] is
+ * the paragraph index over a count, and the two disagree by a hair — measured on Ship of Magic a tap
+ * on the row stored at 0.279 reported 0.2741, which lit the row *behind* it. Slack is half the
+ * distance to the next row of the same chapter (or to the chapter's end, for its last row), so the
+ * nearest row that has started wins, and a row whose heading has not been reached yet still cannot.
+ */
+fun List<BookTocRow>.activeTocIndex(chapterIndex: Int, fraction: Float): Int {
+    var best = -1
+    forEachIndexed { i, row ->
+        val next = getOrNull(i + 1)
+        val gapToNext = when {
+            next != null && next.chapterIndex == row.chapterIndex -> next.fraction - row.fraction
+            else -> 1f - row.fraction
+        }
+        // Half the gap would let a row win while the reader is still in the previous row's territory,
+        // which is plainly wrong when a chapter holds only a handful of rows; the slack exists to
+        // absorb a few paragraphs' worth of reporting difference, and nothing more.
+        val slack = ((gapToNext / 2f).coerceAtMost(MAX_TOC_SLACK)).coerceAtLeast(1e-3f)
+        if (row.chapterIndex < chapterIndex ||
+            (row.chapterIndex == chapterIndex && row.fraction <= fraction + slack)
+        ) best = i
+    }
+    return best
+}
+
+/** Most of a chapter a Contents row may be lit ahead by — about five paragraphs of 1,086 measured. */
+private const val MAX_TOC_SLACK = 0.01f
+
+@Serializable
+data class ParsedEpub(
+    val metadata: EpubMetadata,
+    val manifest: List<EpubManifestItem>,
+    val spine: List<EpubSpineItem>,
+    val toc: List<EpubTocItem>,
+    val coverData: ByteArray? = null,
+    val coverMimeType: String? = null,
+    val chapters: List<Chapter> = emptyList(),
+    val totalCharacters: Long = 0,
+    val totalWords: Long = 0,
+    val rawHtmlByHref: Map<String, String> = emptyMap()
+)

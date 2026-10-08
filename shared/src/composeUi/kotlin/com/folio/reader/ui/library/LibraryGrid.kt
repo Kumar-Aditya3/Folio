@@ -1,0 +1,626 @@
+@file:OptIn(ExperimentalSharedTransitionApi::class)
+
+package com.folio.reader.ui.library
+
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.folio.reader.model.Book
+import com.folio.reader.model.BookStatus
+import com.folio.reader.ui.components.FolioCoverPlate
+import com.folio.reader.ui.components.FolioSharedKeys
+import com.folio.reader.ui.components.LocalTabMorphActive
+import com.folio.reader.ui.components.sharedElementOrNoop
+import com.folio.reader.ui.components.sharedTextOrNoop
+import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioProgressBar
+import com.folio.reader.ui.components.FolioTabReselect
+import com.folio.reader.ui.components.folioPressable
+import com.folio.reader.ui.components.folioRightClick
+import com.folio.reader.ui.components.folioTypeGround
+import com.folio.reader.ui.components.LocalFolioScrollVelocity
+import com.folio.reader.ui.components.folioThemeRim
+import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.theme.paneFill
+import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.components.rememberCoverAccent
+import com.folio.reader.ui.components.rememberCoverHaloStrength
+import com.folio.reader.ui.components.rememberFolioInteraction
+import com.folio.reader.ui.theme.FolioHaptic
+import com.folio.reader.ui.theme.FolioShapeClass
+import com.folio.reader.ui.theme.folioLampSource
+import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.rememberFolioShape
+import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.LocalFolioBarInset
+import com.folio.reader.ui.theme.LocalFolioTopInset
+import com.folio.reader.ui.theme.rememberFolioHaptics
+
+/**
+ * The books shelf, rebuilt as a **shelf** rather than a grid of database rows.
+ *
+ * Three decisions carry it:
+ *
+ * 1. **No cards.** A card around a cover competes with the artwork it contains.
+ *    Covers now sit directly on the page as plates with contact shadows, and the
+ *    metadata is type beneath them — the composition a printed shelf actually has.
+ * 2. **Variable weight.** The first in-progress book spans the full width as a
+ *    *featured* entry; everything after it is a standard shelf entry. A grid where
+ *    every cell is identical cannot express that one of these books is the one you
+ *    are reading tonight. What the two share is the glow: every plate carries its
+ *    own cover's colour out onto the page, so being lit is the shelf's baseline and
+ *    the featured entry is set apart by width, elevation and its travelling rim —
+ *    not by being the only lit thing on the page.
+ * 3. **Active books come forward.** In-progress titles render at full strength;
+ *    finished and untouched ones sit back slightly. Hierarchy between active and
+ *    inactive, not just sort order.
+ *
+ * Sorting, filtering, selection and the overflow menu are untouched.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun BookGrid(
+    books: List<Book>,
+    onBookClick: (Book) -> Unit,
+    onBookLongClick: (Book) -> Unit,
+    onDeleteBook: (Book) -> Unit,
+    selectedBooks: Set<String>,
+    isSelectionMode: Boolean,
+    finishEstimates: Map<String, String> = emptyMap(),
+    preserveFeaturedDuringSelection: Boolean = false,
+) {
+    // The feature slot goes to the first in-progress book in the current (already
+    // sorted and filtered) list, so it always reflects the user's own ordering.
+    val featured = remember(books) {
+        books.firstOrNull { it.normalizedProgress > 0.0 && it.normalizedProgress < 0.99 }
+    }
+    val showFeature = featured != null && (!isSelectionMode || preserveFeaturedDuringSelection)
+    val rest = remember(books, featured, showFeature) {
+        if (showFeature) books.filter { it.id != featured!!.id } else books
+    }
+    // Re-tap on the Library nav item scrolls the shelf back to its top.
+    val gridScroll = rememberLazyGridState()
+    LaunchedEffect(gridScroll) {
+        FolioTabReselect.events.collect { (route, _) ->
+            if (route == "library" &&
+                (gridScroll.firstVisibleItemIndex > 0 || gridScroll.firstVisibleItemScrollOffset > 0)
+            ) {
+                gridScroll.animateScrollToItem(0)
+            }
+        }
+    }
+    // §17 tab-morph crash guard: while a Home↔Library tab dissolve is in flight, these cover
+    // cells ARE the live shared-element source/target. Scrolling the grid now would dispose the
+    // cells hosting the in-flight sharedElement nodes and tear them down mid-flight — the
+    // scroll-during-morph crash. The dissolve is ~300ms, so freezing the shelf for that window is
+    // imperceptible and removes the trigger outright. Reads false when no provider is present
+    // (desktop), so scrolling is unaffected there.
+    val tabMorphActive = LocalTabMorphActive.current
+    LazyVerticalGrid(
+        state = gridScroll,
+        userScrollEnabled = !tabMorphActive,
+        columns = GridCells.Adaptive(minSize = FolioTokens.coverGridMin),
+        contentPadding = PaddingValues(
+            start = FolioTokens.gutter,
+            end = FolioTokens.gutter,
+            top = FolioTokens.space3 + LocalFolioTopInset.current,
+            bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
+        ),
+        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat),
+        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
+    ) {
+        if (showFeature) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    FeaturedShelfEntry(
+                        book = featured!!,
+                        finishEstimate = finishEstimates[featured.id],
+                        isSelected = featured.id in selectedBooks,
+                        isSelectionMode = isSelectionMode,
+                        onClick = { onBookClick(featured) },
+                        onLongClick = { onBookLongClick(featured) },
+                        onDeleteBook = onDeleteBook,
+                    )
+                    // The feature is the shelf's hero, so it closes a movement
+                    // instead of sitting one tile-gap from the field beneath it.
+                    // `verticalArrangement` is uniform `spaceBeat` across the whole
+                    // grid — correct between tile rows, wrong directly under the
+                    // hero, where 20dp made a raised, rim-lit, haloed composition
+                    // read as merely the first (wide) tile in the wall. This tops
+                    // the gap up to a full `spaceMovement`, so the eye reads
+                    // "the one book, then the shelf" rather than one continuous
+                    // grid. Same rhythm doctrine as Home and Stats: a tight gap
+                    // groups, a wide gap separates movements.
+                    Spacer(Modifier.height(FolioTokens.spaceMovement - FolioTokens.spaceBeat))
+                }
+            }
+        }
+        items(rest, key = { it.id }) { book ->
+            BookCard(
+                book = book,
+                modifier = Modifier.animateItem(),
+                isSelected = book.id in selectedBooks,
+                isSelectionMode = isSelectionMode,
+                onClick = { onBookClick(book) },
+                onLongClick = { onBookLongClick(book) },
+                onDeleteBook = onDeleteBook,
+                finishEstimate = finishEstimates[book.id]
+            )
+        }
+    }
+}
+
+/**
+ * The featured entry: a wide, image-led composition where the cover sits at
+ * `coverFeature` beside its own typography and throws a halo onto the page behind
+ * it. Deliberately *not* a card — the halo and the plate's shadow do the
+ * separating, so the page stays continuous. What it does carry is a themed rim:
+ * a light travelling the outline in the cover's own hue against the progress
+ * accent, which marks the one entry the shelf is about without putting a
+ * container under it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FeaturedShelfEntry(
+    book: Book,
+    finishEstimate: String?,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDeleteBook: (Book) -> Unit,
+) {
+    val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != FolioTheme.colors.accentProgress)
+    val interaction = rememberFolioInteraction()
+    var menuOpen by remember { mutableStateOf(false) }
+    val pickupHaptics = rememberFolioHaptics()
+    // The tile's own silhouette, seeded by the book: the hero already varies per
+    // title, and the featured row is the shelf's hero. The rim is the only outline
+    // this row draws, so one shape governs it. The cover beside it stays on
+    // FolioShapes.plate — a printed object keeps its printed corners.
+    val tileShape = rememberFolioShape(book.id.hashCode(), FolioShapeClass.CARD)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .folioPressable(interaction, scaleTo = 0.985f)
+            // The shelf's hero has to sit *above* the page, not merely be drawn on it.
+            // Home's hero gets that from folioRaised's pane — a translucent fill the
+            // room and its lamp show through — and this row had only a rim, so it read
+            // as a row with an outline rather than as the shelf's object.
+            .folioRaised(
+                shape = tileShape,
+                accent = accent,
+                fill = FolioTheme.atmosphere.paneFill(),
+                // A shelf entry is an item in the list — the room shows through it but nothing
+                // scrolls behind it, so it keeps the pane and drops the refraction.
+                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
+            )
+            // After the pressable's layer so the rim travels with the plane when
+            // it dips, and behind the content so the plate occludes the arc
+            // passing under it.
+            .folioThemeRim(
+                shape = tileShape,
+                // The streak hue rather than the progress hue: this row is about pace
+                // to finish, and accentProgress is a saturated blue in most palettes —
+                // which is also rememberCoverAccent's own fallback, so a book with no
+                // usable cover accent would have edged in blue at both ends.
+                counterAccent = FolioTheme.colors.accentStreak,
+                velocity = LocalFolioScrollVelocity.current,
+                // The light rests where the reader stopped. Same number the progress
+                // seam below draws, so the two can never disagree.
+                parkedAt = book.normalizedProgress.toFloat(),
+            )
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
+                onLongClick = {
+                    pickupHaptics.play(FolioHaptic.PickUp)
+                    if (isSelectionMode) onLongClick() else menuOpen = true
+                },
+            )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true },
+        // Centred, exactly like the manga shelf's featured entry. Top alignment set the
+        // cover and eyebrow flush against the pane's rounded top edge, where the corner
+        // radius clipped the artwork's head — the "clipped from the top" report. The manga
+        // hero never had that because it centres the row within the pane, so the two shelf
+        // heroes are now one composition and neither touches the corner.
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FolioCoverPlate(
+            coverPath = book.coverPath,
+            title = book.title,
+            author = book.displayAuthor,
+            modifier = Modifier
+                .sharedElementOrNoop(FolioSharedKeys.bookCover(book.id))
+                // The shelf's lamp sits behind its featured cover.
+                .folioLampSource(),
+            width = FolioTokens.coverFeature,
+            halo = accent,
+            haloStrength = haloStrength,
+            elevation = FolioTokens.elevationRaised,
+            // The featured plate's neighbours are the eyebrow, title and author
+            // below it, all of which stay put while the plate flies — so the
+            // fallback's own copy of title/author would be a third and fourth
+            // rendering of the same words for the length of the morph.
+            suppressFallbackText = true,
+            overlay = {
+                if (isSelected) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(FolioTheme.colors.primary.copy(alpha = 0.32f))
+                            .border(2.dp, FolioTheme.colors.primary, FolioShapes.plate)
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(FolioTheme.colors.primary),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = FolioTheme.colors.onPrimary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+            },
+        )
+        Spacer(Modifier.width(FolioTokens.space4))
+        Column(modifier = Modifier.weight(1f)) {
+            FolioEyebrow("Reading", accent = accent)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = book.title,
+                style = FolioTheme.typography.titleLarge,
+                color = FolioTheme.colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id)),
+            )
+            Text(
+                text = book.displayAuthor,
+                style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(FolioTokens.space2))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${book.progressPercent}%",
+                    style = FolioTheme.typography.titleSmall,
+                    color = accent,
+                )
+                if (finishEstimate != null) {
+                    Spacer(Modifier.width(FolioTokens.space2))
+                    Text(
+                        text = finishEstimate,
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(FolioTokens.space1))
+            FolioProgressBar(progress = book.normalizedProgress.toFloat(), color = accent)
+        }
+        BookItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onDetails = onClick,
+            onSelect = onLongClick,
+            onDelete = { onDeleteBook(book) },
+        )
+    }
+}
+
+/**
+ * A standard shelf entry: the plate — lit by its own cover colour, at
+ * [com.folio.reader.ui.components.COVER_HALO_STRENGTH] once the sample lands —
+ * then type beneath it, ranged left. No card, no centred text, no hover scale.
+ *
+ * Selection is expressed as an accent rim *on the plate* plus a check mark rather
+ * than by recolouring a card container, so a selected book still shows its
+ * artwork. Inactive books (unread or finished) sit back at 0.86 alpha so the shelf
+ * has a foreground and a background.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun BookCard(
+    book: Book,
+    modifier: Modifier = Modifier,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDeleteBook: (Book) -> Unit,
+    finishEstimate: String? = null
+) {
+    val interaction = rememberFolioInteraction()
+    val inProgress = book.normalizedProgress > 0.0 && book.normalizedProgress < 0.99
+    val colors = FolioTheme.colors
+    // The cover lights its own neighbourhood, exactly as the featured row's does.
+    // This is the change that stops a shelf cover being a flat sticker: the plate
+    // already knew how to spill its colour (coverHalo), it was never handed one —
+    // `halo` arrived null from every grid cell. Hoisted to the top of the item
+    // because rememberCoverAccent is @Composable, and the featured rows already
+    // call it in the same position; a modifier expression would re-read it per
+    // frame. It reads the process-lifetime accent cache through a three-permit
+    // gate, so a page of freshly decoded covers samples across frames instead of
+    // stacking a dozen pixel reads and their recompositions on one.
+    val accent = rememberCoverAccent(book.coverPath, colors.accentProgress)
+    val haloStrength = rememberCoverHaloStrength(accent != colors.accentProgress)
+    var menuOpen by remember { mutableStateOf(false) }
+    val pickupHaptics = rememberFolioHaptics()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .folioPressable(interaction)
+            // The "not being read" dim is now the *plate's* business (see `dimmed` on the call
+            // below), not a `graphicsLayer { alpha }` on the whole cell. An alpha layer is an
+            // offscreen render pass per card and a shelf composes a dozen at once; a colour
+            // matrix on the cover image is applied by the draw itself. It also dims the right
+            // thing — the artwork — instead of fading the title and the progress rule with it.
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                // Hand the already-loaded book to the detail screen so its cover
+                // morph target exists on the first frame (see BookHandoff).
+                onClick = { com.folio.reader.ui.book.BookHandoff.offer(book); onClick() },
+                onLongClick = {
+                    pickupHaptics.play(FolioHaptic.PickUp)
+                    if (isSelectionMode) onLongClick() else menuOpen = true
+                }
+            )
+            .folioRightClick { if (!isSelectionMode) menuOpen = true }
+    ) {
+        // §17 shared element: the plate is the same object on the shelf and on the
+        // book's own page, so it travels between them instead of being redrawn.
+        FolioCoverPlate(
+            coverPath = book.coverPath,
+            title = book.title,
+            author = book.displayAuthor,
+            // contentSize to match the detail header's plate: this grid cell is
+            // usually wider than the destination's coverFeature (112dp), so the
+            // morph genuinely resizes. With both ends on contentSize the artwork
+            // stays the size of the interpolating box the whole flight instead of
+            // snapping to its final size only on the last frame.
+            modifier = Modifier.sharedElementOrNoop(
+                FolioSharedKeys.bookCover(book.id),
+                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+            ),
+            // null width: the plate fills the grid cell and derives its height from
+            // the printed trim, so a wide column never squashes the cover.
+            width = null,
+            // The glow, not a second shadow: elevation stays at the plate's veil
+            // default so this change moves one variable — the shelf gains light, it
+            // does not also gain height.
+            halo = accent,
+            haloStrength = haloStrength,
+            // The title and author directly below carry the paired keys, so the
+            // plate must not draw the fallback's own copies of them.
+            suppressFallbackText = true,
+            // Replaces the old cell-wide `alpha = 0.86f` (see the Column above). Same condition —
+            // a book that is not mid-read reads as dimmed — but the cue is a cover desaturation
+            // rather than a fade of the whole cell, and it costs no offscreen layer.
+            dimmed = !inProgress,
+            overlay = {
+                if (isSelected) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(colors.primary.copy(alpha = 0.32f))
+                            .border(2.dp, colors.primary, FolioShapes.plate)
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(colors.primary),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = colors.onPrimary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+                // §5.1: progress as a seam on the plate's foot. §2.6 holds — one
+                // progress form per view, and the ring is gone from the shelf.
+                if (inProgress) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(colors.onSurface.copy(alpha = 0.15f))
+                            .semantics {
+                                contentDescription = "${book.progressPercent}% read"
+                            }
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(book.normalizedProgress.toFloat())
+                                .height(3.dp)
+                                .background(colors.accentProgress)
+                        )
+                    }
+                }
+            },
+        )
+
+        // "No card" still holds — this is not one. The shelf's type used to sit on
+        // bare field, which was the right call while the field was a quiet ramp; it
+        // is now the Mirage shader, whose blooms are bright, move, and land wherever
+        // they land, so the title was comfortable in one cell and inside a lit bloom
+        // in the next. folioTypeGround washes the *page's own* colour under the label
+        // at under half strength and dissolves at both ends, so the field still drifts
+        // through the label and the cell is still a plate with its name beneath it.
+        // The leading `Spacer` is gone because the wash's own top padding is that gap
+        // — the type does not move, the wash simply starts at the plate's foot rather
+        // than below it, and the 8dp head dissolve happens inside those 12dp.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .folioTypeGround()
+                .padding(top = FolioTokens.space2, bottom = FolioTokens.space1)
+        ) {
+            Text(
+                text = book.title,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = FolioTheme.typography.labelMedium,
+                color = colors.onSurface,
+                modifier = Modifier.fillMaxWidth()
+                    .sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id))
+            )
+            Text(
+                text = book.displayAuthor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            )
+            // One caption line only: the percentage while reading, the estimate when
+            // there is one, the status when the book is notable. Three stacked captions
+            // under a 116dp cover is what made the old grid feel like a form.
+            val caption = when {
+                inProgress && finishEstimate != null -> "${book.progressPercent}% · $finishEstimate"
+                inProgress -> "${book.progressPercent}%"
+                book.status != BookStatus.UNREAD && book.status != BookStatus.READING ->
+                    book.status.name.lowercase().replaceFirstChar { it.uppercase() }
+                else -> null
+            }
+            if (caption != null) {
+                Text(
+                    text = caption,
+                    style = FolioTheme.typography.labelSmall,
+                    color = if (inProgress) colors.accentProgress else colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                )
+            }
+        }
+        BookItemMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            onDetails = onClick,
+            onSelect = onLongClick,
+            onDelete = { onDeleteBook(book) },
+        )
+    }
+}
+
+/**
+ * The one context menu a book carries, opened by long-press (touch) or
+ * right-click (mouse). The old per-item ⋮ badge and the long-press selection
+ * jump revealed two different, partial action sets; this is the union behind a
+ * single gesture — the primary action, the door into bulk selection, and delete.
+ */
+@Composable
+internal fun BookItemMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    onDetails: () -> Unit,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    com.folio.reader.ui.components.FolioMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest
+    ) {
+        DropdownMenuItem(
+            text = { Text("Book details") },
+            leadingIcon = {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            onClick = {
+                onDismissRequest()
+                onDetails()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Select") },
+            leadingIcon = {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            onClick = {
+                onDismissRequest()
+                onSelect()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Delete book", color = FolioTheme.colors.error) },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = FolioTheme.colors.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismissRequest()
+                onDelete()
+            }
+        )
+    }
+}

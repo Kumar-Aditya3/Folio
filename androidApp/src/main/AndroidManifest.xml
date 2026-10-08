@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The "Living Paper" haptic vocabulary (FolioHaptics): page-turn ticks,
+         commit clicks, confirm/reject and celebration pulses. Normal permission,
+         auto-granted; VibrationEffect calls silently no-op without it. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- Whole-device library scanning: All Files Access on Android 11+, where
+         scoped storage hides other apps' non-media files (EPUBs, PDFs) from
+         both MediaStore and SAF tree grants unless the root is granted — which
+         OEMs frequently block. Sideloaded app; Play's policy on this permission
+         does not apply. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <!-- Needed to discover installed Mihon extension packages on Android 11+. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- Manga update summary notification (§11.3); runtime-granted on 33+, notifier no-ops when withheld. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps manga chapter downloads alive after the app is closed via a dataSync
+         foreground service (MangaDownloadService). FOREGROUND_SERVICE is the base
+         permission; FOREGROUND_SERVICE_DATA_SYNC authorizes the dataSync type on 34+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- The semantic index is hours of local CPU work, and vendor ROMs freeze a
+         backgrounded app within seconds of it leaving the screen — measured on
+         ColorOS as `OplusHansManager: freeze uid: 10452 pids: [29524]` five
+         seconds after the unfreeze that let one session run. A frozen process
+         executes nothing, so without this exemption indexing only advances while
+         the app is open. Requested through the system dialog from
+         Settings > Semantic search, never silently. Sideloaded app; Play's policy
+         on this permission does not apply, as with MANAGE_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:ignore="BatteryLife" />
+
+    <application
+        android:name=".FolioApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:forceDarkAllowed="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Folio"
+        tools:targetApi="31">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="colorMode"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Folio"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.html" />
+                <data android:pathPattern=".*\\.htm" />
+                <data android:pathPattern=".*\\.docx" />
+                <data android:pathPattern=".*\\.odt" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:pathPattern=".*\\.cbz" />
+            </intent-filter>
+            <!-- Deep links (§3.4 step 4): folio://book/{id} and folio://reader/{id}.
+                 Matched by the navDeepLink entries on those routes in FolioNavHost. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="folio" android:host="book" />
+                <data android:scheme="folio" android:host="reader" />
+            </intent-filter>
+        </activity>
+
+        <!-- The interactive bot-check window (§Cloudflare): a source that answers with
+             a challenge the headless bypass cannot clear hands its URL here, where the
+             reader can solve it. Not exported — it is only ever started in-process. -->
+        <activity
+            android:name=".manga.ChallengeWebViewActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Folio"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Keeps manga chapter downloads running after the user leaves the app. Single
+             in-process service — no android:process, because queue reactivity comes from an
+             in-process MutableStateFlow revision counter in JdbcMangaDownloadRepository.
+             Started/stopped by a queue collector in AppGraph; retires itself when the queue
+             drains. dataSync type on targetSdk 34. -->
+        <service
+            android:name=".downloads.MangaDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- WorkManager's own foreground service, promoted by
+             EmbeddingBackfillWorker.setForeground so the semantic-index pass survives being
+             cached. Without a declared foregroundServiceType here, targetSdk 34 refuses the
+             promotion with MissingForegroundServiceTypeException at runtime — the worker would
+             silently stay an ordinary background job and keep being reaped, which is the
+             "it only works while I'm on the app" symptom this fixes.
+             tools:node="merge" because the service is contributed by the WorkManager library;
+             this entry only adds the type rather than replacing the library's declaration. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Sentry is initialized manually in FolioApplication with an explicit DSN;
+             the AAR's auto-init providers crash at process start without manifest DSN meta-data. -->
+        <provider
+            android:name="io.sentry.android.core.SentryInitProvider"
+            tools:node="remove" />
+        <provider
+            android:name="io.sentry.android.core.SentryPerformanceProvider"
+            tools:node="remove" />
+
+    </application>
+
+</manifest>
