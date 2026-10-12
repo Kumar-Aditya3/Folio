@@ -375,7 +375,11 @@ data class ThemePack(
             ThemePack("lagoon", "Lagoon", "Abyss", "lagoon", "abyss", "lagoon", "abyss"),
             ThemePack("rouge", "Rouge", "Garnet", "rouge", "garnet", "rouge", "garnet"),
             ThemePack("cyberpunk", "Neon Day", "Cyberpunk", "neonday", "cyberpunk", "white", "midnight"),
-            ThemePack("vice", "Vice Day", "Vice", "viceday", "vice", "blossom", "midnight"),
+            // P7: the light side read `blossom`, which is a *dark* page — so Vice Day paired a
+            // light app palette with a dark reader theme, the exact mismatch a pack exists to
+            // prevent (and `readerAndAppDarknessAgreePerPack` caught it). Bubblegum is the
+            // blush-pink page Vice Day's "blush-white heat, hot pink signage" is asking for.
+            ThemePack("vice", "Vice Day", "Vice", "viceday", "vice", "bubblegum", "midnight"),
             ThemePack("aurum", "Champagne", "Aurum", "champagne", "aurum", "sepia", "espresso"),
         )
     }

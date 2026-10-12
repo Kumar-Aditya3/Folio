@@ -232,15 +232,21 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
     // colour, so the room itself never does. Retuned away from warm plaster (the report:
     // "the gallery and dark theme are very green, they need to be black/white") — every
     // plane, ink and accent here is a true neutral grey, R=G=B.
+    //
+    // P7: the page came down from #FAFAFA and the rim from #DCDCDC. A strictly neutral face
+    // still has to satisfy the two greyscale invariants the colour faces get for free: the
+    // card must separate from the page by >= 2 L* (it was 1.04 — the card was invisible on
+    // its own page) and the rim must clear 1.5:1 against the card (it was 1.35:1 — the card
+    // had no edge at all). Both are steps within the greyscale, so the room is still neutral.
     FolioArtDirection(
         id = "gallery", light = true,
-        backgroundBase = 0xFFFAFAFA, backgroundSecondary = 0xFFEFEFEF, surface = 0xFFFDFDFD, surfaceElevated = 0xFFFFFFFF,
+        backgroundBase = 0xFFF7F7F7, backgroundSecondary = 0xFFEFEFEF, surface = 0xFFFDFDFD, surfaceElevated = 0xFFFFFFFF,
         primaryAccent = 0xFF202020, secondaryAccent = 0xFF6E6E6E, tertiaryAccent = 0xFFA8A8A8, warmAccent = 0xFF8A8A8A,
         guillochePrimary = 0xFF3A3A3A, guillocheSecondary = 0xFF8C8C8C, guillocheHighlight = 0xFF575757,
         glowPrimary = 0xFFB8B8B8, glowSecondary = 0xFF8A8A8A,
         progress = 0xFF2B2B2B, progressTrack = 0xFFE4E4E4,
         textPrimary = 0xFF141414, textSecondary = 0xFF575757, textTertiary = 0xFF7E7E7E,
-        border = 0xFFDCDCDC, borderHighlight = 0xFFEBEBEB,
+        border = 0xFFCFCFCF, borderHighlight = 0xFFEBEBEB,
         navigationSelected = 0xFF262626,
         navAccent = 0xFF444444, mastheadAccent = 0xFF7A7A7A, readerOverlayAccent = 0xFF5E5E5E,
         accentProgress = 0xFF111111, accentStreak = 0xFF525252, accentDiscovery = 0xFF2E2E2E, accentAnnotation = 0xFF737373,

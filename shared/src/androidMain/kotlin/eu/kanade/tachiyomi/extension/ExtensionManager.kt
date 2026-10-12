@@ -246,7 +246,7 @@ class ExtensionManager(
     suspend fun trust(extension: Extension.Untrusted) {
         untrustedExtensionMapFlow.value[extension.pkgName] ?: return
 
-        trustExtension.trust(extension.pkgName, extension.versionCode, extension.signatureHash)
+        trustExtension.trust(extension.pkgName, extension.signatureHash)
 
         untrustedExtensionMapFlow.value -= extension.pkgName
 
@@ -262,6 +262,10 @@ class ExtensionManager(
      */
     private fun registerNewExtension(extension: Extension.Installed) {
         installedExtensionMapFlow.value += extension
+        // A package that loads is not untrusted. A stale entry can outlive the decision that
+        // produced it — an update that *used* to land in the Untrusted tab left one behind —
+        // and the tab would keep listing a package that is installed and running.
+        untrustedExtensionMapFlow.value -= extension.pkgName
     }
 
     /**
@@ -272,6 +276,9 @@ class ExtensionManager(
      */
     private fun registerUpdatedExtension(extension: Extension.Installed) {
         installedExtensionMapFlow.value += extension
+        // Same reason as [registerNewExtension]: an update by the same signer stays trusted, so
+        // whatever the Untrusted tab was showing for this package is now out of date.
+        untrustedExtensionMapFlow.value -= extension.pkgName
     }
 
     /**

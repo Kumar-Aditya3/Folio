@@ -16,17 +16,32 @@ class TrustExtension(private val store: TrustStore) {
         // those keys are declared by the fetched remote index (index.json) and are therefore
         // attacker-controllable if the repo host/account is compromised, which would let a
         // malicious repo auto-approve its own APK and load native code with no user prompt.
-        val key = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:${fingerprints.last()}"
-        return key in store.trustedExtensions()
+        val trusted = store.trustedExtensions()
+        val signature = fingerprints.last()
+        // Identity is the **package and the signing key** — not the version.
+        //
+        // The version used to be part of the key, which meant every release produced a key
+        // the store had never seen: an extension the user had explicitly trusted came back
+        // as *untrusted* on its next update, so the Untrusted tab refilled itself on every
+        // upgrade. The signer is what a trust decision is actually about — the same publisher
+        // shipping a newer build is still that publisher.
+        if (trustKey(pkgInfo.packageName, signature) in trusted) return true
+        // The pre-change form, "pkg:versionCode:signature", is still honoured for the version
+        // installed right now, so a decision made before this change survives it instead of
+        // forcing the user to approve the extension a second time.
+        val legacy = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:$signature"
+        return legacy in trusted
     }
 
-    fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        store.trust("$pkgName:$versionCode:$signatureHash", pkgName)
+    fun trust(pkgName: String, signatureHash: String) {
+        store.trust(trustKey(pkgName, signatureHash), pkgName)
     }
 
     fun revokeAll() {
         store.revokeAll()
     }
+
+    private fun trustKey(pkgName: String, signatureHash: String) = "$pkgName:$signatureHash"
 }
 
 /**

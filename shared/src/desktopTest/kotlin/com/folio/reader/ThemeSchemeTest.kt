@@ -120,14 +120,17 @@ class ThemeSchemeTest {
 
     @Test
     fun flipThemeModeSwapsTheActivePackSides() {
-        // Honey/sepia → Ember/ember and back: both faces of the pack follow.
-        val honey = ReaderSettings(appThemeId = "honey", themeId = "sepia")
+        // Honey/honey → Ember/ember and back: both faces of the pack follow.
+        //
+        // The page pair is the pack's own (`ThemePack("honey", …, "honey", "ember")`), not
+        // sepia: sepia is Manuscript's page, and Honey carries its own reader theme.
+        val honey = ReaderSettings(appThemeId = "honey", themeId = "honey")
         val ember = flipThemeMode(honey)
         assertEquals("ember", ember.appThemeId)
         assertEquals("ember", ember.themeId)
         val back = flipThemeMode(ember)
         assertEquals("honey", back.appThemeId)
-        assertEquals("sepia", back.themeId)
+        assertEquals("honey", back.themeId)
     }
 
     @Test

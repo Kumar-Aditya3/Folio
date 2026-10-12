@@ -433,7 +433,13 @@ internal fun enrichChroma(c: Color, gain: Float): Color {
     if (gain == 1f || c.alpha == 0f) return c
     val chroma = oklabChroma(c)
     if (chroma < ENRICH_MIN_CHROMA) return c
-    return tierColour(luminanceOf(c), oklabHue(c), chroma * gain).copy(alpha = c.alpha)
+    val enriched = tierColour(luminanceOf(c), oklabHue(c), chroma * gain).copy(alpha = c.alpha)
+    // `tierColour` bisects for the largest chroma the gamut holds at this hue and lightness and
+    // then spends only `GAMUT_SAFETY` of it. A colour that already sits at the gamut edge
+    // therefore comes back with slightly *less* chroma than it went in with — the vibrancy
+    // lever would dim a pool instead of enriching it (Manuscript's warm pool: 0.1254 ->
+    // 0.1212). The knob may raise chroma or hold it; it may never lower it.
+    return if (oklabChroma(enriched) >= chroma) enriched else c
 }
 
 /**
@@ -637,10 +643,26 @@ private const val BAR_GLASS_CHROMA = 0.16f
 /** How much of the plane is the chromatic material rather than the page-derived base. */
 private const val BAR_GLASS_MATERIAL_SHARE = 0.90f
 
+/**
+ * A material's hue and chroma, or nothing at all for an accent that has no hue to lend.
+ *
+ * Oklab reports an achromatic colour's hue as ~0°, which is *red*. Every material that took
+ * its hue from an accent therefore invented a saturated one out of a neutral: Gallery's
+ * deliberately hue-free faces came out with **pink cards and a pink bar glass**, and the card
+ * was pulled dark enough to sit below its own page. A role below [ROOM_HUE_MIN_CHROMA] has no
+ * hue to give, so it gives none and the material is the neutral it should be.
+ */
+private fun materialHueChroma(accent: Color, l: Float, chromaCeiling: Float): Pair<Float, Float> =
+    if (oklabChroma(accent) < ROOM_HUE_MIN_CHROMA) {
+        0f to 0f
+    } else {
+        val hue = oklabHue(accent)
+        hue to minOf(chromaCeiling, maxChromaInGamut(l, hue) * GAMUT_SAFETY)
+    }
+
 internal fun chromeGlassMaterial(accent: Color, dark: Boolean): Color {
     val l = if (dark) BAR_GLASS_L_DARK else BAR_GLASS_L_LIGHT
-    val hue = oklabHue(accent)
-    val chroma = minOf(BAR_GLASS_CHROMA, maxChromaInGamut(l, hue) * GAMUT_SAFETY)
+    val (hue, chroma) = materialHueChroma(accent, l, BAR_GLASS_CHROMA)
     return oklchToColor(l, chroma, hue)
 }
 
@@ -768,8 +790,7 @@ private fun liftPlane(c: Color, dark: Boolean, amount: Float): Color =
 internal fun cardGlassMaterial(accent: Color, base: Color, dark: Boolean): Color {
     val l = if (dark) maxOf(oklabL(base), CARD_GLASS_L_DARK_FLOOR)
     else minOf(oklabL(base), CARD_GLASS_L_LIGHT_CEIL)
-    val hue = oklabHue(accent)
-    val chroma = minOf(CARD_GLASS_CHROMA, maxChromaInGamut(l, hue) * GAMUT_SAFETY)
+    val (hue, chroma) = materialHueChroma(accent, l, CARD_GLASS_CHROMA)
     return oklchToColor(l, chroma, hue)
 }
 

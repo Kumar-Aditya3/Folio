@@ -520,6 +520,16 @@ class DesignSystemTest {
         for (palette in AppPalette.entries) {
             val pools = atmosphereFor(palette.colors).pools
             assertEquals(3, pools.size, "${palette.id}: the field lost its three pools")
+            // **An achromatic room has no hue to spread.** Gallery and Dark are monochrome
+            // *by design* — "the white cube, strictly monochrome: the art supplies the only
+            // colour, so the room itself never does" — so three neutral lamps are the correct
+            // answer there and a hue spread is not a property the face can have. This is the
+            // same exemption `ThemeSchemeTest.neutralsVaryInHueNotOnlyLightness` makes with its
+            // `achromaticByDesign` list, read off the page instead of listed so a face
+            // re-authored into colour re-enters the check by itself. The threshold is tight
+            // (1% HSV saturation) on purpose: Silver's page is #ECEEF1, which reads 2.1% and
+            // must still be checked.
+            if (rgbToHsv(palette.colors.background.toArgb()).second < 0.01f) continue
             val hues = pools.map { rgbToHsv(it.toArgb()).first }
             var spread = 0f
             for (a in hues.indices) {
