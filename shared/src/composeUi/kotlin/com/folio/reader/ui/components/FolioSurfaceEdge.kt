@@ -472,6 +472,58 @@ internal fun DrawScope.drawFolioRim(
 }
 
 /**
+ * How much of a light pass survives on each of the edge stack's outermost rings.
+ *
+ * Four steps, rising inward, so a catch that used to be clipped at the core path fades in
+ * across the feather instead. The plane and the rim already ramp across these same rings;
+ * this is the third layer of the same material getting the same treatment.
+ */
+private val FOLIO_INSET_FADE = listOf(0.28f, 0.55f, 0.79f, 1f)
+
+/**
+ * Paints a light pass with a **faded inset** rather than a hard clip at the core path.
+ *
+ * Every specular layer in `FolioSurfaces` used to paint its brush on [folioEdgeCorePath] —
+ * the shape inset by the whole feather. That keeps the brightest row off the silhouette,
+ * which was the right instinct, but it does it with a hard, rounded boundary a few dp inside
+ * the silhouette. On a dark face that boundary is invisible, because the catch there is a
+ * lifted *surface* colour sitting on a plane of nearly the same colour. On a light face the
+ * catch is white laid over a mid-grey plane, so the core path draws **itself**: a bright
+ * rounded rectangle inset inside the card, which is the "nested structure inside every
+ * block" a light-mode Settings screen shows and the dark-mode one does not.
+ *
+ * Painting the same brush on the edge stack's own rings at a rising alpha replaces that step
+ * with the same short ramp the plane and the rim already use, so the catch fades in with the
+ * material it belongs to and no inset edge is left to be seen. The bright end of the brush
+ * is unchanged — this only changes where the pass stops, from a line to a ramp.
+ *
+ * Callers must build their brush with explicit coordinates over the surface's own bounds
+ * (`size`), not over the path's, or every ring would remap the gradient and stack a band per
+ * ring.
+ *
+ * A surface the stack declined to feather (a generic shape, a degenerate size) paints the
+ * whole outline, which is exactly what these layers did before the edge stack existed.
+ */
+internal fun DrawScope.drawFolioInsetBrush(
+    stack: FolioEdgeStack,
+    brush: Brush,
+    weights: List<Float> = FOLIO_INSET_FADE,
+) {
+    val rings = stack.rings
+    if (rings.isEmpty()) return
+    if (!stack.feathered || rings.size <= 1) {
+        drawPath(rings[0], brush)
+        return
+    }
+    val first = (rings.size - weights.size).coerceAtLeast(0)
+    for (i in first until rings.size) {
+        val alpha = weights[i - first]
+        if (alpha <= FOLIO_EDGE_ALPHA_FLOOR) continue
+        drawPath(rings[i], brush, alpha = alpha)
+    }
+}
+
+/**
  * The feathered plane, as a drop-in replacement for `Modifier.background(brush, shape)`.
  *
  * Deliberately **not** `@Composable` and deliberately a separate modifier from

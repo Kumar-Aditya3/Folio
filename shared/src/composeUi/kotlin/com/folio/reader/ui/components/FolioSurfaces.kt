@@ -551,10 +551,14 @@ fun Modifier.folioRaised(
         .folioSurfacePlane(shape, fillColor, edgeProfile, raisedFoot)
         .then(lensLayer)
         .drawWithCache {
-            // §18: the catch is laid on the edge stack's core, not on the silhouette — a
-            // sheen whose brightest row *is* the surface's outer edge is a second boundary
-            // cue painted over the first one.
-            val path = folioEdgeCorePath(shape, edgeProfile)
+            // §18: the catch is laid *inside the feather*, not on the silhouette — a sheen
+            // whose brightest row *is* the surface's outer edge is a second boundary cue
+            // painted over the first one. P7: the inset is a **ramp across the edge stack's
+            // rings, not a hard clip at the core path** — a clip there leaves a rounded
+            // boundary a few dp inside the silhouette, and on a light face the catch is white
+            // over a mid-grey plane, so that boundary draws itself as a nested rounded
+            // rectangle. See [drawFolioInsetBrush].
+            val stack = folioEdgeStack(shape, edgeProfile)
             onDrawBehind {
                 // Anti-sun edge occludes, sun-facing edge catches. At neutral daylight
                 // the sun is straight overhead, so this is the old top-light / bottom-
@@ -589,7 +593,7 @@ fun Modifier.folioRaised(
                             end = end,
                         )
                     }
-                    drawPath(path, sheen)
+                    drawFolioInsetBrush(stack, sheen)
                 }
             }
         }
@@ -807,7 +811,11 @@ fun Modifier.folioSunken(
         .folioSurfacePlane(shape, fill, edgeProfile, sunkenFoot)
         .drawWithCache {
             // §18: inside the feather, so the lip lights the recess rather than outlining it.
-            val path = folioEdgeCorePath(shape, edgeProfile)
+            // P7: the inset ramps across the edge stack's rings instead of clipping at the core
+            // path — the lip is the same bright pass as every other catch, and a hard core
+            // boundary on it is the "distinctly visible hard-edged box" the 38dp icon tiles in
+            // the More hub were reported as. See [drawFolioInsetBrush].
+            val stack = folioEdgeStack(shape, edgeProfile)
             onDrawBehind {
                 // Inverted along the same axis: light at the anti-sun edge, shade at
                 // the sun edge. Overhead neutral sun → shade on top, light on bottom.
@@ -821,7 +829,7 @@ fun Modifier.folioSunken(
                     start = start,
                     end = end,
                 )
-                drawPath(path, sheen)
+                drawFolioInsetBrush(stack, sheen)
             }
         }
         .clip(shape)
@@ -1242,15 +1250,21 @@ fun Modifier.folioVeil(
     // per draw against the living light, so the glass catches a highlight that
     // is always a little in transit.
     //
-    // §18: laid on the edge stack's *core* rather than on the silhouette. A sheen whose
+    // §18: laid *inside the feather* rather than on the silhouette. A sheen whose
     // brightest row is the surface's own outer edge is a second boundary cue painted over
     // the first one — and the no-specular branch below was the worse offender, a flat
-    // top-down gradient whose peak was the top edge, clipped dead at the shape. Inset by
-    // the feather, the catch fades out with the plane it belongs to instead of marking
-    // where the plane stops.
+    // top-down gradient whose peak was the top edge, clipped dead at the shape. Inside the
+    // feather, the catch fades in with the plane it belongs to instead of marking where the
+    // plane stops.
+    //
+    // P7: the inset is a ramp across the edge stack's rings, not a clip at the core path.
+    // Clipping there kept the bright row off the silhouette but left a hard rounded boundary
+    // a few dp inside it — invisible on a dark face, glaring on a light one, and the source
+    // of the nested rounded rectangle every block on a light-mode Settings screen showed.
+    // See [drawFolioInsetBrush].
     val sheenLayer = if (caps.specular && effectiveTier == FolioGlassTier.Overlay) {
         Modifier.drawWithCache {
-            val path = folioEdgeCorePath(shape, edgeProfile)
+            val stack = folioEdgeStack(shape, edgeProfile)
             onDrawBehind {
                 val (start, end) = daylightGradient(size, daylight, ambient.value)
                 val light = catchLight
@@ -1264,25 +1278,34 @@ fun Modifier.folioVeil(
                     start = start,
                     end = end,
                 )
-                drawPath(path, sheen)
+                drawFolioInsetBrush(stack, sheen)
             }
         }
     } else {
         // The in-flow / no-specular catch. Was `Modifier.background(verticalGradient, shape)`:
         // a flat overlay whose brightest row was the shape's top edge and which was clipped
         // hard at the silhouette, so the very top of every section card in Settings carried a
-        // bright band that ended at a hard line. Same brush, painted on the core path, so the
+        // bright band that ended at a hard line. Same brush, laid inside the feather, so the
         // card still has a top and the top is no longer an edge.
+        //
+        // P7: and the inset is a **ramp across the edge stack's rings, not a clip at the core
+        // path**. Clipping there leaves a hard rounded boundary a few dp inside the silhouette,
+        // which is invisible on a dark face (the catch is a lifted surface colour) and glaring on
+        // a light one (white over a mid-grey plane) — the nested rounded rectangle every block on
+        // a light-mode Settings screen was showing. See [drawFolioInsetBrush].
         Modifier.drawWithCache {
-            val path = folioEdgeCorePath(shape, edgeProfile)
+            val stack = folioEdgeStack(shape, edgeProfile)
             // §Metal: the flat panel's top catch, brighter and tighter — the first
             // 38% of the surface carries it (was a half-strength wash over the whole
             // height), so it reads as a specular strike along the top chamfer.
+            // Pinned to the surface's own bounds so every ring maps the gradient identically.
             val sheen = Brush.verticalGradient(
                 0f to catchLight.copy(alpha = catchLight.alpha * 0.72f * sheenGain),
                 0.38f to Color.Transparent,
+                startY = 0f,
+                endY = size.height,
             )
-            onDrawBehind { drawPath(path, sheen) }
+            onDrawBehind { drawFolioInsetBrush(stack, sheen) }
         }
     }
 
