@@ -1441,7 +1441,7 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         }
         var totalReadMinutes = 0L
         conn.prepareStatement(
-            "SELECT COALESCE(SUM(s.duration_ms),0)/60000 FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id" +
+            "SELECT COALESCE(SUM(s.duration_ms),0)/60000 FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id AND m.favorite = 1" +
                 whereNotIn("m.id")
         ).use { st ->
             bindExclusions(st, 1)
@@ -1488,7 +1488,7 @@ class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader
         }
         val top = mutableListOf<com.folio.reader.manga.MangaTopEntry>()
         conn.prepareStatement(
-            "SELECT m.id, m.title, SUM(s.duration_ms)/60000 AS minutes FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id" +
+            "SELECT m.id, m.title, SUM(s.duration_ms)/60000 AS minutes FROM reading_sessions s JOIN manga_library m ON m.id = s.book_id AND m.favorite = 1" +
                 whereNotIn("m.id") + " GROUP BY m.id, m.title HAVING minutes > 0 ORDER BY minutes DESC, m.id ASC LIMIT 5"
         ).use { st ->
             bindExclusions(st, 1)

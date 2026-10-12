@@ -147,17 +147,23 @@ private fun rgba(c: Color, alpha: Float) =
  * The `background-image` stack for [paper]/[ink] under the current [daylight], or
  * empty when the ink floor leaves no room for either term — in which case the page
  * stays exactly as flat as it is today, which is a correct outcome, not a degraded one.
+ *
+ * [sheen] is the metallic-sheen knob ([com.folio.reader.ui.theme.folioSheenGain]):
+ * it scales the *lift* — the page's sun-facing corner glow — and leaves the shade
+ * alone, because the outer band's darkening is occlusion rather than light. `1f`
+ * (the default, and what every test passes) is the shipped look byte-for-byte.
  */
 fun pageLightImage(
     daylight: FolioDaylight,
     atmosphere: FolioAtmosphere,
     paperArgb: Int,
     inkArgb: Int,
+    sheen: Float = 1f,
 ): String {
     val paper = argbColor(paperArgb)
     val ink = argbColor(inkArgb)
     val (x, y) = pageLightAnchor(daylight)
-    val lift = inkFloorRespectingAlpha(paper, ink, atmosphere.rimLight, PAGE_LIGHT_LIFT_ALPHA)
+    val lift = inkFloorRespectingAlpha(paper, ink, atmosphere.rimLight, PAGE_LIGHT_LIFT_ALPHA * sheen)
     val shade = inkFloorRespectingAlpha(paper, ink, atmosphere.rimShade, PAGE_LIGHT_SHADE_ALPHA)
     if (lift <= 0f && shade <= 0f) return ""
     val anchor = "$x% $y%"

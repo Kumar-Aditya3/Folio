@@ -24,6 +24,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
@@ -219,12 +220,16 @@ actual fun HtmlContentSurface(
     // visible; a jumped page is.
     val roomDaylight = LocalFolioDaylight.current
     val roomAtmosphere = FolioTheme.atmosphere
+    // The metallic-sheen knob, so the reading page's own corner glow dims with every
+    // other catch in the app. Part of the remember key, so moving the slider restyles
+    // the page light with everything else.
+    val roomSheen = folioSheenGain()
     val pageLight = remember(
-        roomDaylight, roomAtmosphere, settings.themeId, settings.customTheme,
+        roomDaylight, roomAtmosphere, roomSheen, settings.themeId, settings.customTheme,
     ) {
         val paper = settings.customTheme
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
-        pageLightImage(roomDaylight, roomAtmosphere, paper.background, paper.primaryText)
+        pageLightImage(roomDaylight, roomAtmosphere, paper.background, paper.primaryText, roomSheen)
     }
     // Building the document is regex plus concatenation over the whole window — 119 ms measured for a
     // book of 200 KB chapters on a desktop CPU, and several times that on a phone. In remember{} that

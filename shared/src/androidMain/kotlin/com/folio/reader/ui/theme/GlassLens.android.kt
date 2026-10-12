@@ -213,6 +213,33 @@ private fun Modifier.folioGlassLensLayer(
             shader.setFloatUniform("gleam", specular)
             shader.setFloatUniform("wall", depth)
             shader.setFloatUniform("intensity", intensity.coerceIn(0f, 1f))
+            // ── the room, frosted before it is bent ──
+            //
+            // The third part of the nested-shape fix, and the one the on-device
+            // measurement pointed at. The body of a lensed pane is the Haze pass: the room
+            // *blurred*. The band was the room **raw** — the plate replayed at full
+            // sharpness and then split three ways by the dispersion. The ground plane
+            // carries a fine halftone figure, so what the band actually showed was that
+            // figure un-frosted and chromatically smeared: measured on the nav capsule as
+            // a 6px-cell, 12px-pitch pattern swinging +-30 luma, inside a body that was
+            // smooth to +-2. Two different *textures* meeting on a closed curve read as a
+            // shape inside a shape no matter how gently the alpha between them ramps,
+            // which is why every previous attempt to retune the ramp failed.
+            //
+            // The frost first shipped as a **chained** blur RenderEffect — blur the replay,
+            // then lens it — and that is the one change that made the whole pass expensive:
+            // a RenderEffect runs over the whole layer, so every lensed pane (the capsule,
+            // every sheet, the hero) paid a second full-surface Gaussian per frame that the
+            // lens's own body early-out could do nothing about, on top of Haze's. The
+            // frost now runs **inside the shader**: a five-tap poisson disc at
+            // [FolioGlassLens.frost] around each displaced sample, which costs only band
+            // fragments that already survived the early-out — the body pays nothing, and a
+            // pane's lens costs a fraction of the blur pass it replaces. Same intent:
+            // dissolving the halftone texture so the band agrees with the frosted body,
+            // nowhere near far enough to flatten the macro structure the refraction needs
+            // something to bend. `content.eval` clamps at the replay's bounds, which is the
+            // CLAMP behaviour the chain was chosen for.
+            shader.setFloatUniform("frost", FolioGlassLens.frost.toPx())
             lens.renderEffect =
                 RenderEffect.createRuntimeShaderEffect(shader, "content").asComposeRenderEffect()
 
@@ -281,6 +308,7 @@ uniform float tintAlpha;
 uniform float gleam;
 uniform float wall;
 uniform float intensity;
+uniform float frost;
 
 // Per-corner rounded-rect SDF, in coordinates centred on the surface. radii is
 // (topLeft, topRight, bottomRight, bottomLeft) to match Compose's RoundRect.
@@ -290,7 +318,25 @@ float lensSdf(float2 c) {
     float2 h = size * 0.5;
     r = clamp(r, 0.0, min(h.x, h.y));
     float2 q = abs(c) - h + r;
-    return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0))) - r;
+}
+
+// The room, frosted before it is bent — the in-shaper form of the frost that used to be
+// a chained blur RenderEffect. That chain blurred the *whole layer* a second time every
+// frame, which the band-only lens cannot help but pay in full; five taps per sample cost
+// only the fragments that already survived the early-out in main. The poisson disc at
+// the frost radius dissolves the halftone figure the frost was bought for while leaving
+// the macro structure the refraction bends. Samples are premultiplied, so averaging
+// them directly is the correct blur in that space.
+half4 frostAt(float2 p) {
+    if (frost < 0.5) { return content.eval(p); }
+    float f = frost * 0.71;
+    half4 c = content.eval(p);
+    c += content.eval(p + float2( f,  f));
+    c += content.eval(p + float2(-f,  f));
+    c += content.eval(p + float2( f, -f));
+    c += content.eval(p + float2(-f, -f));
+    return c * 0.2;
 }
 
 half4 main(float2 fragCoord) {
@@ -299,20 +345,41 @@ half4 main(float2 fragCoord) {
     // Outside the silhouette the caller's clip has already taken over.
     if (d > 0.5) { return half4(0.0); }
 
-    // 0 deep in the body, 1 on the rim.
-    float t = clamp(1.0 + d / max(bandPx, 1.0), 0.0, 1.0);
+    // ── the band's weight ──
+    //
+    // **This is the fix for "the nav capsule and the hero have a shape inside them".**
+    // The weight used to be `smoothstep(0.02, 0.70, t)` over `t = 1 + d/bandPx`, and that
+    // single expression drew two closed contours inside every surface it ran on:
+    //
+    //  1. **A plateau.** `smoothstep` saturates at `t >= 0.70`, so the outer 30% of the
+    //     band was a flat alpha of 1 and the lens *replaced* the material there. The inner
+    //     boundary of that plateau is an iso-contour of the rounded-rect SDF at
+    //     `d = -0.30·band` — a closed rounded rect a few dp inside the silhouette, and on
+    //     a shape whose corner radius is smaller than the inset (the 0/26/26/0 hero) a
+    //     **square-cornered** one. Measured on device: a hard ring ~13dp in from the
+    //     capsule's edge.
+    //  2. **An end.** The ramp is exactly 0 at `d = -band`, which is a second contour at
+    //     a second radius. `GLASS_RIM_FUNCTIONS` in GlassShader.android.kt already records
+    //     why that is fatal and already fixed it for the film and the gel — "a ramp has an
+    //     end, and an end is an edge" — but the lens, written later, reintroduced it.
+    //
+    // An exponential has neither: no saturation, so no plateau to bound, and no finite
+    // support, so no radius at which the term stops. It is the same kernel the film uses,
+    // which also means the two passes' falloffs coincide instead of crossing — two
+    // contours at the same place are one edge, which is what a surface is allowed.
+    //
+    // The early-out survives, and it is now honest rather than structural: it fires where
+    // the weight is already below one 8-bit level, so it removes work and not a visible
+    // value. `0.30` puts that depth at ~1.7 bands, which still skips the majority of a
+    // hero's interior.
+    float a = exp(min(d, 0.0) / max(bandPx * 0.30, 1.0)) * intensity;
+    if (a <= 0.0039) { return half4(0.0); }
 
-    // Deep in the body the alpha ramp at the end of this function is
-    // `smoothstep(0.02, 0.70, t)`, which is exactly 0 for t <= 0.02 — so every term
-    // below it is multiplied out to transparent black. The file's own note claimed the
-    // pass "costs only the band it paints", and that was never true of the *shader*:
-    // only of its output. Every fragment inside the silhouette still paid two extra SDF
-    // evaluations for the normal and **three** `content.eval` taps for the dispersion,
-    // over the whole surface, to produce nothing. On the surfaces this runs on (a
-    // full-width hero, the nav capsule, a sheet) the 26dp band is a small fraction of
-    // the area, so the body is the majority of the pass. Returning here is
-    // bit-identical and skips it.
-    if (t <= 0.02) { return half4(0.0); }
+    // 0 deep in the body, 1 on the rim. Shapes the *geometry* — the fillet's slope and
+    // the Fresnel — but no longer the alpha, so its end at `d = -band` is no longer a
+    // visible boundary: the terms it drives are already multiplied by a weight that is
+    // still falling smoothly through it.
+    float t = clamp(1.0 + d / max(bandPx, 1.0), 0.0, 1.0);
 
     // Outward normal, from the SDF itself rather than from the bounding box, so a
     // hero with two square corners and two round ones gets the right direction on
@@ -330,32 +397,55 @@ half4 main(float2 fragCoord) {
     float bend = reachPx * clamp(slope / 6.0, 0.0, 1.0);
 
     float2 o = n * bend;
-    half4 sr = content.eval(fragCoord + o * (1.0 + chroma));
-    half4 sg = content.eval(fragCoord + o);
-    half4 sb = content.eval(fragCoord + o * (1.0 - chroma));
 
-    // The replay is premultiplied; recover straight colour before lighting it, or the
-    // rim darkens wherever the room is not fully opaque.
-    float cover = float(sg.a);
-    float3 col = float3(
-        float(sr.r) / max(float(sr.a), 1e-3),
-        float(sg.g) / max(float(sg.a), 1e-3),
-        float(sb.b) / max(float(sb.a), 1e-3)
-    );
+    // Dispersion costs two extra taps, and through most of the band `bend` is small
+    // enough that the red and blue offsets land inside the same texel as the green one —
+    // three samples of one colour. Paying for it only where the split is resolvable is
+    // free visually and gives the wider weight above its cost back.
+    float3 col;
+    float cover;
+    if (bend * chroma < 0.75) {
+        half4 s = frostAt(fragCoord + o);
+        cover = float(s.a);
+        col = float3(s.rgb) / max(cover, 1e-3);
+    } else {
+        half4 sr = frostAt(fragCoord + o * (1.0 + chroma));
+        half4 sg = frostAt(fragCoord + o);
+        half4 sb = frostAt(fragCoord + o * (1.0 - chroma));
+        // The replay is premultiplied; recover straight colour before lighting it, or
+        // the rim darkens wherever the room is not fully opaque.
+        cover = float(sg.a);
+        col = float3(
+            float(sr.r) / max(float(sr.a), 1e-3),
+            float(sg.g) / max(float(sg.a), 1e-3),
+            float(sb.b) / max(float(sb.a), 1e-3)
+        );
+    }
 
     float facing = clamp(dot(n, light) * 0.5 + 0.5, 0.0, 1.0);
-    float fres = t * t * t;
+    // §Metal: the fifth power (was a cube) tightens the catch into a specular band
+    // rather than a broad bloom — metal reflects a light source as a narrow streak,
+    // glass as a wash — and the deeper anti-sun floor below (0.10, was 0.16) is the
+    // other half of the same read: a chamfered edge, dark where it turns away.
+    float fres = t * t * t * t * t;
 
     // The far wall falls into the slab's own thickness on the anti-light edge...
     col = col * (1.0 - fres * (1.0 - facing) * wall);
-    // ...and the lit edge catches. One sixth survives on the dark side so the rim is
+    // ...and the lit edge catches. A tenth survives on the dark side so the rim is
     // continuous rather than a lit arc with two ends.
-    col = col + highlight * (fres * mix(0.16, 1.0, facing) * gleam);
-    // The glass's own body colour, strongest away from the rim where there is least
-    // refraction to carry the material.
-    col = mix(col, tint, tintAlpha * (1.0 - fres * 0.55));
+    col = col + highlight * (fres * mix(0.10, 1.0, facing) * gleam);
+    // The glass's own body colour. **The caller now passes its whole plane, not a third
+    // of it**, and that is the other half of the nested-shape fix. The old `* 0.35f` at
+    // the call sites meant the lens composited a materially *different* surface from the
+    // one painted underneath it — roughly a sixth of the plane over a sharp room, against
+    // the full plane over a frosted one — so wherever the weight was high the band was a
+    // visibly thinner, sharper material than the body, and the transition between them
+    // was the ring. Carrying the full plane makes the band the *same* material as the
+    // body, displaced: the lens then adds refraction and a Fresnel catch and subtracts
+    // nothing, so there is no material step left for an edge to form on.
+    col = mix(col, tint, tintAlpha * (1.0 - fres * 0.22));
 
-    float a = smoothstep(0.02, 0.70, t) * intensity * cover;
-    return half4(half3(clamp(col, 0.0, 1.0) * a), half(a));
+    float af = a * cover;
+    return half4(half3(clamp(col, 0.0, 1.0) * af), half(af));
 }
 """

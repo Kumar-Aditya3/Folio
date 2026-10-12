@@ -322,6 +322,7 @@ data class FsCollection(
     val sortOrder: Int = 0,
     val createdAt: Long,
     val deviceId: String = "",
+    val bookIds: List<String> = emptyList(),
     val updatedAt: Long = createdAt
 )
 

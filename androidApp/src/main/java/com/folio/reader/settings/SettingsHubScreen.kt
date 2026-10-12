@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
@@ -50,6 +51,7 @@ import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioFieldBottom
 import com.folio.reader.ui.components.folioTypeGround
 import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.folioVeilPlane
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberFolioHeaderState
@@ -143,8 +145,15 @@ fun SettingsHubScreen(
                         title = "Reader behavior",
                         subtitle = "Chapter title, progress, clock, brightness",
                         accent = colors.accentProgress,
-                        last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.READING) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Description,
+                        title = "Documents",
+                        subtitle = "How PDFs and Word files are shown",
+                        accent = colors.accentProgress,
+                        last = true,
+                        onClick = { onOpenSettings(FolioSettingsCategory.DOCUMENTS) }
                     )
                 }
             }
@@ -336,8 +345,11 @@ private fun HubSection(
             // The rows live inside this veil, so their own surfaces are nested by
             // construction — the icon tiles' wells most of all. Claiming the content
             // keeps the group's plane and drops the depth cues that were describing a
-            // page behind a surface that is actually behind glass.
-            FolioSurfaceContents { content() }
+            // page behind a surface that is actually behind glass. §19: the plane
+            // published is the exact one this veil paints with (folioVeilPlane, given
+            // the same accent the veil itself was), so a nested well is a whisper of
+            // the hub's own material plus a rim — not a second tier of fill.
+            FolioSurfaceContents(folioVeilPlane(accent = accent)) { content() }
         }
     }
 }

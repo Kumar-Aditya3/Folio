@@ -49,10 +49,10 @@ class FolioFieldCostTest {
 
     @Test
     fun `the families the lag report named are actually downsampled`() {
-        // "Paper texture, perlin cloud, grain gradient … add more to the lag". Each must be
-        // paying strictly less than full resolution, or the fix did not reach the report.
+        // "Perlin cloud, grain gradient … add more to the lag". Each must be paying strictly
+        // less than full resolution, or the fix did not reach the report. (Paper texture was
+        // the report's headline; the family is removed outright — see MeshField.android.kt.)
         for (kind in listOf(
-            FolioFieldKind.PaperTexture,
             FolioFieldKind.PerlinNoise,
             FolioFieldKind.GrainGradient,
         )) {

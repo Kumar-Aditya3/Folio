@@ -56,9 +56,8 @@ val LocalFolioSurfaceFill = compositionLocalOf<Color?> { null }
  * Declares [content] as living one surface deeper than its caller.
  *
  * Applied by the container composables that wrap content in a material —
- * [com.folio.reader.ui.components.FolioSectionCard],
- * [com.folio.reader.ui.components.FolioPanel], the settings category shell and the
- * More hub's sections.
+ * [com.folio.reader.ui.components.FolioSectionCard], the settings category shell, the
+ * More hub's sections and the overlay host's pane.
  *
  * [fill] is the plane *this* container is painted with, so the surfaces it contains can be made of
  * the same stuff (see [LocalFolioSurfaceFill]). Null — the default — publishes nothing and leaves
@@ -105,3 +104,30 @@ fun FolioSurfaceRoot(content: @Composable () -> Unit) {
 val FolioTheme.embedded: Boolean
     @Composable
     get() = LocalFolioSurfaceDepth.current > 0
+
+/**
+ * Asks the glass materials under this node to wear their *calm* light.
+ *
+ * The reader's floating chrome and its in-reader settings/side panels are the one
+ * place the app's glass is always on screen over the reading surface, so the full
+ * specular treatment — a tight bright sheen band, a lit edge bevel, and (on dark
+ * reading themes) a rim tinted toward the theme's secondary hue — reads as "shiny"
+ * and "edge-coloured" against otherwise plain paper. When this is true a [folioVeil]
+ * dims every light catch by [FOLIO_READER_CALM_SHEEN] and strips the hue from the
+ * catch colour, so the islands keep their frosted body, rounded silhouette and a
+ * faint neutral edge — modern, but no longer glossy or book-tinted.
+ *
+ * False — the default, and what every surface outside the reader sees — leaves the
+ * material byte-for-byte what it has always been (Rule 19). The reader provides this
+ * from the inverse of the editorial-styling preference, so the expressive look is
+ * opt-in and the calm look is the default.
+ */
+val LocalFolioReaderCalmGlass = compositionLocalOf { false }
+
+/**
+ * How much of a glass surface's light catch survives under [LocalFolioReaderCalmGlass].
+ * Scales the §17 sheen band, the in-flow top catch, the bevel's lit rim, the lens
+ * specular and the film glints together — the fill, hairline, blur and shadow are
+ * untouched, so the surface loses its gloss without losing its body or its shape.
+ */
+const val FOLIO_READER_CALM_SHEEN = 0.4f

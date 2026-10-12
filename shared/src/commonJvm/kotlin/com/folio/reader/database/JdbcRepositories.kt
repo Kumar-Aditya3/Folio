@@ -1122,6 +1122,7 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
     }
 
     override suspend fun assign(bookId: String, collectionIds: Set<String>) {
+        val previous = getCollectionsForBook(bookId).mapTo(mutableSetOf()) { it.id }
         db.withTransaction { conn ->
             conn.prepareStatement("DELETE FROM book_collections WHERE book_id = ?").use { stmt ->
                 stmt.setString(1, bookId)
@@ -1134,6 +1135,51 @@ class JdbcCollectionRepository(private val db: Database) : CollectionRepository 
                     stmt.setString(1, bookId)
                     stmt.setString(2, collectionId)
                     stmt.setLong(3, Clock.System.now().toEpochMilliseconds())
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+        db.bumpBookData()
+        // Membership changed for every shelf the book entered AND every one it left; bump and
+        // re-emit all of them (so the push side carries fresh bookIds) or removals never reach
+        // other devices. Mirrors the manga category `assign` contract.
+        val affected = (previous + collectionIds).filter { getCollection(it) != null }
+        if (affected.isNotEmpty()) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            db.withConnection { conn ->
+                val placeholders = affected.joinToString(",") { "?" }
+                conn.prepareStatement("UPDATE collections SET updated_at = ? WHERE id IN ($placeholders)").use { stmt ->
+                    stmt.setLong(1, now)
+                    affected.forEachIndexed { i, cid -> stmt.setString(i + 2, cid) }
+                    stmt.executeUpdate()
+                }
+            }
+            db.bumpBookData()
+            affected.forEach { cid ->
+                getCollection(cid)?.let { c ->
+                    db.onEntityChanged?.invoke(
+                        "collection", c.id, "UPSERT", repoJson.encodeToString(Collection.serializer(), c)
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun applyRemoteMembership(collectionId: String, bookIds: Set<String>) {
+        db.withTransaction { conn ->
+            conn.prepareStatement("DELETE FROM book_collections WHERE collection_id = ?").use { stmt ->
+                stmt.setString(1, collectionId)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement(
+                "INSERT OR IGNORE INTO book_collections (book_id, collection_id, added_at) VALUES (?, ?, ?)"
+            ).use { stmt ->
+                val now = Clock.System.now().toEpochMilliseconds()
+                bookIds.forEach { bookId ->
+                    stmt.setString(1, bookId)
+                    stmt.setString(2, collectionId)
+                    stmt.setLong(3, now)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()

@@ -352,14 +352,15 @@ private fun ReaderRouteContent(
 fun DocumentReaderRoute(
     navModel: FolioNavModelImpl,
     documentId: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val graph = navModel.graph
-    // The reader defaults now contain the doc defaults: the persisted
-    // documentReaderMode seeds the reader (unknown values fall back to today's
-    // single-page), and a mode change in the reader writes back through the
-    // canonical settings path, so it survives the visit and syncs like every
-    // other default.
+    // Documents now own their reading settings: the reader is handed the dedicated
+    // document row (typography, page, page theme, layout) instead of the book row,
+    // and every write goes back through the canonical settings path so it survives
+    // the visit and syncs like every other default. The page mode still comes from
+    // `documentReaderMode`, the one document default that predates this row.
     val initialMode = remember(documentId) {
         runCatching {
             com.folio.reader.ui.document.DocumentReaderMode.valueOf(
@@ -390,7 +391,12 @@ fun DocumentReaderRoute(
     }
     DocumentReaderScreen(
         viewModel = viewModel,
-        settings = navModel.globalSettings,
+        settings = navModel.globalSettings.documentSettings,
+        globalSettings = navModel.globalSettings,
+        onSettingsChange = { updated ->
+            navModel.updateSettings(navModel.globalSettings.copy(documentSettings = updated))
+        },
+        onOpenFullSettings = onOpenSettings,
         onBack = onBack,
         // §17 morph landing. Unconditional, unlike the EPUB reader's: this path is
         // pure Compose on both platforms, so there is no native surface whose paint

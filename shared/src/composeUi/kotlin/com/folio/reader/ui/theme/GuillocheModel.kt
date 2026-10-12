@@ -248,6 +248,12 @@ private val PACK_GEOMETRY: Map<String, GuillocheGeometry> = mapOf(
     "blossom" to GuillocheGeometry.PLAYFUL,
     "silver" to GuillocheGeometry.MINIMAL,        // Moonstone
     "graphite" to GuillocheGeometry.MINIMAL,
+    "cyberpunk" to GuillocheGeometry.CRYSTALLINE,  // the neon city's circuitry
+    "neonday" to GuillocheGeometry.CRYSTALLINE,
+    "vice" to GuillocheGeometry.PLAYFUL,            // neon signage, palm chrome
+    "viceday" to GuillocheGeometry.PLAYFUL,
+    "aurum" to GuillocheGeometry.ORNAMENTAL,        // baroque gold leaf
+    "champagne" to GuillocheGeometry.ORNAMENTAL,
     // The two packs with no §26 family: the achromatic Gallery/Dark pair borrows the
     // printed-plate calm (it is the app's default look and should not shout), and the
     // dynamic System pack borrows the tidal sweep (it must sit under any wallpaper).

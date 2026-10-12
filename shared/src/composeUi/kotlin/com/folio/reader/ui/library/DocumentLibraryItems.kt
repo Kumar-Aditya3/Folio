@@ -31,7 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -347,22 +347,22 @@ private fun DocumentItemMenu(
     onDelete: () -> Unit
 ) {
     com.folio.reader.ui.components.FolioMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Open") },
             leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = { onDismissRequest(); onOpen() }
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Categories") },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = { onDismissRequest(); onCategories() }
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Select") },
             leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = { onDismissRequest(); onSelect() }
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Delete document", color = FolioTheme.colors.error) },
             leadingIcon = {
                 Icon(

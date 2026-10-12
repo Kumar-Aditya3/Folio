@@ -65,6 +65,11 @@ fun SettingsReaderDefaultsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit
                     reloadTick++
                 }
             },
+            onOpenDocumentSettings = {
+                navModel.navController?.navigate(
+                    com.folio.reader.nav.FolioDestination.settings(FolioSettingsCategory.DOCUMENTS)
+                )
+            },
         )
     }
 }

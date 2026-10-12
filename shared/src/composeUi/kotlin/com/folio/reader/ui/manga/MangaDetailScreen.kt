@@ -37,7 +37,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +50,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.folio.reader.manga.MangaBackend
 import com.folio.reader.manga.MangaChapter
+import com.folio.reader.manga.MangaDownloadStatus
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaStatus
 import com.folio.reader.ui.components.FolioChip
@@ -73,6 +74,7 @@ import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.components.FolioRowListSkeleton
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
+import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.components.folioPanel
@@ -525,17 +527,17 @@ fun MangaDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
                 ) {
                     if (m.inLibrary) {
-                        OutlinedButton(
+                        // Bedded like Start: the toggle reads as a surface with glass
+                        // behind it, not an outline floating on nothing (see
+                        // [MangaPanelAction] below).
+                        MangaPanelAction(
+                            icon = Icons.Filled.LibraryAddCheck,
+                            label = "In library — tap to remove",
                             onClick = {
                                 onRemoveFromLibrary?.invoke(m)
                                     ?: viewModel.toggleInLibrary()
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Filled.LibraryAddCheck, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("In library — tap to remove", maxLines = 1)
-                        }
+                        )
                     } else {
                         Button(
                             onClick = {
@@ -571,14 +573,25 @@ fun MangaDetailScreen(
                     // page files. Queues every unread chapter; disabled once caught up so it
                     // never dead-clicks.
                     if (downloadsAvailable && !m.isLocal) {
-                        OutlinedButton(
-                            onClick = { viewModel.downloadUnread() },
+                        MangaPanelAction(
+                            icon = Icons.Filled.Download,
+                            label = "Download unread",
                             enabled = hasUnread,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Filled.Download, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Download unread", maxLines = 1)
+                            onClick = { viewModel.downloadUnread() },
+                        )
+                        // Once anything is queued or in flight, offer to abandon the whole
+                        // active queue in one tap — the series-level counterpart to the
+                        // per-row cancel. Finished downloads aren't counted here, so this
+                        // disappears again as soon as the queue drains.
+                        val activeDownloads = remember(downloadStates) {
+                            downloadStates.values.count { it.status != MangaDownloadStatus.DOWNLOADED }
+                        }
+                        if (activeDownloads > 0) {
+                            MangaPanelAction(
+                                icon = Icons.Filled.Close,
+                                label = "Cancel downloads ($activeDownloads)",
+                                onClick = { viewModel.cancelAllDownloads() },
+                            )
                         }
                     }
                 }
@@ -618,12 +631,24 @@ fun MangaDetailScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = expanded || hasOverflow) { expanded = !expanded },
+                            // The book detail screen's description material (see
+                            // BookDescription): the flat, nesting-aware panel — not text
+                            // floating on the field and not a floating veil.
+                            .folioPanel(FolioShapes.inset)
+                            .clickable(enabled = expanded || hasOverflow) { expanded = !expanded }
+                            .padding(16.dp),
                     ) {
+                        Text(
+                            "Description",
+                            style = FolioTheme.typography.titleSmall,
+                            color = FolioTheme.colors.onSurface,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
                         Text(
                             m.description!!,
                             style = FolioTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
+                            color = FolioTheme.colors.onSurfaceVariant,
                             maxLines = if (expanded) Int.MAX_VALUE else 4,
                             overflow = TextOverflow.Ellipsis,
                             onTextLayout = { if (!expanded) hasOverflow = it.hasVisualOverflow },
@@ -762,5 +787,39 @@ private fun ResumeReadingButton(
         Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(4.dp))
         Text(label, maxLines = 1)
+    }
+}
+
+/**
+ * A series-level action on the book detail screen's row material (see BookDetailHeader's
+ * metadata well): the sunken recess rather than a floating veil, so "In library — tap to
+ * remove" and "Download unread" read as structure in the page. Start keeps its own Button
+ * material, as on the book page.
+ */
+@Composable
+private fun MangaPanelAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(FolioShapes.inset)
+            .folioSunken(FolioShapes.inset)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            maxLines = 1,
+            style = FolioTheme.typography.labelLarge,
+            color = if (enabled) FolioTheme.colors.onSurface else FolioTheme.colors.onSurfaceVariant,
+        )
     }
 }

@@ -80,6 +80,15 @@ internal data class FolioArtDirection(
     val borderHighlight: Long,
     // ── navigation ──
     val navigationSelected: Long,
+    // ── the three chrome hues, authored per face ──
+    //
+    // The bottom nav capsule, the top masthead and the in-reader overlays. These
+    // are authored rather than derived because the derivation landed on the
+    // palette's warm note (a gold/olive/umber) on most faces, so the two bars and
+    // the reader panels read as browns. Each face names its own three here.
+    val navAccent: Long,
+    val mastheadAccent: Long,
+    val readerOverlayAccent: Long,
     // ── the four semantic accents, fitted to AA on `surface` ──
     val accentProgress: Long,
     val accentStreak: Long,
@@ -175,6 +184,9 @@ internal fun FolioArtDirection.toFolioColors(): FolioColors {
         // into it. This is the fix for "top bar and bottom nav shouldn't get dark along with it".
         navigationSurface = if (light) mixA(card, page2, 0.45f) else mixA(cardUp, Color.White, 0.16f),
         navigationSelected = Color(navigationSelected),
+        navAccent = Color(navAccent),
+        mastheadAccent = Color(mastheadAccent),
+        readerOverlayAccent = Color(readerOverlayAccent),
         border = Color(border),
         borderHighlight = Color(borderHighlight),
     )
@@ -191,9 +203,9 @@ internal fun FolioArtDirection.toFolioColors(): FolioColors {
  *
  * | theme | light / dark | identity | field |
  * |---|---|---|---|
- * | `gallery` | Gallery / Dark | white-cube plaster, cobalt placard, the red sold-dot | GrainGradient |
+ * | `gallery` | Gallery / Dark | the white cube, strictly monochrome — the art supplies the colour | GrainGradient |
  * | `manuscript` | Manuscript / Espresso | vellum, rubric sienna, iron-gall indigo, gold leaf | Warp |
- * | `silver` | Silver / Graphite | gelatin-silver print; cool platinum, a magenta flash | Dithering |
+ * | `silver` | Silver / Graphite | chrome and brushed steel; graphite is silver unlit — the metal, not the pigment | Dithering |
  * | `arctic` | Arctic / Midnight | glacier blue, snow-shadow, aurora green, low-sun gold | Swirl |
  * | `sakura` | Sakura / Blossom | petal rose, young leaf, branch umber, spring sky | DotOrbit |
  * | `honey` | Honey / Ember | amber gold, hive-shade teal, propolis, clover | Metaballs |
@@ -216,32 +228,42 @@ internal fun FolioArtDirection.toFolioColors(): FolioColors {
  * teal + sapphire + bronze, not Moss at night).
  */
 internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
-    // GALLERY — "Gallery" — warm plaster white; the art supplies the colour
+    // GALLERY — "Gallery" — the white cube, strictly monochrome: the art supplies the only
+    // colour, so the room itself never does. Retuned away from warm plaster (the report:
+    // "the gallery and dark theme are very green, they need to be black/white") — every
+    // plane, ink and accent here is a true neutral grey, R=G=B.
     FolioArtDirection(
         id = "gallery", light = true,
-        backgroundBase = 0xFFF7F5F1, backgroundSecondary = 0xFFEDE4DF, surface = 0xFFFCFBF9, surfaceElevated = 0xFFFFFFFF,
-        primaryAccent = 0xFF0077D2, secondaryAccent = 0xFFBD5348, tertiaryAccent = 0xFFA27700, warmAccent = 0xFF4A9A5F,
-        guillochePrimary = 0xFFAF3D34, guillocheSecondary = 0xFF8A6100, guillocheHighlight = 0xFF0076D0,
-        glowPrimary = 0xFF68BEFF, glowSecondary = 0xFFFFA194,
-        progress = 0xFF0065B9, progressTrack = 0xFFC2E2FF,
-        textPrimary = 0xFF2B2112, textSecondary = 0xFF6B6052, textTertiary = 0xFF8C8276,
-        border = 0xFFD3CBC0, borderHighlight = 0xFFE8E2DA,
-        navigationSelected = 0xFF006BC4,
-        accentProgress = 0xFF006BC4, accentStreak = 0xFF008032, accentDiscovery = 0xFFB3372F, accentAnnotation = 0xFF8A6100,
+        backgroundBase = 0xFFFAFAFA, backgroundSecondary = 0xFFEFEFEF, surface = 0xFFFDFDFD, surfaceElevated = 0xFFFFFFFF,
+        primaryAccent = 0xFF202020, secondaryAccent = 0xFF6E6E6E, tertiaryAccent = 0xFFA8A8A8, warmAccent = 0xFF8A8A8A,
+        guillochePrimary = 0xFF3A3A3A, guillocheSecondary = 0xFF8C8C8C, guillocheHighlight = 0xFF575757,
+        glowPrimary = 0xFFB8B8B8, glowSecondary = 0xFF8A8A8A,
+        progress = 0xFF2B2B2B, progressTrack = 0xFFE4E4E4,
+        textPrimary = 0xFF141414, textSecondary = 0xFF575757, textTertiary = 0xFF7E7E7E,
+        border = 0xFFDCDCDC, borderHighlight = 0xFFEBEBEB,
+        navigationSelected = 0xFF262626,
+        navAccent = 0xFF444444, mastheadAccent = 0xFF7A7A7A, readerOverlayAccent = 0xFF5E5E5E,
+        accentProgress = 0xFF111111, accentStreak = 0xFF525252, accentDiscovery = 0xFF2E2E2E, accentAnnotation = 0xFF737373,
     ),
-    // GALLERY — "Dark" — the gallery after hours — cool charcoal, picture-lights off
+
+
+    // GALLERY — "Dark" — the same monochrome room after hours: charcoal planes, a white
+    // accent, no hue anywhere. The inverse of Gallery above, per the same report.
     FolioArtDirection(
         id = "gallery", light = false,
-        backgroundBase = 0xFF05080D, backgroundSecondary = 0xFF090E15, surface = 0xFF0D1117, surfaceElevated = 0xFF171B21,
-        primaryAccent = 0xFF76C0FF, secondaryAccent = 0xFFFEA195, tertiaryAccent = 0xFFE2BD71, warmAccent = 0xFF9DDAA9,
-        guillochePrimary = 0xFFEB776A, guillocheSecondary = 0xFFC49724, guillocheHighlight = 0xFF52B1FF,
-        glowPrimary = 0xFF48A8FF, glowSecondary = 0xFFF58679,
-        progress = 0xFF5EB2FF, progressTrack = 0xFF09243D,
-        textPrimary = 0xFFEBF1F8, textSecondary = 0xFFA4ACB5, textTertiary = 0xFF727A84,
-        border = 0xFF33373C, borderHighlight = 0xFF1B1E22,
-        navigationSelected = 0xFF74C0FF,
-        accentProgress = 0xFF7BC3FF, accentStreak = 0xFF7AD68F, accentDiscovery = 0xFFFF998B, accentAnnotation = 0xFFE4B750,
+        backgroundBase = 0xFF050505, backgroundSecondary = 0xFF0B0B0B, surface = 0xFF101010, surfaceElevated = 0xFF1A1A1A,
+        primaryAccent = 0xFFE8E8E8, secondaryAccent = 0xFF9E9E9E, tertiaryAccent = 0xFF6E6E6E, warmAccent = 0xFFB8B8B8,
+        guillochePrimary = 0xFFC4C4C4, guillocheSecondary = 0xFF707070, guillocheHighlight = 0xFFA0A0A0,
+        glowPrimary = 0xFF8C8C8C, glowSecondary = 0xFF6E6E6E,
+        progress = 0xFFDCDCDC, progressTrack = 0xFF242424,
+        textPrimary = 0xFFF2F2F2, textSecondary = 0xFFA8A8A8, textTertiary = 0xFF767676,
+        border = 0xFF2E2E2E, borderHighlight = 0xFF181818,
+        navigationSelected = 0xFFE0E0E0,
+        navAccent = 0xFFCFCFCF, mastheadAccent = 0xFF8A8A8A, readerOverlayAccent = 0xFFAEAEAE,
+        accentProgress = 0xFFF5F5F5, accentStreak = 0xFFCBCBCB, accentDiscovery = 0xFFA8A8A8, accentAnnotation = 0xFF838383,
     ),
+
+
     // MANUSCRIPT — "Manuscript" — vellum cream
     FolioArtDirection(
         id = "manuscript", light = true,
@@ -253,12 +275,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF2A2112, textSecondary = 0xFF6A6051, textTertiary = 0xFF887F72,
         border = 0xFFD2CBBF, borderHighlight = 0xFFE7E2DA,
         navigationSelected = 0xFFAC430E,
-        accentProgress = 0xFFAC430E, accentStreak = 0xFF836500, accentDiscovery = 0xFF4063BA, accentAnnotation = 0xFF008055,
+        navAccent = 0xFF7F5BB6, mastheadAccent = 0xFF00869C, readerOverlayAccent = 0xFF007CB6,
+        accentProgress = 0xFF942C02, accentStreak = 0xFF6E5000, accentDiscovery = 0xFF2E4EA3, accentAnnotation = 0xFF00663D,
     ),
+
+
     // MANUSCRIPT — "Espresso" — dark roast with crema gold — a yellow-brown, deliberately not Ember's orange
     FolioArtDirection(
         id = "manuscript", light = false,
-        backgroundBase = 0xFF0E0400, backgroundSecondary = 0xFF180800, surface = 0xFF190B03, surfaceElevated = 0xFF23160E,
+        backgroundBase = 0xFF0E0400, backgroundSecondary = 0xFF180800, surface = 0xFF37271C, surfaceElevated = 0xFF42332A,
         primaryAccent = 0xFFF0A968, secondaryAccent = 0xFF95C0FF, tertiaryAccent = 0xFF83D6B7, warmAccent = 0xFFFAB6A5,
         guillochePrimary = 0xFF6A9FEE, guillocheSecondary = 0xFF40B690, guillocheHighlight = 0xFFEC9540,
         glowPrimary = 0xFFE18C34, glowSecondary = 0xFF79ACF8,
@@ -266,34 +291,48 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFF7EEE9, textSecondary = 0xFFB4A8A2, textTertiary = 0xFF82766F,
         border = 0xFF3E3129, borderHighlight = 0xFF231913,
         navigationSelected = 0xFFF6A65D,
-        accentProgress = 0xFFF9AA60, accentStreak = 0xFFFFA189, accentDiscovery = 0xFF8BBFFF, accentAnnotation = 0xFF67D6AF,
+        navAccent = 0xFF00C5DD, mastheadAccent = 0xFF77C46F, readerOverlayAccent = 0xFFB09CFF,
+        accentProgress = 0xFFFFB86E, accentStreak = 0xFFFFA78F, accentDiscovery = 0xFF8EC2FF, accentAnnotation = 0xFF67D6AF,
     ),
-    // SILVER — "Silver" — cool platinum; restrained chroma is the point — a metal, not a pigment
+
+
+    // SILVER — "Silver" — real silver: chrome-white planes, brushed-steel greys, a cool
+    // blue polish — a metal, not a pigment, and not the old periwinkle/mauve take that
+    // read as a generic cool palette. Graphite below is its exact inverse, per the
+    // report: "graphite needs to be the inverse of silver, and the silver needs to
+    // actually be silver."
     FolioArtDirection(
         id = "silver", light = true,
-        backgroundBase = 0xFFF1F5F9, backgroundSecondary = 0xFFDEE7ED, surface = 0xFFF9FBFD, surfaceElevated = 0xFFFDFEFF,
-        primaryAccent = 0xFF656FAC, secondaryAccent = 0xFF398596, tertiaryAccent = 0xFF986F93, warmAccent = 0xFF978457,
-        guillochePrimary = 0xFF1C7587, guillocheSecondary = 0xFF82597E, guillocheHighlight = 0xFF646EAA,
-        glowPrimary = 0xFFA9B4EB, glowSecondary = 0xFF8DCDDD,
-        progress = 0xFF555E96, progressTrack = 0xFFD8DDF3,
-        textPrimary = 0xFF192431, textSecondary = 0xFF586371, textTertiary = 0xFF7B8591,
-        border = 0xFFC4CDD8, borderHighlight = 0xFFDEE3EB,
-        navigationSelected = 0xFF5A639F,
-        accentProgress = 0xFF5A639F, accentStreak = 0xFF7E6625, accentDiscovery = 0xFF077689, accentAnnotation = 0xFF855680,
+        backgroundBase = 0xFFECEEF1, backgroundSecondary = 0xFFDCE0E6, surface = 0xFFF6F8FA, surfaceElevated = 0xFFFBFCFD,
+        primaryAccent = 0xFF53606F, secondaryAccent = 0xFF59808F, tertiaryAccent = 0xFF818C9C, warmAccent = 0xFF8C8468,
+        guillochePrimary = 0xFF3B4A5C, guillocheSecondary = 0xFF708090, guillocheHighlight = 0xFF55636F,
+        glowPrimary = 0xFFAFC2D4, glowSecondary = 0xFF8FA6B8,
+        progress = 0xFF4A5563, progressTrack = 0xFFD5DBE3,
+        textPrimary = 0xFF1A212B, textSecondary = 0xFF55606E, textTertiary = 0xFF79828E,
+        border = 0xFFC6CED8, borderHighlight = 0xFFE0E5EB,
+        navigationSelected = 0xFF4E5A69,
+        navAccent = 0xFF00884B, mastheadAccent = 0xFF426EC2, readerOverlayAccent = 0xFF008A7F,
+        accentProgress = 0xFF4A5665, accentStreak = 0xFF615433, accentDiscovery = 0xFF215E6F, accentAnnotation = 0xFF55516B,
     ),
-    // SILVER — "Graphite" — pencil graphite — blue-black with the silver flash
+
+
+    // SILVER — "Graphite" — silver's inverse: the same steel hue axis, unlit. Blue-black
+    // metal, pale-chrome accents — the metal in the dark, not a second pigment.
     FolioArtDirection(
         id = "silver", light = false,
-        backgroundBase = 0xFF07090E, backgroundSecondary = 0xFF0B1017, surface = 0xFF0E1318, surfaceElevated = 0xFF191D22,
-        primaryAccent = 0xFFADB5F3, secondaryAccent = 0xFF82CBDD, tertiaryAccent = 0xFFDDB3D9, warmAccent = 0xFFDAC79B,
-        guillochePrimary = 0xFF49AEC4, guillocheSecondary = 0xFFBF8AB9, guillocheHighlight = 0xFF9CA6F0,
-        glowPrimary = 0xFF939CE6, glowSecondary = 0xFF5DBACF,
-        progress = 0xFF9EA6EA, progressTrack = 0xFF212338,
-        textPrimary = 0xFFEBF1F8, textSecondary = 0xFFA5ABB5, textTertiary = 0xFF727984,
-        border = 0xFF36393F, borderHighlight = 0xFF1E2125,
-        navigationSelected = 0xFFABB5F9,
-        accentProgress = 0xFFAFB8FD, accentStreak = 0xFFD6BB79, accentDiscovery = 0xFF71CDE3, accentAnnotation = 0xFFDFA9D9,
+        backgroundBase = 0xFF0A0C0F, backgroundSecondary = 0xFF10141A, surface = 0xFF292D34, surfaceElevated = 0xFF343841,
+        primaryAccent = 0xFFB9C7D9, secondaryAccent = 0xFF7FA7B8, tertiaryAccent = 0xFF98A2B2, warmAccent = 0xFFC1B494,
+        guillochePrimary = 0xFFA8B8CC, guillocheSecondary = 0xFF7889A0, guillocheHighlight = 0xFF9FB0C4,
+        glowPrimary = 0xFF7C97B0, glowSecondary = 0xFF5E7085,
+        progress = 0xFFAEBACB, progressTrack = 0xFF232B36,
+        textPrimary = 0xFFEDF1F6, textSecondary = 0xFFA9B2BD, textTertiary = 0xFF757E8A,
+        border = 0xFF313945, borderHighlight = 0xFF1B2027,
+        navigationSelected = 0xFFB4C3D6,
+        navAccent = 0xFF9BA3FF, mastheadAccent = 0xFF00C7D6, readerOverlayAccent = 0xFFFA878A,
+        accentProgress = 0xFFC0CFE2, accentStreak = 0xFFD0C18F, accentDiscovery = 0xFF8CBBDF, accentAnnotation = 0xFFBCBAD8,
     ),
+
+
     // ARCTIC — "Arctic" — pale ice; snow's shadow is blue
     FolioArtDirection(
         id = "arctic", light = true,
@@ -305,12 +344,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF10272B, textSecondary = 0xFF51666A, textTertiary = 0xFF74878B,
         border = 0xFFC0D0D3, borderHighlight = 0xFFDAE5E7,
         navigationSelected = 0xFF007794,
-        accentProgress = 0xFF007794, accentStreak = 0xFF965900, accentDiscovery = 0xFF007F49, accentAnnotation = 0xFF675AAF,
+        navAccent = 0xFF007BB8, mastheadAccent = 0xFF9652A2, readerOverlayAccent = 0xFF5669C2,
+        accentProgress = 0xFF005E7A, accentStreak = 0xFF804400, accentDiscovery = 0xFF006733, accentAnnotation = 0xFF544598,
     ),
+
+
     // ARCTIC — "Midnight" — polar night — navy, not black
     FolioArtDirection(
         id = "arctic", light = false,
-        backgroundBase = 0xFF00070E, backgroundSecondary = 0xFF000D18, surface = 0xFF001018, surfaceElevated = 0xFF0A1A22,
+        backgroundBase = 0xFF00070E, backgroundSecondary = 0xFF000D18, surface = 0xFF182C36, surfaceElevated = 0xFF273740,
         primaryAccent = 0xFF16CFF6, secondaryAccent = 0xFF74D5A0, tertiaryAccent = 0xFFBFB7FF, warmAccent = 0xFFF1BF7F,
         guillochePrimary = 0xFF24BA78, guillocheSecondary = 0xFF9B8EF1, guillocheHighlight = 0xFF00C2ED,
         glowPrimary = 0xFF00B8E0, glowSecondary = 0xFF44C686,
@@ -318,8 +360,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFE9F2F7, textSecondary = 0xFFA1ADB3, textTertiary = 0xFF6F7B82,
         border = 0xFF24343C, borderHighlight = 0xFF0F1B22,
         navigationSelected = 0xFF00D1FC,
-        accentProgress = 0xFF00D4FF, accentStreak = 0xFFF6AD47, accentDiscovery = 0xFF5BDA99, accentAnnotation = 0xFFBAB0FF,
+        navAccent = 0xFFDA8DDE, mastheadAccent = 0xFF8DA8FF, readerOverlayAccent = 0xFF7AC46E,
+        accentProgress = 0xFF11D6FF, accentStreak = 0xFFF6AD47, accentDiscovery = 0xFF5BDA99, accentAnnotation = 0xFFBCB2FF,
     ),
+
+
     // SAKURA — "Sakura" — blush paper
     FolioArtDirection(
         id = "sakura", light = true,
@@ -331,12 +376,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF2F1D23, textSecondary = 0xFF6F5C62, textTertiary = 0xFF8F7E84,
         border = 0xFFD6C8CD, borderHighlight = 0xFFEAE0E3,
         navigationSelected = 0xFFA33F75,
-        accentProgress = 0xFFA33F75, accentStreak = 0xFF0070AD, accentDiscovery = 0xFF377B26, accentAnnotation = 0xFFA05000,
+        navAccent = 0xFFB54950, mastheadAccent = 0xFF98519F, readerOverlayAccent = 0xFF5669C2,
+        accentProgress = 0xFF8C2961, accentStreak = 0xFF005993, accentDiscovery = 0xFF21660B, accentAnnotation = 0xFF893B00,
     ),
+
+
     // SAKURA — "Blossom" — night hanami — plum sky, lantern-lit petals
     FolioArtDirection(
         id = "sakura", light = false,
-        backgroundBase = 0xFF0E020A, backgroundSecondary = 0xFF170612, surface = 0xFF180A14, surfaceElevated = 0xFF22141E,
+        backgroundBase = 0xFF0E020A, backgroundSecondary = 0xFF170612, surface = 0xFF362630, surfaceElevated = 0xFF41313C,
         primaryAccent = 0xFFF796D0, secondaryAccent = 0xFF95D088, tertiaryAccent = 0xFFF9B07E, warmAccent = 0xFF8ED2FF,
         guillochePrimary = 0xFF68B457, guillocheSecondary = 0xFFDF8540, guillocheHighlight = 0xFFF37EC6,
         glowPrimary = 0xFFE874BC, glowSecondary = 0xFF78C067,
@@ -344,8 +392,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFF6EDF3, textSecondary = 0xFFB2A7AE, textTertiary = 0xFF81757C,
         border = 0xFF3F3039, borderHighlight = 0xFF241920,
         navigationSelected = 0xFFFD91D2,
-        accentProgress = 0xFFFF94D5, accentStreak = 0xFF5FC9FF, accentDiscovery = 0xFF8AD47A, accentAnnotation = 0xFFFFA564,
+        navAccent = 0xFFCC93EE, mastheadAccent = 0xFF80ACFF, readerOverlayAccent = 0xFF00C5DC,
+        accentProgress = 0xFFFFAAEB, accentStreak = 0xFF61CBFF, accentDiscovery = 0xFF8AD47A, accentAnnotation = 0xFFFFA564,
     ),
+
+
     // HONEY — "Honey" — honeycomb cream — the warmest page in the set
     FolioArtDirection(
         id = "honey", light = true,
@@ -357,12 +408,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF292211, textSecondary = 0xFF686151, textTertiary = 0xFF898375,
         border = 0xFFD1CCBF, borderHighlight = 0xFFE6E3DA,
         navigationSelected = 0xFF8E5E00,
-        accentProgress = 0xFF8E5E00, accentStreak = 0xFF517700, accentDiscovery = 0xFF007B7D, accentAnnotation = 0xFFA84533,
+        navAccent = 0xFFB04970, mastheadAccent = 0xFF008A60, readerOverlayAccent = 0xFF0081AC,
+        accentProgress = 0xFF784A00, accentStreak = 0xFF3E6200, accentDiscovery = 0xFF006264, accentAnnotation = 0xFF91301F,
     ),
+
+
     // HONEY — "Ember" — a dying coal — orange-red, deliberately away from Espresso's yellow-brown
     FolioArtDirection(
         id = "honey", light = false,
-        backgroundBase = 0xFF0F0200, backgroundSecondary = 0xFF180600, surface = 0xFF190902, surfaceElevated = 0xFF24140C,
+        backgroundBase = 0xFF0F0200, backgroundSecondary = 0xFF180600, surface = 0xFF37251A, surfaceElevated = 0xFF433128,
         primaryAccent = 0xFFFF9778, secondaryAccent = 0xFF39D6D8, tertiaryAccent = 0xFFF8B172, warmAccent = 0xFFB6D68D,
         guillochePrimary = 0xFF00B8BA, guillocheSecondary = 0xFFDE8628, guillocheHighlight = 0xFFFF7D58,
         glowPrimary = 0xFFFD734F, glowSecondary = 0xFF00C6C9,
@@ -370,8 +424,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFF7EEE9, textSecondary = 0xFFB4A8A2, textTertiary = 0xFF827670,
         border = 0xFF3E2E26, borderHighlight = 0xFF231711,
         navigationSelected = 0xFFFF9576,
-        accentProgress = 0xFFFF9B7D, accentStreak = 0xFFA2CF62, accentDiscovery = 0xFF00DBDE, accentAnnotation = 0xFFFFA752,
+        navAccent = 0xFFF586A9, mastheadAccent = 0xFF45C992, readerOverlayAccent = 0xFF2FBDF6,
+        accentProgress = 0xFFFEB394, accentStreak = 0xFFA2CF62, accentDiscovery = 0xFF00D8DB, accentAnnotation = 0xFFFFA752,
     ),
+
+
     // MOSS — "Moss" — pale moss
     FolioArtDirection(
         id = "moss", light = true,
@@ -383,12 +440,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF1D2617, textSecondary = 0xFF5C6556, textTertiary = 0xFF7E8678,
         border = 0xFFC8CFC3, borderHighlight = 0xFFE0E5DD,
         navigationSelected = 0xFF2A7C32,
-        accentProgress = 0xFF2A7C32, accentStreak = 0xFFA2465B, accentDiscovery = 0xFF6E6E00, accentAnnotation = 0xFF9F501C,
+        navAccent = 0xFF008A7F, mastheadAccent = 0xFF008A60, readerOverlayAccent = 0xFF00869C,
+        accentProgress = 0xFF0F671D, accentStreak = 0xFF8B3148, accentDiscovery = 0xFF5A5900, accentAnnotation = 0xFF883C00,
     ),
+
+
     // MOSS — "Peacock" — a peacock eye is teal + sapphire + bronze + a violet sheen — its own hue set, not Moss at night
     FolioArtDirection(
         id = "moss", light = false,
-        backgroundBase = 0xFF000906, backgroundSecondary = 0xFF00120C, surface = 0xFF00140F, surfaceElevated = 0xFF061E19,
+        backgroundBase = 0xFF000906, backgroundSecondary = 0xFF00120C, surface = 0xFF19312B, surfaceElevated = 0xFF243C36,
         primaryAccent = 0xFF56D6A3, secondaryAccent = 0xFF56CFF2, tertiaryAccent = 0xFFFCAD84, warmAccent = 0xFFAEC7FF,
         guillochePrimary = 0xFF00B2DD, guillocheSecondary = 0xFFE2814C, guillocheHighlight = 0xFF00CC90,
         glowPrimary = 0xFF00C287, glowSecondary = 0xFF00BEE8,
@@ -396,8 +456,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFE8F3F0, textSecondary = 0xFFA1AEAB, textTertiary = 0xFF6E7D79,
         border = 0xFF223833, borderHighlight = 0xFF0D1E1B,
         navigationSelected = 0xFF40D8A0,
-        accentProgress = 0xFF44DBA4, accentStreak = 0xFF9CBBFF, accentDiscovery = 0xFF1AD2FD, accentAnnotation = 0xFFFFA26E,
+        navAccent = 0xFF7AC46E, mastheadAccent = 0xFFBD98F8, readerOverlayAccent = 0xFF55B6FF,
+        accentProgress = 0xFF4CE0A9, accentStreak = 0xFFA0BFFF, accentDiscovery = 0xFF1AD2FD, accentAnnotation = 0xFFFFA46F,
     ),
+
+
     // DAWN — "Dawn" — first light — lilac over apricot
     FolioArtDirection(
         id = "dawn", light = true,
@@ -409,12 +472,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF2B1E2A, textSecondary = 0xFF6B5D69, textTertiary = 0xFF8A7E89,
         border = 0xFFD3C8D2, borderHighlight = 0xFFE8E0E7,
         navigationSelected = 0xFF814EA4,
-        accentProgress = 0xFF814EA4, accentStreak = 0xFF806600, accentDiscovery = 0xFFA44C12, accentAnnotation = 0xFF0E6EAC,
+        navAccent = 0xFFA04E94, mastheadAccent = 0xFF00869C, readerOverlayAccent = 0xFFB54950,
+        accentProgress = 0xFF6D3A8E, accentStreak = 0xFF6A5102, accentDiscovery = 0xFF8D3700, accentAnnotation = 0xFF005895,
     ),
+
+
     // DAWN — "Dusk" — twilight violet with the last ember on the horizon
     FolioArtDirection(
         id = "dawn", light = false,
-        backgroundBase = 0xFF05030F, backgroundSecondary = 0xFF0B071A, surface = 0xFF0D0A1A, surfaceElevated = 0xFF171523,
+        backgroundBase = 0xFF05030F, backgroundSecondary = 0xFF0B071A, surface = 0xFF282638, surfaceElevated = 0xFF343242,
         primaryAccent = 0xFFD2A3FB, secondaryAccent = 0xFFFEA195, tertiaryAccent = 0xFF98C5FF, warmAccent = 0xFFF8B0D1,
         guillochePrimary = 0xFFEB776A, guillocheSecondary = 0xFF689FF0, guillocheHighlight = 0xFFC88EF9,
         glowPrimary = 0xFFBF85EF, glowSecondary = 0xFFF58679,
@@ -422,8 +488,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFF0EFF8, textSecondary = 0xFFAAA9B5, textTertiary = 0xFF787783,
         border = 0xFF32303F, borderHighlight = 0xFF1A1824,
         navigationSelected = 0xFFD4A0FF,
-        accentProgress = 0xFFD8A3FF, accentStreak = 0xFFFE99CA, accentDiscovery = 0xFFFF998B, accentAnnotation = 0xFF8BBFFF,
+        navAccent = 0xFFA2A1FF, mastheadAccent = 0xFF00C5E0, readerOverlayAccent = 0xFFE18BD5,
+        accentProgress = 0xFFE4B0FD, accentStreak = 0xFFFF9DCE, accentDiscovery = 0xFFFFA192, accentAnnotation = 0xFF8EC2FF,
     ),
+
+
     // LAGOON — "Lagoon" — sunlit shallows
     FolioArtDirection(
         id = "lagoon", light = true,
@@ -435,12 +504,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF0F2727, textSecondary = 0xFF516767, textTertiary = 0xFF748787,
         border = 0xFFBFD0D0, borderHighlight = 0xFFDAE6E5,
         navigationSelected = 0xFF007C75,
-        accentProgress = 0xFF007C75, accentStreak = 0xFF206CAF, accentDiscovery = 0xFFA84538, accentAnnotation = 0xFF876300,
+        navAccent = 0xFF008A5E, mastheadAccent = 0xFF6C62BE, readerOverlayAccent = 0xFFAE4974,
+        accentProgress = 0xFF00635D, accentStreak = 0xFF005798, accentDiscovery = 0xFF913024, accentAnnotation = 0xFF714E00,
     ),
+
+
     // LAGOON — "Abyss" — the deepest page in the set — bioluminescence is the only light
     FolioArtDirection(
         id = "lagoon", light = false,
-        backgroundBase = 0xFF000406, backgroundSecondary = 0xFF000A0E, surface = 0xFF000B10, surfaceElevated = 0xFF021619,
+        backgroundBase = 0xFF000406, backgroundSecondary = 0xFF000A0E, surface = 0xFF15272C, surfaceElevated = 0xFF1D3337,
         primaryAccent = 0xFF00D7D4, secondaryAccent = 0xFFB1B3FF, tertiaryAccent = 0xFF8AD89B, warmAccent = 0xFFFFAEAD,
         guillochePrimary = 0xFF908FFE, guillocheSecondary = 0xFF4FB76B, guillocheHighlight = 0xFF00C8C6,
         glowPrimary = 0xFF00BEBB, glowSecondary = 0xFF9D9DFF,
@@ -448,8 +520,11 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFE8F2F5, textSecondary = 0xFFA0AEB0, textTertiary = 0xFF6D7C7F,
         border = 0xFF1A2D31, borderHighlight = 0xFF061517,
         navigationSelected = 0xFF00D8D6,
-        accentProgress = 0xFF00DCD9, accentStreak = 0xFFFF9798, accentDiscovery = 0xFFB1B3FF, accentAnnotation = 0xFF73D78B,
+        navAccent = 0xFF00C3E5, mastheadAccent = 0xFFC595F3, readerOverlayAccent = 0xFFF286B2,
+        accentProgress = 0xFF00D9D6, accentStreak = 0xFFFF9FA0, accentDiscovery = 0xFFB3B5FF, accentAnnotation = 0xFF73D78B,
     ),
+
+
     // ROUGE — "Rouge" — playbill cream with a crimson press
     FolioArtDirection(
         id = "rouge", light = true,
@@ -461,12 +536,15 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFF301D1D, textSecondary = 0xFF705C5C, textTertiary = 0xFF907E7E,
         border = 0xFFD8C8C7, borderHighlight = 0xFFEBE0E0,
         navigationSelected = 0xFFB03846,
-        accentProgress = 0xFFB03846, accentStreak = 0xFF007B7F, accentDiscovery = 0xFF8A6100, accentAnnotation = 0xFF984588,
+        navAccent = 0xFFAF4973, mastheadAccent = 0xFF0080AF, readerOverlayAccent = 0xFF008B6B,
+        accentProgress = 0xFF982033, accentStreak = 0xFF006266, accentDiscovery = 0xFF744C00, accentAnnotation = 0xFF823073,
     ),
+
+
     // ROUGE — "Garnet" — wine-black with facet fire
     FolioArtDirection(
         id = "rouge", light = false,
-        backgroundBase = 0xFF0D0103, backgroundSecondary = 0xFF160307, surface = 0xFF17070A, surfaceElevated = 0xFF221113,
+        backgroundBase = 0xFF0D0103, backgroundSecondary = 0xFF160307, surface = 0xFF352226, surfaceElevated = 0xFF412E30,
         primaryAccent = 0xFFFF94A0, secondaryAccent = 0xFFE7B461, tertiaryAccent = 0xFFE6AAE9, warmAccent = 0xFF78DDD7,
         guillochePrimary = 0xFFD19000, guillocheSecondary = 0xFFC97FCD, guillocheHighlight = 0xFFFF7B8C,
         glowPrimary = 0xFFF87183, glowSecondary = 0xFFDC9E29,
@@ -474,8 +552,117 @@ internal val FOLIO_ART_DIRECTIONS: List<FolioArtDirection> = listOf(
         textPrimary = 0xFFF8EDEE, textSecondary = 0xFFB4A7A9, textTertiary = 0xFF837577,
         border = 0xFF3C2B2E, borderHighlight = 0xFF211416,
         navigationSelected = 0xFFFF909E,
-        accentProgress = 0xFFFF96A2, accentStreak = 0xFF02D9D1, accentDiscovery = 0xFFF0B142, accentAnnotation = 0xFFE99EED,
+        navAccent = 0xFFEE87BD, mastheadAccent = 0xFF00C0EE, readerOverlayAccent = 0xFF45C992,
+        accentProgress = 0xFFFEABB7, accentStreak = 0xFF0AD9D1, accentDiscovery = 0xFFF0B142, accentAnnotation = 0xFFEA9EEE,
     ),
+
+
+    // CYBERPUNK — "Neon Day" — the city washed out by daylight: concrete haze, cobalt glass,
+    // neon signage unlit but still loud. The accents are the night face's neons pitched deep
+    // enough to clear AA on paper.
+    FolioArtDirection(
+        id = "cyberpunk", light = true,
+        backgroundBase = 0xFFEFF2F7, backgroundSecondary = 0xFFDFE6F2, surface = 0xFFF7F9FD, surfaceElevated = 0xFFFDFFFF,
+        primaryAccent = 0xFF0066A8, secondaryAccent = 0xFFB3186B, tertiaryAccent = 0xFF8A5A00, warmAccent = 0xFF9A4A12,
+        guillochePrimary = 0xFF0E62C3, guillocheSecondary = 0xFFB12E77, guillocheHighlight = 0xFF5A46C8,
+        glowPrimary = 0xFF54C8F5, glowSecondary = 0xFFFF77B8,
+        progress = 0xFF065A9E, progressTrack = 0xFFC9E7F8,
+        textPrimary = 0xFF111A2E, textSecondary = 0xFF4A5872, textTertiary = 0xFF6E7C95,
+        border = 0xFFC3CDE2, borderHighlight = 0xFFDEE5F2,
+        navigationSelected = 0xFF0B69B4,
+        navAccent = 0xFF7F5BB6, mastheadAccent = 0xFFA14E93, readerOverlayAccent = 0xFFB54950,
+        accentProgress = 0xFF00559F, accentStreak = 0xFF824100, accentDiscovery = 0xFF006074, accentAnnotation = 0xFF8F245F,
+    ),
+
+
+    // CYBERPUNK — "Cyberpunk" — the neon city at night: asphalt blue-black, cyan signage,
+    // magenta flash, electric amber. Saturation is the point where the light is.
+    FolioArtDirection(
+        id = "cyberpunk", light = false,
+        backgroundBase = 0xFF050711, backgroundSecondary = 0xFF090D1A, surface = 0xFF272D3F, surfaceElevated = 0xFF32384C,
+        primaryAccent = 0xFF3EE6FF, secondaryAccent = 0xFFFF4D9E, tertiaryAccent = 0xFFF5D90A, warmAccent = 0xFFE87A3D,
+        guillochePrimary = 0xFF35C8E8, guillocheSecondary = 0xFFE84F9B, guillocheHighlight = 0xFF9FA6FF,
+        glowPrimary = 0xFF2BD9F2, glowSecondary = 0xFFFF5CA8,
+        progress = 0xFF49D8F5, progressTrack = 0xFF0B2E3A,
+        textPrimary = 0xFFEAF4FF, textSecondary = 0xFFA7B6CE, textTertiary = 0xFF74849E,
+        border = 0xFF2A3350, borderHighlight = 0xFF161C30,
+        navigationSelected = 0xFF54E0FF,
+        navAccent = 0xFF00C9C3, mastheadAccent = 0xFF5EC783, readerOverlayAccent = 0xFFFA878A,
+        accentProgress = 0xFF4FDCFA, accentStreak = 0xFFFFA4E8, accentDiscovery = 0xFF0BDDB0, accentAnnotation = 0xFFDCBA55,
+    ),
+
+
+    // VICE — "Vice Day" — Miami daylight: blush-white heat, hot pink signage, a teal
+    // flash. The accents are the night face's neons pitched deep enough to clear AA
+    // on paper; the mechanism re-tones them against the rendered planes.
+    FolioArtDirection(
+        id = "vice", light = true,
+        backgroundBase = 0xFFFDF6F9, backgroundSecondary = 0xFFF3E4EC, surface = 0xFFFEFAFC, surfaceElevated = 0xFFFFFFFF,
+        primaryAccent = 0xFFD81B79, secondaryAccent = 0xFF008A80, tertiaryAccent = 0xFF7B1FA2, warmAccent = 0xFF9C6B00,
+        guillochePrimary = 0xFFE91E63, guillocheSecondary = 0xFF009688, guillocheHighlight = 0xFF8E24AA,
+        glowPrimary = 0xFFFF6FA5, glowSecondary = 0xFF4DD0E1,
+        progress = 0xFFC2185B, progressTrack = 0xFFFFD9E6,
+        textPrimary = 0xFF1F0A14, textSecondary = 0xFF5C4453, textTertiary = 0xFF83707C,
+        border = 0xFFF2CFDF, borderHighlight = 0xFFF9E7EE,
+        navigationSelected = 0xFFC2185B,
+        navAccent = 0xFFA44D8E, mastheadAccent = 0xFF007FB0, readerOverlayAccent = 0xFF008849,
+        accentProgress = 0xFFA00041, accentStreak = 0xFF00616D, accentDiscovery = 0xFF006457, accentAnnotation = 0xFF7327A4,
+    ),
+
+
+    // VICE — "Vice" — the decree face: very black, pink shades, and pink EDGES —
+    // `secondary` is the role the atmosphere lifts into rimLight, so it carries a
+    // lighter hot pink and every edge catch, rim and bar on the face reads pink,
+    // while the teal flash survives in the glows and the streak.
+    FolioArtDirection(
+        id = "vice", light = false,
+        backgroundBase = 0xFF060208, backgroundSecondary = 0xFF0D0512, surface = 0xFF271C2F, surfaceElevated = 0xFF31243B,
+        primaryAccent = 0xFFFF4FA3, secondaryAccent = 0xFFFF7AB8, tertiaryAccent = 0xFFB388FF, warmAccent = 0xFFED9B40,
+        guillochePrimary = 0xFFFF2E94, guillocheSecondary = 0xFF00E5CC, guillocheHighlight = 0xFF9C4DFF,
+        glowPrimary = 0xFFFF2E94, glowSecondary = 0xFF00D9C0,
+        progress = 0xFFFF2E94, progressTrack = 0xFF2A0A1E,
+        textPrimary = 0xFFFDEBF4, textSecondary = 0xFFC4A8B9, textTertiary = 0xFF8F7585,
+        border = 0xFF4A2438, borderHighlight = 0xFF20101C,
+        navigationSelected = 0xFFFF4FA3,
+        navAccent = 0xFFFA878A, mastheadAccent = 0xFF00C5DF, readerOverlayAccent = 0xFF60C781,
+        accentProgress = 0xFFFF91E6, accentStreak = 0xFF02DBC2, accentDiscovery = 0xFFD2A7FF, accentAnnotation = 0xFFFCA950,
+    ),
+
+
+    // AURUM — "Champagne" — gilded daylight: champagne cream, deep gold-ochre,
+    // emerald, plum. Old money with the lights on.
+    FolioArtDirection(
+        id = "aurum", light = true,
+        backgroundBase = 0xFFFAF5EC, backgroundSecondary = 0xFFEFE4CE, surface = 0xFFFCF8F1, surfaceElevated = 0xFFFFFCF6,
+        primaryAccent = 0xFF7A5C00, secondaryAccent = 0xFF00695C, tertiaryAccent = 0xFF7B1E4E, warmAccent = 0xFF8A4A00,
+        guillochePrimary = 0xFFB8860B, guillocheSecondary = 0xFF00897B, guillocheHighlight = 0xFF8E24AA,
+        glowPrimary = 0xFFFFD54F, glowSecondary = 0xFF00BFA5,
+        progress = 0xFF7A5C00, progressTrack = 0xFFF0E3C8,
+        textPrimary = 0xFF231A08, textSecondary = 0xFF5F5343, textTertiary = 0xFF83766B,
+        border = 0xFFE4D6B8, borderHighlight = 0xFFF3EAD8,
+        navigationSelected = 0xFF7A5C00,
+        navAccent = 0xFFB54950, mastheadAccent = 0xFF008951, readerOverlayAccent = 0xFF6963BF,
+        accentProgress = 0xFF6E5000, accentStreak = 0xFF006457, accentDiscovery = 0xFF8A2D5B, accentAnnotation = 0xFF814200,
+    ),
+
+
+    // AURUM — "Aurum" — black-tie: aubergine-black lacquer, burnished gold edges,
+    // emerald neon, orchid. The chandelier is lit.
+    FolioArtDirection(
+        id = "aurum", light = false,
+        backgroundBase = 0xFF0A0508, backgroundSecondary = 0xFF140A12, surface = 0xFF382A35, surfaceElevated = 0xFF443240,
+        primaryAccent = 0xFFFFD180, secondaryAccent = 0xFFE6B84C, tertiaryAccent = 0xFFD8A6E8, warmAccent = 0xFFFF9E64,
+        guillochePrimary = 0xFFE6B84C, guillocheSecondary = 0xFF8B6BCF, guillocheHighlight = 0xFFFFA24D,
+        glowPrimary = 0xFFFFD180, glowSecondary = 0xFF8B6BCF,
+        progress = 0xFFFFD180, progressTrack = 0xFF2E1F12,
+        textPrimary = 0xFFFDF6EA, textSecondary = 0xFFCFC0B4, textTertiary = 0xFF94867C,
+        border = 0xFF4A3320, borderHighlight = 0xFF241812,
+        navigationSelected = 0xFFFFD180,
+        navAccent = 0xFF48C991, mastheadAccent = 0xFFE989C8, readerOverlayAccent = 0xFF00C4E1,
+        accentProgress = 0xFFEFC170, accentStreak = 0xFF54D6C9, accentDiscovery = 0xFFDAA8EA, accentAnnotation = 0xFFFFA56B,
+    ),
+
+
 )
 
 /** One theme's face, by the theme pack's own id. */

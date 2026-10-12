@@ -222,6 +222,9 @@ fun FolioHeroCard(
                 // where before it had only the ramp. See the hero's own note in HomeScreen.
                 refractBackdrop = true,
                 shape = shape,
+                // The metallic-sheen knob is the film's own intensity scalar, so the
+                // hero card's glints dim with every other light catch in the app.
+                intensity = com.folio.reader.ui.theme.folioSheenGain(),
                 platePackId = platePackId,
                 plateFieldTop = atmos.fieldTop,
                 plateFieldBottom = atmos.fieldBottom,

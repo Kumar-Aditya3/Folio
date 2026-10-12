@@ -545,8 +545,14 @@ private val HEATMAP_BAND_STOPS = listOf(0f, 0.34f, 0.67f, 1f)
 
 private val HEATMAP_CELL_SHAPE = RoundedCornerShape(3.dp)
 
-/** A day with no reading: present, and barely. Distinct from a slot with no date. */
-private const val HEATMAP_EMPTY_ALPHA = 0.14f
+/**
+ * A day with no reading: present, and visibly so — distinct from a slot with no date
+ * (transparent). 0.14 was "barely", and on the pane the dim squares read as holes in
+ * the grid rather than as days that were skipped, which is the report; 0.28 keeps them
+ * clearly the dimmest thing in the grid while staying under the lowest active band
+ * (0.4 of an accent hue), so empty and light activity never swap places.
+ */
+private const val HEATMAP_EMPTY_ALPHA = 0.28f
 
 /**
  * Floor for the busiest band against the fill it is painted on. It is the one band

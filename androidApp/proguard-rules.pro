@@ -46,6 +46,10 @@
 -keep class okio.** { *; }
 -keep class org.jsoup.** { *; }
 -keep class app.cash.quickjs.** { *; }
+# Conscrypt is installed as the top JCE security provider at startup and resolves
+# much of its native (BoringSSL/JNI) surface reflectively; shrinking it breaks the
+# provider registration and TLS falls back to the platform stack we're replacing.
+-keep class org.conscrypt.** { *; }
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
@@ -96,20 +100,22 @@
 }
 -dontwarn ai.onnxruntime.**
 
-# Mirage's two static shader families are hosted by Folio with the library's vsync clock
-# switched off (see FolioStaticField.android.kt). `paperTexture` and `halftoneDots` do not
-# forward a `speed` to `mirageEffect`, so both ran a per-frame clock to re-render a
-# bit-identical full-screen image -- the dearest shader in the set, at refresh rate. The fix
-# re-hosts them via the public `mirageEffect(speed = 0f)` using the family's own shader
+# Mirage's static shader family is hosted by Folio with the library's vsync clock
+# switched off (see FolioStaticField.android.kt). `halftoneDots` — and `paperTexture`,
+# before that family was removed — do not forward a `speed` to `mirageEffect`, so the
+# wrapper ran a per-frame clock to re-render a bit-identical full-screen image. The fix
+# re-hosts the family via the public `mirageEffect(speed = 0f)` using its own shader
 # source, which is a private top-level `val SHADER` in the generated `*Kt` class and is
-# therefore read reflectively by name.
+# therefore read reflectively BY NAME (`Class.forName`).
 #
-# Without these rules R8 strips or renames that field in release only, the reflective lookup
-# returns null, and each modifier silently falls back to the library wrapper -- i.e. the lag
-# returns in release while debug is fine. Degradation, never a crash, but invisible.
--keepclassmembers class io.androidpoet.mirage.PaperTextureKt {
+# The rule must be `-keep`, not `-keepclassmembers`: the members-only form preserves the
+# field but lets R8 rename the class, and a renamed class makes Class.forName throw, which
+# the reflective lookup swallows before falling back to the library wrapper -- i.e. the
+# per-frame clock returns in release while debug is fine. Degradation, never a crash, and
+# that exact failure shipped once: the release mapping showed
+# `io.androidpoet.mirage.PaperTextureKt -> M3.G`. The Gradle guard in androidApp/
+# build.gradle.kts fails the build if these classes are ever renamed again.
+-keep class io.androidpoet.mirage.HalftoneDotsKt {
     java.lang.String SHADER;
 }
--keepclassmembers class io.androidpoet.mirage.HalftoneDotsKt {
-    java.lang.String SHADER;
-}
+

@@ -65,6 +65,8 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.folio.reader.ui.components.FolioTabReselect
+import com.folio.reader.ui.components.FolioEdgeRole
+import com.folio.reader.ui.components.folioSoftFill
 import com.folio.reader.ui.components.folioDestinationAccent
 import com.folio.reader.ui.components.folioFieldBottom
 import com.folio.reader.ui.components.folioGlassPress
@@ -83,6 +85,7 @@ import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.fillForm
 import com.folio.reader.ui.theme.folioGuillocheQuiet
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
@@ -149,6 +152,19 @@ fun FolioNavShell(
         suppressBlur = true
         kotlinx.coroutines.delay(120)
         suppressBlur = false
+    }
+
+    // The room is last-writer-wins by design and a screen's declaration deliberately
+    // survives its own dispose (see FolioAmbientTint) — so a book or manga detail's
+    // preview tint kept colouring whichever tab came next, and More's bar read as
+    // "whatever I visited last". Re-declaring the room's standing colour on every route
+    // change puts every non-featuring destination (Stats, More, the books shelf) back
+    // into the anchor's colour, while a screen that declares its own re-declares right
+    // after this and still wins while it is visited. Null holder (ambient colour off,
+    // desktop) makes this a no-op.
+    val ambientTint = com.folio.reader.ui.theme.LocalFolioAmbientTint.current
+    LaunchedEffect(currentRoute, ambientTint) {
+        ambientTint?.to(ambientTint.canonical)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -260,6 +276,10 @@ fun FolioNavShell(
             // insets, the selection band) and its own wash mechanism; it takes only the colour.
             val chrome = rememberFolioChromeMaterial()
             val sweepLight = chrome.sheen
+            // The metallic-sheen knob: the selection sweep is the capsule's light
+            // answer, so it dims with every other catch. The capsule's fill, edge and
+            // blur are its material and stay untouched.
+            val sheenGain = folioSheenGain()
             // The glass this capsule is made of *in the room the reader is standing
             // in*: the palette's own chrome plane with the colour of the book being read
             // folded into its hue by the field model, at the atmosphere's own strength.
@@ -401,7 +421,7 @@ fun FolioNavShell(
                                         brush = Brush.horizontalGradient(
                                             0f to Color.Transparent,
                                             0.5f to sweepLight.copy(
-                                                alpha = sweepLight.alpha * 0.38f * navSweepAlpha(progress),
+                                                alpha = sweepLight.alpha * 0.38f * navSweepAlpha(progress) * sheenGain,
                                             ),
                                             1f to Color.Transparent,
                                             startX = x,
@@ -594,12 +614,27 @@ private fun FolioNavItem(
         // drawn on an inner child centered inside the larger hit target. §16: the
         // pill carries the liquid press (rim flash; the corner term is a no-op on
         // a pill by construction), so the flash tracks the capsule's own shape.
+        //
+        // §18: the fill is **feathered**, and this is the nested shape in the user's
+        // screenshot. `clip(pill).background(accent, pill)` at 0.76 alpha is a hard-edged,
+        // near-opaque 42dp pill sitting centred inside a 54dp capsule whose own edge the
+        // whole §18 ladder exists to dissolve — 6dp of clearance all round, so the eye
+        // gets two concentric outlines 6dp apart and reads the obvious thing. Feathering
+        // it costs the selection nothing: the interior keeps the full 0.76 that the glyph
+        // needs for a clean chromatic bed (that alpha was raised deliberately and is
+        // untouched), and only the outermost ~3dp ramps, so the pill stops being an
+        // outline and becomes a pool of accent the mark sits in.
+        //
+        // `Tile` is the right rung and not a guess: a 42dp short side puts
+        // FOLIO_EDGE_MAX_SHARE's clamp at 5dp, so the ladder would cut anything longer
+        // down to about this anyway, and a selection chip is exactly the small-chip case
+        // the rung is named for.
         Box(
             modifier = Modifier
                 .width(width)
                 .height(42.dp)
                 .clip(FolioShapes.pill)
-                .background(pillFill, FolioShapes.pill)
+                .folioSoftFill(FolioShapes.pill, pillFill, FolioEdgeRole.Tile)
                 .folioGlassPress(interaction, FolioShapes.pill, focal),
             contentAlignment = Alignment.Center,
         ) {

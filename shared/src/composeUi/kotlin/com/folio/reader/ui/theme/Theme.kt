@@ -126,6 +126,28 @@ data class FolioColors(
     // veil/scrim it floats in, so the bar can read as a pane of glass rather than
     // a hole cut in the page.
     val navigationSurface: Color = surfaceVariant,
+    // ── §18 the chrome hues, authored per face ─────────────────────────────
+    //
+    // The bottom nav capsule, the top masthead and the in-reader overlays each
+    // take their hue from a *deliberately authored* colour rather than from a
+    // derived role. The derivation used to pick `warmAccent` for the capsule and
+    // `tertiaryAccent` for the masthead, and `warmAccent` is the palette's
+    // designated warm note — a gold, an olive or an umber on most faces — so the
+    // one surface on every route landed on a brown. `tertiaryAccent` and the
+    // room-bounded veil hue produced the same result on the warm rooms. These
+    // three roles are the fix: one authored decision per face, per surface.
+    //
+    //  - [navAccent] — the hue the **bottom nav capsule** (and every reader
+    //    island cut from the same plane) is placed at. Defaults to the progress
+    //    accent so a palette that does not author it stays as it was.
+    //  - [mastheadAccent] — the hue of the **top masthead**'s glass, its 5dp
+    //    chromatic core and the room scrim's affinity. Defaults to `tertiary`.
+    //  - [readerOverlayAccent] — the hue of the **in-reader overlays** (the
+    //    settings sheet, TOC, annotations and echoes panels). Defaults to
+    //    `primary`.
+    val navAccent: Color = accentProgress,
+    val mastheadAccent: Color = tertiaryAccent,
+    val readerOverlayAccent: Color = primary,
     // Navigation capsule selected-item accent.
     //
     // **Authored on all 18 art-directed faces, and deliberately NOT read by the
@@ -236,6 +258,21 @@ val AbyssFolioColors = folioArtDirection("lagoon", light = false)
 val RougeFolioColors = folioArtDirection("rouge", light = true)
 val GarnetFolioColors = folioArtDirection("rouge", light = false)
 
+// Neon Day / Cyberpunk -- the neon city washed out by daylight and lit at night:
+// asphalt blue-black, neon cyan, magenta signage, electric amber.
+private val NeonDayFolioColors = folioArtDirection("cyberpunk", light = true)
+val CyberpunkFolioColors = folioArtDirection("cyberpunk", light = false)
+
+// Vice Day / Vice -- the decree pair: very black with pink shades at night,
+// blush-white heat and hot pink by day; a teal flash both ways.
+private val ViceDayFolioColors = folioArtDirection("vice", light = true)
+val ViceFolioColors = folioArtDirection("vice", light = false)
+
+// Champagne / Aurum -- black-tie gilding: aubergine-black lacquer with burnished
+// gold at night, champagne cream with deep gold-ochre by day.
+private val ChampagneFolioColors = folioArtDirection("aurum", light = true)
+val AurumFolioColors = folioArtDirection("aurum", light = false)
+
 
 enum class AppPalette(
     val id: String,
@@ -262,7 +299,13 @@ enum class AppPalette(
     GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
     BLOSSOM("blossom", "Blossom", true, BlossomFolioColors),
     ABYSS("abyss", "Abyss", true, AbyssFolioColors),
-    GARNET("garnet", "Garnet", true, GarnetFolioColors);
+    GARNET("garnet", "Garnet", true, GarnetFolioColors),
+    NEONDAY("neonday", "Neon Day", false, NeonDayFolioColors),
+    CYBERPUNK("cyberpunk", "Cyberpunk", true, CyberpunkFolioColors),
+    VICEDAY("viceday", "Vice Day", false, ViceDayFolioColors),
+    VICE("vice", "Vice", true, ViceFolioColors),
+    CHAMPAGNE("champagne", "Champagne", false, ChampagneFolioColors),
+    AURUM("aurum", "Aurum", true, AurumFolioColors);
 
     companion object {
         /**
@@ -331,6 +374,9 @@ data class ThemePack(
             ThemePack("dawn", "Dawn", "Dusk", "dawn", "dusk", "dawn", "dusk"),
             ThemePack("lagoon", "Lagoon", "Abyss", "lagoon", "abyss", "lagoon", "abyss"),
             ThemePack("rouge", "Rouge", "Garnet", "rouge", "garnet", "rouge", "garnet"),
+            ThemePack("cyberpunk", "Neon Day", "Cyberpunk", "neonday", "cyberpunk", "white", "midnight"),
+            ThemePack("vice", "Vice Day", "Vice", "viceday", "vice", "blossom", "midnight"),
+            ThemePack("aurum", "Champagne", "Aurum", "champagne", "aurum", "sepia", "espresso"),
         )
     }
 }
@@ -702,10 +748,26 @@ object FolioTokens {
     const val glassDepthAlpha = 0.30f
 
     /** The resting leading sweep of the reader's end-edge glass sheets. */
-    val radiusSheetSweep = 26.dp
+    val radiusSheetSweep = 14.dp
 
     /** The capsule radius those sheets enter reading as, before settling. */
     val radiusSheetCapsule = 96.dp
+
+    /**
+     * The capsule radius of the reader's *floating islands* — the redesigned chrome. Instead of
+     * two full-width slabs welded to the screen edges, the chrome is a set of detached glass
+     * capsules (back, title, actions, and the bottom progress bar) that hover with a uniform
+     * [insetReaderIsland] margin on every side, letting the page show through the gaps. A strong
+     * pill radius is what reads them as discrete floating objects rather than cut-down bars.
+     */
+    val radiusReaderIsland = 12.dp
+
+    /**
+     * The uniform margin the floating reader islands keep from the screen edges and from each
+     * other. One value for all four sides and the inter-island gaps, so the chrome reads as a
+     * single family of objects sharing one rhythm rather than ad-hoc insets.
+     */
+    val insetReaderIsland = 12.dp
 }
 
 object FolioTheme {
@@ -732,6 +794,14 @@ object FolioTheme {
         // must not reset the room's clock. The live value is read once at the
         // true root (AppTheme) and flows down from there.
         daylight: FolioDaylight = LocalFolioDaylight.current,
+        // The Muted ↔ Vivid lever, inherited like opacity/daylight so a nested re-entry keeps
+        // the live value. Read once at the app root (AppTheme) from ReaderSettings.vibrancy.
+        vibrancy: FolioVibrancy = LocalFolioVibrancy.current,
+        // The metallic-sheen lever, inherited the same way: the reader's re-themed
+        // chrome and the Appearance previews must not reset how strongly surfaces
+        // catch the light. Read once at the true root (AppTheme) from
+        // ReaderSettings.metallicSheen.
+        sheen: FolioSheen = LocalFolioSheen.current,
         content: @Composable () -> Unit
     ) {
         // Ã‚Â§17 contrast pass: the ink roles deepened toward the palette's own
@@ -740,18 +810,27 @@ object FolioTheme {
         // inherit the same derivation. The raw palettes stay exactly as
         // authored and as tested; only what the eye sees moves.
         val ink = remember(colors) { deepenInkRoles(colors).withLegibleAccents() }
+        // The vibrancy lever (Muted ↔ Vivid) decides the planes here as well, so the Material
+        // bridge agrees with the atmosphere the screens read. See LocalFolioVibrancy.
+        val vibe = vibrancy.level
         // The atmosphere is derived here as well as by `FolioTheme.atmosphere`, because the
         // Material bridge below needs the app's *planes* and cannot wait for a local that is
         // provided downstream of it. Pure and remembered, and the plane roles do not depend on
         // the pack's light (which only sets the field's gradient axis — see atmosphereFor), so
         // the default light is the right one to derive with: what comes out is the same
         // veilFill/panelFill the screens read.
-        val planes = remember(ink) { atmosphereFor(ink) }
+        val planes = remember(ink, vibe) { atmosphereFor(ink, vibrancy = vibe) }
         CompositionLocalProvider(
             LocalFolioColors provides ink,
             LocalFolioTypography provides typography,
             LocalFolioSurfaceOpacity provides opacity,
             LocalFolioDaylight provides daylight,
+            // Flow the lever down so FolioTheme.atmosphere (and any nested re-entry) reads the
+            // same value the planes above were derived with.
+            LocalFolioVibrancy provides vibrancy,
+            // Flow the metallic-sheen lever down so every paint site — the surfaces here
+            // and any nested re-entry — reads the same gain the root read from settings.
+            LocalFolioSheen provides sheen,
             // Material3 defaults LocalContentColor to pure black, and Folio's
             // panels are not wrapped in `Surface`, so every unstyled Text/Icon
             // rendered black Ã¢â‚¬â€ unreadable on any dark palette. Anchor the default
@@ -790,6 +869,12 @@ object FolioTheme {
         // reader's clock; MaterialTheme below inherits it. Null means "the live
         // hour" (the normal case); a caller may pin one to preview 7am against 9pm.
         daylight: FolioDaylight? = null,
+        // The app's true root is also where the vibrancy lever enters, from
+        // ReaderSettings.vibrancy; MaterialTheme and every screen inherit it.
+        vibrancy: FolioVibrancy = LocalFolioVibrancy.current,
+        // And where the metallic-sheen lever enters, from
+        // ReaderSettings.metallicSheen; MaterialTheme and every screen inherit it.
+        sheen: FolioSheen = LocalFolioSheen.current,
         content: @Composable () -> Unit
     ) {
         val typo = remember(fontTheme) { FolioTypography(fontTheme) }
@@ -799,6 +884,8 @@ object FolioTheme {
             typography = typo,
             opacity = opacity,
             daylight = daylight ?: rememberDaylight(),
+            vibrancy = vibrancy,
+            sheen = sheen,
         ) {
             // AppTheme is a *room's* root — the app's, or a preview's own, since the
             // Appearance mock-ups re-enter this same door to show one theme inside

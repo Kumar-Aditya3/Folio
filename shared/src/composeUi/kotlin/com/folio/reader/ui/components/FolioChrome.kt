@@ -70,6 +70,7 @@ import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.folioLiquidGlass
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.lightDirection
 import kotlin.math.PI
 import kotlin.math.roundToInt
@@ -359,13 +360,10 @@ fun FolioTopBar(
     // colour, and it is most of why the top of the window had no surface on it while the
     // bottom had a defined pill.
     val fill = FolioTheme.surfaceOpacity.chromeBarFill(blurred = blurred)
-    // The ground under the status icons is a piece of the page, so it takes the
-    // room's colour too — `barScrim` alone is derived from the untinted background,
-    // which left the top of the screen reading as a separate band from the field
-    // beneath it. Read the holder's nullable value rather than the fallback-taking
-    // helper, so an unlit tree stays byte-identical.
-    val roomTint = com.folio.reader.ui.theme.LocalFolioAmbientTint.current?.requested
-    val scrimBase = com.folio.reader.ui.theme.scrimFor(atmos, roomTint, atmos.fieldTintStrength)
+    // Status-icon ground: per palette and per theme, not the featured cover. The masthead no
+    // longer borrows the hero's hue (see FolioChromeMaterial) — a null tint returns the authored
+    // scrim byte-for-byte so the top of the screen wears the theme's own colour.
+    val scrimBase = com.folio.reader.ui.theme.scrimFor(atmos, null, atmos.fieldTintStrength)
     val statusColor = scrimBase.copy(alpha = scrimBase.alpha * fill.scrim)
     // Glass for *this* room, not the palette's resting one: the chrome plane is derived per
     // palette and the book's colour is runtime, so the bar asks the chrome material to bend its
@@ -387,6 +385,11 @@ fun FolioTopBar(
     // Purely additive over the veil. Read from the chrome material so the catch on
     // the bar and the catch on the capsule are one colour.
     val sheen = chrome.sheen
+    // The metallic-sheen knob: the bar's own light answer — the film's glints and the
+    // mirror band below — dims with every other catch in the app. The fill, the
+    // scrim, the hairline and the blur are the bar's material, not its light, and
+    // stay untouched.
+    val sheenGain = folioSheenGain()
     // Blur only while something is passing underneath — the same condition as the
     // fill — fading in with the bar's presence. A bar at rest over the page's own
     // field has nothing to refract.
@@ -485,7 +488,10 @@ fun FolioTopBar(
                         highlight = sheen,
                         lightX = lx,
                         lightY = ly,
-                        intensity = fill.presence,
+                        // The bar's presence *and* the metallic-sheen knob: the film
+                        // is the bar's light answer (the specular at the crown), so it
+                        // fades with the material and dims with every other catch.
+                        intensity = fill.presence * sheenGain,
                         enabled = glassCaps.specular,
                         // The masthead is an unclipped, full-bleed band — it runs under the
                         // status bar and squares off at the crown — so its true silhouette is
@@ -576,7 +582,7 @@ fun FolioTopBar(
                             Brush.linearGradient(
                                 0f to Color.Transparent,
                                 mastheadSheenStop(f) to Color.Transparent,
-                                1f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
+                                1f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence * sheenGain),
                                 start = sheenStart,
                                 end = sheenEnd,
                             )
@@ -584,7 +590,7 @@ fun FolioTopBar(
                     } else {
                         drawRect(
                             Brush.verticalGradient(
-                                0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence),
+                                0f to sheen.copy(alpha = sheen.alpha * 0.30f * fill.presence * sheenGain),
                                 0.38f to Color.Transparent,
                             )
                         )

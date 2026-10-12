@@ -200,7 +200,7 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
             settingsStore,
             // §11.2/§12.9: exclusions gate every Home content selection;
             // group repos resolve each book's tags and collections.
-            com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
+            graph.statsExclusionRepository,
             graph.tagRepository,
             graph.collectionRepository,
             // §11.4: the New-chapters card reads manga_update_state through
@@ -284,7 +284,7 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
             // each book's tags/collections (series/status come from the books).
             // The exclusions repo is built here against the shared database; the
             // settings UI is a later slice.
-            statsExclusionRepository = com.folio.reader.database.JdbcStatsExclusionRepository(graph.database),
+            statsExclusionRepository = graph.statsExclusionRepository,
             tagRepository = graph.tagRepository,
             collectionRepository = graph.collectionRepository,
             // EXTENSION exclusions expand to source ids through the backend's
@@ -483,8 +483,9 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     @Composable
     override fun documentReaderContent(
         documentId: String,
-        onBack: () -> Unit
-    ) = DocumentReaderRoute(this, documentId, onBack)
+        onBack: () -> Unit,
+        onOpenSettings: () -> Unit
+    ) = DocumentReaderRoute(this, documentId, onBack, onOpenSettings)
 
     @Composable
     override fun bookDetailContent(

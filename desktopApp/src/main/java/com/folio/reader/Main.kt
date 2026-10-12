@@ -1164,7 +1164,9 @@ fun main(args: Array<String>) {
                 fontTheme = com.folio.reader.ui.theme.FontTheme.byId(globalSettings.fontThemeId),
                 colors = customAppTheme?.toFolioColors() ?: appPalette.colors,
                 isDark = customAppTheme?.isDark ?: appPalette.isDark,
-                opacity = globalSettings.surfaceOpacity()
+                opacity = globalSettings.surfaceOpacity(),
+                vibrancy = com.folio.reader.ui.theme.FolioVibrancy(globalSettings.vibrancy),
+                sheen = com.folio.reader.ui.theme.FolioSheen(globalSettings.metallicSheen),
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -1360,6 +1362,8 @@ fun main(args: Array<String>) {
                                     deps = deps,
                                     documentId = current.documentId,
                                     settings = globalSettings,
+                                    onSettingsChanged = { globalSettings = it },
+                                    onOpenSettings = { pushScreen(Screen.Settings) },
                                     onBack = { popScreen() }
                                 )
 
@@ -1873,12 +1877,15 @@ private fun DocumentReaderRoute(
     deps: FolioDesktopAppDependencies,
     documentId: String,
     settings: com.folio.reader.settings.ReaderSettings,
+    onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onBack: () -> Unit
 ) {
-    // Same contract as Android: the persisted documentReaderMode seeds the
-    // reader and a mode change writes back through the host's settings path.
-    // The desktop host passes a settings snapshot (no live row), so the
-    // persistence callback merges into the stored row directly.
+    // Same contract as Android: documents now own their reading settings. The
+    // reader is handed the dedicated document row, and a change is written back
+    // through the host's settings path (merge into the stored row) while the
+    // host's snapshot is refreshed so the panel reflects the write immediately.
+    // The page mode still comes from `documentReaderMode`.
     val initialMode = remember(documentId) {
         runCatching {
             com.folio.reader.ui.document.DocumentReaderMode.valueOf(settings.documentReaderMode)
@@ -1897,6 +1904,7 @@ private fun DocumentReaderRoute(
         )
     }
     val vmScope = viewModel.scope
+    val writeScope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(documentId) {
         viewModel.open(documentId)
     }
@@ -1907,7 +1915,17 @@ private fun DocumentReaderRoute(
     }
     DocumentReaderScreen(
         viewModel = viewModel,
-        settings = settings,
+        settings = settings.documentSettings,
+        globalSettings = settings,
+        onSettingsChange = { updated ->
+            onSettingsChanged(settings.copy(documentSettings = updated))
+            writeScope.launch {
+                deps.settingsRepository.mergeGlobalSettings {
+                    it.copy(documentSettings = updated)
+                }
+            }
+        },
+        onOpenFullSettings = onOpenSettings,
         onBack = onBack
     )
 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.folioVeilPlane
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.settings.SettingsLivePreview
 import com.folio.reader.ui.theme.FolioShapes
@@ -31,6 +32,14 @@ object FolioSettingsCategory {
     const val TRANSPARENCY = "transparency"
     const val CUSTOM_THEME = "custom_theme"
     const val DEFAULTS = "defaults"
+
+    /**
+     * Dedicated **document** settings — the typography, page and page theme a
+     * PDF/Word/HTML document opens with. Separate from [DEFAULTS] because a
+     * document is not a book: these are the document row's own defaults
+     * (`ReaderSettings.documentSettings`), not the book defaults.
+     */
+    const val DOCUMENTS = "documents"
 
     /** §14.2: the merged Typography/Layout/Formatting destination. */
     const val TEXT_AND_PAGE = "text_and_page"
@@ -126,7 +135,12 @@ fun SettingsCategoryScaffold(
                     // and drop the depth cues that were describing a page that is not there.
                     // One declaration here replaces the per-call-site fix that kept coming
                     // undone (see SettingsPanelSync's own note). FolioSurfaceContents.
-                    FolioSurfaceContents { content() }
+                    //
+                    // §19: the shell also publishes the exact plane it is painted with
+                    // (folioVeilPlane mirrors folioVeil's own fill arithmetic), so a nested
+                    // surface is a floor of the shell's own material rather than a second
+                    // tier of fill — the division is the rim, not a plane change.
+                    FolioSurfaceContents(folioVeilPlane()) { content() }
                 }
             }
         }

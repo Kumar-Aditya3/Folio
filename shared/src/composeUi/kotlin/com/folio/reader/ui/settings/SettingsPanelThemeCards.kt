@@ -8,8 +8,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,10 +53,10 @@ import com.folio.reader.ui.theme.paneFill
  * theme feels like picking up an object rather than ticking a radio button.
  *
  * Three things make the card tell the truth about the theme:
- *  - **The field band runs the theme's own Mirage shader** (frozen to one frame for the row's
- *    sake — [folioFieldKindFor] on the pack id), so Honey's metaballs and Arctic's swirl look
- *    different at a glance, not just differently tinted. Where the shader can't run it falls back
- *    to a gradient of the theme's accents, so the band is never blank.
+ *  - **The band is a gradient of the theme's own accents.** It used to run the theme's
+ *    Mirage shader frozen to one frame; the animation became its own setting, and then the
+ *    shader field left the app entirely (see FolioThemeBackground's note), so the card is
+ *    purely the palette: colours, not motion.
  *  - **The accents are the real multi-hue palette**, four swatches rather than one dot, so a
  *    theme that is cobalt + sienna + verdigris + gold reads as four colours.
  *  - **Every colour is read post-[folioRenderedColors]**, the same deepen-ink + legible-accents
@@ -218,6 +221,9 @@ internal fun ThemePackCard(
  * rather than a bare token. The lit tile is the pack's current effective choice; tapping writes
  * into `ReaderSettings.fieldOverrides` keyed by [packId] (Default stores nothing). Selection
  * language matches the cards: the chosen tile lifts to the raised material with an accent rim.
+ *
+ * `PaperTexture` is absent by decree — it is the one family the user ordered removed outright;
+ * see `MeshField.android.kt`'s dispatch note.
  */
 @Composable
 internal fun ThemeFieldOverridePicker(
@@ -240,14 +246,35 @@ internal fun ThemeFieldOverridePicker(
         ordered.forEach { add(FieldOption(it.name, it.displayName(), it.describe())) }
     }
     val accents = listOf(colors.primary, colors.secondary, colors.tertiary)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 2.dp),
+    // The row is a pushed settings destination: popping it disposes the composition, so a
+    // bare scroll state would reopen at the leftmost tile every time — the user's report that
+    // the animation section "resets to the leftmost every time I reopen". Remember the last
+    // scroll position in a process-lifetime holder keyed by pack and restore it verbatim on
+    // re-entry, so the row reopens exactly where it was left. The first time a pack is seen
+    // there is nothing saved, so fall back to scrolling the persisted selection into view
+    // (the old behaviour) rather than the leftmost tile.
+    val selectedIndex = options.indexOfFirst { it.token == current }.coerceAtLeast(0)
+    val saved = FieldPickerScrollMemory.get(packId)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = saved?.index ?: selectedIndex,
+        initialFirstVisibleItemScrollOffset = saved?.offset ?: 0,
+    )
+    DisposableEffect(packId) {
+        onDispose {
+            FieldPickerScrollMemory.put(
+                packId,
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        options.forEach { opt ->
+        items(options) { opt ->
             val selected = opt.token == current
             val interaction = rememberFolioInteraction()
             val shape = FolioShapes.inset
@@ -394,5 +421,24 @@ internal fun FontThemeCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/**
+ * Process-lifetime memory of the animation picker's horizontal scroll position, keyed by
+ * theme pack. The picker lives in a settings destination that is disposed on back-press, so a
+ * plain [rememberLazyListState] cannot survive a reopen; stashing the first-visible index and
+ * offset here lets the row reopen exactly where the user left it. Deliberately not persisted to
+ * disk — this is session scroll state, not a user setting.
+ */
+private object FieldPickerScrollMemory {
+    data class Pos(val index: Int, val offset: Int)
+
+    private val byPack = mutableMapOf<String, Pos>()
+
+    fun get(packId: String): Pos? = byPack[packId]
+
+    fun put(packId: String, index: Int, offset: Int) {
+        byPack[packId] = Pos(index, offset)
     }
 }

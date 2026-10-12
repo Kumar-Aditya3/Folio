@@ -155,6 +155,12 @@ internal fun Modifier.folioSilk(
  */
 private val FIELD_PERIODS_MS = listOf(37_000L, 53_000L, 43_000L)
 
+// §Vibrancy — how far the bloom alpha travels from its measured base (0.20 dark / 0.46 light) to
+// the vivid / muted ends of the Muted ↔ Vivid lever. Both are 0 at VIBRANCY_NEUTRAL, so the base
+// keeps its calibrated value there; the chroma itself rides the already-enriched atmosphere pools.
+private const val BLOOM_ALPHA_SPAN = 0.45f
+private const val BLOOM_ALPHA_MUTE = 0.45f
+
 /**
  * How often the ground plane re-samples its drift: 20 Hz, not per vsync.
  *
@@ -299,19 +305,17 @@ fun Modifier.folioSilkBackground(
     // page of #05030F — three coloured spotlights, measured. The aurora reads at 0.20 because
     // additive light is perceptually cheap on a near-black bed; the thing that was expensive was
     // the floor it was lifting. Paper is still untouched.
-    val bloomAlpha = if (dark) 0.20f else 0.46f
-    // Muted packs (moss, silver, the pale lights) author low-chroma pools; drawn literally they
-    // vanish into the gradient. Pushing each pool away from its own luma lifts the saturation so
-    // the colour is unmistakably present, without moving the hue the palette authored.
-    //
-    // P9: the boost is now per polarity. Under `BlendMode.Plus` a saturation boost is also a
-    // *brightness* boost on the dominant channel — `vivid(1.35)` takes Dusk's glowPrimary blue
-    // channel from 0.937 to 1.0 and its red from 0.749 to 0.788 — so on a dark face the dial
-    // that was "make muted packs read" was also pushing light into the room. Paper keeps 1.35
-    // (plain over-compositing, where saturation costs no luminance).
-    val vividPools = remember(pools, dark) {
-        pools.map { it.vivid(if (dark) 1.15f else 1.35f) }
-    }
+    // §Vibrancy change B: the pools now arrive **already enriched** from `atmosphereFor` — the
+    // one Muted ↔ Vivid lever is applied once in the derivation and consumed identically here and
+    // by the Android Mirage shader, so the old path-specific `vivid()` boost is gone (chroma is a
+    // derivation concern now, not a per-renderer one). What stays here is the bloom's *alpha*,
+    // which still rides the lever: a more vivid room draws its aurora a touch more present. Both
+    // terms are 0 at VIBRANCY_NEUTRAL, so the base keeps its measured 0.20 / 0.46 there.
+    val vibrancy = FolioTheme.atmosphere.vibrancy
+    val vibeUp = ((vibrancy - VIBRANCY_NEUTRAL) / (1f - VIBRANCY_NEUTRAL)).coerceIn(0f, 1f)
+    val vibeDown = ((VIBRANCY_NEUTRAL - vibrancy) / VIBRANCY_NEUTRAL).coerceIn(0f, 1f)
+    val bloomAlpha = (if (dark) 0.20f else 0.46f) *
+        (1f + vibeUp * BLOOM_ALPHA_SPAN - vibeDown * BLOOM_ALPHA_MUTE)
 
     return drawWithCache {
         val w = size.width
@@ -325,32 +329,17 @@ fun Modifier.folioSilkBackground(
             // tree that contains it — the same discipline the ambient light and the lamp keep.
             if (!blooms) return@onDrawBehind
             val p = phases.value
-            if (vividPools.isNotEmpty()) {
-                drawBloom(vividPools[0], p.getOrElse(0) { 0f }, 0.26f, 0.30f, 1.20f, bloomAlpha, blend, w, h, maxDim)
+            if (pools.isNotEmpty()) {
+                drawBloom(pools[0], p.getOrElse(0) { 0f }, 0.26f, 0.30f, 1.20f, bloomAlpha, blend, w, h, maxDim)
             }
-            if (vividPools.size > 1) {
-                drawBloom(vividPools[1], p.getOrElse(1) { 0f }, 0.78f, 0.64f, 1.05f, bloomAlpha, blend, w, h, maxDim)
+            if (pools.size > 1) {
+                drawBloom(pools[1], p.getOrElse(1) { 0f }, 0.78f, 0.64f, 1.05f, bloomAlpha, blend, w, h, maxDim)
             }
-            if (vividPools.size > 2) {
-                drawBloom(vividPools[2], p.getOrElse(2) { 0f }, 0.52f, 0.90f, 0.92f, bloomAlpha * 0.9f, blend, w, h, maxDim)
+            if (pools.size > 2) {
+                drawBloom(pools[2], p.getOrElse(2) { 0f }, 0.52f, 0.90f, 0.92f, bloomAlpha * 0.9f, blend, w, h, maxDim)
             }
         }
     }
-}
-
-/**
- * Lifts a colour's saturation by pushing each channel away from its own luma by [amount]
- * (>1 saturates, 1 is identity). Hue and rough lightness are preserved, so a palette's authored
- * pool keeps its identity while actually reading as colour on screen.
- */
-private fun Color.vivid(amount: Float): Color {
-    val l = 0.299f * red + 0.587f * green + 0.114f * blue
-    return Color(
-        red = (l + (red - l) * amount).coerceIn(0f, 1f),
-        green = (l + (green - l) * amount).coerceIn(0f, 1f),
-        blue = (l + (blue - l) * amount).coerceIn(0f, 1f),
-        alpha = alpha,
-    )
 }
 
 /**

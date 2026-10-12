@@ -3,7 +3,7 @@ package com.folio.reader.ui.theme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.util.lerp
 import com.folio.reader.settings.ReaderSettings
 
@@ -44,7 +44,7 @@ data class FolioSurfaceOpacity(
     /** Cards, sheets and menus drawn with `Modifier.folioVeil`. */
     val panel: Float = PANEL_GLASS,
     /** Reader bars, side rail, TOC/notes drawers and the reader settings sheet. */
-    val readerChrome: Float = 1f
+    val readerChrome: Float = PANEL_GLASS
 ) {
     companion object {
         val Default = FolioSurfaceOpacity()
@@ -73,10 +73,11 @@ data class FolioSurfaceOpacity(
 
         /**
          * The §16 glass tiers — each surface's designed point once *real* blur
-         * runs under it (see [glassTierAlpha]). Reader chrome deliberately has
-         * none: it sits over the page being read, where bleed-through is a legibility
-         * problem blur does not fully buy back, and over the WebView it cannot blur
-         * at all.
+         * runs under it (see [glassTierAlpha]). Reader chrome now joins them: the
+         * side panels (TOC, notes, settings) frost a dimmed backdrop drawn behind
+         * them, so they tier down exactly like an app panel. The reader bars sit
+         * over the WebView where there is nothing Compose to blur, so there they
+         * resolve to a translucent-but-unfrosted glass — still a pane, not a lid.
          */
         const val BAR_GLASS_BLURRED = 0.38f
         const val NAV_GLASS_BLURRED = 0.50f
@@ -93,6 +94,24 @@ data class FolioSurfaceOpacity(
         // on-panel text legible while the frosted body + accent tint under it do
         // the "opaque yet glass" work.
         const val PANEL_GLASS_BLURRED = 0.62f
+
+        /**
+         * The in-reader knob's designed rest (mirrors [PANEL_GLASS]; the reader
+         * settings' own default). The anchor for the reader chrome's weight scale.
+         */
+        const val READER_GLASS = 0.90f
+
+        /**
+         * The pinned fill for **pop-ups** — dialogs, menus, sheets and the reader's
+         * side panels/drawers/composers. These are deliberately detached from every
+         * user opacity knob ([panel], [readerChrome]) and painted at the highest
+         * opacity their own glass material allows, so a pop-up is never see-through
+         * however transparent the room's chrome is set. `1f` is a solid lid by the
+         * knob contract (see [glassTierAlpha]); the surface still wears its own veil
+         * rim and sheen, it just does not bleed the page or scrim behind it. Pass
+         * this to `folioVeil`/`FolioDialog`/`FolioMenu` instead of a knob accessor.
+         */
+        const val POPUP_OPAQUE = 1f
     }
 }
 
@@ -138,6 +157,21 @@ fun FolioSurfaceOpacity.panelFill(canBlur: Boolean): Float =
     } else {
         panel
     }
+
+/**
+ * §20 — the Cards and Sheets knob applied to a *plane's own designed alpha*.
+ *
+ * The veil family always followed the knob ([panelFill]); the pane and panel families
+ * painted atmosphere-fixed alphas instead ([FolioAtmosphere.paneFill] and friends), which
+ * is exactly the report that the slider "only changes the cards in More": the More hub's
+ * cards are veils, while Home's, Stats' and the library shelves' cards are raised panes
+ * and flat panels. This scale is **identity at the knob's designed rest**
+ * ([FolioSurfaceOpacity.PANEL_GLASS]) — nothing changes at rest, on any surface, on any
+ * device — and below it every plane-class fill thins with the same proportion the veils
+ * thin by, while `1f` still means solid.
+ */
+fun FolioSurfaceOpacity.panelKnobScale(designAlpha: Float): Float =
+    (designAlpha * (panel / FolioSurfaceOpacity.PANEL_GLASS)).coerceIn(FolioSurfaceOpacity.MIN, 1f)
 
 /**
  * The masthead's fill, as the alphas of the stops its gradient is built from.
@@ -255,7 +289,16 @@ fun ReaderSettings.surfaceOpacity(): FolioSurfaceOpacity = FolioSurfaceOpacity(
     readerChrome = sane(readerChromeOpacity)
 )
 
-val LocalFolioSurfaceOpacity = staticCompositionLocalOf { FolioSurfaceOpacity.Default }
+/**
+ * The live opacity preferences, and this **must** be a dynamic local: the Transparency
+ * screen's sliders change the provided value at runtime, and a
+ * `staticCompositionLocalOf` never invalidates its readers — in-flow cards picked new
+ * values up only when something else happened to recompose them, and the overlay host's
+ * sheets (Settings, Home, Stats) sat at the root and never recomposed at all, which is
+ * the "the sheets don't update" report. A composition local of an `@Immutable` data
+ * class costs nothing when the value has not changed: equality is one reference compare.
+ */
+val LocalFolioSurfaceOpacity = compositionLocalOf { FolioSurfaceOpacity.Default }
 
 /** The active opacity preferences. */
 val FolioTheme.surfaceOpacity: FolioSurfaceOpacity
@@ -264,15 +307,58 @@ val FolioTheme.surfaceOpacity: FolioSurfaceOpacity
     get() = LocalFolioSurfaceOpacity.current
 
 /**
- * Fill alpha for a reader glass surface.
+ * §20.1 — how far a glass surface's *own* knob sits from its designed rest, as the
+ * scale its internal Haze tints (the chromatic frost and the frosted body) must
+ * follow. Without this a blurred surface thins only by its external fill while
+ * the frost and body keep it solid from the inside, which is the "the slider does
+ * not change the transparency" report on the reader's sheets: the fill obeyed the
+ * knob, but the frost carried most of the opacity and never moved. `1f` at the
+ * knob's rest, so the designed look is byte-for-byte; the chrome bars already
+ * scale their frost by `fill.presence` and are unaffected.
+ */
+@Composable
+@ReadOnlyComposable
+fun glassWeightScale(readerChrome: Boolean): Float {
+    val o = LocalFolioSurfaceOpacity.current
+    val rest = if (readerChrome) FolioSurfaceOpacity.READER_GLASS else FolioSurfaceOpacity.PANEL_GLASS
+    val knob = if (readerChrome) o.readerChrome else o.panel
+    return (knob / rest).coerceIn(0f, 1.2f)
+}
+
+/**
+ * Fill alpha for the reader *bars* (top/bottom chrome, rail).
  *
- * Reader controls sit over a page being read rather than over the app's own
- * field, so at 100% they are fully solid and the page cannot bleed through the
- * text; at the floor they are a barely-there tint over it.
+ * These sit directly over the page being read — a native WebView Haze cannot
+ * sample — so there is nothing Compose behind them to blur and translucency alone
+ * would let page text bleed through at full contrast. They therefore follow the
+ * knob verbatim (near-solid by default) and are not tiered: see
+ * [readerPanelVeilAlpha] for the side panels, which do have a backdrop to frost.
  */
 val FolioTheme.readerVeilAlpha: Float
     @Composable
+    @ReadOnlyComposable
     get() = LocalFolioSurfaceOpacity.current.readerChrome.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+
+/**
+ * Fill alpha for the reader *side panels* (TOC, notes, settings sheet, Echoes).
+ *
+ * Unlike the bars, these open over a full-screen scrim that dims the page behind
+ * them (see `ReaderSidePanels`), so translucency does not expose sharp page text —
+ * only the already-dimmed scrim and the theme's own ambient pools. The fill
+ * therefore tiers down to [FolioSurfaceOpacity.PANEL_GLASS_BLURRED] exactly like an
+ * app panel ([panelFill]) **whether or not real blur is available**: the scrim is
+ * the backdrop, so a no-blur device still reads translucent glass over dimmed
+ * colour instead of the near-opaque raw knob (the "still opaque" report). The knob
+ * still governs: `1f` is a solid lid, and the transparency slider thins the panels
+ * proportionally.
+ */
+val FolioTheme.readerPanelVeilAlpha: Float
+    @Composable
+    @ReadOnlyComposable
+    get() {
+        val knob = LocalFolioSurfaceOpacity.current.readerChrome.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+        return glassTierAlpha(knob, FolioSurfaceOpacity.PANEL_GLASS, FolioSurfaceOpacity.PANEL_GLASS_BLURRED)
+    }
 
 /**
  * How much *weight* a glass surface carries — the perceptual depth plane it sits
@@ -312,13 +398,13 @@ data class FolioGlassWeight(
 ) {
     companion object {
         /** Chrome: bars, rails. Light and transparent — barely a slab. */
-        val Bar = FolioGlassWeight(blurScale = 0.95f, frostTintAlpha = 0.08f, bodyTintAlpha = 0.16f)
+        val Bar = FolioGlassWeight(blurScale = 1.0f, frostTintAlpha = 0.1f, bodyTintAlpha = 0.18f)
         /** The app's workhorse card/sheet material (`folioVeil`). A real slab. */
-        val Veil = FolioGlassWeight(blurScale = 1.1f, frostTintAlpha = 0.13f, bodyTintAlpha = 0.26f)
+        val Veil = FolioGlassWeight(blurScale = 1.2f, frostTintAlpha = 0.16f, bodyTintAlpha = 0.3f)
         /** Lifted cards and heroes (`folioRaised`). Thicker, more presence. */
-        val Raised = FolioGlassWeight(blurScale = 1.35f, frostTintAlpha = 0.17f, bodyTintAlpha = 0.32f)
+        val Raised = FolioGlassWeight(blurScale = 1.45f, frostTintAlpha = 0.21f, bodyTintAlpha = 0.37f)
         /** Modals and the frontmost sheets. Full thickness, floats clearly. */
-        val Modal = FolioGlassWeight(blurScale = 1.6f, frostTintAlpha = 0.19f, bodyTintAlpha = 0.36f)
+        val Modal = FolioGlassWeight(blurScale = 1.7f, frostTintAlpha = 0.24f, bodyTintAlpha = 0.42f)
 
         /**
          * The neutral weight: current blur, no frost tint. Existing call sites

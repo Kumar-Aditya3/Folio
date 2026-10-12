@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.folio.reader.ui.components.FolioDialog
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioSurfaceOpacity
 
 /**
  * Glass composer for a highlight's note. A dismissed (not cancelled) dialog
@@ -53,6 +54,10 @@ internal fun NoteComposerDialog(
         expanded = true,
         onDismissRequest = onDismiss,
         title = "Note",
+        // §16: a reader-owned pop-up, but pop-ups are detached from the opacity knobs
+        // and pinned to the highest opacity their own glass allows, so the note is
+        // always legible over the page it is about regardless of the chrome slider.
+        fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (passage.isNotBlank()) {

@@ -48,7 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioDialog
-import com.folio.reader.ui.components.FolioSlider
+import com.folio.reader.ui.components.PageBlock
+import com.folio.reader.ui.reader.pageBlockChromeHeight
 import com.folio.reader.ui.components.folioGlassEffect
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.settings.readableLabel
@@ -57,6 +58,7 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTokens
+import kotlin.math.roundToInt
 
 @Composable
 internal fun ReaderSettingsDialog(
@@ -273,21 +275,28 @@ internal fun ReaderControls(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val lastPage = (pageCount - 1).coerceAtLeast(0)
-            // Progress runs in the reading direction: RTL mirrors the slider and
-            // swaps the end labels so the filled side is where the reader is going.
+            // Progress uses the same leaf-stack PageBlock the document and book readers draw,
+            // so all three bottom bars match; PageBlock mirrors the fill and the seek maths for
+            // RTL internally, so the flanking numerals just swap which end they sit at.
+            val fraction = if (lastPage <= 0) 0f else currentPage.toFloat() / lastPage.toFloat()
             Text(
                 if (rtl) "$pageCount" else "${currentPage + 1}",
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
             )
-            FolioSlider(
-                value = if (rtl) (lastPage - currentPage).toFloat() else currentPage.toFloat(),
-                onValueChange = { onSeek(if (rtl) lastPage - it.toInt() else it.toInt()) },
-                valueRange = 0f..lastPage.toFloat(),
-                modifier = Modifier.weight(1f).padding(horizontal = FolioTokens.space2),
-                accent = Color.White,
-                background = Color.Black,
-                inactive = Color.White.copy(alpha = 0.28f),
+            PageBlock(
+                fraction = fraction,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(pageBlockChromeHeight)
+                    .padding(horizontal = FolioTokens.space2),
+                paper = Color.Black,
+                ink = Color.White,
+                accent = FolioTheme.colors.accentProgress,
+                pageCountHint = pageCount,
+                stateLabel = "Page ${currentPage + 1} of $pageCount",
+                onSeek = { f -> onSeek((f * lastPage).roundToInt().coerceIn(0, lastPage)) },
+                rtl = rtl,
             )
             Text(
                 if (rtl) "${currentPage + 1}" else "$pageCount",
@@ -429,8 +438,12 @@ internal fun NotesListDialog(
                             // Was `.background(colors.surfaceVariant, …)`: an opaque row inside a
                             // glass pane, which is the same defect as the pane itself one level
                             // down. `folioSunken` is the app's own nested-well material and the
-                            // host already quiets it (FolioSurfaceContents).
-                            .folioSunken(FolioShapes.inset)
+                            // host already quiets it (FolioSurfaceContents) — but the §19 fill
+                            // floor stops there: this pane sits over a native WebView Android
+                            // cannot blur, and on the no-blur path a floored well would stack
+                            // translucencies and let the page's text bleed through the very bed
+                            // the well exists to give. The reader stays opaque (fullMaterial).
+                            .folioSunken(FolioShapes.inset, fullMaterial = true)
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

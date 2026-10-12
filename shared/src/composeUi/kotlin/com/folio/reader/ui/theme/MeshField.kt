@@ -52,6 +52,7 @@ expect fun FolioThemeField(
     accents: List<Color>,
     isDark: Boolean,
     animate: Boolean,
+    vibrancy: Float = VIBRANCY_NEUTRAL,
     modifier: Modifier = Modifier,
 )
 
@@ -121,6 +122,7 @@ fun FolioThemeBackground(modifier: Modifier = Modifier) {
                 accents = listOf(colors.primary, colors.secondary, colors.tertiary),
                 isDark = atmo.isDark,
                 animate = animate,
+                vibrancy = atmo.vibrancy,
                 modifier = Modifier.fillMaxSize(),
             )
         }

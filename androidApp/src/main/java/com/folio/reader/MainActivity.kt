@@ -413,7 +413,10 @@ class MainActivity : ComponentActivity() {
             // §16: one backdrop registry for the whole shell — every screen
             // attaches its scrolling child as the source, and the capsule, the
             // mastheads and the status banner blur against it.
-            com.folio.reader.ui.components.FolioGlassRoot(capabilities = glassCapabilities) {
+            com.folio.reader.ui.components.FolioGlassRoot(
+                capabilities = glassCapabilities,
+                inFlowGlass = !model.globalSettings.minimalLiquidGlass,
+            ) {
                 androidx.compose.runtime.CompositionLocalProvider(
                     com.folio.reader.ui.theme.LocalDynamicSchemes provides dynamicSchemes,
                 ) {
@@ -422,7 +425,13 @@ class MainActivity : ComponentActivity() {
                         fontTheme = FontTheme.byId(model.globalSettings.fontThemeId),
                         colors = appColors,
                         isDark = appDark,
-                        opacity = model.globalSettings.surfaceOpacity()
+                        opacity = model.globalSettings.surfaceOpacity(),
+                        // The Muted ↔ Vivid lever: provided through AppTheme so the Material
+                        // bridge's planes and every screen's atmosphere read the user's setting.
+                        vibrancy = com.folio.reader.ui.theme.FolioVibrancy(model.globalSettings.vibrancy),
+                        // The metallic-sheen lever: provided through AppTheme so every
+                        // paint site — surfaces, films, masthead, capsule, lamp — reads it.
+                        sheen = com.folio.reader.ui.theme.FolioSheen(model.globalSettings.metallicSheen),
                     ) {
                     // §17 living glass: the room's slow animated light, provided
                     // once at the Android root. Every material's sheen and the

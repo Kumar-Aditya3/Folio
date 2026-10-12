@@ -18,6 +18,7 @@ actual fun FolioThemeField(
     accents: List<Color>,
     isDark: Boolean,
     animate: Boolean,
+    vibrancy: Float,
     modifier: Modifier,
 ) {
     // Intentionally empty: the fallback painted underneath stands alone.

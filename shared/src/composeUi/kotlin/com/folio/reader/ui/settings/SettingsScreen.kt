@@ -140,6 +140,14 @@ fun SettingsScreen(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
 
+                                    SettingsCategory.DOCUMENTS -> DocumentDefaultsPanel(
+                                        settings = settings.documentSettings,
+                                        pageMode = settings.documentReaderMode,
+                                        onSettingsChange = { onSettingsChange(settings.copy(documentSettings = it)) },
+                                        onPageModeChange = { onSettingsChange(settings.copy(documentReaderMode = it)) },
+                                        extraFonts = settings.customFonts.map { it.name },
+                                    )
+
                                     SettingsCategory.TEXT_AND_PAGE -> TextAndPageSettingsPanel(
                                         settings,
                                         onSettingsChange
@@ -259,6 +267,14 @@ fun SettingsScreen(
                                         settings, mangaDefaultMode, onSettingsChange, onMangaDefaultModeChange
                                     )
 
+                                    SettingsCategory.DOCUMENTS -> DocumentDefaultsPanel(
+                                        settings = settings.documentSettings,
+                                        pageMode = settings.documentReaderMode,
+                                        onSettingsChange = { onSettingsChange(settings.copy(documentSettings = it)) },
+                                        onPageModeChange = { onSettingsChange(settings.copy(documentReaderMode = it)) },
+                                        extraFonts = settings.customFonts.map { it.name },
+                                    )
+
                                     SettingsCategory.TEXT_AND_PAGE -> TextAndPageSettingsPanel(
                                         settings,
                                         onSettingsChange
@@ -324,6 +340,7 @@ enum class SettingsCategory(val displayName: String, val routeName: String) {
     CUSTOM_THEME("Custom theme", "custom_theme"),
     TRANSPARENCY("Transparency", "transparency"),
     DEFAULTS("Reader defaults", "defaults"),
+    DOCUMENTS("Documents", "documents"),
     TEXT_AND_PAGE("Text & page", "text_and_page"),
     READING("Reading", "reading"),
     CLOUD_SYNC("Cloud Sync", "cloud_sync"),

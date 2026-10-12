@@ -395,7 +395,14 @@ private fun FilterSheet(
         onDismissRequest = onDismiss,
         title = "Filters",
     ) {
-        LazyColumn(modifier = Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(
+            // Content is inset to match the pane title (FolioOverlayHost draws the title at
+            // space3 horizontal); without this the filter controls run flush to the glass edge.
+            modifier = Modifier
+                .heightIn(max = 420.dp)
+                .padding(horizontal = FolioTokens.space3),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             item {
                 Column {
                     filters.forEachIndexed { index, filter ->
@@ -409,7 +416,8 @@ private fun FilterSheet(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(horizontal = FolioTokens.space3)
+                .padding(top = 12.dp, bottom = FolioTokens.space1),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Cancel") }

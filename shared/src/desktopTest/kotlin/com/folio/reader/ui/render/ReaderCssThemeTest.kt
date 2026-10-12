@@ -80,18 +80,36 @@ class ReaderCssThemeTest {
     fun `heading link and selection rules are always emitted`() {
         for (theme in Theme.PICKER) {
             for (mode in modes) {
+                // Calm default: headings and external links drop to the body ink so the
+                // reading page carries no theme colour; links stay findable via a quiet
+                // secondary-ink underline.
                 val css = sheet(ReaderSettings(themeId = theme.id, formattingMode = mode))
                 assertTrue(
-                    "h1,h2,h3,h4,h5,h6{color:${hex(theme.headingText)} !important;}" in css,
-                    "${theme.id}/$mode missing heading ink",
+                    "h1,h2,h3,h4,h5,h6{color:${hex(theme.primaryText)} !important;}" in css,
+                    "${theme.id}/$mode calm heading should drop to body ink",
                 )
                 assertTrue(
-                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:${hex(theme.link)} !important;}" in css,
-                    "${theme.id}/$mode missing link ink",
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:${hex(theme.primaryText)} !important;" +
+                        "text-decoration:underline !important;text-decoration-color:${hex(theme.secondaryText)} !important;" +
+                        "text-underline-offset:0.12em !important;}" in css,
+                    "${theme.id}/$mode calm link should be inked + underlined",
                 )
                 assertTrue(
                     "::selection{background:${hex(theme.selection)} !important" in css,
                     "${theme.id}/$mode missing selection rule",
+                )
+
+                // Editorial look: the theme's expressive heading/link colours return.
+                val editorial = sheet(
+                    ReaderSettings(themeId = theme.id, formattingMode = mode, editorialReading = true),
+                )
+                assertTrue(
+                    "h1,h2,h3,h4,h5,h6{color:${hex(theme.headingText)} !important;}" in editorial,
+                    "${theme.id}/$mode editorial missing heading ink",
+                )
+                assertTrue(
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:${hex(theme.link)} !important;}" in editorial,
+                    "${theme.id}/$mode editorial missing link ink",
                 )
             }
         }

@@ -84,6 +84,15 @@ kotlin {
                 implementation(libs.okhttp)
                 implementation(libs.okhttp.brotli)
                 implementation(libs.okhttp.zstd)
+                // Conscrypt TLS provider — installed first at app startup so handshakes
+                // and chain validation run on a modern BoringSSL stack rather than the
+                // device's (possibly outdated) platform provider. Mitigates "Trust anchor
+                // for certification path not found" / handshake failures from sources.
+                implementation(libs.conscrypt.android)
+                // Extensions' inline parseAs() links kotlinx.serialization.json.okio
+                // (decodeFromBufferedSource); the host must bundle it or they crash on
+                // the first JSON parse with NoClassDefFoundError OkioStreamsKt.
+                implementation(libs.kotlinx.serialization.json.okio)
                 runtimeOnly(libs.quickjs)
                 implementation(libs.jsoup)
                 implementation(libs.rxjava1)

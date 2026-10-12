@@ -17,6 +17,7 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.TWO_PI
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.rememberSlowPhases
 import kotlin.math.PI
@@ -74,9 +75,11 @@ internal const val RIM_PERIOD_MS = 24_000L
 /**
  * How far the static ring is lifted from the palette's hairline toward its rim light.
  * A polished edge, not a neon one: enough to read as a real specular rim now that the
- * theme owns it, short of becoming the brightest thing on the card.
+ * theme owns it, short of becoming the brightest thing on the card. Raised 0.62 → 0.72
+ * with the rest of the beam: the user's report was that the boundary animation on the
+ * home and library heroes was too faint to read as an edge at all.
  */
-internal const val RIM_METALLIC = 0.62f
+internal const val RIM_METALLIC = 0.72f
 
 /**
  * 30 Hz rather than the house 10 Hz slow clock
@@ -89,11 +92,18 @@ internal const val RIM_METALLIC = 0.62f
  */
 private const val RIM_TICK_MS = 33L
 
-/** The lit arc's angular width as a fraction of a full turn, at rest. */
-internal const val RIM_BEAM_SPAN = 0.30f
+/**
+ * The lit arc's angular width as a fraction of a full turn, at rest. Widened 0.30 → 0.34
+ * with the head lift below: a stronger boundary without a slower circuit.
+ */
+internal const val RIM_BEAM_SPAN = 0.34f
 
-/** Peak alpha at the centre of the arc; it ramps to nothing at both ends across [RIM_BEAM_SPAN]. */
-internal const val RIM_HEAD_ALPHA = 0.62f
+/**
+ * Peak alpha at the centre of the arc; it ramps to nothing at both ends across
+ * [RIM_BEAM_SPAN]. Raised 0.62 → 0.85 — the report was that the travelling light read as
+ * nothing on the heroes; it must be unmissably *the* edge, still short of a neon outline.
+ */
+internal const val RIM_HEAD_ALPHA = 0.85f
 
 /**
  * How much fainter the bloom is than the core ring it surrounds.
@@ -106,9 +116,10 @@ internal const val RIM_HEAD_ALPHA = 0.62f
  *
  * Only the intensity differs. Hue, span, position and travel are shared with the core, so
  * the travelling light is untouched — this changes how wide the glow is allowed to shout,
- * nothing about how it moves.
+ * nothing about how it moves. Lifted 0.30 → 0.38 alongside the stronger head: the bloom is
+ * what carries "stronger" at a glance without the core turning into a hard border.
  */
-internal const val RIM_BLOOM_RATIO = 0.30f
+internal const val RIM_BLOOM_RATIO = 0.38f
 
 /**
  * How much a fling may widen the beam, as a fraction of [RIM_BEAM_SPAN].
@@ -322,6 +333,10 @@ fun Modifier.folioThemeRim(
     // so the beam had nothing to contrast against and the animated border vanished.
     // The palette, not the book, gets to be loud here.
     val rimAccent = FolioTheme.colors.primary
+    // The metallic-sheen knob: the comet's beam and its polished base dim with every
+    // other light catch. The hairline underneath survives at 0, so the edge itself
+    // never disappears — only its light does.
+    val sheenGain = folioSheenGain()
     val phases: State<List<Float>>? =
         if (animate) rememberSlowPhases(listOf(RIM_PERIOD_MS), RIM_TICK_MS) else null
     return drawWithCache {
@@ -338,7 +353,7 @@ fun Modifier.folioThemeRim(
         // a gold ring around a yellow jacket in a purple room read as a random gold
         // ring. The book is carried by the lamp and by the light inside the pane, where
         // its cause is obvious.
-        val base = lerp(hairline, rimAtmos.rimLight, RIM_METALLIC)
+        val base = lerp(hairline, rimAtmos.rimLight, RIM_METALLIC * sheenGain)
         // Every pass is clipped to the shape and drawn at twice its visible
         // weight, so half the stroke falls outside and what remains is a rim that
         // hugs the inside of the edge. Without the clip, a surface that is not
@@ -373,13 +388,13 @@ fun Modifier.folioThemeRim(
                 wrapToOne(turn / TWO_PI + (parkedAt ?: 0f).coerceIn(0f, 1f) * RIM_PROGRESS_SWING)
             }
             val beam = Brush.sweepGradient(
-                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha),
+                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha * sheenGain),
                 center,
             )
             // The halo is the same light through a wider stroke, and has to be fainter
             // than the core or it is a stripe rather than a glow. See [RIM_BLOOM_RATIO].
             val halo = Brush.sweepGradient(
-                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha * RIM_BLOOM_RATIO),
+                rimBeamColors(head, rimAccent, counterAccent, span, headAlpha * sheenGain * RIM_BLOOM_RATIO),
                 center,
             )
             clipPath(path) {

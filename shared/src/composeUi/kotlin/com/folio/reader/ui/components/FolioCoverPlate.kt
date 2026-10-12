@@ -177,6 +177,9 @@ fun FolioCoverPlate(
     overlay: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val atmos = FolioTheme.atmosphere
+    // The metallic-sheen knob: the seat's rim-lit top catch dims; the paper branch's
+    // foot shade is occlusion, not light, and stays.
+    val sheenGain = com.folio.reader.ui.theme.folioSheenGain()
     val sizing = if (width != null) {
         Modifier.width(width).height(width * FolioTokens.coverAspect)
     } else {
@@ -197,7 +200,8 @@ fun FolioCoverPlate(
                         FolioTheme.colors.primary, halo,
                         HALO_COVER_BORROW, FolioTheme.atmosphere,
                     ),
-                    strength = haloStrength,
+                    // The metallic-sheen knob dims the halo with every other glow.
+                    strength = haloStrength * sheenGain,
                 ) else Modifier
             )
             .shadow(
@@ -240,7 +244,7 @@ fun FolioCoverPlate(
                     Brush.verticalGradient(
                         listOf(
                             (if (atmos.isDark) atmos.rimLight else Color.White)
-                                .copy(alpha = 0.28f),
+                                .copy(alpha = 0.28f * sheenGain),
                             // Paper occludes rather than emits, but it should occlude in
                             // the palette's own deepest outline. This stop was a literal
                             // Color.Black, which drew a black rule along the foot of a

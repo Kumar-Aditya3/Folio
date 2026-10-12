@@ -465,8 +465,10 @@ fun StatsRoute(
                     .nestedScroll(headerState.nestedScrollConnection)
                     .folioBackdropSource().folioPageWash()
             ) {
-                // Stats is where colour is expected: the room lights from the year's #1 book.
-                StatsAmbientSource(navModel)
+                // The room is the anchor's, on every tab: the shell re-declares the
+                // standing colour on each route change, and Stats declaring its own
+                // (the year's #1 book) is exactly the shade the user reported —
+                // Home, More and Library share the anchor tint and this did not.
                 StatisticsTabContent(
                     viewModel = navModel.statisticsVM,
                     onBookClick = onOpenBookDetail,
@@ -490,25 +492,6 @@ fun StatsRoute(
             modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter),
         )
     }
-}
-
-/**
- * Stats lights the room from the reader's #1 book of the year — the cover
- * `topBooks` already carries, so nothing new is fetched.
- *
- * The collect of [com.folio.reader.ui.statistics.StatisticsViewModel.sharedState]
- * (eager, process-wide, already collected by the screen below) lives *here* rather
- * than in StatsRoute: an emission then relights the room inside this scope only,
- * where recomposing the route would rebuild the manga statistics repository passed
- * down and re-run its whole pass, for a colour.
- */
-@Composable
-private fun StatsAmbientSource(navModel: FolioNavModelImpl) {
-    val stats by navModel.statisticsVM.sharedState.collectAsState()
-    val topCover = stats.topBooks.firstOrNull()?.coverPath
-    val lit = navModel.globalSettings.ambientColor && topCover != null
-    FolioAmbientSource(if (lit) rememberCoverAccent(topCover, FolioTheme.colors.accentProgress) else null)
-    FolioCoverLightSource(if (lit) rememberCoverLight(topCover) else null)
 }
 
 /**
@@ -542,6 +525,11 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
     when (category) {
         com.folio.reader.settings.FolioSettingsCategory.DEFAULTS ->
             com.folio.reader.settings.SettingsReaderDefaultsScreen(navModel, onBack)
+
+        // Dedicated document settings — the typography, page and page theme a
+        // PDF/Word/HTML document opens with, kept separate from the book defaults.
+        com.folio.reader.settings.FolioSettingsCategory.DOCUMENTS ->
+            com.folio.reader.settings.SettingsDocumentsScreen(navModel, onBack)
 
         // §14.2: one merged screen; the pre-merge categories (typography,
         // layout, formatting) keep resolving to it for old deep links.

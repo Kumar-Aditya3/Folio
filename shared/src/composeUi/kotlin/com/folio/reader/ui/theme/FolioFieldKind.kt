@@ -67,8 +67,6 @@ enum class FolioFieldKind {
     Heatmap,
     /** Faceted gemstone smoke with inner glow. */
     GemSmoke,
-    /** Fibrous paper grain with folds and crumple. */
-    PaperTexture,
     /** Printed halftone dot screen — risograph character. */
     HalftoneDots,
     /** A soft pulsing light border, bloom breathing around the edges. */
@@ -120,7 +118,6 @@ fun FolioFieldKind.displayName(): String = when (this) {
     FolioFieldKind.LiquidMetal -> "Liquid Metal"
     FolioFieldKind.Heatmap -> "Heatmap"
     FolioFieldKind.GemSmoke -> "Gem Smoke"
-    FolioFieldKind.PaperTexture -> "Paper Texture"
     FolioFieldKind.HalftoneDots -> "Halftone"
     FolioFieldKind.PulsingBorder -> "Pulsing Border"
     FolioFieldKind.StaticMeshGradient -> "Static Mesh"
@@ -150,7 +147,6 @@ fun FolioFieldKind.describe(): String = when (this) {
     FolioFieldKind.LiquidMetal -> "Chromatic liquid-metal sheen"
     FolioFieldKind.Heatmap -> "Glowing thermal contours"
     FolioFieldKind.GemSmoke -> "Faceted gemstone smoke"
-    FolioFieldKind.PaperTexture -> "Fibrous paper with folds"
     FolioFieldKind.HalftoneDots -> "Printed halftone dot screen"
     FolioFieldKind.PulsingBorder -> "Bloom breathing at the edges"
     FolioFieldKind.StaticMeshGradient -> "A still mesh-gradient poster"

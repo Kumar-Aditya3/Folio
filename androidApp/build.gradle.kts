@@ -22,8 +22,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 141
-        versionName = "1.2.87"
+        versionCode = 142
+        versionName = "1.2.88"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -112,6 +112,40 @@ tasks.configureEach {
     if (name.contains("lintVital", ignoreCase = true)) enabled = false
 }
 
+// FolioStaticField.android.kt reads Mirage's static shader host classes reflectively BY NAME
+// (`Class.forName("io.androidpoet.mirage.HalftoneDotsKt")`), so R8 must not rename them;
+// proguard-rules.pro `-keep`s the names. This guard turns a regression of that rule into a
+// build failure rather than the silent runtime cost that shipped once already: with the class
+// renamed, the lookup fails quietly and the static family falls back to the library wrapper,
+// whose per-vsync clock re-runs a static full-screen shader every frame -- release only,
+// debug fine.
+val mirageMappingFile = layout.buildDirectory
+    .file("outputs/mapping/release/mapping.txt").get().asFile
+tasks.matching { it.name.startsWith("minify") && it.name.endsWith("WithR8") }.configureEach {
+    doLast {
+        if (!mirageMappingFile.exists()) return@doLast
+        val renamed = mirageMappingFile.readLines().mapNotNull { line ->
+            Regex("""^io\.androidpoet\.mirage\.(\w+Kt) -> (\S+):$""")
+                .find(line)
+                // `R8$$REMOVED$$CLASS$$x` marks a class R8 stripped as dead code (an unused
+                // Mirage family, e.g. GemSmokeKt) — that is not a rename, and the by-name
+                // lookup never targets a class the app does not use. Only an actual rename
+                // silently re-enables the per-vsync clock.
+                ?.takeIf {
+                    it.groupValues[2] != "io.androidpoet.mirage.${it.groupValues[1]}" &&
+                        !it.groupValues[2].contains("REMOVED")
+                }
+                ?.groupValues?.get(1)
+        }
+        check(renamed.isEmpty()) {
+            "R8 renamed Mirage shader host class(es): ${renamed.joinToString()}. The -keep " +
+                "rules in proguard-rules.pro must preserve io.androidpoet.mirage.*Kt class " +
+                "names -- FolioStaticField.android.kt looks them up reflectively by name, and " +
+                "a rename silently re-enables the library's per-vsync clock in release."
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -120,6 +154,10 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    // Conscrypt TLS provider — FolioApplication.onCreate installs it as the top
+    // security provider. `implementation` in :shared does not expose it here, so the
+    // app module declares it directly to reference org.conscrypt.Conscrypt.
+    implementation(libs.conscrypt.android)
 
     // JDBC bridge over android.database.sqlite — provides the SQLite JDBC driver on Android
     // (xerial sqlite-jdbc only ships desktop natives).

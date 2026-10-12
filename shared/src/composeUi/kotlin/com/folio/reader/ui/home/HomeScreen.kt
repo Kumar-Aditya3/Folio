@@ -78,6 +78,8 @@ import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.COVER_HALO_STRENGTH_HERO
 import com.folio.reader.ui.components.FolioCoverPlate
 import com.folio.reader.ui.components.FolioEyebrow
+import com.folio.reader.ui.components.FolioEdgeRole
+import com.folio.reader.ui.components.folioSoftWash
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.FolioProgressBar
@@ -105,6 +107,7 @@ import com.folio.reader.ui.components.tint
 import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.components.LocalGlassCapabilities
+import com.folio.reader.ui.theme.FolioAmbientCanonical
 import com.folio.reader.ui.theme.FolioAmbientSource
 import com.folio.reader.ui.theme.FolioCoverLightSource
 import com.folio.reader.ui.components.rememberCoverLight
@@ -121,6 +124,7 @@ import com.folio.reader.ui.theme.heroWashBorrow
 import com.folio.reader.ui.theme.tameCover
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.folioLiquidGlass
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.lightDirection
 import com.folio.reader.ui.theme.paneFill
 import com.folio.reader.ui.theme.rememberFolioPressFocal
@@ -245,6 +249,11 @@ fun HomeScreen(
                 rememberCoverAccent(anchorItem.coverPath, fallbackTint)
             } else null
             FolioAmbientSource(ambientTint)
+            // And the same colour as the room's standing tint, so the shell can reset
+            // to it on every route change: a detail screen's preview must not outlive
+            // its visit, and a tab that features nothing should wear the anchor's
+            // colour, not the previous writer's. See FolioAmbientCanonical.
+            FolioAmbientCanonical(ambientTint)
             // And the artwork's own light: where its brightness sits, what colour the
             // lit parts are, how much of it there is. This is what places the room's
             // lamp by the book instead of by its average.
@@ -582,21 +591,26 @@ private fun ReadingNowAnchor(
             // raised sheen carry the surface. Lit by the room's own virtual sun so
             // its specular agrees with the rim catch.
             //
-            // R1: the gel is on. It was held off because the hero's backdrop was a
-            // smooth vertical ramp plus three soft pools, where a lens rim has no
-            // high-frequency detail to separate and the dispersion lands three samples
-            // on one colour — a painted rectangle, not glass. The guilloche now
-            // engraves a figure on that ramp, which is the detail the refraction was
-            // always waiting for, so the hero is finally a surface it pays on.
+            // R2: the gel is OFF, and the reason is the app's own record: the plate it
+            // refracts has no call site anywhere (`LocalFolioGuillocheActive` is forced
+            // false at the root — see MainActivity), so the gel's band is a rim derived
+            // from an engraving nobody paints. That band, inset a fifth of the short side
+            // over the pane's own feathered fill, is the home hero's reported "nested
+            // square": an outer glassy rim, then an abrupt inner rectangle with nothing
+            // behind it. The film itself stays — light on the glass — but the room
+            // refraction goes until the plate actually exists.
             .folioLiquidGlass(
                 accent = tint,
                 highlight = FolioTheme.atmosphere.rimLight,
                 lightX = heroLight.first,
                 lightY = heroLight.second,
                 enabled = LocalGlassCapabilities.current.specular,
-                refractBackdrop = true,
+                refractBackdrop = false,
                 focal = heroFocal,
                 shape = heroShape,
+                // The metallic-sheen knob is the film's own intensity scalar, so the
+                // hero's glints dim with every other light catch in the app.
+                intensity = folioSheenGain(),
                 // The engraving this hero stands on, asked for rather than assumed: the gel
                 // evaluates the plate's own figure so the ribbons it bends are the ribbons
                 // the page painted.
@@ -607,7 +621,17 @@ private fun ReadingNowAnchor(
             // The silk is no longer drawn here: it is the app's single ground plane now
             // (MainActivity's `folioSilkBackground`), showing through this hero like every
             // other surface. The hero keeps only its own glass, wash and rim.
-            .background(
+            //
+            // §18: **feathered**, not `background(brush, heroShape)`. The stops below were
+            // already tapered so the wash could not draw a Mach band *along its own axis*,
+            // and that was the right fix for the wrong axis. A hard fill of the hero's
+            // shape laid over a plane that `folioRaised` has just ramped to nothing at the
+            // silhouette puts the hard silhouette straight back: the ramp is still being
+            // drawn, still correct, and entirely invisible underneath an opaque lid of the
+            // same outline. The wash now ramps along the surface's normal with everything
+            // else, so the card has one edge and the lens owns it. See [folioSoftWash].
+            .folioSoftWash(
+                heroShape,
                 // Eased falloff, not a two-stop fade. The old wash reached transparent
                 // by 0.65 of the diagonal and then held flat; the slope change where the
                 // fade met the flat drew a faint rectangle edge across the plane — a Mach
@@ -622,7 +646,7 @@ private fun ReadingNowAnchor(
                     0.82f to tint.copy(alpha = washAlpha * 0.04f),
                     1f to Color.Transparent,
                 ),
-                heroShape,
+                FolioEdgeRole.Pane,
             )
             // The anchor's themed rim: a light travelling the plane's own
             // silhouette in the cover's hue against the discovery counter-hue.

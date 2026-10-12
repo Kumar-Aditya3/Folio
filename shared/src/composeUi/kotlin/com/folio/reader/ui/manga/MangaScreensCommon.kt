@@ -273,7 +273,10 @@ internal fun CategoryPickerDialog(
         onDismissRequest = onDismiss,
         title = "Categories",
     ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (categories.isEmpty()) {
                     Text(
                         "No categories yet — create one below.",
@@ -338,7 +341,7 @@ internal fun CategoryPickerDialog(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = FolioTokens.space3),
+                .padding(start = 16.dp, end = 16.dp, top = FolioTokens.space3, bottom = FolioTokens.space2),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Done") }

@@ -613,6 +613,13 @@ fun ReaderScreen(
         // draw-time skip would leave a full-rate frame request alive behind an opaque page.
         com.folio.reader.ui.theme.FolioFieldOccluder()
         Box(modifier = Modifier.fillMaxSize().background(Color(readerThemePreset.background))) {
+        // The reader's chrome and in-reader panels wear the calm glass unless the
+        // reader is in editorial styling: dimmed, hue-stripped light catches so the
+        // islands stop reading as shiny and book-edge-tinted. Scoped to the reader
+        // subtree, so every other surface keeps its full material (Rule 19).
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.folio.reader.ui.theme.LocalFolioReaderCalmGlass provides !settings.editorialReading
+        ) {
         // Main content - fills entire screen, overlays positioned absolutely
         if (currentChapter != null) {
             val reservedEnd = if (occludes) 0.dp else when {
@@ -733,8 +740,9 @@ fun ReaderScreen(
         // rather than printed. It carries no pointer modifier, so it never steals a
         // tap from the page, and it is skipped where the page is a heavyweight native
         // window that paints over Compose layers — there it would cost a layer and
-        // never appear.
-        if (!occludes && settings.showProgress) {
+        // never appear. Decorative page texture, so it is parked unless the reader
+        // opts into the editorial look; the calm default leaves the margins clean.
+        if (!occludes && settings.showProgress && settings.editorialReading) {
             androidx.compose.foundation.layout.Spacer(
                 modifier = Modifier
                     .fillMaxSize()
@@ -864,6 +872,7 @@ fun ReaderScreen(
                 pageCountHint = totalPages,
                 chapterStops = chapterStops,
                 pagesLeftLabel = if (settings.showProgress) pagesLeftLabel else null,
+                editorial = settings.editorialReading,
                 onSeek = seekToBookFraction
             )
         }
@@ -944,6 +953,7 @@ fun ReaderScreen(
             onWriteGlobal = onWriteGlobal,
             onResetBook = onResetBook
         )
+        }
         }
         }
     }

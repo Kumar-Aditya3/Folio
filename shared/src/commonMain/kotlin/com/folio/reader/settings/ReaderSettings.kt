@@ -11,6 +11,22 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 
+/**
+ * Colour-vibrancy range anchors, shared by this setting and the compose-layer atmosphere
+ * derivation (which keeps its own `VIBRANCY_NEUTRAL` copy because it cannot see this module).
+ * [FOLIO_VIBRANCY_NEUTRAL] is the pre-vibrancy look; [FOLIO_VIBRANCY_DEFAULT] is what the app
+ * ships at. Keep the neutral value in sync with `com.folio.reader.ui.theme.VIBRANCY_NEUTRAL`.
+ */
+const val FOLIO_VIBRANCY_NEUTRAL = 0.5f
+const val FOLIO_VIBRANCY_DEFAULT = 0.78f
+
+/**
+ * The metallic-sheen knob's top of travel, and the look the app has always shipped at:
+ * every light catch in the app renders at full strength. The slider scales *down* from
+ * here, so the current look is the highest the setting can go.
+ */
+const val FOLIO_METALLIC_SHEEN_FULL = 1f
+
 @Serializable
 data class ReaderSettings(
     val fontFamily: String = "Literata",
@@ -72,6 +88,27 @@ data class ReaderSettings(
      */
     val ambientColor: Boolean = true,
     /**
+     * How saturated the room's colour is, on one "Muted ↔ Vivid" scale in `0..1`.
+     * [FOLIO_VIBRANCY_NEUTRAL] (0.5) is the look every screen had before this knob existed;
+     * the app ships at [FOLIO_VIBRANCY_DEFAULT]. It drives the field's pool and foot chroma,
+     * the pool/bloom alpha, the lit-cover clamp headroom, the glass dimmer and the Android
+     * field shader's dark-sink — all at pinned luminance, so like [ambientColor] it changes
+     * only the colour of the air and never the ink's contrast ratio. App-level, not per-book.
+     */
+    val vibrancy: Float = FOLIO_VIBRANCY_DEFAULT,
+    /**
+     * How strongly every surface catches the light — the metallic glow — on one
+     * `0..1` scale. [FOLIO_METALLIC_SHEEN_FULL] (1) is the look the app has always
+     * had and the highest the setting goes; dragging it down softens every light
+     * catch together: the specular rims and corner sheens on tabs, cards, plates and
+     * bars, the AGSL glints and travelling highlights, the masthead's mirror band,
+     * the nav capsule's selection sweep, cover-seat rims, the reading page's corner
+     * light and the room's lamp bloom. Depth survives — shadows, fills, hairlines,
+     * refraction and blur are untouched — only the *light response* dims. 0 turns
+     * every catch off. App-level, not per-book.
+     */
+    val metallicSheen: Float = FOLIO_METALLIC_SHEEN_FULL,
+    /**
      * User-authored app palette. When present it replaces the palette named by
      * [appThemeId] everywhere; the atmosphere (field gradient, colour pools,
      * shadows) is re-derived from it, so the gradient applies to custom colours
@@ -88,8 +125,12 @@ data class ReaderSettings(
     val topBarOpacity: Float = 0.35f,
     val navBarOpacity: Float = 0.9f,
     val panelOpacity: Float = 0.97f,
-    /** Reader bars, rails, drawers and the reader settings sheet; solid by default. */
-    val readerChromeOpacity: Float = 1f,
+    /**
+     * Reader bars, rails, drawers and the reader settings sheet. Glass like the rest
+     * of the app: the panels frost the dimmed backdrop drawn behind them, so this
+     * mirrors `FolioSurfaceOpacity.PANEL_GLASS` rather than sitting solid.
+     */
+    val readerChromeOpacity: Float = 0.9f,
     /**
      * §16 liquid glass: blur, directional specular and grain on the overlay
      * layer, on devices that can carry them. Off restores the pre-glass look on
@@ -97,6 +138,15 @@ data class ReaderSettings(
      * way, which is why this is a flag and not a fifth slider.
      */
     val liquidGlassEffects: Boolean = true,
+    /**
+     * §20 reach: when liquid glass is on, keep it *minimal* — on true overlays only (the
+     * bars, the nav capsule, sheets, menus, modals and floating heroes), not on the many
+     * in-flow panels and chips (section cards, stats blocks, shelf items). Off (the default)
+     * lets the glass reach every panel so an in-flow pane frosts the room like a real slab;
+     * on is the opt-out for anyone who finds the full reach heavy or busy. It only trims the
+     * effect — it never adds glass, and it does nothing on a device that cannot blur.
+     */
+    val minimalLiquidGlass: Boolean = false,
     /**
      * Render the app's window outside sRGB. Cover art, manga pages and inline EPUB
      * art routinely carry a Display-P3 or Adobe-RGB profile: the decoder preserves
@@ -147,6 +197,15 @@ data class ReaderSettings(
      */
     val documentReaderMode: String = "SINGLE_PAGE",
     /**
+     * The dedicated reading settings a **document** opens with — its own
+     * typography, page, page theme and layout, separate from the book defaults
+     * above. Persisted in the same row (so it syncs and backs up with everything
+     * else) but never written by the book reader's panels, and never snapshotted
+     * per item: documents follow these defaults the way they follow
+     * [documentReaderMode]. See [DocumentSettings].
+     */
+    val documentSettings: DocumentSettings = DocumentSettings(),
+    /**
      * Eye-protection (warm/blue-light-reduction) filter — a global comfort
      * preference, not a per-book reading choice, so it lives outside the
      * per-book override lists like [liquidGlassEffects]. Off by default so
@@ -155,6 +214,21 @@ data class ReaderSettings(
      */
     val eyeProtection: Boolean = false,
     val eyeProtectionIntensity: Float = 0.4f,
+    /**
+     * Editorial (expressive) reading look. Off by default so the reading page is
+     * calm: headings render in the body ink and external links are inked +
+     * underlined rather than tinted, the decorative page foxing is parked, and the
+     * "pages left" chip reads neutral. When on, the page restores the theme's
+     * expressive styling — coloured headings ([Theme.headingText]), tinted links
+     * ([Theme.link]), page-edge foxing, and the accent-tinted progress chip.
+     *
+     * A global reading-appearance preference (like [eyeProtection]), not a per-book
+     * reading choice, so it lives outside the per-book override lists like
+     * [liquidGlassEffects]. Default off means every existing install opens calmer
+     * with no migration; readers who want the vivid themes to paint into the page
+     * opt back in.
+     */
+    val editorialReading: Boolean = false,
     /**
      * Per-theme background-animation overrides, keyed by `ThemePack.id`. An app-level
      * preference (like [liquidGlassEffects]), not a per-book reading choice, so it lives

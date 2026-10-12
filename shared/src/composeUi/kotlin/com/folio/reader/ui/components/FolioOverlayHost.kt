@@ -1,5 +1,12 @@
 package com.folio.reader.ui.components
 
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -9,13 +16,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -30,20 +39,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioGlassTier
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioSurfaceContents
+import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioSectionAccent
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlin.math.roundToInt
 
 /**
@@ -128,6 +141,24 @@ class FolioOverlayController internal constructor() {
     internal var onDismiss: (() -> Unit)? = null
     internal var pane: (@Composable ColumnScope.() -> Unit)? = null
     internal var title: String? = null
+    // An explicit pane fill alpha. Null keeps the app's panel knob (the default). The reader
+    // passes its own in-reader-controls veil here so a reader-owned menu/dialog tracks the
+    // "In-reader controls" slider rather than the global panel one — the host composes the pane
+    // in its own scope, so the knob cannot be inherited and has to be carried as a value.
+    internal var fillAlpha: Float? = null
+
+    // Pane ownership. The host shows exactly one pane, but a single tap can both close the
+    // current pane and open the next one — a menu item that opens a confirm dialog or a
+    // category picker is the common case. Those two effects (the closing menu's
+    // `expanded=false` and the opening dialog's `expanded=true`) land in the same
+    // recomposition in an unspecified order, so the menu's `dismiss()` used to clobber the
+    // dialog the dialog had *just* shown, and the action read as "nothing happened".
+    //
+    // Each `show()` mints a fresh token and records it as the owner. A caller dismisses with
+    // the token it was given, and a dismiss whose token is no longer the owner is a no-op —
+    // so a stale menu can never close a newer pane, regardless of effect ordering.
+    private var serial = 0
+    private var owner = 0
 
     /** True while a pane is showing. The host's back handler is gated on this. */
     val isOpen: Boolean get() = kind != null
@@ -139,36 +170,44 @@ class FolioOverlayController internal constructor() {
     fun showMenu(
         anchor: Rect,
         title: String? = null,
+        fillAlpha: Float? = null,
         onDismiss: () -> Unit,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Menu, anchor, title, onDismiss, content)
+    ) = show(FolioOverlayKind.Menu, anchor, title, fillAlpha, onDismiss, content)
 
     /** Show a centred dialog. */
     fun showDialog(
         title: String? = null,
+        fillAlpha: Float? = null,
         onDismiss: () -> Unit,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Dialog, null, title, onDismiss, content)
+    ) = show(FolioOverlayKind.Dialog, null, title, fillAlpha, onDismiss, content)
 
     /** Show a bottom sheet. */
     fun showSheet(
         title: String? = null,
+        fillAlpha: Float? = null,
         onDismiss: () -> Unit,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Sheet, null, title, onDismiss, content)
+    ) = show(FolioOverlayKind.Sheet, null, title, fillAlpha, onDismiss, content)
 
     private fun show(
         kind: FolioOverlayKind,
         anchor: Rect?,
         title: String?,
+        fillAlpha: Float?,
         onDismiss: () -> Unit,
         content: @Composable ColumnScope.() -> Unit,
-    ) {
+    ): Int {
         this.kind = kind
         this.anchor = anchor
         this.title = title
+        this.fillAlpha = fillAlpha
         this.onDismiss = onDismiss
         this.pane = content
+        serial += 1
+        owner = serial
+        return owner
     }
 
     /**
@@ -180,9 +219,22 @@ class FolioOverlayController internal constructor() {
         kind = null
         anchor = null
         title = null
+        fillAlpha = null
         onDismiss = null
         pane = null
+        owner = 0
         notify()
+    }
+
+    /**
+     * Close the pane only if [token] still owns it — the token returned by the matching
+     * `show*` call. A dismiss from a pane that has already been replaced is dropped, which is
+     * what lets a menu item open a dialog without the closing menu tearing it back down. A
+     * token of 0 (never shown / already superseded) is always a no-op.
+     */
+    fun dismiss(token: Int) {
+        if (token == 0 || token != owner) return
+        dismiss()
     }
 }
 
@@ -211,10 +263,60 @@ fun rememberFolioOverlayController(): FolioOverlayController = remember { FolioO
 @Composable
 fun FolioOverlayHost(modifier: Modifier = Modifier) {
     val controller = LocalFolioOverlay.current ?: return
-    val kind = controller.kind ?: return
-    val pane = controller.pane ?: return
-    val title = controller.title
-    val anchor = controller.anchor
+
+    // ── the enter/exit transition ──
+    //
+    // The pane used to appear and vanish as a raw composition add/remove, because this
+    // function early-returned on `controller.kind == null`. That return is also why no
+    // exit could ever play: by the time the pane should be animating out, the state it
+    // would animate is already gone. So the last live pane is *held* — in a plain holder,
+    // not in snapshot state, because nothing may recompose off it; it exists only so the
+    // exit transition has something to draw after the controller has cleared itself.
+    val kindNow = controller.kind
+    val paneNow = controller.pane
+    val open = kindNow != null && paneNow != null
+    val motion = rememberMotionEnabled()
+    val transition = updateTransition(open, label = "folioOverlay")
+    // Asymmetric on purpose, and this is the lean: opening is the acknowledgement of a
+    // tap, so it may take the time to arrive from the trigger; closing is the user having
+    // already decided, so it gets out of the way. A menu that fades out as slowly as it
+    // faded in feels like latency.
+    val fade by transition.animateFloat(
+        transitionSpec = {
+            if (!motion) snap() else if (targetState) {
+                tween(FOLIO_OVERLAY_ENTER_MS, easing = LinearOutSlowInEasing)
+            } else {
+                tween(FOLIO_OVERLAY_EXIT_MS, easing = FastOutLinearInEasing)
+            }
+        },
+        label = "folioOverlayFade",
+    ) { if (it) 1f else 0f }
+    val grow by transition.animateFloat(
+        transitionSpec = {
+            if (!motion) snap() else if (targetState) {
+                spring(dampingRatio = 0.86f, stiffness = 1500f)
+            } else {
+                tween(FOLIO_OVERLAY_EXIT_MS, easing = FastOutLinearInEasing)
+            }
+        },
+        label = "folioOverlayGrow",
+    ) { if (it) 1f else FOLIO_OVERLAY_MENU_ENTER_SCALE }
+
+    val held = remember { FolioOverlayFrame() }
+    if (open) {
+        held.kind = kindNow
+        held.pane = paneNow
+        held.title = controller.title
+        held.anchor = controller.anchor
+        held.fillAlpha = controller.fillAlpha
+    }
+    // Closed *and* settled: nothing to draw and nothing left to finish.
+    if (!open && !transition.isRunning) return
+    val kind = held.kind ?: return
+    val pane = held.pane ?: return
+    val title = held.title
+    val anchor = held.anchor
+    val paneFillAlpha = held.fillAlpha
 
     val scrim = FolioTheme.atmosphere.shadowAmbient.copy(alpha = FOLIO_OVERLAY_SCRIM_ALPHA)
     // The pane must not blur while the chrome is occluding a swap: the backdrop would be the
@@ -225,8 +327,9 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
 
     // Back closes the pane, and only while one is open — the handler lives inside the host, so it
     // sits above the shell's own walk in the handler stack and cannot swallow a back that was
-    // meant to pop a route.
-    FolioBackHandler(enabled = true, onBack = { controller.dismiss() })
+    // meant to pop a route. Disabled during the exit so a second back reaches the route rather
+    // than being eaten by a pane that is already leaving.
+    FolioBackHandler(enabled = open, onBack = { controller.dismiss() })
 
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
@@ -251,6 +354,7 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .matchParentSize()
+                .graphicsLayer { alpha = fade }
                 .background(scrim)
                 .clickable(
                     interactionSource = scrimInteraction,
@@ -262,17 +366,14 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
         val paneModifier = Modifier
             .then(
                 when (kind) {
-                    // A menu hangs off its trigger: its top-left tracks the anchor's bottom-left,
-                    // clamped into the window so a trigger near an edge cannot push it off screen.
+                    // A menu hangs off its trigger: its top-left tracks the anchor's
+                    // bottom-left — measured first, then placed, so the clamp knows the
+                    // pane's real size and a trigger near any edge cannot push it off
+                    // screen (see the placement comment below).
                     FolioOverlayKind.Menu -> {
                         val maxW = with(density) { maxWidth.toPx() }
                         val maxH = with(density) { maxHeight.toPx() }
-                        val x = (anchor?.left ?: 0f)
-                            .coerceIn(0f, (maxW - FOLIO_OVERLAY_MENU_MIN_PX).coerceAtLeast(0f))
-                        val y = (anchor?.bottom ?: 0f)
-                            .coerceIn(0f, (maxH - FOLIO_OVERLAY_MENU_MIN_PX).coerceAtLeast(0f))
                         Modifier
-                            .offset { IntOffset(x.roundToInt(), y.roundToInt()) }
                             .widthIn(
                                 min = FOLIO_OVERLAY_MENU_MIN_WIDTH,
                                 max = FOLIO_OVERLAY_MENU_MAX_WIDTH,
@@ -281,6 +382,39 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                             // Material's own menu does the same. The cap is what gives the
                             // scroll a bounded height to work against.
                             .heightIn(max = FOLIO_OVERLAY_MENU_MAX_HEIGHT)
+                            // Placement that measures before it places. The old `offset`
+                            // clamped the pane's top-left against a fixed 96px guard without
+                            // knowing the pane's real size, so a menu anchored near the right
+                            // edge (panes are 200-320dp wide) or near the bottom of the
+                            // screen (heights run to the 420dp cap) was pushed past the
+                            // window and cut off by it — the long-press menus on the last
+                            // shelf rows. Clamping with the measured size fixes the sides;
+                            // the flip — open above the trigger when the menu does not fit
+                            // below it — fixes the foot, the same way Material's own menus
+                            // flip; and the final coerce is the degenerate fallback (a pane
+                            // taller than the window pins to the top and scrolls).
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(constraints)
+                                val maxX = (maxW - placeable.width).coerceAtLeast(0f).roundToInt()
+                                val x = (anchor?.left ?: 0f).roundToInt().coerceIn(0, maxX)
+                                val top = (anchor?.top ?: 0f).roundToInt()
+                                val below = (anchor?.bottom ?: 0f).roundToInt()
+                                val y = when {
+                                    below + placeable.height <= maxH.roundToInt() -> below
+                                    top - placeable.height >= 0 -> top - placeable.height
+                                    else -> (maxH - placeable.height).coerceAtLeast(0f).roundToInt()
+                                }
+                                // Which end the pane grew from, for the transform origin
+                                // below. A menu that flipped above its trigger has to
+                                // scale out of its *bottom* edge or it appears to crawl
+                                // away from the finger that opened it. Written in layout,
+                                // read in draw — the phases are already in that order, so
+                                // no extra frame and no recomposition.
+                                held.originY = if (y < top) 1f else 0f
+                                layout(placeable.width, placeable.height) {
+                                    placeable.place(x, y)
+                                }
+                            }
                             .padding(FolioTokens.space2)
                     }
                     // A pane with a text field is in the **app's** window, so no dialog window
@@ -297,9 +431,35 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                             .imePadding()
                             .padding(FolioTokens.space4)
                             .widthIn(max = FOLIO_OVERLAY_DIALOG_MAX_WIDTH)
-                    FolioOverlayKind.Sheet -> Modifier.fillMaxWidth().imePadding()
+                            // A dialog whose own content is scrollable (a LazyColumn or a
+                            // nested verticalScroll — e.g. a source's Filters sheet) would be
+                            // measured with infinite max-height by the pane's verticalScroll
+                            // below and crash ("Vertically scrollable component was measured
+                            // with an infinity maximum height constraints"). Capping to the
+                            // window height keeps the measurement finite; the pane itself
+                            // scrolls when the content is taller.
+                            .heightIn(max = maxHeight)
+                    FolioOverlayKind.Sheet ->
+                        Modifier.fillMaxWidth().imePadding().heightIn(max = maxHeight)
                 }
             )
+            // The transition, applied *after* the placement modifiers so it transforms the
+            // pane in place and the measure-then-place clamp above is untouched. A menu
+            // grows out of the corner it hangs from — the trigger's own corner, start-side,
+            // and the end the placement actually chose (see `originY`) — which is what makes
+            // the pane read as having come *from* the control rather than having been
+            // cross-faded over the screen. A dialog and a sheet scale about their own middle
+            // and foot respectively, matching where each one enters from.
+            .graphicsLayer {
+                alpha = fade
+                scaleX = grow
+                scaleY = grow
+                transformOrigin = when (kind) {
+                    FolioOverlayKind.Menu -> TransformOrigin(0f, held.originY)
+                    FolioOverlayKind.Dialog -> TransformOrigin(0.5f, 0.5f)
+                    FolioOverlayKind.Sheet -> TransformOrigin(0.5f, 1f)
+                }
+            }
             // The pane swallows taps so a tap inside it does not reach the scrim behind it.
             .clickable(
                 interactionSource = paneInteraction,
@@ -311,6 +471,12 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                     FolioOverlayKind.Sheet -> FolioShapes.sheet
                     else -> FolioShapes.card
                 },
+                // Every hosted pop-up (dialog, menu, sheet) is detached from the user
+                // opacity knobs and pinned to the highest opacity its own glass material
+                // allows, so a pop-up is never see-through however transparent the room's
+                // chrome is set. A caller may still pin an explicit alpha, but no caller
+                // falls back to the global panel knob any more.
+                fillAlpha = paneFillAlpha ?: FolioSurfaceOpacity.POPUP_OPAQUE,
                 accent = LocalFolioSectionAccent.current,
                 // §16 cost model: an anchored menu is small, high-attention chrome under the
                 // reader's finger, so it takes the finer `control` budget; a dialog or a
@@ -331,8 +497,13 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
 
         // Nested panels inside the pane are quieted — a card inside the glass must not ring a
         // second full-strength rim a few pixels inside the pane's own (see FolioSurfaceDepth).
-        // The pane scrolls so a long menu or dialog is usable rather than clipped.
-        FolioSurfaceContents {
+        // The pane scrolls so a long menu or dialog is usable rather than clipped. §19: the
+        // pane publishes the exact plane it is painted with (folioVeilPlane — same accent,
+        // same blur gating as its own folioVeil call above), so nested surfaces are a floor
+        // of this pane's material plus a rim: one object with structure in it.
+        FolioSurfaceContents(
+            folioVeilPlane(accent = LocalFolioSectionAccent.current, blurEnabled = !occlude)
+        ) {
             Column(
                 paneModifier.then(Modifier.verticalScroll(rememberScrollState())),
             ) {
@@ -380,6 +551,7 @@ fun FolioMenu(
     modifier: Modifier = Modifier,
     title: String? = null,
     anchor: Rect? = null,
+    fillAlpha: Float? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val controller = LocalFolioOverlay.current
@@ -408,27 +580,86 @@ fun FolioMenu(
 
     val currentContent by rememberUpdatedState(content)
     val currentDismiss by rememberUpdatedState(onDismissRequest)
-    // Ownership: only the menu that actually opened the pane may close it. Without this, a second
-    // `FolioMenu` composing with `expanded = false` would dismiss the first one's pane.
-    var shown by remember { mutableStateOf(false) }
+    // Ownership: only the menu that actually opened the pane may close it. `showMenu` returns a
+    // token; dismissing with it is a no-op once a newer pane (e.g. a dialog this menu's own item
+    // opened) has taken over, so the closing menu can't tear that newer pane straight back down.
+    var token by remember { mutableStateOf(0) }
     LaunchedEffect(expanded, rect) {
         if (expanded) {
-            shown = true
-            controller.showMenu(rect, title = title, onDismiss = { currentDismiss() }) {
+            token = controller.showMenu(rect, title = title, fillAlpha = fillAlpha, onDismiss = { currentDismiss() }) {
                 currentContent()
             }
-        } else if (shown) {
-            shown = false
-            controller.dismiss()
+        } else if (token != 0) {
+            controller.dismiss(token)
+            token = 0
         }
     }
     // A menu composed conditionally — `if (open) FolioMenu(expanded = true, …)` — leaves the
     // composition without ever seeing `expanded` go false, so the pane has to be closed on dispose
-    // or it would outlive its trigger. The `shown` guard keeps this from closing a pane another
-    // menu owns.
+    // or it would outlive its trigger. The token guard keeps this from closing a pane another
+    // menu or dialog now owns.
     DisposableEffect(Unit) {
-        onDispose { if (shown) controller.dismiss() }
+        onDispose { if (token != 0) controller.dismiss(token) }
     }
+}
+
+/**
+ * The last live pane, held across its own exit.
+ *
+ * Deliberately **not** snapshot state. Nothing may recompose off these: they are written
+ * during composition while the controller still has a pane and read in the same pass, and
+ * they exist for exactly one reason — [FolioOverlayHost] early-returns the moment the
+ * controller clears, which left no way to draw an exit. [originY] is the one field written
+ * from a later phase (layout) and read from a later one still (draw), which is safe in that
+ * direction and in that direction only.
+ */
+private class FolioOverlayFrame {
+    var kind: FolioOverlayKind? = null
+    var pane: (@Composable ColumnScope.() -> Unit)? = null
+    var title: String? = null
+    var anchor: Rect? = null
+    var fillAlpha: Float? = null
+    var originY: Float = 0f
+}
+
+/**
+ * A menu row at the app's own density.
+ *
+ * Material's `DropdownMenuItem` carries a **48dp** floor (`MenuListItemContainerHeight`) and
+ * 12dp of vertical content padding, and that floor is applied by a `sizeIn` *inside* the
+ * component, so it can only be overridden from the call site. It is the right number for a
+ * touch menu of four or five destinations; it is the wrong number for the menus this app
+ * actually has. The library's display menu is a label, a view switcher, eight sort rows and
+ * two direction rows: at 48dp that is over 500dp of pane, which blows through the height cap
+ * and becomes a *scrolling* menu — a list of eight short words that the user has to scroll.
+ * The long-press menus are three to six rows and read as a slab for the same reason.
+ *
+ * 36dp with 12dp of horizontal padding keeps every row comfortably past the 32dp that a
+ * pointer-and-touch dense menu wants, puts the same eight-row sort list in ~300dp, and stops
+ * the cap being reached at all — so the menus stop scrolling, which is most of the "takes way
+ * too much space" complaint.
+ *
+ * Shaped exactly like `DropdownMenuItem` minus `contentPadding` (which it owns), so a call
+ * site migrates by renaming the call. [FolioMenuItemLabel] is the matching section label.
+ */
+@Composable
+fun FolioMenuItem(
+    text: @Composable () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
+) {
+    DropdownMenuItem(
+        text = text,
+        onClick = onClick,
+        modifier = modifier.height(FOLIO_MENU_ROW_HEIGHT),
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = FolioTokens.space2, vertical = 0.dp),
+    )
 }
 
 /**
@@ -441,6 +672,7 @@ fun FolioDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     title: String? = null,
+    fillAlpha: Float? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val controller = LocalFolioOverlay.current
@@ -458,21 +690,20 @@ fun FolioDialog(
     }
     val currentContent by rememberUpdatedState(content)
     val currentDismiss by rememberUpdatedState(onDismissRequest)
-    var shown by remember { mutableStateOf(false) }
+    var token by remember { mutableStateOf(0) }
     LaunchedEffect(expanded) {
         if (expanded) {
-            shown = true
-            controller.showDialog(title = title, onDismiss = { currentDismiss() }) {
+            token = controller.showDialog(title = title, fillAlpha = fillAlpha, onDismiss = { currentDismiss() }) {
                 currentContent()
             }
-        } else if (shown) {
-            shown = false
-            controller.dismiss()
+        } else if (token != 0) {
+            controller.dismiss(token)
+            token = 0
         }
     }
     // See FolioMenu: a dialog composed conditionally must close its pane when it leaves.
     DisposableEffect(Unit) {
-        onDispose { if (shown) controller.dismiss() }
+        onDispose { if (token != 0) controller.dismiss(token) }
     }
 }
 
@@ -490,16 +721,44 @@ fun FolioDialog(
 private const val FOLIO_OVERLAY_SCRIM_ALPHA = 0.32f
 
 /** A menu pane's width ceiling — a menu is a list of short labels, not a panel. */
-private val FOLIO_OVERLAY_MENU_MAX_WIDTH = 320.dp
+private val FOLIO_OVERLAY_MENU_MAX_WIDTH = 268.dp
 
-/** A menu pane's width floor, so a menu of two-word labels is not a cramped sliver. */
-private val FOLIO_OVERLAY_MENU_MIN_WIDTH = 200.dp
+/**
+ * A menu pane's width floor. Material's own floor for a dropdown row is 112dp
+ * (DropdownMenuItemDefaultMinWidth); matching it means the pane sizes to its longest label —
+ * "fit to text" — instead of stretching four short scope names across a fixed 200dp slab,
+ * while still keeping a two-word menu from being a cramped sliver.
+ */
+private val FOLIO_OVERLAY_MENU_MIN_WIDTH = 112.dp
 
-/** A menu pane's height ceiling; past it the pane scrolls, as Material's own menu does. */
-private val FOLIO_OVERLAY_MENU_MAX_HEIGHT = 420.dp
+/**
+ * A menu pane's height ceiling; past it the pane scrolls, as Material's own menu does.
+ *
+ * Down from 420dp with [FOLIO_MENU_ROW_HEIGHT]: at 36dp a row, 340dp holds nine rows plus a
+ * label, which covers every menu in the library outright. The old pairing (48dp rows against
+ * a 420dp cap) guaranteed the opposite — the display menus exceeded the cap and shipped as
+ * scrolling panes, and a menu tall enough to scroll is a menu that has stopped looking like
+ * a menu.
+ */
+private val FOLIO_OVERLAY_MENU_MAX_HEIGHT = 340.dp
+
+/** See [FolioMenuItem]: the app's menu row height, against Material's 48dp floor. */
+private val FOLIO_MENU_ROW_HEIGHT = 36.dp
+
+/**
+ * How small a pane starts and ends.
+ *
+ * 0.96, not 0.8. A menu is anchored chrome a few hundred dp across, and the scale is there to
+ * say "this came out of that control", not to perform. Past a few percent the rows visibly
+ * reflow inside the growing box and the type swims, which is the cheap-looking end of this
+ * effect; 4% reads as the pane settling.
+ */
+private const val FOLIO_OVERLAY_MENU_ENTER_SCALE = 0.96f
+
+/** Arrive in 160ms, leave in 110ms. See the transition note in [FolioOverlayHost]. */
+private const val FOLIO_OVERLAY_ENTER_MS = 160
+
+private const val FOLIO_OVERLAY_EXIT_MS = 110
 
 /** The dialog pane's width ceiling, so a small confirm does not become a full-width slab. */
 private val FOLIO_OVERLAY_DIALOG_MAX_WIDTH = 420.dp
-
-/** Clamp guard: keep at least this much of a menu pane on screen when the anchor is at an edge. */
-private const val FOLIO_OVERLAY_MENU_MIN_PX = 96f

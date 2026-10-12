@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,9 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -216,6 +215,7 @@ internal fun TagDetailView(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TagEditDialog(
     title: String,
@@ -248,19 +248,22 @@ internal fun TagEditDialog(
                     fontWeight = FontWeight.SemiBold
                 )
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(6),
+                // A non-scrolling wrap grid: the pane content already lives in a
+                // vertical scroll (FolioOverlayHost), and a LazyVerticalGrid nested in
+                // that is measured with infinite height — which crashes. 13 fixed
+                // swatches wrap into rows of six with no scroll container of their own.
+                FlowRow(
+                    maxItemsInEachRow = 6,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    item {
-                        ColorSwatch(
-                            color = null,
-                            selected = selectedColor == null,
-                            onClick = { selectedColor = null }
-                        )
-                    }
-                    items(TagPresetColors) { color ->
+                    ColorSwatch(
+                        color = null,
+                        selected = selectedColor == null,
+                        onClick = { selectedColor = null }
+                    )
+                    TagPresetColors.forEach { color ->
                         ColorSwatch(
                             color = color,
                             selected = selectedColor == color,
@@ -290,6 +293,7 @@ internal fun TagEditDialog(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ColorPickerDialog(
     currentColor: Int?,
@@ -304,19 +308,20 @@ internal fun ColorPickerDialog(
         title = "Choose Color",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(6),
+                // Non-scrolling wrap grid — see TagEditDialog: a lazy grid nested in the
+                // pane's own vertical scroll is measured with infinite height and crashes.
+                FlowRow(
+                    maxItemsInEachRow = 6,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    item {
-                        ColorSwatch(
-                            color = null,
-                            selected = selectedColor == null,
-                            onClick = { selectedColor = null }
-                        )
-                    }
-                    items(TagPresetColors) { color ->
+                    ColorSwatch(
+                        color = null,
+                        selected = selectedColor == null,
+                        onClick = { selectedColor = null }
+                    )
+                    TagPresetColors.forEach { color ->
                         ColorSwatch(
                             color = color,
                             selected = selectedColor == color,

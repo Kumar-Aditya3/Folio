@@ -43,7 +43,6 @@ import io.androidpoet.mirage.gemSmoke
 import io.androidpoet.mirage.halftoneDots
 import io.androidpoet.mirage.heatmap
 import io.androidpoet.mirage.liquidMetal
-import io.androidpoet.mirage.paperTexture
 import io.androidpoet.mirage.water
 
 /**
@@ -112,6 +111,27 @@ private const val FIELD_DARK_BACK_DEEPEN = 0.22f
  */
 private const val FIELD_DARK_PALETTE_SINK = 0.52f
 
+/**
+ * §Vibrancy change B: how much of the dark-palette sink the Muted ↔ Vivid lever may lift at its
+ * vivid end. The sink exists to pull the luminous dark accents down to the room's luminance band;
+ * a more vivid room keeps more of the authored colour by sinking it less (never past this
+ * fraction, so the room never climbs back to paper's luminance). Zero effect at VIBRANCY_NEUTRAL.
+ */
+private const val FIELD_DARK_SINK_RELAX = 0.5f
+
+/**
+ * Extra sink toward the field base for the palette-dominated families on a dark face.
+ *
+ * The shared [FIELD_DARK_PALETTE_SINK] is tuned for families that render their palette over
+ * `back` at a reduced per-family intensity. A subset does not: [FolioFieldKind.MeshGradient] and
+ * [FolioFieldKind.Warp] have no `colorBack` at all (the whole field is a blend of the palette),
+ * and Voronoi / Swirl / Heatmap / HalftoneDots / StaticMeshGradient / StaticRadialGradient read
+ * the palette straight as their dominant colour. On a near-black page those carry the theme's
+ * accents at close to paper's luminance — the "mirage is too bright in dark mode" report — so
+ * their palette is sunk this much further toward the already-dark `back` before use. Dark only.
+ */
+private const val FIELD_DARK_PALETTE_SINK_EXTRA = 0.42f
+
 @Composable
 actual fun FolioThemeField(
     kind: FolioFieldKind,
@@ -121,6 +141,7 @@ actual fun FolioThemeField(
     accents: List<Color>,
     isDark: Boolean,
     animate: Boolean,
+    vibrancy: Float,
     modifier: Modifier,
 ) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
@@ -130,13 +151,18 @@ actual fun FolioThemeField(
     } else {
         top
     }
+    // §Vibrancy: the pools arrive already enriched from `atmosphereFor` (shared with the Canvas
+    // base), and the dark-palette sink is eased as the room grows more vivid so the shader keeps
+    // more of that colour. `up` is 0 at VIBRANCY_NEUTRAL, so the sink stays at its measured 0.52.
+    val up = ((vibrancy - VIBRANCY_NEUTRAL) / (1f - VIBRANCY_NEUTRAL)).coerceIn(0f, 1f)
+    val sink = FIELD_DARK_PALETTE_SINK * (1f - up * FIELD_DARK_SINK_RELAX)
     // The field's working palette: the loud accents first (they carry the theme's identity), then
     // the softer aurora pools. Deduped and never empty. On a dark face every entry is sunk toward
     // the field's own base so the animation carries the theme's hue at the room's luminance
     // rather than at the accents' — see FIELD_DARK_PALETTE_SINK.
-    val palette = remember(pools, accents, isDark, back) {
+    val palette = remember(pools, accents, isDark, back, sink) {
         val authored = (accents + pools).distinct().ifEmpty { listOf(top, bottom) }
-        if (!isDark) authored else authored.map { lerp(it, back, FIELD_DARK_PALETTE_SINK) }
+        if (!isDark) authored else authored.map { lerp(it, back, sink) }
     }
     // The field's pixel budget. Every family here is a full-screen AGSL pass whose clock lives
     // inside Mirage and runs on `withFrameNanos` — i.e. at the display's full rate, which no
@@ -185,9 +211,9 @@ private val FILTER_SIZING = SizingParams(fit = ShaderFit.Cover)
  * becomes the filter's source. [folioSilkBackground] is a plain `drawWithCache` fill, which keeps
  * this to one display-list-cached full-screen draw rather than a second shader.
  *
- * [animate] is the source's own drift, which is only worth paying for on the two filters that
- * have no `u_time` of their own ([FolioFieldKind.PaperTexture], [FolioFieldKind.HalftoneDots]):
- * there it is the only motion in the field. Where the filter animates, the source is frozen.
+ * [animate] is the source's own drift, only worth paying for on a filter that has no `u_time`
+ * of its own ([FolioFieldKind.HalftoneDots]) — but the source is frozen here regardless, so
+ * the dearest pass runs once per theme rather than once per frame of silk.
  */
 @Composable
 private fun Modifier.filterSource(animate: Boolean): Modifier =
@@ -206,6 +232,11 @@ private fun MirageField(
     // Each family runs slow � a reading-app background breathes, it does not perform. `s()` scales
     // a family's natural speed and collapses to a frozen frame under reduce-motion.
     fun s(v: Float): Float = if (animate) v else 0f
+    // §Mirage dark brightness: the palette-dominated families (see FIELD_DARK_PALETTE_SINK_EXTRA)
+    // take an extra sink of their palette toward the field base so a night field reads as night
+    // rather than at paper's luminance. The already-sunk `palette` is unchanged for every other
+    // family, and light faces are untouched (`deep` == `palette`).
+    val deep = if (isDark) palette.map { lerp(it, back, FIELD_DARK_PALETTE_SINK_EXTRA) } else palette
     when (kind) {
         // GALLERY � a vast plaster wall whose light drifts under canvas grain. Corners shape keeps
         // the gradient pooled in the corners like a lit room; high softness, low intensity, grain on.
@@ -225,7 +256,7 @@ private fun MirageField(
         // out of true by a moderate warp and swirl.
         FolioFieldKind.Warp -> Warp(
             modifier = modifier,
-            colors = palette.cycle(4),
+            colors = deep.cycle(4),
             proportion = 0.5f,
             softness = 1f,
             shape = WarpPattern.Stripes,
@@ -249,7 +280,7 @@ private fun MirageField(
         FolioFieldKind.Swirl -> Swirl(
             modifier = modifier,
             colorBack = back,
-            colors = palette.cycle(3),
+            colors = deep.cycle(3),
             bandCount = 5f,
             twist = 0.14f,
             center = 0.25f,
@@ -282,9 +313,9 @@ private fun MirageField(
         // MOSS � a cellular colony spreading over stone: Voronoi cells with a gap and a faint glow.
         FolioFieldKind.Voronoi -> Voronoi(
             modifier = modifier,
-            colors = palette.cycle(2),
+            colors = deep.cycle(2),
             stepsPerColor = 3,
-            colorGlow = palette.first(),
+            colorGlow = deep.first(),
             colorGap = back,
             distortion = 0.4f,
             gap = 0.05f,
@@ -312,7 +343,7 @@ private fun MirageField(
         // LAGOON � turquoise, sand and coral drifting through moving water; blends, never whitens.
         FolioFieldKind.MeshGradient -> MeshGradient(
             modifier = modifier,
-            colors = palette.cycle(4),
+            colors = deep.cycle(4),
             distortion = 0.8f,
             swirl = 0.12f,
             grainMixer = 0f,
@@ -442,7 +473,7 @@ private fun MirageField(
         FolioFieldKind.Heatmap -> Box(
             modifier
                 .heatmap(
-                    colors = palette.cycle(4),
+                    colors = deep.cycle(4),
                     colorBack = back,
                     contour = 0.5f,
                     innerGlow = 0.5f,
@@ -469,35 +500,27 @@ private fun MirageField(
                 )
                 .background(back),
         )
-        // The two static filters. Neither shader declares `u_time`, so neither can move, and
-        // neither public wrapper forwards a `speed` — which meant both ran the library's vsync
-        // clock forever to re-render an image that cannot change. Hosted here with the clock off
-        // and their source frozen, so each resolves to one shader pass per theme rather than one
-        // per frame. See FolioStaticField.android.kt for the mechanism and the fallback.
+        // The one static filter. The shader declares no `u_time`, so it cannot move, and the
+        // public wrapper forwards no `speed` — which meant it ran the library's vsync clock
+        // forever to re-render an image that cannot change. Hosted with the clock off and its
+        // source frozen, so it resolves to one shader pass per theme rather than one per
+        // frame. See FolioStaticField.android.kt for the mechanism and the fallback.
         //
-        // The source is frozen deliberately. Handing these two the live silk drift was the only
-        // way to make them appear to move, but it also forced the filter to re-run on every frame
-        // of that drift — the dearest shader in the set, full-screen, at refresh rate. Paper does
-        // not move; a paper field is a paper field. Ambient motion on these themes comes from the
-        // lamp and the room scrim, which cost a gradient rather than a noise lattice.
-        FolioFieldKind.PaperTexture -> Box(
-            modifier
-                .folioStaticPaperTexture(
-                    colorFront = palette.first(),
-                    colorBack = back,
-                    contrast = 0.3f,
-                    roughness = 0.4f,
-                    fiber = 0.3f,
-                    folds = 0.6f,
-                    sizing = FILTER_SIZING,
-                )
-                .filterSource(animate = false),
-        )
+        // The source is frozen deliberately: handing the filter the live silk drift was the
+        // only way to make it appear to move, but it also forced the filter to re-run on
+        // every frame of that drift — full-screen, at refresh rate.
+        //
+        // PaperTexture is not here at all, and that is the user's verdict rather than a
+        // tuning call: the paper field was reported as making the app unusable across five
+        // rounds of fixes, and unlike halftone its cost was structural — per fragment a
+        // 3-tap roughness fbm, two 9-cell crumple lattices, a 4-octave fibre gradient
+        // sampled four times, two 15-iteration fold searches and a 9-cell drop lattice, by a
+        // wide margin the dearest shader in the set. Halftone stays: it was never the report.
         FolioFieldKind.HalftoneDots -> Box(
             modifier
                 .folioStaticHalftoneDots(
                     colorBack = back,
-                    colorFront = palette.first(),
+                    colorFront = deep.first(),
                     size = 0.5f,
                     radius = 1.25f,
                     contrast = 0.45f,
@@ -521,13 +544,13 @@ private fun MirageField(
         )
         FolioFieldKind.StaticMeshGradient -> StaticMeshGradient(
             modifier = modifier,
-            colors = (listOf(back) + palette).cycle(5),
+            colors = (listOf(back) + deep).cycle(5),
             mixing = 0.93f,
         )
         FolioFieldKind.StaticRadialGradient -> StaticRadialGradient(
             modifier = modifier,
             colorBack = back,
-            colors = palette.cycle(3),
+            colors = deep.cycle(3),
             radius = 0.85f,
             falloff = 0.3f,
             mixing = 0.5f,

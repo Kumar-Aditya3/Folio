@@ -69,7 +69,9 @@ interface FolioNavModel {
     @Composable
     fun documentReaderContent(
         documentId: String,
-        onBack: () -> Unit
+        onBack: () -> Unit,
+        /** Opens the dedicated document settings destination from the in-reader panel. */
+        onOpenSettings: () -> Unit
     )
 
     @Composable

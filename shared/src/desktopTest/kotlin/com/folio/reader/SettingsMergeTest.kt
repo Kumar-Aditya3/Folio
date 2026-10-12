@@ -101,6 +101,10 @@ class SettingsMergeTest {
         panelOpacity = 0.9f,
         readerChromeOpacity = 0.85f,
         liquidGlassEffects = false,
+        // minimalLiquidGlass defaults to false, so the non-default fixture value is true —
+        // every field must be non-default or the field-count guard in
+        // everyFieldIsDiffedAndApplied would pass vacuously for a field this fixture forgot.
+        minimalLiquidGlass = true,
         // wideGamutColor defaults to true, so the non-default fixture value is false —
         // omitting it would fail the field-count guard below by one.
         wideGamutColor = false,
@@ -113,6 +117,14 @@ class SettingsMergeTest {
         // would pass vacuously for a field this fixture forgot to set.
         semanticDiscovery = false,
         documentReaderMode = "CONTINUOUS",
+        // documentSettings defaults to DocumentSettings(), so the non-default fixture
+        // value carries a different font. It is one serializable field like any other,
+        // so the field-count guard counts it; omitting it fails the guard by one.
+        documentSettings = com.folio.reader.settings.DocumentSettings(
+            fontFamily = "Georgia",
+            fontSize = 20f,
+            themeId = "sepia",
+        ),
         // eyeProtection defaults to false and eyeProtectionIntensity to 0.4f, so the
         // non-default fixture values are true / 0.7f. Omitting these two made the
         // field-count guard below fail by exactly two — which is how the missing
@@ -122,7 +134,22 @@ class SettingsMergeTest {
         // ambientColor defaults to true, so the non-default fixture value is false. The
         // field-count guard below caught the omission on the first run after the setting
         // landed, which is the whole reason the guard exists.
-        ambientColor = false
+        ambientColor = false,
+        // vibrancy defaults to FOLIO_VIBRANCY_DEFAULT, so the non-default fixture value is a
+        // different point on the Muted ↔ Vivid scale. Global-only like ambientColor, but still a
+        // serialized field the field-count guard counts, so it must be set to a non-default here.
+        vibrancy = 0.3f,
+        // metallicSheen defaults to FOLIO_METALLIC_SHEEN_FULL (1f — the current look is the
+        // slider's top), so the non-default fixture value is a softer point on the scale.
+        metallicSheen = 0.6f,
+        // fieldOverrides defaults to emptyMap, so the non-default fixture value is a
+        // non-empty map. It is a serializable field like any other, so the field-count
+        // guard counts it; omitting it failed the guard by one.
+        fieldOverrides = mapOf("paper" to "Swirl"),
+        // editorialReading defaults to false, so the non-default fixture value is true.
+        // This one was missing from the fixture and had been failing the field-count guard
+        // by one since the field landed.
+        editorialReading = true
     )
 
     @Test

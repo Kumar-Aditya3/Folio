@@ -31,7 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -452,10 +452,10 @@ fun BookCard(
             // The title and author directly below carry the paired keys, so the
             // plate must not draw the fallback's own copies of them.
             suppressFallbackText = true,
-            // Replaces the old cell-wide `alpha = 0.86f` (see the Column above). Same condition —
-            // a book that is not mid-read reads as dimmed — but the cue is a cover desaturation
-            // rather than a fade of the whole cell, and it costs no offscreen layer.
-            dimmed = !inProgress,
+            // Covers always render at full fidelity: the "not mid-read" state is carried by the
+            // progress rule and label below, not by desaturating the artwork, which washed out the
+            // whole shelf (every unread *and* finished book) and read as a general fade.
+            dimmed = false,
             overlay = {
                 if (isSelected) {
                     Box(
@@ -587,7 +587,7 @@ internal fun BookItemMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest
     ) {
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Book details") },
             leadingIcon = {
                 Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -597,7 +597,7 @@ internal fun BookItemMenu(
                 onDetails()
             }
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Select") },
             leadingIcon = {
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -607,7 +607,7 @@ internal fun BookItemMenu(
                 onSelect()
             }
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Delete book", color = FolioTheme.colors.error) },
             leadingIcon = {
                 Icon(

@@ -61,7 +61,13 @@ fun CustomAppTheme.toFolioColors(): FolioColors {
         accentStreak = Color(accentStreak),
         // Annotation is the only accent with no slot in the editor; sitting it
         // between primary and streak keeps it distinct from all three pools.
-        accentAnnotation = lerp(p, Color(accentStreak), 0.5f)
+        accentAnnotation = lerp(p, Color(accentStreak), 0.5f),
+        // §18: the three chrome hues follow the custom palette's own accents, so a
+        // hand-made theme's nav bar, masthead and reader panels are its colours
+        // rather than the Gallery neutral that `fallback` would otherwise supply.
+        navAccent = Color(accentProgress),
+        mastheadAccent = Color(accentDiscovery),
+        readerOverlayAccent = p
     )
 }
 

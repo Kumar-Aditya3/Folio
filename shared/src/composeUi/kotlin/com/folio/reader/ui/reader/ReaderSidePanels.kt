@@ -10,12 +10,17 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioSheetDragToDismiss
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
@@ -78,12 +83,42 @@ internal fun BoxScope.ReaderSidePanels(
         enter = androidx.compose.animation.fadeIn(),
         exit = androidx.compose.animation.fadeOut()
     ) {
+        val atmosphere = FolioTheme.atmosphere
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 // The palette's own ambient shadow, not pure black, so the scrim
                 // reads as depth on light themes instead of a hole.
-                .background(FolioTheme.atmosphere.shadowAmbient.copy(alpha = 0.35f))
+                .background(atmosphere.shadowAmbient.copy(alpha = 0.35f))
+                // The reader parks the global field (FolioFieldOccluder), and the page
+                // itself is a native WebView Haze cannot sample — so without this the
+                // end-edge panels have nothing Compose behind them to blur and fall back
+                // to a flat lid. Paint the theme's own ambient pools into the strip the
+                // panels cover, then register it as a backdrop source: the panels' veil
+                // frosts real, themed colour and reads as glass instead of an opaque slab.
+                .drawBehind {
+                    val pools = atmosphere.pools
+                    if (pools.isNotEmpty()) {
+                        val radius = size.minDimension * 0.6f
+                        pools.forEachIndexed { i, pool ->
+                            val center = Offset(
+                                x = size.width * (0.98f - i * 0.12f),
+                                y = size.height * (0.2f + i * 0.3f),
+                            )
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        pool.copy(alpha = atmosphere.poolAlpha),
+                                        Color.Transparent,
+                                    ),
+                                    center = center,
+                                    radius = radius,
+                                ),
+                            )
+                        }
+                    }
+                }
+                .folioBackdropSource()
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = {
                         if (showToc) onToggleToc()

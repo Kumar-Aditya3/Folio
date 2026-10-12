@@ -80,6 +80,7 @@ import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.folioBarTopInset
 
@@ -704,12 +705,13 @@ private fun RelatedChip(compact: Boolean = false, onClick: () -> Unit) {
 @Composable
 private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Modifier = Modifier) {
     // Glass over content, like every other over-content panel — a sheet rising
-    // from the bottom, so its top corners are rounded.
+    // from the bottom, so its top corners are rounded. A pop-up: detached from the
+    // opacity knobs and pinned to the highest opacity its own glass allows.
     val panelShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .folioVeil(panelShape)
+            .folioVeil(panelShape, fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE)
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)
     ) {
         Row(

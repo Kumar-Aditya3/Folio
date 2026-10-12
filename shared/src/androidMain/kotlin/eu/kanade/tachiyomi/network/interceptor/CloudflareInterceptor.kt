@@ -31,10 +31,25 @@ class CloudflareInterceptor(
     private val executor = ContextCompat.getMainExecutor(context)
 
     override fun shouldIntercept(response: Response): Boolean {
-        // Check if Cloudflare anti-bot is on
+        // Only ever engage for Cloudflare-fronted hosts.
+        if (response.header("Server") !in SERVER_CHECK) return false
+
         // Checking the cf-mitigated header is the official way to detect a Cloudflare challenge:
         // https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/
-        return response.header("cf-mitigated") == "challenge" && response.header("Server") in SERVER_CHECK
+        if (response.header("cf-mitigated") == "challenge") return true
+
+        // Fallback for older challenge pages that return a bare 403/503 without the cf-mitigated
+        // header. Only engage the headless WebView when the body is an actual JS challenge
+        // interstitial. A plain WAF/IP block ("Sorry, you have been blocked") can't be solved by
+        // any client, so engaging the WebView there just dead-ends in a "solve bot" -> open
+        // browser -> still 403 loop. Letting those fall through surfaces the real error instead.
+        if (response.code != 403 && response.code != 503) return false
+        val body = try {
+            response.peekBody(512L * 1024).string()
+        } catch (_: Exception) {
+            return false
+        }
+        return CHALLENGE_MARKERS.any { marker -> body.contains(marker, ignoreCase = true) }
     }
 
     override fun intercept(
@@ -178,5 +193,18 @@ class CloudflareInterceptor(
 
 private val SERVER_CHECK = arrayOf("cloudflare-nginx", "cloudflare")
 private val COOKIE_NAMES = listOf("cf_clearance")
+
+// Markers that identify an actual Cloudflare JS-challenge interstitial (as opposed to a plain
+// WAF/IP block that returns the same 403/503 status but cannot be solved by a WebView).
+private val CHALLENGE_MARKERS = listOf(
+    "challenge-platform",
+    "/cdn-cgi/challenge-platform/",
+    "cf_chl_opt",
+    "window._cf_chl",
+    "cf-chl-",
+    "cf-browser-verification",
+    "turnstile",
+    "just a moment",
+)
 
 private class CloudflareBypassException : Exception()

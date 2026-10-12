@@ -144,20 +144,16 @@ fun FolioFieldKind.fieldRenderScale(): Float = when (this) {
     FolioFieldKind.StaticMeshGradient,
     FolioFieldKind.StaticRadialGradient -> FolioFieldCost.scaleSoft
 
-    // The two families that render **once**, so resolution is free and quality is all that is
+    // The one family that renders **once**, so resolution is free and quality is all that is
     // left to optimise for.
     //
-    // Neither declares `u_time`; both are hosted with the library's clock switched off and a
-    // frozen source (see FolioStaticField.android.kt), so each pays exactly one shader pass per
-    // theme change rather than one per frame. A per-frame budget is therefore the wrong
-    // instrument: halving their area saved a quarter of a cost that is now paid once, and spent
-    // the one thing that mattered. [FolioFieldKind.PaperTexture]'s `roughness` term is the only
-    // part of it that reads `fragCoord` directly — i.e. the fibre grain the texture exists for —
-    // so downsampling it coarsened precisely the detail that makes paper read as paper, which is
-    // why the field was reported as looking worse after it was made cheaper.
+    // It declares no `u_time` and is hosted with the library's clock switched off and a
+    // frozen source (see FolioStaticField.android.kt), so it pays exactly one shader pass
+    // per theme change rather than one per frame. A per-frame budget is therefore the wrong
+    // instrument. (PaperTexture used to share this tier; the family is removed outright —
+    // see MeshField.android.kt's dispatch note for the record.)
     //
-    // Full scale. If either ever gains a clock, move it back to [FolioFieldCost.scaleGrain].
-    FolioFieldKind.PaperTexture,
+    // Full scale. If it ever gains a clock, move it back to [FolioFieldCost.scaleGrain].
     FolioFieldKind.HalftoneDots -> FolioFieldCost.scalePattern
 
     // Carry a getPatternUV term, so the grain / cell / stroke pitch grows with 1/scale.
@@ -265,70 +261,4 @@ fun Modifier.folioFieldDownsample(scale: Float): Modifier {
             compositingStrategy = CompositingStrategy.Offscreen
             clip = false
         }
-}
-
-// ── occlusion ────────────────────────────────────────────────────────────────────────────────
-
-/**
- * How many surfaces currently claim to cover the ground plane completely.
- *
- * The field is mounted once, at the app root, under every route ([FolioThemeBackground] from
- * `MainActivity`), which is what guarantees no screen can forget to have a background. The cost
- * of that guarantee is that a route which is itself opaque edge to edge — the reader's page, a
- * full-screen image viewer — keeps a full-screen procedural shader running at the display's
- * refresh rate underneath something that hides every pixel of it, and because the field is the
- * source of the §16 room rung that also re-blurs every glass surface in the app per frame.
- *
- * A composition local only flows *down* and the field is an ancestor, so this is the same
- * upward-write seam [LocalFolioGuillocheQuiet] and [LocalFolioLampAnchor] use: the covering
- * surface registers, the root reads.
- *
- * A **counter** rather than a flag, so two overlapping claims cannot have the first one to
- * leave reveal the field under the second. Null (every un-provided tree: desktop, previews,
- * tests) means nothing can register and the field always draws, which is the pre-existing
- * behaviour exactly.
- */
-val LocalFolioFieldOcclusion = compositionLocalOf<MutableState<Int>?> { null }
-
-/** Builds the counter. Provided at the app root beside the other field locals. */
-@Composable
-fun rememberFolioFieldOcclusion(): MutableState<Int> = remember { mutableStateOf(0) }
-
-/**
- * Declares that this route covers the ground plane completely and opaquely, so the field can
- * stop drawing while it is on screen.
- *
- * Call it from the composition of a route whose background is genuinely opaque over the whole
- * window — the reader page, a full-screen viewer. It is **not** for a sheet, a dialog, a
- * translucent scrim or anything that lets the room show through at the edges: those still want
- * the field behind them, and claiming otherwise shows up as the background losing its motion.
- *
- * The claim is released on dispose, so it cannot outlive its route.
- */
-@Composable
-fun FolioFieldOccluder() {
-    val occlusion = LocalFolioFieldOcclusion.current ?: return
-    DisposableEffect(occlusion) {
-        occlusion.value = occlusion.value + 1
-        onDispose { occlusion.value = (occlusion.value - 1).coerceAtLeast(0) }
-    }
-}
-
-/**
- * Whether the field has anything to draw for: false exactly while some route has claimed the
- * whole window with [FolioFieldOccluder].
- *
- * Read in **composition** deliberately, which is the opposite of the discipline every phase in
- * this package keeps for a *clock*. The difference is that this is not a clock: it changes once
- * per route entry, and what it controls is whether the Mirage composable is in the tree at all.
- * Nothing cheaper can switch the field off, because the thing that has to stop is Mirage's own
- * `LaunchedEffect` vsync loop, and a `LaunchedEffect` only stops when it leaves the composition.
- */
-@Composable
-fun rememberFolioFieldVisible(): Boolean {
-    val occlusion = LocalFolioFieldOcclusion.current ?: return true
-    val visible: State<Boolean> = remember(occlusion) {
-        derivedStateOf { occlusion.value <= 0 }
-    }
-    return visible.value
 }

@@ -220,6 +220,9 @@ fun MangaCoverPlate(
     overlay: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null,
 ) {
     val atmos = FolioTheme.atmosphere
+    // The metallic-sheen knob: the seat's rim-lit top catch dims; the paper branch's
+    // foot shade is occlusion, not light, and stays.
+    val sheenGain = com.folio.reader.ui.theme.folioSheenGain()
     val sizing = if (width != null) {
         Modifier.width(width).height(width * FolioTokens.coverAspect)
     } else {
@@ -234,7 +237,8 @@ fun MangaCoverPlate(
                     // The cover's own hue at a light source's saturation — a glow is
                     // light the object throws, not the room's lamp.
                     lampColor(halo, null, 0f, FolioTheme.atmosphere),
-                    strength = haloStrength,
+                    // The metallic-sheen knob dims the halo with every other glow.
+                    strength = haloStrength * sheenGain,
                 ) else Modifier
             )
             .shadow(
@@ -279,7 +283,8 @@ fun MangaCoverPlate(
                     0.5.dp,
                     Brush.verticalGradient(
                         listOf(
-                            (if (atmos.isDark) atmos.rimLight else Color.White).copy(alpha = 0.5f),
+                            (if (atmos.isDark) atmos.rimLight else Color.White)
+                                .copy(alpha = 0.5f * sheenGain),
                             if (atmos.isDark) Color.Transparent else Color.Black.copy(alpha = 0.16f),
                         ),
                     ),

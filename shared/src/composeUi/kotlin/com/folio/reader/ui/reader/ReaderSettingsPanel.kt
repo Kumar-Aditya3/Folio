@@ -69,7 +69,8 @@ import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.FolioSurfaceOpacity
+import com.folio.reader.ui.theme.readerPanelVeilAlpha
 
 /** Smallest reader text size in sp — unchanged; users liked the low end. */
 private const val MIN_FONT_SIZE_SP = 12f
@@ -121,15 +122,17 @@ fun ReaderSettingsPanel(
     fun actualFontName(font: String): String =
         settings.customFonts.firstOrNull { it.name == font }?.familyName ?: font
     val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
-    // §16: the sweep enters reading as a capsule and settles to 26dp.
-    val panelShape = rememberFolioSheetMorphShape(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp))
+    // §16: the sweep enters reading as a capsule and settles to the island sweep radius.
+    val panelShape = rememberFolioSheetMorphShape(
+        RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
+    )
     val accentText = rememberLegibleAccent(FolioTheme.colors.primary)
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
             .width(280.dp)
-            .folioVeil(panelShape, fillAlpha = FolioTheme.readerVeilAlpha)
+            .folioVeil(panelShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.spaceBeat),
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
@@ -255,7 +258,9 @@ fun ReaderSettingsPanel(
                     com.folio.reader.ui.components.FolioMenu(
                         expanded = fontMenuOpen,
                         onDismissRequest = { fontMenuOpen = false },
-                        modifier = Modifier.width(248.dp)
+                        modifier = Modifier.width(248.dp),
+                        // Reader-owned menu, but a pop-up: pinned opaque, off the knobs.
+                        fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
                     ) {
                         availableFonts.forEach { font ->
                             // The label is the app UI font (uniform size, aligned
@@ -545,6 +550,37 @@ fun ReaderSettingsPanel(
                     onValueChange = { applyGlobal(settings.copy(eyeProtectionIntensity = it.coerceIn(0f, 1f))) },
                     valueRange = 0f..1f,
                     accent = accentText,
+                )
+            }
+
+            // Editorial styling — restores the theme's expressive page look (coloured
+            // headings, tinted links, page-edge foxing, accent progress chip) and the
+            // glossy, book-edge-tinted reader chrome. Off by default so the page and its
+            // chrome stay calm. Global reading-appearance preference, so it always writes
+            // the defaults row.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = settings.editorialReading,
+                        role = Role.Switch,
+                        onValueChange = { applyGlobal(settings.copy(editorialReading = it)) },
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Editorial styling", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurface)
+                    Text(
+                        "Coloured headings, tinted links and glossier chrome",
+                        style = FolioTheme.typography.bodySmall,
+                        color = FolioTheme.colors.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = settings.editorialReading,
+                    onCheckedChange = null,
+                    colors = SwitchDefaults.colors(checkedTrackColor = FolioTheme.colors.primary)
                 )
             }
         }

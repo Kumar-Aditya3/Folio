@@ -57,6 +57,8 @@ fun ReaderDefaultsPanel(
     mangaOverrideCount: Int = 0,
     /** Drops those, so every manga opens in the default mode. */
     onApplyToOpenedManga: (() -> Unit)? = null,
+    /** Opens the dedicated Documents screen (its own typography, page and theme). */
+    onOpenDocumentSettings: (() -> Unit)? = null,
 ) {
     val colors = FolioTheme.colors
     Column(
@@ -153,10 +155,21 @@ fun ReaderDefaultsPanel(
             color = colors.onSurfaceVariant,
         )
         Text(
-            "Documents do not take their own copy — every document opens in this mode.",
+            "Documents have their own reading settings — typeface, page and page theme — " +
+                "kept separate from your books. Unlike a book, a document never takes a copy, " +
+                "so every document follows them. PDFs are fixed pages, so only the page mode " +
+                "above applies to them.",
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
+        if (onOpenDocumentSettings != null) {
+            TextButton(
+                onClick = onOpenDocumentSettings,
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                Text("Document settings")
+            }
+        }
     }
 }
 

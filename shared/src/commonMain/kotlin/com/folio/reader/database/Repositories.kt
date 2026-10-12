@@ -205,6 +205,13 @@ interface CollectionRepository {
     fun observeBookIdsInCollection(collectionId: String): Flow<Set<String>>
     suspend fun bookIdsInCollection(collectionId: String): Set<String>
 
+    /**
+     * Rewrites one collection's membership from a synced remote document, without
+     * re-emitting sync events (the manga `applyRemote` contract). Default no-op so
+     * non-syncing fakes need not implement it.
+     */
+    suspend fun applyRemoteMembership(collectionId: String, bookIds: Set<String>) {}
+
     /** Gives the book the default collection when it belongs to no collection yet. */
     suspend fun ensureMembership(bookId: String)
 

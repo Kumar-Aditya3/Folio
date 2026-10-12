@@ -56,7 +56,7 @@ import androidx.compose.ui.util.lerp
  *
  * Grain is deliberately **not** part of this layer. Unifying the chrome's noise with the back
  * screen was considered and rejected: several field families are already grain
- * ([FolioFieldKind.GrainGradient], [FolioFieldKind.PaperTexture]), so a second noise pass over the
+ * ([FolioFieldKind.GrainGradient], [FolioFieldKind.HalftoneDots]), so a second noise pass over the
  * whole window would be redundant texture bought at full-screen cost, against two open
  * frame-time issues. The field's own texture also dithers this gradient, so the usual
  * anti-banding reason does not apply either.

@@ -39,6 +39,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.CustomAppTheme
+import com.folio.reader.settings.FOLIO_METALLIC_SHEEN_FULL
+import com.folio.reader.settings.FOLIO_VIBRANCY_NEUTRAL
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.components.FOLIO_CHROME_GLASS
@@ -542,6 +544,72 @@ fun TransparencySettingsPanel(
                 },
             )
         }
+        // §20 reach: the opt-out that keeps liquid glass minimal. On, the glass reaches
+        // every in-flow panel (section cards, stats blocks, shelves) so they frost the room
+        // like real slabs; off restricts it to the true overlays — bars, the capsule, sheets
+        // and modals — so the effect still shows but stays off the many in-flow panels. Only
+        // meaningful while liquid glass is on, so it is offered only then.
+        if (settings.liquidGlassEffects) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Minimal liquid glass",
+                        style = FolioTheme.typography.bodyLarge,
+                        color = colors.onSurface,
+                    )
+                    Text(
+                        text = "Keep the glass on the bars, the capsule, sheets and " +
+                            "menus only. Panels and cards in the page stay painted, so " +
+                            "the effect is still there but far lighter.",
+                        style = FolioTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.minimalLiquidGlass,
+                    onCheckedChange = { on ->
+                        onSettingsChange(settings.copy(minimalLiquidGlass = on))
+                    },
+                )
+            }
+        }
+        // The metallic-sheen slider. One scalar for the whole light response — every
+        // specular rim, corner sheen, travelling glint, mirror band and the room's
+        // lamp bloom — because the report was about the *effect*, not one surface:
+        // a knob per material would have forced twenty answers to one question.
+        // Full (the top, and the default) is the look the app has always shipped;
+        // the slider only travels down from it, so today's build is the ceiling.
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FolioSliderRow(
+                label = "Metallic sheen",
+                valueLabel = when {
+                    settings.metallicSheen < 0.02f -> "Off"
+                    settings.metallicSheen < 0.98f -> "Soft"
+                    else -> "Full"
+                },
+                value = settings.metallicSheen.coerceIn(0f, FOLIO_METALLIC_SHEEN_FULL),
+                onValueChange = {
+                    onSettingsChange(
+                        settings.copy(metallicSheen = it.coerceIn(0f, FOLIO_METALLIC_SHEEN_FULL))
+                    )
+                },
+                valueRange = 0f..FOLIO_METALLIC_SHEEN_FULL,
+            )
+            Text(
+                text = "How strongly every surface catches the light — the metallic " +
+                    "glow on tabs, cards, plates, bars and the reading page, and the " +
+                    "room's corner lamp. Full is the current look; lower it to soften " +
+                    "the shine everywhere at once. Shadows and depth are not affected.",
+                style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
         // The room's colour comes from the book now, and an amplitude this large
         // needs an exit. Off restores the palette's own atmosphere everywhere,
         // byte-for-byte. Contrast is not what is being traded either way: the tint
@@ -569,6 +637,33 @@ fun TransparencySettingsPanel(
                 onCheckedChange = { on ->
                     onSettingsChange(settings.copy(ambientColor = on))
                 },
+            )
+        }
+        // The Muted ↔ Vivid lever. One scalar, applied once in the atmosphere derivation, that
+        // sets how saturated the room's field, pools and glass read. Like Ambient colour it moves
+        // hue/chroma at pinned luminance, so it can make the room richer or quieter but never take
+        // a contrast ratio from ink. Neutral (the midpoint) is the look that predates this knob.
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FolioSliderRow(
+                label = "Colour vibrancy",
+                valueLabel = when {
+                    settings.vibrancy < FOLIO_VIBRANCY_NEUTRAL - 0.02f -> "Muted"
+                    settings.vibrancy <= FOLIO_VIBRANCY_NEUTRAL + 0.02f -> "Neutral"
+                    else -> "Vivid"
+                },
+                value = settings.vibrancy.coerceIn(0f, 1f),
+                onValueChange = { onSettingsChange(settings.copy(vibrancy = it.coerceIn(0f, 1f))) },
+                valueRange = 0f..1f,
+            )
+            Text(
+                text = "How saturated the room's colour is, from muted to vivid. The " +
+                    "midpoint is the classic look. Luminance is held throughout, so this " +
+                    "only changes how colourful the background reads, never text contrast.",
+                style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
             )
         }
         // Wide-gamut colour. It is not a filter or a tint: the same numbers are drawn,

@@ -243,6 +243,9 @@ class LibraryViewModel(
 
     fun closeBulkPicker() {
         bulkCollectionPickerInitial.value = null
+        // The picked books have been re-shelved and may no longer be on the current
+        // shelf; drop the selection so stale off-screen selections don't linger.
+        clearSelection()
     }
 
     /**

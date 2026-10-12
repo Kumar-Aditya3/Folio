@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -120,12 +120,11 @@ private fun FilterDropdown(
         com.folio.reader.ui.components.FolioMenu(
             expanded = open,
             onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = 420.dp),
         ) {
             com.folio.reader.ui.components.FolioMenuLabel("Status")
             statusOptions.forEach { (label, status) ->
                 val active = status in filter.statuses
-                DropdownMenuItem(
+                FolioMenuItem(
                     text = { Text(label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface) },
                     leadingIcon = { MenuCheck(active) },
                     // Stays open: statuses combine.
@@ -139,7 +138,7 @@ private fun FilterDropdown(
             }
             HorizontalDivider()
             com.folio.reader.ui.components.FolioMenuLabel("Series")
-            DropdownMenuItem(
+            FolioMenuItem(
                 text = {
                     Text(
                         "All series",
@@ -154,7 +153,7 @@ private fun FilterDropdown(
             )
             allSeries.forEach { series ->
                 val active = filter.seriesId == series.id
-                DropdownMenuItem(
+                FolioMenuItem(
                     text = { Text(series.name, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface) },
                     leadingIcon = { MenuCheck(active) },
                     onClick = {
@@ -164,14 +163,14 @@ private fun FilterDropdown(
                 )
             }
             if (allSeries.isEmpty()) {
-                DropdownMenuItem(
+                FolioMenuItem(
                     text = { Text("No series yet") },
                     onClick = { open = false },
                 )
             }
             if (filter.hasFilters()) {
                 HorizontalDivider()
-                DropdownMenuItem(
+                FolioMenuItem(
                     text = { Text("Clear filters") },
                     onClick = {
                         onFilterChange(LibraryViewModel.FilterState())

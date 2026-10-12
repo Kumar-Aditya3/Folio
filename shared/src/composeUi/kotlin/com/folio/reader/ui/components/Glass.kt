@@ -322,6 +322,20 @@ val LocalGlassBackdrop = compositionLocalOf<HazeState?> { null }
 fun glassBlurred(): Boolean =
     LocalGlassCapabilities.current.blur && LocalGlassBackdrop.current != null
 
+/**
+ * §20 reach: whether in-flow surfaces (section cards, stats blocks, shelf items, panels)
+ * upgrade to the full overlay glass treatment — blur, lens, sheen, bevel — or stay on the
+ * lighter painted-glass tier.
+ *
+ * This is the "minimal liquid glass" opt-out. `true` (the default) lets the glass reach
+ * every panel so an in-flow pane frosts the room like a real slab; `false` keeps the effect
+ * on true overlays only (bars, the capsule, sheets, modals, heroes floating over content)
+ * so glass still shows but stays off the many in-flow panels and chips. It is only ever a
+ * *decline*: a `false` here never adds glass and never matters on a device that cannot blur,
+ * it only chooses not to upgrade an in-flow surface that would otherwise go full glass.
+ */
+val LocalGlassInFlowGlass = compositionLocalOf { true }
+
 /** A screen-sized backdrop registry; provide it around both the content and the chrome. */
 @Composable
 fun rememberGlassBackdrop(): HazeState = remember { HazeState() }
@@ -334,11 +348,13 @@ fun rememberGlassBackdrop(): HazeState = remember { HazeState() }
 @Composable
 fun FolioGlassRoot(
     capabilities: GlassCapabilities,
+    inFlowGlass: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     androidx.compose.runtime.CompositionLocalProvider(
         LocalGlassCapabilities provides capabilities,
         LocalGlassBackdrop provides rememberGlassBackdrop(),
+        LocalGlassInFlowGlass provides inFlowGlass,
     ) {
         content()
     }

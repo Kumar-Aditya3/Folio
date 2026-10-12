@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -23,10 +25,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,7 +86,11 @@ internal fun FolioSearchField(
             .clip(FolioShapes.pill)
             .background(atmos.sunkenFill.copy(alpha = 0.5f), FolioShapes.pill)
             .border(1.dp, atmos.hairline, FolioShapes.pill)
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            // 6dp vertical: the field's height is its content row (20dp, the text's own
+            // line) plus this padding, which lands the pill at ~32dp — the same height in
+            // Books, Manga and Documents, where the bare leading icon never inflated it.
+            // The old 9dp + a 48dp icon row made it a 66dp tower.
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         decorationBox = { inner ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -98,10 +103,14 @@ internal fun FolioSearchField(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .clickable { scopeMenuOpen = true }
-                                // Reserve a >=48dp thumb target around the ~18dp
-                                // icon+chevron, which was far below a reliable tap.
-                                .minimumInteractiveComponentSize()
-                                .padding(vertical = 2.dp),
+                                // A bounded target, not an inflated one: the 48dp minimum
+                                // was the entire reason the field towered over the switch.
+                                // The chevron row is now the text's own height (~20dp),
+                                // which is what makes Books and Manga exactly as thin as
+                                // Documents — whose bare leading icon never had a minimum
+                                // to fight. The width keeps the tap target thumb-sized;
+                                // the height comes from the field, not the icon.
+                                .sizeIn(minWidth = 40.dp, minHeight = 20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -123,7 +132,15 @@ internal fun FolioSearchField(
                         ) {
                             scopeOptions.forEachIndexed { index, label ->
                                 val selected = index == scopeSelected
-                                DropdownMenuItem(
+                                FolioMenuItem(
+                                    // This call site used to carry the compact height and
+                                    // content padding itself, with a note explaining that
+                                    // Material enforces its 48dp floor *inside* the
+                                    // component so only a caller modifier can beat it. The
+                                    // note was right and the conclusion is now shared: that
+                                    // reasoning is exactly what FolioMenuItem is, and it was
+                                    // true of every other menu in the library too, none of
+                                    // which had it. The row keeps the same 36dp.
                                     text = {
                                         Text(
                                             label,
@@ -170,13 +187,14 @@ internal fun FolioSearchField(
                     inner()
                 }
                 if (query.isNotEmpty()) {
-                    // >=48dp thumb target around the 20dp glyph; a bare 20dp
-                    // clickable was well under a reliable tap.
+                    // Same bounded target as the scope chevron above: the field must not
+                    // grow a minimum back the moment text exists. 32x20 keeps the clear
+                    // target the field's own height, matching Documents too.
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
                             .clickable { onQueryChange("") }
-                            .minimumInteractiveComponentSize(),
+                            .sizeIn(minWidth = 32.dp, minHeight = 20.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(

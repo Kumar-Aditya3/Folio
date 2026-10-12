@@ -98,9 +98,36 @@ object FolioGlassLens {
      */
     const val dispersion: Float = 0.16f
 
-    /** Fresnel rim gain. The lit edge catching; the anti-sun edge keeps a sixth of it. */
-    const val specular: Float = 0.5f
+    /**
+     * Fresnel rim gain — the specular catch. Raised 0.5 → 0.85 for the metallic
+     * read: metal's highlight is *tighter and brighter* than glass's, and the
+     * gain is the brightness half of that pair (the tightness is the shader's
+     * Fresnel exponent).
+     */
+    const val specular: Float = 0.85f
 
-    /** How far the slab's far wall falls into its own thickness. The weight term. */
-    const val depth: Float = 0.3f
+    /**
+     * How far the slab's far wall falls into its own thickness. The weight term.
+     * Raised 0.3 → 0.36: a metal slab reads thicker than a glass one — the
+     * anti-sun edge falls further before the body takes over, which is what
+     * makes the catch read as a chamfered edge rather than a soft bloom.
+     */
+    const val depth: Float = 0.36f
+
+    /**
+     * 6dp of blur on the replayed room, applied *before* the refraction.
+     *
+     * Not a softening of the effect — a correction to what the effect is sampling. A
+     * lensed pane's body is the Haze pass, i.e. the room at ~21dp of blur; the band was
+     * the same room at zero. The ground plane's figure is a fine halftone, so the band
+     * showed that figure sharp and dispersion-split while the body showed it dissolved,
+     * and a boundary between two *textures* reads as a drawn shape however smoothly the
+     * alpha across it ramps. This is the smallest radius that dissolves a figure whose
+     * cell is a couple of dp.
+     *
+     * Deliberately far short of the Haze radius. The lens needs structure to bend — bend
+     * a uniform field and nothing moves, which is the failure the gel is on record for —
+     * so this closes the texture gap without closing the detail gap.
+     */
+    val frost: Dp = 6.dp
 }

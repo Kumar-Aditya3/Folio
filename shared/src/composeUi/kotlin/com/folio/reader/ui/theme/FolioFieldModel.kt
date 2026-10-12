@@ -83,6 +83,16 @@ internal const val POOL_FACING = 0.45f
  */
 internal const val POOL_ALPHA_CEILING = 0.28f
 
+/**
+ * §Vibrancy change C: the vivid-end targets for the two lit-cover cushions. Reached only at the
+ * top of the Muted ↔ Vivid lever and lerped in by [vibeUp], so neutral keeps the measured values
+ * above. Both stay well clear of 7:1 at the pools' raised ceiling (see the lit-cover guard test).
+ */
+private const val POOL_ALPHA_CEILING_VIVID = 0.31f
+
+/** Lerp fraction from neutral to the vivid end of the lever. Zero at [VIBRANCY_NEUTRAL]. */
+private fun vibeUp(v: Float) = ((v - VIBRANCY_NEUTRAL) / (1f - VIBRANCY_NEUTRAL)).coerceIn(0f, 1f)
+
 /** How much of [fieldColors]' tint goes into pool alpha rather than into hue. */
 private const val POOL_ALPHA_GAIN = 0.5f
 
@@ -158,10 +168,19 @@ fun fieldColors(
 ): FolioFieldColors {
     if (tint == null || strength <= 0f) return fieldColors(atmos)
     val s = strength.coerceIn(0f, 1f)
+    // §Vibrancy change C: the floor and the pool-alpha ceiling are the two cushions that trade
+    // legibility headroom for colour. Both are relaxed toward their vivid targets as the room's
+    // vibrancy rises, and both are identity at VIBRANCY_NEUTRAL (up == 0), so the lit-cover
+    // contrast guards — which derive at neutral — are untouched. The relaxed targets are kept
+    // comfortably above 7:1 with the pools at their raised ceiling; `litCoverFieldClearsSeven`
+    // in the field-model tests holds the shipped-vivid path to the same floor.
+    val up = vibeUp(atmos.vibrancy)
+    val floor = INK_FLOOR_WITH_MARGIN + (INK_FLOOR_WITH_MARGIN_VIVID - INK_FLOOR_WITH_MARGIN) * up.toDouble()
+    val poolCeiling = POOL_ALPHA_CEILING + (POOL_ALPHA_CEILING_VIVID - POOL_ALPHA_CEILING) * up
     // Margin under the floor: the pools sit on top of these endpoints and spend some
     // of the headroom, so the endpoints are held to the lightness that leaves the
     // composite clear of 7:1 rather than exactly at it.
-    val limit = inkFieldLimit(atmos.ink, INK_FLOOR_WITH_MARGIN, atmos.fieldTop)
+    val limit = inkFieldLimit(atmos.ink, floor, atmos.fieldTop)
     return FolioFieldColors(
         top = clampToInk(mixG(atmos.fieldTop, tint, s), limit),
         bottom = clampToInk(
@@ -177,7 +196,7 @@ fun fieldColors(
             )
         },
         poolAlpha = (atmos.poolAlpha * (1f + POOL_ALPHA_GAIN * s))
-            .coerceAtMost(POOL_ALPHA_CEILING),
+            .coerceAtMost(poolCeiling),
         sourceX = atmos.fieldSourceX,
         sourceY = atmos.fieldSourceY,
     )
@@ -193,6 +212,14 @@ fun fieldColors(
  * pools at their ceiling and still leaves the room genuinely lit.
  */
 private const val INK_FLOOR_WITH_MARGIN = 12.5
+
+/**
+ * §Vibrancy change C: the relaxed floor at the vivid end of the lever. Lower than
+ * [INK_FLOOR_WITH_MARGIN] frees luminance headroom for the cover's tint, and 11:1 still leaves
+ * the composite above 7:1 with the pools at their raised ceiling (measured give-back ~0.768 ⇒
+ * ~8.4:1). Reached only at full vivid; identity at neutral.
+ */
+private const val INK_FLOOR_WITH_MARGIN_VIVID = 11.0
 
 /** A field luminance range, in WCAG relative luminance, that keeps the ink legible. */
 private class InkFieldLimit(val min: Float, val max: Float)

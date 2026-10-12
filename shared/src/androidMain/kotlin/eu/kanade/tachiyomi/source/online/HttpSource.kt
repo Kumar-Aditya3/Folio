@@ -106,6 +106,10 @@ abstract class HttpSource : CatalogueSource {
      */
     protected open fun headersBuilder(): Headers.Builder = Headers.Builder().apply {
         add("User-Agent", network.defaultUserAgentProvider())
+        // Browser-like Accept headers reduce naive 403 bot blocks on sites that reject
+        // requests lacking them. Sources that need site-specific headers override this.
+        add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        add("Accept-Language", "en-US,en;q=0.5")
     }
 
     /**

@@ -132,7 +132,11 @@ fun FolioMenuLabel(text: String, modifier: Modifier = Modifier) {
         // other eyebrow in the app (FolioEyebrow adds 1.4sp).
         letterSpacing = 1.2.sp,
         color = FolioTheme.colors.onSurfaceVariant,
-        modifier = modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
+        // Gutters match [FolioMenuItem]'s 12dp content padding so the kicker sits on the
+        // same left edge as the rows it heads rather than 2dp off it. Vertical trimmed with
+        // the row height: a 10dp lead-in was proportionate above a 48dp row and is a third
+        // of a 36dp one, which is how three group labels cost a row and a half of pane.
+        modifier = modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
     )
 }
 

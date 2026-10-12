@@ -4,13 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import com.folio.reader.ui.theme.FolioAmbientTint
 import com.folio.reader.ui.theme.FolioAtmosphere
 import com.folio.reader.ui.theme.FolioBarFill
 import com.folio.reader.ui.theme.FolioGlassWeight
 import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.FolioTheme
-import com.folio.reader.ui.theme.LocalFolioAmbientTint
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.navCapsuleFill
 import com.folio.reader.ui.theme.navGlassFor
@@ -195,18 +193,19 @@ fun FolioSurfaceOpacity.chromeBarFill(blurred: Boolean = false): FolioBarFill {
 /**
  * The active chrome material.
  *
- * [FolioAmbientTint.requested] is read **nullable**, exactly as [folioNavGlass] and
- * [folioFieldBottom] read it, so an unlit tree gets the authored plane byte-for-byte. Read
- * here rather than inside the draw lambda because it changes once per book, not per frame.
+ * The masthead and the nav capsule are coloured **per palette and per theme**, from the
+ * atmosphere's authored chrome plane — they no longer borrow the featured cover's accent. The
+ * ambient tint still lights the room's field and the cover refraction; the two bars are the one
+ * surface that stays the theme's own colour so chrome reads the same whatever is on the shelf.
  */
 @Composable
 fun rememberFolioChromeMaterial(): FolioChromeMaterial {
     val atmos = FolioTheme.atmosphere
-    val tint: Color? = LocalFolioAmbientTint.current?.requested
-    return remember(atmos, tint) {
+    return remember(atmos) {
         FolioChromeMaterial(
             plane = atmos.navigationSurface,
-            glass = navGlassFor(atmos, tint, atmos.fieldTintStrength),
+            // Null tint: the authored per-theme plane byte-for-byte, never the hero cover's hue.
+            glass = navGlassFor(atmos, null, atmos.fieldTintStrength),
             accent = atmos.chromeAccent,
             sheen = atmos.rimLight,
             hairline = atmos.hairline,

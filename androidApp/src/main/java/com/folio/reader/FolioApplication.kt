@@ -158,6 +158,12 @@ class AppGraph(private val app: Application) {
     val mangaHistoryRepository = com.folio.reader.database.JdbcMangaHistoryRepository(database)
     val mangaDownloadRepository = com.folio.reader.database.JdbcMangaDownloadRepository(database)
     val mangaNoteRepository = com.folio.reader.database.JdbcMangaNoteRepository(database)
+    // §11.2: a single stats-exclusion repository shared by Home, the Statistics tab
+    // and the Settings exclusions screen. Each JdbcStatsExclusionRepository owns its
+    // own `revision` MutableStateFlow, so separate instances never see each other's
+    // writes — toggling an exclusion in Settings would not refresh the live stats
+    // until an app restart. One instance makes the toggle propagate immediately.
+    val statsExclusionRepository = com.folio.reader.database.JdbcStatsExclusionRepository(database)
     // Built lazily off the main thread (first touched by runStartupTasks on graphScope): the Mihon
     // backend eagerly constructs two OkHttpClients + a disk cache, the extension manager and a
     // synchronous Injekt registration, none of which the reader/library first frame needs. Keeping
@@ -808,6 +814,18 @@ class FolioApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // ── TLS PROVIDER ───────────────────────────────────────────────────────
+        // Install Conscrypt as the top security provider before any networking
+        // (AppGraph builds NetworkHelper below). Conscrypt is a modern BoringSSL-
+        // backed TLS stack that replaces the device's platform provider, which on
+        // many devices is the root cause of "Trust anchor for certification path
+        // not found" and TLS handshake failures against manga sources. It anchors to
+        // the system trust store, so this does not weaken validation — it only makes
+        // the handshake/chain logic consistent and current. Paired with TlsHelper's
+        // AIA chain-completion, it is Mihon's belt-and-suspenders for source TLS.
+        runCatching {
+            java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1)
+        }.onFailure { it.printStackTrace() }
         // ── CRASH REPORTING (§8.4 FOLIO_IMPLEMENTATION_SPEC) ───────────────────
         // Opt-in crash reporting with visible privacy notice; reports contain stack trace + build version.
         runCatching {

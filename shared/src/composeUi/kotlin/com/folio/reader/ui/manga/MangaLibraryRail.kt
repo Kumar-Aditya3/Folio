@@ -1,10 +1,13 @@
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -97,7 +100,21 @@ fun MangaLibraryRail(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        if (searchActive) {
+        // The masthead extends to make way: the search header grows downward from the bar
+        // (expandVertically from the top) while the category chips collapse upward, so
+        // opening search reads as the field sliding down, not the chrome jumping. Books
+        // and Documents do the same.
+        AnimatedContent(
+            targetState = searchActive,
+            transitionSpec = {
+                (fadeIn(tween(FolioTokens.motionFast.toInt())) +
+                    expandVertically(expandFrom = Alignment.Top)) togetherWith
+                    (fadeOut(tween(FolioTokens.motionFast.toInt())) +
+                        shrinkVertically(shrinkTowards = Alignment.Top))
+            },
+            label = "mangaRail",
+        ) { search ->
+        if (search) {
             MangaSearchHeader(
                 scope = searchScope,
                 onScopeChange = { next ->
@@ -148,6 +165,7 @@ fun MangaLibraryRail(
                 }
             }
             Spacer(Modifier.height(4.dp))
+        }
         }
 
         if (!searchActive) {
@@ -206,7 +224,10 @@ fun MangaLibraryRail(
             onDismissRequest = { manageCollectionsOpen = false },
             title = "Categories",
         ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -250,7 +271,7 @@ fun MangaLibraryRail(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = { manageCollectionsOpen = false }) { Text("Done") }
@@ -303,7 +324,9 @@ private fun MangaSearchHeader(
                             onScopeChange(if (index == 1) MangaSearchScope.SOURCES else MangaSearchScope.LIBRARY)
                         },
                     )
-                    IconButton(onClick = onClose) {
+                    // 36dp, not IconButton's 48dp minimum: the rail's row must match the
+                    // field beside it (see LibrarySearchRail's SearchCloseIcon).
+                    IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
                     }
                 }
@@ -331,7 +354,9 @@ private fun MangaSearchHeader(
                             onScopeChange(if (index == 1) MangaSearchScope.SOURCES else MangaSearchScope.LIBRARY)
                         },
                     )
-                    IconButton(onClick = onClose) {
+                    // 36dp to match the field beside it; the 48dp default made the row
+                    // taller than the field it closes.
+                    IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
                     }
                 }

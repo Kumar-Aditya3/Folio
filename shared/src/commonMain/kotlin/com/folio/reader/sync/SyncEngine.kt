@@ -452,6 +452,8 @@ class SyncEngine(
                 sortOrder = collection.sortOrder,
                 createdAt = collection.createdAt.toEpochMilliseconds(),
                 deviceId = deviceId,
+                bookIds = runCatching { collectionRepository.bookIdsInCollection(collection.id).toList() }
+                    .getOrDefault(emptyList()),
                 updatedAt = collection.updatedAt.toEpochMilliseconds()
             )
         )
@@ -717,6 +719,7 @@ class SyncEngine(
             if (remote.deviceId == deviceId) continue
             val local = localCollections[remote.id]
             val remoteMs = remote.updatedAt.takeIf { it > 0 } ?: remote.createdAt
+            val accepted = local == null || local.updatedAt.toEpochMilliseconds() < remoteMs
             if (local == null) {
                 runCatching {
                     collectionRepository.insertCollection(
@@ -743,6 +746,19 @@ class SyncEngine(
                         emitSyncEvent = false
                     )
                 }
+            }
+            // Shelf membership rides on the collection document (bookIds), mirroring the
+            // manga category sync. Only rewrite it when we accept this remote as the newer
+            // copy, so a stale remote never clobbers newer local membership. Cloud book ids
+            // are mapped to local ids and filtered to books that exist here (cloud-only books
+            // are not materialised by applyRemoteBooks), so no orphan rows are written.
+            if (accepted) {
+                val memberIds = remote.bookIds
+                    .map { resolveLocalBookId(it) }
+                    .filterTo(mutableSetOf()) { id ->
+                        runCatching { bookRepository.getBook(id) }.getOrNull() != null
+                    }
+                runCatching { collectionRepository.applyRemoteMembership(remote.id, memberIds) }
             }
         }
 

@@ -232,11 +232,21 @@ object ReaderCss {
                 surfaceCss +
                 prettyWrapCss +
                 balanceWrapCss +
-                "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()} !important;}" +
+                // Headings and links default to the body ink so the reading page is
+                // calm; the theme's expressive heading/link colour only paints when the
+                // reader opts into editorial styling. Hierarchy survives on size/weight.
+                "h1,h2,h3,h4,h5,h6{color:#${(if (settings.editorialReading) theme.headingText else theme.primaryText).rgb()} !important;}" +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
-                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}" +
+                (if (settings.editorialReading)
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
+                else
+                    // Calm links stay findable without colour: body ink plus a quiet
+                    // secondary-ink underline.
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.primaryText.rgb()} !important;" +
+                            "text-decoration:underline !important;text-decoration-color:#${theme.secondaryText.rgb()} !important;" +
+                            "text-underline-offset:0.12em !important;}") +
                 (if (original) "" else
                     "p::first-letter{font-size:inherit !important;line-height:inherit !important;" +
                             "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}") +
@@ -365,11 +375,16 @@ object ReaderCss {
                 surfaceCss +
                 prettyWrapCss +
                 balanceWrapCss +
-                "h1,h2,h3,h4,h5,h6{color:#${theme.headingText.rgb()} !important;}" +
+                "h1,h2,h3,h4,h5,h6{color:#${(if (settings.editorialReading) theme.headingText else theme.primaryText).rgb()} !important;}" +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
-                "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}" +
+                (if (settings.editorialReading)
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.link.rgb()} !important;}"
+                else
+                    "a[href^=\"http\"],a[href^=\"mailto\"]{color:#${theme.primaryText.rgb()} !important;" +
+                            "text-decoration:underline !important;text-decoration-color:#${theme.secondaryText.rgb()} !important;" +
+                            "text-underline-offset:0.12em !important;}") +
                 (if (original) "" else
                     "p::first-letter{font-size:inherit !important;line-height:inherit !important;" +
                             "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}")

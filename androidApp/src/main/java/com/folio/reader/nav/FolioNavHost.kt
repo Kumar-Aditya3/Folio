@@ -306,7 +306,14 @@ fun FolioNavHost(
                     FolioSharedElementScope(this) {
                         navModel.documentReaderContent(
                             documentId = documentId,
-                            onBack = { navController.popBackStack() }
+                            onBack = { navController.popBackStack() },
+                            onOpenSettings = {
+                                navController.navigate(
+                                    FolioDestination.settings(
+                                        com.folio.reader.settings.FolioSettingsCategory.DOCUMENTS
+                                    )
+                                )
+                            }
                         )
                     }
                 }

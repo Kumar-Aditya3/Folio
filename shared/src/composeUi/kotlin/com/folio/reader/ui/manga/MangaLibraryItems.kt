@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -103,6 +102,8 @@ internal fun CollectionRow(
                 category.name,
                 style = MaterialTheme.typography.bodyMedium,
                 color = FolioTheme.colors.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             androidx.compose.material3.TextButton(onClick = { editing = true }) { Text("Rename") }
@@ -185,7 +186,9 @@ fun FeaturedMangaShelfEntry(
             halo = accent,
             haloStrength = haloStrength,
             elevation = FolioTokens.elevationRaised,
-            dimmed = fullyRead,
+            // Cover art stays full-strength; "finished" is carried by the "Read" label and the
+            // muted title colour below, not by washing out the thumbnail.
+            dimmed = false,
             overlay = {
                 if (isSelected) {
                     Box(
@@ -306,7 +309,6 @@ internal fun MangaGridItem(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction)
-            .graphicsLayer { alpha = if (fullyRead) 0.86f else 1f }
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
@@ -329,7 +331,9 @@ internal fun MangaGridItem(
             width = null,
             halo = accent,
             haloStrength = haloStrength,
-            dimmed = fullyRead,
+            // Cover art stays full-strength; "finished" is carried by the "Read" label and the
+            // muted title colour below, not by washing out the thumbnail.
+            dimmed = false,
             modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id)),
             overlay = {
                 if (selected) {
@@ -496,7 +500,9 @@ internal fun MangaListItem(
                     thumbnailUrl = manga.thumbnailUrl,
                     coverPath = manga.coverPath,
                     modifier = Modifier.fillMaxSize(),
-                    dimmed = fullyRead,
+                    // Cover art stays full-strength; "finished" is carried by the "Read" label and the
+            // muted title colour below, not by washing out the thumbnail.
+            dimmed = false,
                 )
             }
             Column(
@@ -562,7 +568,9 @@ internal fun MangaListItem(
                         thumbnailUrl = manga.thumbnailUrl,
                         coverPath = manga.coverPath,
                         modifier = Modifier.fillMaxSize(),
-                        dimmed = fullyRead,
+                        // Cover art stays full-strength; "finished" is carried by the "Read" label and the
+            // muted title colour below, not by washing out the thumbnail.
+            dimmed = false,
                     )
                     if (progress > 0f && progress < 1f) {
                         Box(
@@ -643,32 +651,32 @@ fun MangaItemMenu(
     onRemove: () -> Unit,
 ) {
     com.folio.reader.ui.components.FolioMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Open") },
             leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
             onClick = { onDismissRequest(); onOpen() },
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Categories…") },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null) },
             onClick = { onDismissRequest(); onCategories() },
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Mark all as read") },
             leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
             onClick = { onDismissRequest(); onMarkRead(true) },
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Mark all as unread") },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
             onClick = { onDismissRequest(); onMarkRead(false) },
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Select") },
             leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
             onClick = { onDismissRequest(); onSelect() },
         )
-        DropdownMenuItem(
+        FolioMenuItem(
             text = { Text("Remove from library") },
             leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
             onClick = { onDismissRequest(); onRemove() },

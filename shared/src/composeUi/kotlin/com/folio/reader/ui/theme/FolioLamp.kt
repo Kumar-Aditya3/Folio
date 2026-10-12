@@ -346,6 +346,13 @@ fun applyLamp(over: Color, lamp: FolioLampLight, x: Float, y: Float): Color {
 fun Modifier.folioLamp(lamp: FolioLamp): Modifier {
     val atmos = FolioTheme.atmosphere
     val motion = rememberMotionEnabled()
+    // The metallic-sheen knob. The lamp is the room's corner glow — the biggest, most
+    // corner-anchored light in the app — so it dims with every other catch. Applied
+    // here, at the draw, and never in [lampOf]: that function and [applyLamp] are the
+    // one arithmetic the lamp's contrast guard asserts, and a preference folded into
+    // them would make the guard describe the preference. Scaling *down* only ever
+    // returns contrast; the solved peak stays a ceiling either way.
+    val sheenGain = folioSheenGain()
     // Started only when the lamp actually has somewhere to move. The clock's own loop is
     // `withFrameNanos` per tick (see [rememberSlowPhases]), and a `withFrameNanos` is a frame
     // *request*: run unconditionally, it asked the Choreographer for a frame ten times a second
@@ -373,7 +380,7 @@ fun Modifier.folioLamp(lamp: FolioLamp): Modifier {
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = (0..LAMP_KNOTS).map {
-                        lit.color.copy(alpha = lit.alpha * lampFalloff(it.toFloat() / LAMP_KNOTS))
+                        lit.color.copy(alpha = lit.alpha * sheenGain * lampFalloff(it.toFloat() / LAMP_KNOTS))
                     },
                     center = center,
                     radius = lit.radius,

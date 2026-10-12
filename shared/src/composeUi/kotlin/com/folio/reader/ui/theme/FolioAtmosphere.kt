@@ -156,6 +156,18 @@ data class FolioAtmosphere(
      * still clear its contrast floor against it, and no brighter.
      */
     val ink: Color,
+    /**
+     * The room's colour-vibrancy position on a single "Muted ↔ Vivid" scale, carried on
+     * the atmosphere so every field consumer (the pools, the blooms, the lit-cover clamp,
+     * the glass dimmer) reads one orthogonal lever instead of its own hardcoded constant.
+     *
+     * [VIBRANCY_NEUTRAL] reproduces the pre-vibrancy output byte-for-byte, so the whole
+     * design-system/field/lamp suite — which derives at the default — is unaffected. The
+     * app ships at [FOLIO_VIBRANCY_DEFAULT] through [LocalFolioVibrancy]; the setting moves
+     * it. The lever is hue- and luminance-preserving by construction (see [enrichChroma]),
+     * so it can add colour but never trade away a contrast ratio.
+     */
+    val vibrancy: Float = VIBRANCY_NEUTRAL,
 )
 
 /**
@@ -391,6 +403,37 @@ internal fun tierColour(gammaLuma: Float, hueDeg: Float, chromaTarget: Float): C
         chroma = affordable(l)
     }
     return oklchToColor(l, chroma, hueDeg)
+}
+
+/**
+ * The neutral position of the "Muted ↔ Vivid" lever. At this value every vibrancy gain is
+ * exactly 1, so [atmosphereFor] returns the pre-vibrancy output byte-for-byte. Kept equal to
+ * [com.folio.reader.settings.FOLIO_VIBRANCY_NEUTRAL], the setting-layer copy of the same anchor
+ * (the settings module cannot see this one).
+ */
+internal const val VIBRANCY_NEUTRAL = 0.5f
+
+/** Below this Oklab chroma a colour has no hue worth pushing, so [enrichChroma] leaves it be. */
+private const val ENRICH_MIN_CHROMA = 0.012f
+
+/**
+ * Multiply a colour's Oklab **chroma** by [gain] while holding its luminance and its hue, capped
+ * to the sRGB gamut. This is the one primitive the vibrancy lever is built on, and it has two
+ * load-bearing properties:
+ *
+ * - [gain] == 1f returns the colour *unchanged* (reference equality), so [VIBRANCY_NEUTRAL] — where
+ *   every gain is exactly 1 — is byte-identical to the old pipeline and no test moves.
+ * - luminance is pinned (via [tierColour]'s bisection on [luminanceOf]) and only chroma rises, so
+ *   enrichment can never lower a contrast ratio. "Hue moves, luminance does not" is the same
+ *   invariant the lamp and the lit-field tint already run on.
+ *
+ * A near-neutral colour is returned as-is rather than having a hue invented for it.
+ */
+internal fun enrichChroma(c: Color, gain: Float): Color {
+    if (gain == 1f || c.alpha == 0f) return c
+    val chroma = oklabChroma(c)
+    if (chroma < ENRICH_MIN_CHROMA) return c
+    return tierColour(luminanceOf(c), oklabHue(c), chroma * gain).copy(alpha = c.alpha)
 }
 
 /**
@@ -642,7 +685,7 @@ private const val CARD_MATERIAL_SHARE = 0.80f
  * twice it — `dusk`'s card goes 0.158 → 0.206 Oklab L instead of 0.158 → 0.32, and still
  * carries ~0.09 chroma against the authored roles' 0.08-0.195.
  */
-private const val CARD_MATERIAL_SHARE_DARK = 0.58f
+private const val CARD_MATERIAL_SHARE_DARK = 0.42f
 
 // Dark-mode lightness FLOOR for the grouping-surface material. The bug this fixes: a card's own
 // lightness at night is near-black (L ~0.10-0.14), and `maxChromaInGamut(l, hue)` collapses to
@@ -664,7 +707,7 @@ private const val CARD_MATERIAL_SHARE_DARK = 0.58f
 // 0.24 is where the gamut still holds ~0.13-0.16 Oklab chroma — comfortably inside the roles'
 // own 0.08-0.195 band — so the pane keeps being a *colour* and stops being a mid-tone. The
 // reasoning the floor was introduced under is intact; only the price is.
-private const val CARD_GLASS_L_DARK_FLOOR = 0.24f
+private const val CARD_GLASS_L_DARK_FLOOR = 0.17f
 
 // Light-mode lightness CEILING for the grouping-surface material — the symmetric twin of
 // CARD_GLASS_L_DARK_FLOOR, and the direct fix for "all ten light themes look like the same white
@@ -683,6 +726,44 @@ private const val CARD_GLASS_L_DARK_FLOOR = 0.24f
 // pane clearly a light surface after the 0.80 material mix (lands ~0.86 L) while finally admitting
 // real chroma — this is the direct fix for "everything is a variant of the same colour".
 private const val CARD_GLASS_L_LIGHT_CEIL = 0.80f
+
+/**
+ * §20 — how far each piece of **furniture** is lifted off its authored lightness before it is
+ * placed, on a dark face only.
+ *
+ * The report these answer: "in dark mode cards and the bottom nav are as dark as the
+ * background, so it looks dull." That was literally true, and it was the sum of two correct
+ * decisions pulling the same way. P8/P9 brought the dark room down hard — pools 0.16 → 0.07,
+ * field tint 0.045 → 0.035, the card-glass floor 0.36 → 0.24 at a 0.58 share — because the
+ * complaint then was the *opposite* one ("dark not dark enough", "row surfaces sit a few
+ * percent lighter still"). Every one of those dials moves the furniture and the room together,
+ * so the room arrived at its authored swatch with the furniture sitting flat against it.
+ *
+ * The fix is to separate the two: the **room** keeps every bit of the darkness P8/P9 bought,
+ * and only the planes that are *objects in* that room step off it. A lift here is gamma-space
+ * ([liftG]), applied to the plane's own authored colour *before* [tierColour] places it, so the
+ * hue and the chroma the sheet authored survive and only the step off the page changes.
+ *
+ * Three values rather than one, because the three planes answer to different floors:
+ *
+ *  - the **card** feeds `raisedFill`, and `raisedFill` at [FolioAtmosphere.paneAlpha] is the
+ *    hero pane that `FolioLampTest.theHeroPaneKeepsItsOwnTextLegible` holds to 7:1 over the
+ *    worst lit point. Lifting the pane *reduces* that ratio, so the card gets the smallest
+ *    step — enough to read as a separate object, not enough to spend the veto's margin;
+ *  - the **panel** feeds `panelFill`, the largest grouping surface in the app (and Material's
+ *    `surfaceContainerLow`), so it carries the bulk of the "cards look dull" report and takes
+ *    the middle step;
+ *  - the **nav plane** is the one piece of furniture on screen on every route and carries no
+ *    body copy — only icons and labels at display weight — so it takes the largest step. It is
+ *    also the surface the report named outright.
+ */
+private const val DARK_PLANE_LIFT_CARD = 0.02f
+private const val DARK_PLANE_LIFT_PANEL = 0.045f
+private const val DARK_PLANE_LIFT_NAV = 0.11f
+
+/** Lifts a plane off its authored lightness on a dark face, preserving its alpha. */
+private fun liftPlane(c: Color, dark: Boolean, amount: Float): Color =
+    if (!dark) c else liftG(c, amount).copy(alpha = c.alpha)
 
 internal fun cardGlassMaterial(accent: Color, base: Color, dark: Boolean): Color {
     val l = if (dark) maxOf(oklabL(base), CARD_GLASS_L_DARK_FLOOR)
@@ -1012,6 +1093,12 @@ private const val VEIL_CHROMA = 0.10f
 private const val VEIL_CHROMA_DARK = 0.22f
 private const val SCRIM_CHROMA = 0.14f
 private const val RIM_CHROMA = 0.05f
+// Dark faces emit a coloured rim rather than catch a white sheen, and the emission is the one
+// highlight that cannot cost legibility (it is laid at the surface boundary, not on the body the
+// ink sits on). The dark rim therefore carries far more chroma than paper's grey edge so the card
+// reads as a dark body ringed in the theme's own light. tierColour still clamps to the in-gamut
+// ceiling, so a theme whose hue cannot hold this much simply takes as much as it can.
+private const val RIM_CHROMA_DARK = 0.16f
 
 /**
  * How far the **paper** chrome comes down off white, so that it can be a colour at all.
@@ -1076,16 +1163,58 @@ private const val PAPER_CHROME_DROP = 0.13f
 private const val FIELD_FOOT_ACCENT_DARK = 0.055f
 private const val FIELD_FOOT_ACCENT_LIGHT = 0.05f
 
+// §Vibrancy spans — how far the "Muted ↔ Vivid" lever may travel from neutral, tuned per
+// light/dark. Dark rooms carry the field as near-additive light over a near-black bed, so they
+// take more chroma and more bloom before anything smears; paper is held gentler so it stays
+// paper. Every span is the distance from neutral (gain 1) to the vivid/muted extreme, so at
+// VIBRANCY_NEUTRAL all of them contribute exactly zero and the output is unchanged.
+private const val POOL_CHROMA_SPAN_DARK = 0.55f
+private const val POOL_CHROMA_SPAN_LIGHT = 0.42f
+// The field's foot carries the least text and the most area, so it is the safest place to spend
+// chroma — hence a wider span than the pools (change E: raise the deepest region's chroma target).
+private const val FIELD_BOTTOM_CHROMA_SPAN_DARK = 0.80f
+private const val FIELD_BOTTOM_CHROMA_SPAN_LIGHT = 0.62f
+private const val VIBE_CHROMA_MUTE = 0.45f
+// Pool/bloom alpha gain. The field is drawn bolder as it grows more vivid, within the lit-room
+// ceiling the field model already enforces.
+private const val POOL_ALPHA_SPAN = 0.50f
+private const val POOL_ALPHA_MUTE = 0.50f
+// Change D: let the glass breathe a few points as vibrancy rises so the plane dims the field
+// less, kept small (and smaller on paper) so the hero's own text never loses its bed. Still
+// vetoed downstream by `theHeroPaneKeepsItsOwnTextLegible` at the neutral reference.
+private const val PANE_RELAX_DARK = 0.07f
+private const val PANE_RELAX_LIGHT = 0.045f
+private const val PANE_TIGHTEN = 0.06f
+
 /**
  * Derives the atmosphere for [colors]. Pure and cheap — remembered per palette
  * at the theme root, so screens read it for free.
+ *
+ * [vibrancy] is the "Muted ↔ Vivid" lever; it defaults to [VIBRANCY_NEUTRAL] so every direct
+ * caller (the whole test suite) gets the exact pre-vibrancy derivation, while the live app passes
+ * the user's setting in through [LocalFolioVibrancy].
  */
 fun atmosphereFor(
     colors: FolioColors,
     light: FolioLight = FolioLight.Default,
+    vibrancy: Float = VIBRANCY_NEUTRAL,
 ): FolioAtmosphere {
     val bgLuma = luminanceOf(colors.background)
     val dark = bgLuma < 0.45f
+
+    // §Vibrancy — resolve the one scalar into per-channel gains. `up`/`down` are the signed
+    // distance from neutral in each direction, so at VIBRANCY_NEUTRAL both are 0 and every gain
+    // below is exactly 1f: the derivation is then byte-identical to the pre-vibrancy pipeline.
+    // Enrichment is applied at the construction site; it is hue- and luminance-preserving
+    // (see enrichChroma), so none of it can lower a contrast ratio.
+    val vibeUp = ((vibrancy - VIBRANCY_NEUTRAL) / (1f - VIBRANCY_NEUTRAL)).coerceIn(0f, 1f)
+    val vibeDown = ((VIBRANCY_NEUTRAL - vibrancy) / VIBRANCY_NEUTRAL).coerceIn(0f, 1f)
+    val poolChromaGain =
+        1f + vibeUp * (if (dark) POOL_CHROMA_SPAN_DARK else POOL_CHROMA_SPAN_LIGHT) - vibeDown * VIBE_CHROMA_MUTE
+    val bottomChromaGain =
+        1f + vibeUp * (if (dark) FIELD_BOTTOM_CHROMA_SPAN_DARK else FIELD_BOTTOM_CHROMA_SPAN_LIGHT) - vibeDown * VIBE_CHROMA_MUTE
+    val poolAlphaGain = 1f + vibeUp * POOL_ALPHA_SPAN - vibeDown * POOL_ALPHA_MUTE
+    val paneAlphaGain = 1f - vibeUp * (if (dark) PANE_RELAX_DARK else PANE_RELAX_LIGHT) + vibeDown * PANE_TIGHTEN
 
     // **The room's own hue — the anchor for the field and for every tier.**
     //
@@ -1258,7 +1387,7 @@ fun atmosphereFor(
         // card plane is free to be the thing that sits above it. The gradient survives (the
         // two authored page planes differ, and the foot still carries the second role's hue);
         // what stops is the climb toward a surface the room is not made of.
-        val bloom = mixG(colors.background, colors.backgroundSecondary, 0.62f)
+        val bloom = mixG(colors.background, colors.backgroundSecondary, 0.50f)
         fieldBottom = mixG(bloom, fieldFootAccent, FIELD_FOOT_ACCENT_DARK)
     } else {
         fieldTop = colors.background
@@ -1298,7 +1427,7 @@ fun atmosphereFor(
     // into the page, which is what a recess is. `sunkenFill` already treats it as a layer at
     // 0.30 alpha on a dark face, so the mix supplies its temperature and the alpha supplies
     // the depth.
-    val panel = colors.surfaceElevated
+    val panel = liftPlane(colors.surfaceElevated, dark, DARK_PLANE_LIFT_PANEL)
     val well = mixG(colors.surface, colors.background, 0.45f)
 
     // The pools are the palette's **authored light sources**, not three samples of one.
@@ -1399,17 +1528,30 @@ fun atmosphereFor(
     // keeps the authored plane untouched.
     val navAccentColor = chromaticRole(
         listOf(
+            // §18 chrome hue: the face's *authored* nav accent first. The derivation
+            // used to lead with `warmAccent` — the palette's designated warm note, a
+            // gold/olive/umber on most faces — so the one surface on every route was
+            // placed at a brown. The authored role is a deliberate, clean hue per
+            // face; the warm/tertiary/secondary/primary fallbacks keep any palette
+            // that does not author one (or authors an achromatic one) exactly as it was.
+            colors.navAccent,
             colors.warmAccent,
             colors.tertiaryAccent,
             colors.secondaryAccent,
             colors.primaryAccent,
         ),
     )
+    // §20 lift: on a dark face the authored nav plane sits within a few percent of the field —
+    // `navigationSurface` is `mixA(card, page2)`, i.e. a step off a page that P8/P9 brought down
+    // to a near-black — so the one piece of furniture on screen on every route read as part of
+    // the page. Lift it off the room *before* it is placed, so [tierColour] still holds the
+    // lifted lightness exactly and spends only chroma; the hue the sheet authored survives.
+    val navPlaneBase = liftPlane(colors.navigationSurface, dark, DARK_PLANE_LIFT_NAV)
     val navPlane = if (oklabChroma(navAccentColor) < ROOM_HUE_MIN_CHROMA) {
-        colors.navigationSurface
+        navPlaneBase
     } else {
         tierColour(
-            luminanceOf(colors.navigationSurface),
+            luminanceOf(navPlaneBase),
             oklabHue(navAccentColor),
             NAV_CHROMA,
         ).copy(alpha = colors.navigationSurface.alpha)
@@ -1420,7 +1562,15 @@ fun atmosphereFor(
     // of *and* the `tintGlass` pull laid over that material — four helpings of one accent on
     // the strip directly above a page whose crown leans on the very same accent. `tertiary` is
     // the role the chrome was always specified to speak in.
-    val chromeAccentColor = chromaticRole(listOf(colors.tertiaryAccent, colors.primaryAccent))
+    //
+    // §18: it now speaks in the face's *authored* masthead hue first ([FolioColors.mastheadAccent]).
+    // The derivation led with `tertiaryAccent`, which is a brown on manuscript, silver, sakura,
+    // honey, moss, lagoon, cyberpunk and vice-day, so the top bar read as a brown band on those
+    // faces. The authored role is a deliberate second hue per face; `tertiary`/`primary` remain
+    // the fallback for a palette that does not author one.
+    val chromeAccentColor = chromaticRole(
+        listOf(colors.mastheadAccent, colors.tertiaryAccent, colors.primaryAccent),
+    )
     val barGlassBase = if (dark) {
         // Weighted toward the (now lifted) chrome plane, not the dark field, so the bar sits
         // proud of the darkened background instead of being dragged down with it.
@@ -1428,15 +1578,34 @@ fun atmosphereFor(
     } else {
         mixG(liftG(fieldTop, 0.42f), navPlane, 0.20f)
     }
-    val card = colors.surface
+    val card = liftPlane(colors.surface, dark, DARK_PLANE_LIFT_CARD)
+
+    // §18: the in-reader overlays' hue — the face's authored [FolioColors.readerOverlayAccent],
+    // taken directly rather than clamped to the room. The clamp is right for a tier of the page
+    // (a card, a well, a scrim) and wrong for the reader's panels: on the warm rooms
+    // (manuscript, honey, dawn, aurum, rouge) the room hue is itself an orange, so a
+    // room-bounded veil came out a flat brown on every one of them. An overlay is an opaque
+    // *panel* laid over the page with its own ink, so it may be a colour of its own choosing.
+    // An achromatic face (gallery, whose accents are all grey) falls back to the old
+    // room-bounded placement so it stays neutral.
+    val overlayHue = if (oklabChroma(colors.readerOverlayAccent) < ROOM_HUE_MIN_CHROMA) {
+        tierHue(planeHue, oklabHue(colors.primary))
+    } else {
+        oklabHue(colors.readerOverlayAccent)
+    }
 
     return FolioAtmosphere(
         isDark = dark,
         fieldTop = fieldTop,
-        fieldBottom = fieldBottom,
+        // §Vibrancy change E: the field's foot is the deepest, least text-bearing region, so it
+        // carries the widest chroma span. Identity at neutral (bottomChromaGain == 1f).
+        fieldBottom = enrichChroma(fieldBottom, bottomChromaGain),
         fieldSourceX = light.sourceX,
         fieldSourceY = light.sourceY,
-        pools = pools,
+        // §Vibrancy change A/B: enrich the authored pools once, here, so both the Canvas
+        // SilkField base and the Android Mirage shader consume identical already-vivid colours
+        // (no path-specific vivid()/sink). Hue- and luminance-preserving; identity at neutral.
+        pools = pools.map { enrichChroma(it, poolChromaGain) },
         // The pools are the theme's colour, so they have to carry. Raised from a whisper
         // (0.16 / 0.085) so the four authored hues read as a living aurora rather than a
         // rumour under the wash — this is the main dial that turns a mono room multi-hue.
@@ -1472,7 +1641,7 @@ fun atmosphereFor(
         // even after P8. Three pools still read as three hues at 0.07 — the hue spread is
         // carried by `harmonizePoolHues`, not by the alpha — so multi-hue is preserved and
         // only the amount of light comes down.
-        poolAlpha = if (dark) 0.07f else 0.15f,
+        poolAlpha = (if (dark) 0.07f else 0.15f) * poolAlphaGain,
         // The room is lit by what is being read, and the amplitude has to be real
         // for that to register at all: the value this replaced was a whisper at one
         // edge of the wash, which is why every screen looked like the same brown room.
@@ -1507,20 +1676,35 @@ fun atmosphereFor(
         // whitening is the one operation that removes chroma, which is why the rim read as a
         // grey edge highlight on an otherwise coloured card. The lightness the lift produced is
         // held exactly, so nothing about the rim's brightness moves. See [RIM_CHROMA].
+        //
+        // **Dark faces emit harder (0.34 → 0.48 lift, 0.62 → 0.78 alpha).** This file's own
+        // `shadowScale` note sets the doctrine: a dark room has no light to occlude, so depth
+        // there is carried by the rim *emitting* rather than by a cast shadow. The rim was being
+        // asked to carry that whole job at an amplitude picked when the shadow still helped, so
+        // a card at night sat at the field's own luminance with a whisper of an edge — the
+        // "everything is as dark as the background, so it looks dull" report. Raising the
+        // emission is the lever that cannot cost legibility: it is an edge highlight laid at the
+        // surface's boundary, so it adds the lift the eye reads as a separate object without
+        // touching the body the ink sits on (which is what the 7:1 pane veto measures).
         rimLight = if (dark) {
+            // §Metal: lifted harder and carried at higher alpha than the original
+            // 0.48/0.78 — the rim is the one highlight every glass surface shares
+            // (sheen, lens Fresnel, well lips), and the decree is that it *stands
+            // out on the glass*: a bright tight catch rather than a soft bloom.
             tierColour(
-                luminanceOf(lift(colors.surface, 0.34f)),
+                luminanceOf(lift(colors.surface, 0.72f)),
                 tierHue(planeHue, oklabHue(colors.secondary)),
-                RIM_CHROMA,
-            ).copy(alpha = 0.62f)
+                RIM_CHROMA_DARK,
+            ).copy(alpha = 0.92f)
         } else {
             // **Paper's rim stays white, and that is not the same failure as the rest of the
             // paper chrome.** A rim is a specular highlight — light catching an edge — and on a
             // light surface a specular is white by physics. It is a highlight rather than a
             // plane, so there is nothing here that *should* carry the theme; colouring it would
             // read as a stained edge. The veil, the scrim and the nav plane are planes, and they
-            // are the ones that now carry a hue.
-            Color.White.copy(alpha = 0.92f)
+            // are the ones that now carry a hue. §Metal: 0.92 -> 0.97 — the catch stands out
+            // here too.
+            Color.White.copy(alpha = 0.97f)
         },
         rimShade = if (dark) {
             Color.Black.copy(alpha = 0.40f)
@@ -1580,7 +1764,15 @@ fun atmosphereFor(
         // see-through, so on the dark faces it gets the extra transparency rather than the
         // fill — which is the honest way to make a dark room read dark without burying the
         // refraction the pane exists to show. `theHeroPaneKeepsItsOwnTextLegible` still vetoes.
-        paneAlpha = if (dark) 0.60f else 0.76f,
+        // §Vibrancy change D: the plane dims the field a touch less as the room grows vivid.
+        // §20.1: 0.60 -> 0.72 on a dark face. The bloom-lit dark room is BRIGHTER than
+        // the authored card swatch (SilkField pours the blooms at 0.20 alpha on dark),
+        // so at 0.60 the rendered card composited under its pane sat at or below its
+        // own room — a recess, not a raised card, on every dark theme (measured by
+        // outputs/palette/folio_plane_retune.py). More of the pane, less of the room:
+        // the card reads as its own surface while the room still breathes through the
+        // remaining 28%. Paper keeps its authored 0.76.
+        paneAlpha = (if (dark) 0.72f else 0.76f) * paneAlphaGain,
         // A recess cannot be an opaque colour. The page a reader actually sees is the
         // field *after* the runtime pools and the cover's lamp have been laid over it,
         // so any at-rest token chosen to be "the dark of the page" is either flat
@@ -1619,11 +1811,21 @@ fun atmosphereFor(
         // effectively opaque so page text never competes with menu text.
         //
         // The veil is the *room, dimmed* — it covers the page the reader was just looking at —
-        // so it is placed at the room's own hue (bounded, like every tier, by
-        // [MAX_TIER_HUE_DEV]) rather than left as a deepen of the authored `surface`, which is
-        // a neutral on 14 of the 22 palettes. Lightness and alpha are both held exactly, so the
+        // so it is placed at a hue rather than left as a deepen of the authored `surface`, which
+        // is a neutral on most palettes. Lightness and alpha are both held exactly, so the
         // veil stays as opaque as the guard demands and its ink contrast does not move. See
         // [VEIL_CHROMA].
+        //
+        // **§18: the hue is the face's authored [FolioColors.readerOverlayAccent], not the room's.**
+        // It used to be `tierHue(planeHue, hue(primary))` — the room hue, pulled at most 12° toward
+        // primary. That is the right rule for a *tier of the page* (a card, a well, a scrim), and
+        // the wrong one for the reader's overlays: on the warm rooms (manuscript, honey, dawn,
+        // aurum, rouge) the room hue is itself an orange, so every reader panel — the settings
+        // sheet, the TOC, the annotations — came out a flat brown. A reader overlay is an opaque
+        // *panel* laid over the page with its own ink, not the page thickening, so it is allowed
+        // to be a colour of its own choosing. The authored role is one deliberate hue per face;
+        // an achromatic face (gallery, whose accents are all grey) falls back to the old
+        // room-bounded placement so it stays neutral.
         veilFill = if (dark) {
             // Dark glass was reading as flat black: *deepening* `surface` at all drops the plane
             // toward the floor, and a hue needs luminance to live in — with none, the tint
@@ -1650,7 +1852,7 @@ fun atmosphereFor(
             // on dark) gains contrast rather than losing it.
             tierColour(
                 luminanceOf(lift(colors.surface, 0.055f)),
-                tierHue(planeHue, oklabHue(colors.primary)),
+                overlayHue,
                 VEIL_CHROMA_DARK,
             ).copy(alpha = 0.97f)
         } else {
@@ -1660,7 +1862,7 @@ fun atmosphereFor(
             // 9.4:1 against it.
             tierColour(
                 luminanceOf(deepenG(liftG(colors.surface, 0.35f), PAPER_CHROME_DROP)),
-                tierHue(planeHue, oklabHue(colors.primary)),
+                overlayHue,
                 VEIL_CHROMA,
             ).copy(alpha = 0.98f)
         },
@@ -1779,6 +1981,7 @@ fun atmosphereFor(
         // The ink that sits straight on the page — most rows and lists in the app are
         // this colour on the field, with no surface between them.
         ink = colors.onBackground,
+        vibrancy = vibrancy,
     )
 }
 
@@ -1791,8 +1994,9 @@ val FolioTheme.atmosphere: FolioAtmosphere
         // page ramps along its own source rather than a shared diagonal — see
         // [FolioAtmosphere.fieldSourceX]. A tree with no pack gets [FolioLight.Default].
         val packId = LocalFolioPackId.current
-        return remember(colors, packId) {
-            atmosphereFor(colors, FOLIO_LIGHTS[packId] ?: FolioLight.Default)
+        val vibrancy = LocalFolioVibrancy.current.level
+        return remember(colors, packId, vibrancy) {
+            atmosphereFor(colors, FOLIO_LIGHTS[packId] ?: FolioLight.Default, vibrancy)
         }
     }
 
@@ -1804,3 +2008,29 @@ val FolioTheme.atmosphere: FolioAtmosphere
  * in one.
  */
 fun FolioAtmosphere.paneFill(): Color = raisedFill.copy(alpha = paneAlpha)
+
+/**
+ * The room's colour-vibrancy lever: a single scalar in `0..1` where [VIBRANCY_NEUTRAL] (0.5) is
+ * the old look, `1` is the most saturated the gamut and the contrast guards allow, and `0` is
+ * the most muted. One orthogonal knob, tuned per light/dark inside [atmosphereFor], driving the
+ * pool and field chroma, the pool/bloom alpha, the lit-cover clamp headroom, the glass dimmer and
+ * the Android field shader's dark-sink — so there is exactly one place a user (or a theme) moves
+ * "how colourful the room is", and it can never move legibility.
+ */
+@Immutable
+data class FolioVibrancy(val level: Float = com.folio.reader.settings.FOLIO_VIBRANCY_DEFAULT) {
+    companion object {
+        /** The pre-vibrancy look: every gain is 1, every test derives here. */
+        val Neutral = FolioVibrancy(VIBRANCY_NEUTRAL)
+        /** What the app ships at before the user touches the slider. */
+        val Default = FolioVibrancy(com.folio.reader.settings.FOLIO_VIBRANCY_DEFAULT)
+    }
+}
+
+/**
+ * Provided once at the app root from `ReaderSettings.vibrancy`. Defaults to [FolioVibrancy.Default]
+ * so any tree that does not provide it (previews, isolated activities) still gets the shipped
+ * vivid look, while the design-system tests call [atmosphereFor] directly and keep the neutral
+ * default. Read by [FolioTheme.atmosphere] and by the Material bridge in `FolioTheme.MaterialTheme`.
+ */
+val LocalFolioVibrancy = androidx.compose.runtime.compositionLocalOf { FolioVibrancy.Default }

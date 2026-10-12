@@ -37,7 +37,7 @@ import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.readerPanelVeilAlpha
 
 /**
  * The Echoes side panel — cross-book resonant passages for the reader's current selection.
@@ -62,7 +62,7 @@ internal fun EchoesPanel(
         modifier = Modifier
             .fillMaxHeight()
             .width(320.dp)
-            .folioVeil(panelShape, fillAlpha = FolioTheme.readerVeilAlpha)
+            .folioVeil(panelShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
     ) {
         Row(
             modifier = Modifier

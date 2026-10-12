@@ -267,6 +267,9 @@ class DocumentLibraryViewModel(
 
     fun closeBulkPicker() {
         bulkPickerInitial.value = null
+        // The picked documents have been re-categorised and may no longer be on the
+        // current category; drop the selection so stale off-screen selections don't linger.
+        clearSelection()
     }
 
     fun applyBulkCategories(categoryIds: Set<String>) {

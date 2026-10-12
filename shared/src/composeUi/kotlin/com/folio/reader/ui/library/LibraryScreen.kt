@@ -5,6 +5,11 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +53,7 @@ import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -549,7 +554,21 @@ fun LibraryScreen(
                     if (!documentSearchActive) { railPxByMode[libraryMode] = it.height; lastRailPx = it.height }
                 }
             ) {
-                if (documentSearchActive && documentLibraryViewModel != null) {
+                // The masthead extends to make way: the search rail grows downward from the
+                // bar (expandVertically from the top) while the chips collapse upward, so
+                // opening search reads as the field sliding down, not the chrome jumping.
+                // Books and Manga do the same.
+                AnimatedContent(
+                    targetState = documentSearchActive && documentLibraryViewModel != null,
+                    transitionSpec = {
+                        (fadeIn(tween(FolioTokens.motionFast.toInt())) +
+                            expandVertically(expandFrom = Alignment.Top)) togetherWith
+                            (fadeOut(tween(FolioTokens.motionFast.toInt())) +
+                                shrinkVertically(shrinkTowards = Alignment.Top))
+                    },
+                    label = "documentsRail",
+                ) { search ->
+                if (search && documentLibraryViewModel != null) {
                     LibrarySearchRail(
                         switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
                         query = documentState.query,
@@ -588,6 +607,7 @@ fun LibraryScreen(
                         }
                     }
                 }
+                }
             }
         })
         LibraryMode.BOOKS -> ({
@@ -603,7 +623,21 @@ fun LibraryScreen(
                 }
             ) {
                 val controller = bookSearchController
-                if (bookSearchActive && controller != null) {
+                // The masthead extends to make way: the search rail grows downward from the
+                // bar (expandVertically from the top) while the chips collapse upward, so
+                // opening search reads as the field sliding down, not the chrome jumping.
+                // Documents and Manga do the same.
+                AnimatedContent(
+                    targetState = bookSearchActive && controller != null,
+                    transitionSpec = {
+                        (fadeIn(tween(FolioTokens.motionFast.toInt())) +
+                            expandVertically(expandFrom = Alignment.Top)) togetherWith
+                            (fadeOut(tween(FolioTokens.motionFast.toInt())) +
+                                shrinkVertically(shrinkTowards = Alignment.Top))
+                    },
+                    label = "booksRail",
+                ) { search ->
+                if (search && controller != null) {
                     Column(Modifier.fillMaxWidth()) {
                         LibrarySearchRail(
                             switch = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
@@ -691,6 +725,7 @@ fun LibraryScreen(
                             null
                         },
                     )
+                }
                 }
             }
         })
@@ -914,7 +949,7 @@ fun LibraryScreen(
                                 com.folio.reader.ui.components.FolioMenuLabel("Sort")
                                 com.folio.reader.ui.manga.MangaSortBy.entries.forEach { o ->
                                     val active = mangaLibraryViewModel?.sortBy?.value == o
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = {
                                             Text(o.label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface)
                                         },
@@ -928,7 +963,7 @@ fun LibraryScreen(
                                 com.folio.reader.ui.components.FolioMenuLabel("Filter")
                                 com.folio.reader.ui.manga.MangaLibFilter.entries.forEach { f ->
                                     val active = f in mangaActiveFilters
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = {
                                             Text(f.label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface)
                                         },
@@ -943,7 +978,6 @@ fun LibraryScreen(
                                 com.folio.reader.ui.components.FolioMenu(
                                     expanded = displayOpen,
                                     onDismissRequest = { displayOpen = false },
-                                    modifier = Modifier.heightIn(max = 420.dp)
                                 ) {
                                     com.folio.reader.ui.components.FolioMenuLabel("View")
                                     ViewModeRow(
@@ -954,7 +988,7 @@ fun LibraryScreen(
                                     com.folio.reader.ui.components.FolioMenuLabel("Sort")
                                     DocumentSortBy.entries.forEach { option ->
                                         val active = option == documentState.sortBy
-                                        DropdownMenuItem(
+                                        FolioMenuItem(
                                             text = { Text(option.label, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface) },
                                             leadingIcon = { ViewCheck(active) },
                                             onClick = { displayOpen = false; documentLibraryViewModel?.setSort(option) },
@@ -962,7 +996,7 @@ fun LibraryScreen(
                                     }
                                     HorizontalDivider()
                                     com.folio.reader.ui.components.FolioMenuLabel("Format")
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = {
                                             Text(
                                                 "All formats",
@@ -974,14 +1008,14 @@ fun LibraryScreen(
                                     )
                                     DocumentFormat.entries.forEach { format ->
                                         val active = format == documentState.formatFilter
-                                        DropdownMenuItem(
+                                        FolioMenuItem(
                                             text = { Text(format.name, color = if (active) FolioTheme.colors.primary else FolioTheme.colors.onSurface) },
                                             leadingIcon = { ViewCheck(active) },
                                             onClick = { documentLibraryViewModel?.setFormatFilter(format) }
                                         )
                                     }
                                     HorizontalDivider()
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text(if (documentState.sortAscending) "Ascending" else "Descending") },
                                         leadingIcon = {
                                             Icon(
@@ -1016,7 +1050,7 @@ fun LibraryScreen(
                                 )
                                 com.folio.reader.ui.components.FolioMenuLabel("Sort")
                                 bookFriendlyNames.forEach { (option, label) ->
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = {
                                             Text(
                                                 label,
@@ -1028,7 +1062,7 @@ fun LibraryScreen(
                                     )
                                 }
                                 HorizontalDivider()
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text(if (sortAscending) "Ascending" else "Descending") },
                                     leadingIcon = {
                                         Icon(
@@ -1061,38 +1095,38 @@ fun LibraryScreen(
                         }
                         if (mangaMode) {
                             com.folio.reader.ui.components.FolioMenu(expanded = mangaOverflowOpen, onDismissRequest = { mangaOverflowOpen = false }) {
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Browse sources") },
                                     onClick = { mangaOverflowOpen = false; onMangaBrowseClick() },
                                 )
                                 // Downloads live on the manga rail (with a live queue
                                 // count) — the overflow item was redundant.
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Reading history") },
                                     onClick = { mangaOverflowOpen = false; onMangaHistoryClick() },
                                 )
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Check for new chapters") },
                                     onClick = { mangaOverflowOpen = false; mangaLibraryViewModel?.updateLibrary() },
                                 )
                                 if (mangaExtensionsAvailable) {
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text("Extensions") },
                                         onClick = { mangaOverflowOpen = false; onMangaExtensionsClick() },
                                     )
                                 }
                                 HorizontalDivider()
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Import backup") },
                                     onClick = { mangaOverflowOpen = false; onMangaBackupImport() },
                                 )
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Export backup") },
                                     onClick = { mangaOverflowOpen = false; onMangaBackupExport() },
                                 )
                                 if (showSettingsAction) {
                                     HorizontalDivider()
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text("Settings") },
                                         leadingIcon = {
                                             Icon(
@@ -1108,7 +1142,7 @@ fun LibraryScreen(
                         } else if (documentMode) {
                             com.folio.reader.ui.components.FolioMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
                                 if (showSettingsAction) {
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text("Settings") },
                                         leadingIcon = {
                                             Icon(
@@ -1123,15 +1157,15 @@ fun LibraryScreen(
                             }
                         } else {
                             com.folio.reader.ui.components.FolioMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Tags") },
                                     onClick = { overflowOpen = false; onTagManagerClick() }
                                 )
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Revisit Items") },
                                     onClick = { overflowOpen = false; onRevisitClick() }
                                 )
-                                DropdownMenuItem(
+                                FolioMenuItem(
                                     text = { Text("Quotes") },
                                     onClick = { overflowOpen = false; onQuoteBrowserClick() }
                                 )
@@ -1139,14 +1173,14 @@ fun LibraryScreen(
                                 // it in the nav capsule and passes null.
                                 if (onOpenStats != null) {
                                     HorizontalDivider()
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text("Stats") },
                                         onClick = { overflowOpen = false; onOpenStats() }
                                     )
                                 }
                                 if (showSettingsAction) {
                                     HorizontalDivider()
-                                    DropdownMenuItem(
+                                    FolioMenuItem(
                                         text = { Text("Settings") },
                                         leadingIcon = {
                                             Icon(
@@ -1410,7 +1444,10 @@ private fun BookCollectionManagerDialog(
         onDismissRequest = onDismiss,
         title = "Collections",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1453,7 +1490,7 @@ private fun BookCollectionManagerDialog(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Done") }
@@ -1528,7 +1565,10 @@ private fun DocumentCategoryManagerDialog(
         onDismissRequest = onDismiss,
         title = "Categories",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1571,7 +1611,7 @@ private fun DocumentCategoryManagerDialog(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Done") }
@@ -1654,7 +1694,10 @@ private fun DocumentCategoryPickerDialog(
         onDismissRequest = onDismiss,
         title = "Categories",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
                 if (categories.isEmpty()) {
                     Text(
                         "No categories yet — create one below.",
@@ -1724,7 +1767,7 @@ private fun DocumentCategoryPickerDialog(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Done") }
@@ -1763,7 +1806,10 @@ private fun BookCollectionPickerDialog(
         onDismissRequest = onDismiss,
         title = "Collections",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
                 if (collections.isEmpty()) {
                     Text(
                         "No collections yet — create one below.",
@@ -1830,7 +1876,7 @@ private fun BookCollectionPickerDialog(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onDismiss) { Text("Done") }

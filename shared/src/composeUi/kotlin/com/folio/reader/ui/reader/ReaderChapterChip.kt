@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.readerVeilAlpha
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
@@ -51,6 +52,9 @@ internal fun ReaderChapterChipHost(
     }
     val motion = rememberMotionEnabled()
     val interaction = rememberFolioInteraction()
+    // §16: the chip is a reader overlay, so its plate answers to the in-reader-controls
+    // slider too — otherwise it stayed opaque while every other overlay thinned out.
+    val veil = FolioTheme.readerVeilAlpha
     AnimatedVisibility(
         visible = chip != null,
         modifier = modifier,
@@ -76,7 +80,7 @@ internal fun ReaderChapterChipHost(
                 color = FolioTheme.colors.onSurface,
                 modifier = Modifier
                     .folioPressable(interaction)
-                    .background(FolioTheme.colors.surfaceVariant, RoundedCornerShape(FolioTokens.radiusChip))
+                    .background(FolioTheme.colors.surfaceVariant.copy(alpha = veil), RoundedCornerShape(FolioTokens.radiusChip))
                     .clickable(interactionSource = interaction, indication = null, onClick = onDismiss)
                     .padding(horizontal = FolioTokens.space2, vertical = FolioTokens.space1)
             )

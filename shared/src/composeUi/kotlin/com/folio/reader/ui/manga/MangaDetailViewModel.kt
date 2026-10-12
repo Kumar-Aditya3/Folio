@@ -273,6 +273,21 @@ class MangaDetailViewModel(
         }
     }
 
+    /**
+     * Cancels every still-active download for this series in one action — the
+     * series-level counterpart to [downloadUnread]/[download]. Finished (DOWNLOADED)
+     * entries are left alone; queued, in-flight and errored ones are removed along with
+     * any partially written pages.
+     */
+    fun cancelAllDownloads() {
+        val manager = downloadManager ?: return
+        scope.launch {
+            downloadStates.value.values
+                .filter { it.status != com.folio.reader.manga.MangaDownloadStatus.DOWNLOADED }
+                .forEach { manager.cancel(it.id) }
+        }
+    }
+
     /** Deletes a finished download's pages from storage. */
     fun deleteDownload(chapter: MangaChapter) {
         val manager = downloadManager ?: return

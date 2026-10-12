@@ -35,6 +35,14 @@ class FolioAmbientTint internal constructor(
     /** The colour the room is showing right now, mid-crossfade or settled. */
     val shown: State<Color?>,
     private val target: MutableState<Color?>,
+    /**
+     * The room's **standing colour** — what a destination that features nothing of its
+     * own should wear. Declared by [FolioAmbientCanonical] (the anchor's owner, Home)
+     * and re-declared by the nav shell on every route change, which is the other half
+     * of the last-writer-wins contract: a screen's own [to] still wins while it is
+     * visited, but it can no longer outlive its visit.
+     */
+    private val canonicalTarget: MutableState<Color?>,
 ) {
     /**
      * The colour the room was *asked* for, before the crossfade reaches it.
@@ -46,9 +54,17 @@ class FolioAmbientTint internal constructor(
      */
     val requested: Color? get() = target.value
 
+    /** The standing colour, or null for the palette's own. See [canonicalTarget]. */
+    val canonical: Color? get() = canonicalTarget.value
+
     /** Ask the room to move to [color]. Null leaves it the palette's own. */
     fun to(color: Color?) {
         target.value = color
+    }
+
+    /** Declare the standing colour. See [FolioAmbientCanonical]. */
+    fun setCanonical(color: Color?) {
+        canonicalTarget.value = color
     }
 }
 
@@ -65,6 +81,7 @@ val LocalFolioAmbientTint = compositionLocalOf<FolioAmbientTint?> { null }
 fun rememberFolioAmbientTint(): FolioAmbientTint {
     val target = remember { mutableStateOf<Color?>(null) }
     val shown = remember { mutableStateOf<Color?>(null) }
+    val canonical = remember { mutableStateOf<Color?>(null) }
     val motion = rememberMotionEnabled()
     LaunchedEffect(target.value, motion) {
         val to = target.value
@@ -88,7 +105,7 @@ fun rememberFolioAmbientTint(): FolioAmbientTint {
             shown.value = lerp(from, to, t)
         }
     }
-    return remember(shown, target) { FolioAmbientTint(shown, target) }
+    return remember(shown, target, canonical) { FolioAmbientTint(shown, target, canonical) }
 }
 
 /**
@@ -105,6 +122,25 @@ fun rememberFolioAmbientTint(): FolioAmbientTint {
 fun FolioAmbientSource(color: Color?) {
     val tint = LocalFolioAmbientTint.current ?: return
     LaunchedEffect(color) { tint.to(color) }
+}
+
+/**
+ * Declares the room's **standing colour** — what the shell resets to on every route
+ * change, so a tab that features nothing of its own (Stats, More, the books shelf)
+ * wears the anchor's colour instead of whichever screen wrote last.
+ *
+ * The last-writer-wins seam deliberately does not clear on dispose, which is right for
+ * the crossfade and wrong for the long term: a book or manga detail's preview tint used
+ * to keep colouring every tab that failed to declare its own, and More's bar became
+ * "whatever I visited last". The canonical is the room's answer to *what were we doing
+ * before the preview* — the colour of the book being read, which only the anchor's
+ * owner (Home) knows. Declared alongside [FolioAmbientSource]; harmless anywhere the
+ * holder is absent (ambient colour off, desktop, previews).
+ */
+@Composable
+fun FolioAmbientCanonical(color: Color?) {
+    val tint = LocalFolioAmbientTint.current ?: return
+    LaunchedEffect(color) { tint.setCanonical(color) }
 }
 
 /**

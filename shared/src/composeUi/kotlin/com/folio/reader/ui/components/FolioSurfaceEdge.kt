@@ -237,7 +237,7 @@ data class FolioEdgeProfile(
  * | [Chrome] | 5dp | 0.42 | The capsule and the masthead are always on screen, over live content, and are the surfaces the user named last ("even the bottom nav bar"). Longest ramp the 56dp capsule can take under [FOLIO_EDGE_MAX_SHARE], and the faintest edge on the ladder. |
  * | [Pane] | 4.5dp | 0.50 | Glass genuinely over content: sheets, menus, chips, the reader's panels. It must stay findable against a page, so a touch shorter than chrome. |
  * | [Card] | 6dp | 0.50 | The in-flow workhorse — section cards, settings groups, panels, the shelf plate. The biggest surfaces, the biggest offenders, and the ones with the most height to spend on a ramp. |
- * | [Inset] | 3.5dp | 0.60 | A surface inside another surface. Its rim is already a ghost ([FOLIO_EMBEDDED_RIM]), and a long ramp inside a parent plane reads as a smudge rather than a division. |
+ * | [Inset] | 3.5dp | 0.60 | A surface inside another surface. Its rim is the §19 division — [FOLIO_EMBEDDED_RIM] of the hairline over a floor of the parent's plane — and a long ramp inside a parent plane reads as a smudge rather than a division, so it stays short. |
  * | [Tile] | 3dp | 0.60 | Icon tiles, small chips. Short side measured in tens of dp, so the clamp would cut a longer feather down anyway — naming it keeps the intent honest. |
  * | [Well] | 3dp | 0.70 | A recess is an *inversion*, and its lip is the thing that reads as depth. Shortest ramp on the ladder: enough to kill the hard rectangle, not enough to fill the hole in. |
  */
@@ -566,3 +566,81 @@ internal fun CacheDrawScope.folioEdgeCorePath(
     shape: Shape,
     profile: FolioEdgeProfile,
 ): Path = folioEdgeStack(shape, profile).core
+
+/**
+ * §18 — **`Modifier.background(color, shape)`, feathered**, for call sites outside this
+ * package.
+ *
+ * [folioSurfacePlane] is `internal`, which is right for the material family but left two
+ * call sites with no way to spend the ladder — and both of them were drawing the exact
+ * step function this file exists to delete, *on top of* a surface that had already
+ * feathered itself:
+ *
+ *  - the **nav bar's selected pill**, a `clip(pill).background(accent, pill)` at 0.76
+ *    alpha, 42dp tall, centred inside a 54dp glass capsule. A hard-edged opaque shape
+ *    inside a soft-edged translucent one is not a subtle artifact of a shader — it is
+ *    the literal reading of "nested shapes", and it is the one in the screenshot;
+ *  - the **home hero's tint wash**, a `background(linearGradient, heroShape)` applied
+ *    after `folioRaised` had already ramped the plane to nothing at the silhouette. A
+ *    hard fill of the same shape painted over a feathered one *restores the hard
+ *    silhouette*: the ramp underneath is still there and still correct, and completely
+ *    invisible, because something opaque was drawn over its outer end.
+ *
+ * Same ring stack, same smoothstep profile, same cache-phase build as the material
+ * family. Not `@Composable` and not themed: the caller already has the colour it wants,
+ * and the only thing it is missing is the edge.
+ */
+fun Modifier.folioSoftFill(
+    shape: Shape,
+    color: Color,
+    role: FolioEdgeRole = FolioEdgeRole.Tile,
+    foot: Color = color,
+): Modifier = folioSurfacePlane(shape, color, role.profile, foot)
+
+/**
+ * The same thing for a [Brush] — a wash, a gradient, a tint sweep.
+ *
+ * A brush carries its own per-pixel alpha, so the ring stack cannot bake the ramp into
+ * the colour the way [folioPlaneBrushes] does. It drives the ring's *layer* alpha
+ * instead, with the identical "increment that takes the already-accumulated alpha there"
+ * solve, so a gradient composites into the same C1 ramp a flat fill does and the brush's
+ * own variation along the surface's axis survives untouched. The two are independent:
+ * the brush varies along the axis, the rings vary along the normal.
+ */
+fun Modifier.folioSoftWash(
+    shape: Shape,
+    brush: Brush,
+    role: FolioEdgeRole = FolioEdgeRole.Card,
+): Modifier = drawWithCache {
+    val profile = role.profile
+    val stack = folioEdgeStack(shape, profile)
+    val heads = folioWashHeads(stack.rings.size)
+    onDrawBehind {
+        val n = min(stack.rings.size, heads.size)
+        for (i in 0 until n) {
+            if (heads[i] <= FOLIO_EDGE_ALPHA_FLOOR) continue
+            drawPath(stack.rings[i], brush, alpha = heads[i])
+        }
+    }
+}
+
+/**
+ * Per-ring layer alphas for [folioSoftWash], outermost first.
+ *
+ * The same exact solve as [folioPlaneBrushes] — `head = (A_i − A_(i-1)) / (1 − A_(i-1))`
+ * — against a target of 1.0, because the brush supplies the absolute alpha and the rings
+ * only have to deliver the *profile*. A single un-inset ring (the legacy branch) comes
+ * back as `[1.0]`, which is `background(brush, shape)` exactly.
+ */
+private fun folioWashHeads(steps: Int): FloatArray {
+    if (steps <= 1) return floatArrayOf(1f)
+    val heads = FloatArray(steps)
+    var covered = 0f
+    for (i in 0 until steps) {
+        val t = (i + 1).toFloat() / steps
+        val target = t * t * (3f - 2f * t)
+        heads[i] = if (covered >= 1f) 1f else ((target - covered) / (1f - covered)).coerceIn(0f, 1f)
+        covered = target
+    }
+    return heads
+}

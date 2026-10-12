@@ -6,9 +6,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +21,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +35,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,34 +56,52 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.model.Highlight
+import com.folio.reader.settings.DocumentSettings
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
+import com.folio.reader.settings.toReaderSettings
 import com.folio.reader.ui.components.EmptyState
 import com.folio.reader.ui.components.FolioSharedKeys
-import com.folio.reader.ui.components.FolioStatusBarBand
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.folioSheetDragToDismiss
 import com.folio.reader.ui.components.pageFoxing
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.library.DocumentThumbnail
+import com.folio.reader.ui.reader.readerIsland
 import com.folio.reader.ui.render.HtmlContentSurface
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.atmosphere
 import java.io.File
 import kotlin.math.roundToInt
 
 @Composable
 fun DocumentReaderScreen(
     viewModel: DocumentReaderViewModel,
-    settings: ReaderSettings = ReaderSettings(),
+    /**
+     * The document's own reading settings — typography, page and page theme —
+     * kept separate from the book defaults. Edited in place by the in-reader
+     * panel ([DocumentSettingsPanel]) through [onSettingsChange].
+     */
+    settings: DocumentSettings = DocumentSettings(),
+    /**
+     * The global **book** row, used only as the base for the app-level fields a
+     * document does not own (eye protection, the ambient tint, editorial
+     * styling, the vibrancy/sheen knobs). Documents no longer inherit a book's
+     * typography or page theme — that was the bug this feature fixes — but the
+     * device-level atmosphere is still one setting for the whole app.
+     */
+    globalSettings: ReaderSettings = ReaderSettings(),
+    onSettingsChange: (DocumentSettings) -> Unit = {},
+    onOpenFullSettings: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /**
@@ -94,8 +119,26 @@ fun DocumentReaderScreen(
     var resetZoomKey by remember { mutableIntStateOf(0) }
     var seekNonce by remember { mutableIntStateOf(0) }
     var seekRequest by remember { mutableStateOf<Pair<Float, Long>?>(null) }
+    var showSettingsPanel by remember { mutableStateOf(false) }
     val occludes = com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()
     val isPdf = state.document?.format == com.folio.reader.model.DocumentFormat.PDF
+    // A PDF never shows the document panel — it has no typography or page settings to
+    // apply. Guarding the flag itself (not only the island) also closes a panel that was
+    // open when the reader lands on a PDF, e.g. after a re-open.
+    val settingsPanelVisible = showSettingsPanel && !isPdf
+
+    // The rendering surfaces speak `ReaderSettings`; the document row supplies the
+    // document-owned half and the global book row the app-level half.
+    //
+    // **A PDF is excluded on purpose.** A PDF is a fixed page the renderer paints as
+    // bitmaps: typeface, size, line/paragraph spacing, margins, text width, alignment,
+    // hyphenation and the reflowable layout mode cannot touch it, so offering them would
+    // be a panel of dead controls. The PDF path therefore keeps the global reader row —
+    // exactly what it used before documents had settings of their own — and the
+    // in-reader document panel is not shown for it (see the settings island below).
+    val effective = remember(settings, globalSettings, isPdf) {
+        if (isPdf) globalSettings else settings.toReaderSettings(globalSettings)
+    }
 
     // §17 morph landing / real-first-paint gate, mirroring the EPUB reader
     // (ReaderScreen.kt:177-216,667-698). The reflowable (DOCX/HTML) surface is a
@@ -140,14 +183,14 @@ fun DocumentReaderScreen(
     val showBottom = state.controlsVisible && state.loadState is DocumentReaderLoadState.Ready
     // The page block is cut from the *reader's* paper, not the app palette, so it
     // reads against whatever preset the document is being shown in.
-    val readerTheme = settings.customTheme
-        ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+    val readerTheme = effective.customTheme
+        ?: com.folio.reader.settings.Theme.getPreset(effective.themeId)
     val paper = Color(readerTheme.background)
     val ink = Color(readerTheme.primaryText)
-    val showBlock = showBottom && settings.showProgress
+    val showBlock = showBottom && effective.showProgress
     val topInset = if (occludes && state.controlsVisible) 56.dp else 0.dp
     val bottomInset = if (occludes && showBottom) {
-        val block = if (settings.showProgress) 40.dp else 0.dp
+        val block = if (effective.showProgress) 40.dp else 0.dp
         if (isPdf) block + 56.dp else block
     } else 0.dp
 
@@ -222,13 +265,13 @@ fun DocumentReaderScreen(
                         //    single-section path.
                         val useWindow = !occludes &&
                             state.reflowableWindow.isNotEmpty() &&
-                            settings.layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS
+                            effective.layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS
                         if (useWindow) {
                             HtmlContentSurface(
                                 sections = state.reflowableWindow,
                                 windowed = true,
                                 anchorChapterId = state.reflowableAnchorChapterId,
-                                settings = settings,
+                                settings = effective,
                                 // scrollOffset is the section-local seed within the
                                 // anchor chunk; chapterId names that anchor.
                                 position = com.folio.reader.model.ReadingPosition(
@@ -278,7 +321,7 @@ fun DocumentReaderScreen(
                             ),
                             windowed = false,
                             anchorChapterId = null,
-                            settings = settings,
+                            settings = effective,
                             position = state.reflowableLocator?.toSurfacePosition(state.document!!.id, state.normalizedProgress),
                             highlights = emptyList<Highlight>(),
                             enabled = true,
@@ -370,7 +413,7 @@ fun DocumentReaderScreen(
         // where Compose can composite over the page: on desktop the reflowable path
         // is a heavyweight browser window that paints over Compose layers, while the
         // PDF path renders its own bitmaps and so still takes the cue.
-        if ((!occludes || isPdf) && settings.showProgress) {
+        if ((!occludes || isPdf) && effective.showProgress) {
             Spacer(
                 modifier = Modifier
                     .fillMaxSize()
@@ -388,7 +431,16 @@ fun DocumentReaderScreen(
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it }
         ) {
-            DocumentReaderBar(state, onBack, viewModel::toggleBookmark, morphDocumentId)
+            DocumentReaderBar(
+                state,
+                onBack,
+                viewModel::toggleBookmark,
+                morphDocumentId,
+                // Null for a PDF: a fixed page has no typography or page settings to
+                // offer, so the island is not drawn at all rather than opening a panel
+                // of controls that cannot move.
+                onOpenSettings = if (isPdf) null else ({ showSettingsPanel = true }),
+            )
         }
 
         AnimatedVisibility(
@@ -397,38 +449,114 @@ fun DocumentReaderScreen(
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it }
         ) {
-            Column(Modifier.navigationBarsPadding()) {
-                if (isPdf) {
-                    DocumentReaderControls(
-                        state = state,
-                        onMode = {
-                            viewModel.setMode(
-                                if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
-                                    DocumentReaderMode.CONTINUOUS
-                                } else {
-                                    DocumentReaderMode.SINGLE_PAGE
-                                }
-                            )
-                        },
-                        onRotate = viewModel::rotateClockwise,
-                        onResetZoom = { resetZoomKey++ }
-                    )
+            // The bottom child is a floating island: it takes the nav-bar inset and the uniform
+            // edge margin itself, so the wrapper stays a plain full-width slot and the capsule
+            // hovers above the nav bar with the page showing through the margin on every side.
+            val onSeekProgress: (Float) -> Unit = { fraction ->
+                viewModel.seekToProgress(fraction)
+                if (!isPdf) {
+                    seekNonce++
+                    seekRequest = fraction to seekNonce.toLong()
                 }
-                if (showBlock) {
+            }
+            Column(Modifier.fillMaxWidth()) {
+                if (isPdf) {
+                    // The single-page/continuous toggle row and the progress block are cut from
+                    // ONE continuous glass sheet, now a floating island: a single rounded capsule
+                    // (the chrome plane at the reader's near-solid alpha) that hovers above the nav
+                    // bar with a uniform margin on every side. The children are drawn `bare` (no
+                    // glass, no inset) and contribute only content, so the two rows read as one
+                    // plate — the toggle no longer sits as a square panel on the progress bar's
+                    // shoulders, and the page shows through the margin, not through the glass.
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(
+                                start = FolioTokens.insetReaderIsland,
+                                end = FolioTokens.insetReaderIsland,
+                                bottom = FolioTokens.insetReaderIsland,
+                            )
+                            .readerIsland(RoundedCornerShape(FolioTokens.radiusReaderIsland))
+                            .padding(vertical = 6.dp)
+                    ) {
+                        DocumentReaderControls(
+                            state = state,
+                            onMode = {
+                                viewModel.setMode(
+                                    if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
+                                        DocumentReaderMode.CONTINUOUS
+                                    } else {
+                                        DocumentReaderMode.SINGLE_PAGE
+                                    }
+                                )
+                            },
+                            onRotate = viewModel::rotateClockwise,
+                            onResetZoom = { resetZoomKey++ },
+                        )
+                        if (showBlock) {
+                            DocumentPageBlock(
+                                state = state,
+                                isPdf = isPdf,
+                                paper = paper,
+                                ink = ink,
+                                bare = true,
+                                onSeek = onSeekProgress,
+                            )
+                        }
+                    }
+                } else if (showBlock) {
                     DocumentPageBlock(
                         state = state,
                         isPdf = isPdf,
                         paper = paper,
                         ink = ink,
-                        onSeek = { fraction ->
-                            viewModel.seekToProgress(fraction)
-                            if (!isPdf) {
-                                seekNonce++
-                                seekRequest = fraction to seekNonce.toLong()
-                            }
-                        }
+                        onSeek = onSeekProgress,
                     )
                 }
+            }
+        }
+
+        // In-reader document settings — a scrim plus the end-edge sheet, mirroring the
+        // EPUB reader's quick-settings panel. Composed last so it sits over both the page
+        // and the reader chrome. The panel writes the *document* defaults; "All settings"
+        // hands off to the Settings hub.
+        AnimatedVisibility(
+            visible = settingsPanelVisible,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    // The palette's own ambient shadow, not pure black, so the scrim
+                    // reads as depth on light themes instead of a hole.
+                    .background(FolioTheme.atmosphere.shadowAmbient.copy(alpha = 0.35f))
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { showSettingsPanel = false })
+                    }
+            )
+        }
+        AnimatedVisibility(
+            visible = settingsPanelVisible,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            enter = slideInHorizontally { it } + fadeIn(),
+            exit = slideOutHorizontally { it } + fadeOut()
+        ) {
+            Box(Modifier.folioSheetDragToDismiss { showSettingsPanel = false }) {
+                DocumentSettingsPanel(
+                    settings = settings,
+                    onSettingsChange = onSettingsChange,
+                    onDismiss = { showSettingsPanel = false },
+                    onOpenFullSettings = {
+                        showSettingsPanel = false
+                        onOpenFullSettings()
+                    },
+                    extraFonts = globalSettings.customFonts.map { it.name },
+                )
             }
         }
     }
@@ -439,11 +567,13 @@ private fun DocumentReaderControls(
     state: DocumentReaderState,
     onMode: () -> Unit,
     onRotate: () -> Unit,
-    onResetZoom: () -> Unit
+    onResetZoom: () -> Unit,
 ) {
     Row(
+        // No glass or inset here: the controls are drawn inside the shared chrome sheet (see the
+        // caller), which supplies the single continuous plane and the nav-bar inset. The row only
+        // insets its content horizontally so it lines up with the progress block beneath it.
         Modifier.fillMaxWidth()
-            .folioVeil(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .padding(horizontal = FolioTokens.space3),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -478,6 +608,7 @@ private fun DocumentPageBlock(
     isPdf: Boolean,
     paper: Color,
     ink: Color,
+    bare: Boolean = false,
     onSeek: (Float) -> Unit
 ) {
     val pageCount = state.pageCount.coerceAtLeast(1)
@@ -497,6 +628,7 @@ private fun DocumentPageBlock(
         ink = ink,
         stateLabel = label,
         pageCountHint = pageCount,
+        bare = bare,
         onSeek = onSeek
     )
 }
@@ -506,39 +638,39 @@ private fun DocumentReaderBar(
     state: DocumentReaderState,
     onBack: () -> Unit,
     onBookmark: () -> Unit,
-    morphDocumentId: String? = null
+    morphDocumentId: String? = null,
+    onOpenSettings: (() -> Unit)? = null
 ) {
-    // Same chrome contract as the EPUB and manga readers: the inked status band
-    // over the page, then a 56dp glass row with rounded feet, so the back arrow,
-    // the centred title and the bookmark all sit on one aligned baseline. The
-    // old bar was a bare Row with no band, no height and no shape — its icons
-    // hugged the screen edge uncentred, and it read as a different product.
-    //
-    // "Same chrome contract" now includes the *material*: the chrome plane and the chrome
-    // weight, like the masthead, the capsule and the EPUB reader's bars, at this reader's
-    // own alpha. It took `veilFill` — the card plane — which is how a bar ends up made of
-    // the same substance as the content behind it. See FolioChromeMaterial.
-    val chrome = com.folio.reader.ui.components.rememberFolioChromeMaterial()
-    Column(Modifier.fillMaxWidth()) {
-        FolioStatusBarBand(inkBand = true)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .folioVeil(
-                    shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                    elevation = FolioTokens.elevationVeil,
-                    fillColor = chrome.plane,
-                    fillAlpha = FolioTheme.readerVeilAlpha,
-                    weight = chrome.weight,
-                )
-                .height(56.dp)
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    // Floating islands, like the EPUB reader: a back capsule, a title capsule and a bookmark
+    // capsule hovering below the status bar with a uniform margin, so the page breathes through
+    // the gaps. Each capsule is the shared `readerIsland` glass (the chrome plane and weight at
+    // this reader's near-solid alpha), so the document reader is the same material family as the
+    // EPUB and manga chrome rather than a different product.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(
+                horizontal = FolioTokens.insetReaderIsland,
+                vertical = FolioTokens.insetReaderIsland,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(FolioTokens.insetReaderIsland),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.readerIsland(CircleShape)) {
             IconButton(onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = FolioTheme.colors.onSurface)
             }
+        }
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .readerIsland()
+                .heightIn(min = 48.dp)
+                .padding(horizontal = FolioTokens.space3),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
             Text(
                 state.document?.title.orEmpty(),
                 style = FolioTheme.typography.titleMedium,
@@ -547,7 +679,7 @@ private fun DocumentReaderBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1f, fill = false)
                     // §17: paired with the library tile's title, so the file's name
                     // arrives with its plate rather than appearing once the reader
                     // has already opened.
@@ -561,12 +693,25 @@ private fun DocumentReaderBar(
                         }
                     )
             )
+        }
+        Box(Modifier.readerIsland(CircleShape)) {
             IconButton(onBookmark) {
                 Icon(
                     if (state.isCurrentPositionBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                     "Toggle bookmark",
                     tint = FolioTheme.colors.onSurface
                 )
+            }
+        }
+        if (onOpenSettings != null) {
+            Box(Modifier.readerIsland(CircleShape)) {
+                IconButton(onOpenSettings) {
+                    Icon(
+                        Icons.Default.Settings,
+                        "Document settings",
+                        tint = FolioTheme.colors.onSurface
+                    )
+                }
             }
         }
     }
