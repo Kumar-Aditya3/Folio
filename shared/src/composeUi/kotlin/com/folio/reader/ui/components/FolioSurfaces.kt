@@ -1453,7 +1453,16 @@ fun Modifier.folioVeil(
             // the page's own flow is not floating over anything by definition, so the cast
             // shadow was never describing a true relationship — the feathered plane and the
             // rim ramp carry the separation instead.
-            if (embedded || (effectiveTier != FolioGlassTier.Overlay && fill.alpha < 1f)) {
+            //
+            // **P7: the guard reads the caller's [tier], not [effectiveTier].** The §20 in-flow
+            // glass upgrade promotes an in-flow veil to `Overlay` on any device that can blur,
+            // which silently defeated this guard: every section card in the app started casting
+            // its 10dp shadow through its own translucent plane again, and the result is the
+            // dark rounded band just inside the silhouette — the "nested structure inside every
+            // block" a light-mode Settings screen shows. Whether a surface is in the page's flow
+            // is a property of how the caller placed it, so the caller's own tier is what
+            // decides; an in-flow surface never casts, upgraded or not.
+            if (embedded || tier == FolioGlassTier.InFlow) {
                 Modifier
             } else {
                 Modifier.shadow(
