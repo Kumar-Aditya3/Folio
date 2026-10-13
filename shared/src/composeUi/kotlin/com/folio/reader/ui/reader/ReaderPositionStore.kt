@@ -74,7 +74,10 @@ internal class ReaderPositionStore(
             chapterProgress = 0.0,
             scrollOffset = 0.0
         )
-        println("📚 Position initialized: ${if (saved != null) "restored from DB" else "created new"}, chapter=${positionState.value?.chapterProgress}, book=${positionState.value?.normalizedProgress}")
+        // The decisive reopen diagnostic: if a "position resets to chapter start" report
+        // ever recurs, this line separates a bad SAVE (the row here already reads 0 /
+        // chapter start) from a bad RESTORE (row is right but the surface seeds elsewhere).
+        println("📚 Position initialized: ${if (saved != null) "restored from DB" else "created new"}, spine=${positionState.value?.spineIndex}, chapter=${positionState.value?.chapterProgress}, offset=${positionState.value?.scrollOffset}, book=${positionState.value?.normalizedProgress}")
 
         // Update book's normalized progress from saved position
         saved?.let { pos ->
@@ -155,6 +158,7 @@ internal class ReaderPositionStore(
             durationMs = totalMs,
             wordsRead = words
         )
+        println("💾 Position persist: book=${position.bookId} spine=${position.spineIndex} chapter=${position.chapterProgress} offset=${position.scrollOffset}")
         scope.launch {
             runCatching {
                 positionRepository.upsertPosition(position)

@@ -40,6 +40,14 @@ internal class ReaderAnnotations(
     private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
     private val _highlights = MutableStateFlow<List<Highlight>>(emptyList())
     private val _notes = MutableStateFlow<List<Note>>(emptyList())
+    // Highlight ids the reader deleted while that highlight's insert may still be in
+    // flight. `addHighlight` and `removeHighlight` are independent coroutines on `scope`
+    // with no ordering between them, so a delete issued the instant after a create can
+    // reach the database first — and the insert then lands on top of the delete and
+    // resurrects the row. A id recorded here tells the insert, on completion, that the
+    // reader changed its mind: persist the removal instead of surfacing the row.
+    private val removedWhileWriting =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
     val bookmarks: Flow<List<Bookmark>> = _bookmarks
     val highlights: Flow<List<Highlight>> = _highlights
     val notes: Flow<List<Note>> = _notes
@@ -138,6 +146,14 @@ internal class ReaderAnnotations(
         )
         scope.launch {
             val saved = runCatching { highlightRepository.insertHighlight(highlight) }.isSuccess
+            if (removedWhileWriting.remove(highlight.id)) {
+                // The reader deleted this highlight while the insert was in flight — the
+                // delete won the race to the UI and lost (or tied) the race to the
+                // database. Finish what the delete started instead of resurrecting the
+                // row; the quote/revisit side-effects below are skipped with it.
+                runCatching { highlightRepository.deleteHighlight(highlight.id) }
+                return@launch
+            }
             if (saved) {
                 // #9: reflect the highlight in memory only once the write actually persisted.
                 _highlights.value = _highlights.value + highlight
@@ -180,13 +196,19 @@ internal class ReaderAnnotations(
     }
 
     fun removeHighlight(highlightId: String) {
+        removedWhileWriting.add(highlightId)
+        // Optimistic: the row leaves the page at once — the delete is the one annotation
+        // action where a visible beat of lag reads as "the tap did nothing" and invites a
+        // second tap. A failed write puts it back; the reload was never the truth channel.
+        val snapshot = _highlights.value
+        _highlights.value = snapshot.filterNot { it.id == highlightId }
         scope.launch {
             val deleted = runCatching { highlightRepository.deleteHighlight(highlightId) }.isSuccess
-            if (deleted) {
-                _highlights.value = _highlights.value.filterNot { it.id == highlightId }
-            } else {
-                // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed highlight delete; the removal is silently reverted on reload.
+            if (!deleted) {
+                removedWhileWriting.remove(highlightId)
+                _highlights.value = _highlights.value + snapshot.filter { it.id == highlightId }
             }
+            // TODO(#9): no error channel in ReaderAnnotations or ReaderViewModel to surface this failed highlight delete; the optimistic row is restored until the reload.
         }
     }
 

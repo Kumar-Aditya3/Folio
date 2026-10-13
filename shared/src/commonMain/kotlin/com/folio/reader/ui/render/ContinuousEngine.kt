@@ -441,7 +441,15 @@ window.__folioRestyle=function(fc,sc,shadowCss){
 function restore(){
   var s=scroller();
   var sec=secBySpine(SEED_SPINE)||secs()[0];
-  if(sec){var top=topOf(sec),h=Math.max(0,sec.offsetHeight-vh());s.scrollTop=top+h*SEED_FRAC;}
+  // Invert report() exactly. The report measures the fraction from the section top to
+  // the VIEWPORT CENTRE over the FULL section height (f=(scrollTop+vh/2-top)/H); the
+  // old restore scaled over the scrollable RANGE (H-vh), which is the inverse only at
+  // f=0.5 — everywhere else the two disagree by vh*(0.5-f), so every reopen landed
+  // up to half a screen ahead of where the reader stopped (most reading happens in
+  // the first half of a chapter, i.e. always ahead). Scroll to the same absolute
+  // place the fraction was measured from, clamped so a fraction near 0 stays at the
+  // section start rather than scrolling above it.
+  if(sec){var top=topOf(sec),h=Math.max(1,sec.offsetHeight);s.scrollTop=Math.max(top,top+h*SEED_FRAC-vh()*0.5);}
   else{s.scrollTop=Math.max(0,s.scrollHeight-s.clientHeight)*SEED_FRAC;}
   if((s.scrollTop||0)>0)restorePending=false;
   if(document.body)document.body.style.opacity='1';

@@ -504,8 +504,27 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
         FolioSurfaceContents(
             folioVeilPlane(accent = LocalFolioSectionAccent.current, blurEnabled = !occlude)
         ) {
+            // Dialog panes carry the content inset themselves. Their callers compose
+            // bare rows and texts (`PageActionsDialog`, the confirm dialogs, the reader
+            // settings), and the pane's rim and edge ramp painted right up against that
+            // content — the first and last words of every row sat under the pane's own
+            // edge, which read as clipped. Menu rows own their content padding
+            // ([FolioMenuItem]) and sheets are full-bleed by design, so only the dialog
+            // kind is inset here.
+            val contentInset = if (kind == FolioOverlayKind.Dialog) {
+                Modifier.padding(
+                    start = FolioTokens.space3,
+                    end = FolioTokens.space3,
+                    top = if (title == null) FolioTokens.space2 else 0.dp,
+                    bottom = FolioTokens.space3,
+                )
+            } else {
+                Modifier
+            }
             Column(
-                paneModifier.then(Modifier.verticalScroll(rememberScrollState())),
+                paneModifier
+                    .then(contentInset)
+                    .then(Modifier.verticalScroll(rememberScrollState())),
             ) {
                 // A pane's title is drawn *here*, not by the caller: it is part of the pane's
                 // furniture (it also becomes the accessibility `paneTitle` above), so a caller that
@@ -516,8 +535,10 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                         style = FolioTheme.typography.titleSmall,
                         color = FolioTheme.colors.onSurface,
                         modifier = Modifier.padding(
-                            start = FolioTokens.space3,
-                            end = FolioTokens.space3,
+                            // The dialog pane itself now carries the horizontal inset; a
+                            // second one would indent the title relative to its own rows.
+                            start = if (kind == FolioOverlayKind.Dialog) 0.dp else FolioTokens.space3,
+                            end = if (kind == FolioOverlayKind.Dialog) 0.dp else FolioTokens.space3,
                             top = FolioTokens.space2,
                             bottom = FolioTokens.space1,
                         ),

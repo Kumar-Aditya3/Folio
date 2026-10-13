@@ -10,11 +10,23 @@ import kotlinx.serialization.json.Json
 /**
  * Draws the chapter's highlights into the page itself.
  *
- * Folio anchors annotations by text, so the page re-finds each snippet across text
- * nodes and wraps it in a `<mark>`. Colours come from the theme's own palette and
- * are applied as a wash only — the text colour is never touched, so the words stay
- * readable on every theme. On dark themes a translucent wash alone sinks into the
- * background, so the colour is repeated as an inset underline.
+ * A highlight is anchored where the reader made it — [Highlight.spineIndex] names the
+ * chapter section and [Highlight.startLocator] carries the paragraph index the selection
+ * protocol recorded (`/spine/paragraph:0`). The painter resolves that anchor against the
+ * live DOM: the section with the matching `data-folio-spine`, then the paragraph the
+ * selection protocol would have indexed (the section's Nth `<p>`, or Nth direct child
+ * when the section has no `<p>`s — the same rule `folio-sel2` uses). The text is the
+ * *disambiguator within the anchor*, not the anchor itself.
+ *
+ * That ordering is what keeps a common word pinned to the spot it was selected in.
+ * The first painter matched the bare text and wrapped **every** occurrence in **every**
+ * section — highlighting "and" lit every "and" in the chapter, and in continuous mode,
+ * where all window sections share one document, in the whole book.
+ *
+ * Colours come from the theme's own palette and are applied as a wash only — the text
+ * colour is never touched, so the words stay readable on every theme. On dark themes a
+ * translucent wash alone sinks into the background, so the colour is repeated as an
+ * inset underline.
  */
 object HighlightPaint {
 
@@ -23,7 +35,11 @@ object HighlightPaint {
         @SerialName("i") val id: String,
         @SerialName("t") val text: String,
         @SerialName("b") val background: String,
-        @SerialName("u") val underline: String
+        @SerialName("u") val underline: String,
+        /** The chapter section the highlight lives in (-1: unknown — legacy rows). */
+        @SerialName("s") val spine: Int,
+        /** The paragraph the selection protocol indexed (-1: unknown). */
+        @SerialName("p") val paragraph: Int
     )
 
     /** Shared styling only; each mark carries its own colours so one page can mix them. */
@@ -42,10 +58,21 @@ object HighlightPaint {
         else "rgba($rgb,0.42)" to ""
     }
 
+    /** The paragraph index half of the `/spine/paragraph:offset` locator. */
+    private val LOCATOR_PARA = Regex("^/-?\\d+/(-?\\d+):")
+
     private fun payload(highlights: List<Highlight>, theme: Theme): String {
         val marks = highlights.filter { !it.isDeleted && it.selectedText.isNotBlank() }.map {
             val (background, underline) = colorsFor(it.effectiveColor, theme.isDark)
-            Mark(it.id, it.selectedText.trim(), background, underline)
+            Mark(
+                id = it.id,
+                text = it.selectedText.trim(),
+                background = background,
+                underline = underline,
+                spine = it.spineIndex,
+                paragraph = LOCATOR_PARA.find(it.startLocator)
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            )
         }
         return Json.encodeToString(ListSerializer(Mark.serializer()), marks)
     }
@@ -106,7 +133,7 @@ object HighlightPaint {
                 // Map offsets skip whitespace, so a run inside one node is contiguous
                 // even when its raw indexes are not: the gap between them is all
                 // whitespace, and it stays inside the same mark.
-                "function gapIsWs(node,a,b){var s=node.nodeValue||'';for(var i=a;i<b;i++){if(!isWs(s.charAt(i)))return false;}return true;}\n" +
+                "function gapIsWs(node,a,b){var s=node.nodeValue||'';for(var i=a;i<b;i++){if(!isWs(s.charAt(i)))return false;}}\n" +
                 "function wrap(c,h,len,bg,sh,mid){\n" +
                 "  var end=h+len,i=h,segs=[],seg=null,done=false;\n" +
                 "  while(i<end){\n" +
@@ -128,26 +155,64 @@ object HighlightPaint {
                 "  }\n" +
                 "  return done;\n" +
                 "}\n" +
+                // Paint ONE occurrence of the needle inside one scope, at its first
+                // position. A highlight is one range the reader made in one place; the
+                // old painter looped and wrapped every occurrence in the scope, which is
+                // how highlighting "and" lit every "and" on the page.
+                "function paintIn(scope,needle,it){\n" +
+                "  if(!scope)return false;\n" +
+                "  var c=collect(scope),guard=0;\n" +
+                "  while(guard++<3){\n" +
+                "    var hit=c.full.indexOf(needle);\n" +
+                "    if(hit<0)return false;\n" +
+                "    if(wrap(c,hit,needle.length,it.b,it.u,it.i))return true;\n" +
+                // A failed surroundContents may still have split nodes — re-map once.
+                "    c=collect(scope);\n" +
+                "  }\n" +
+                "  return false;\n" +
+                "}\n" +
+                // The paragraph node the selection protocol would have indexed: the
+                // section scope's Nth <p>, or Nth direct child when the section has no
+                // <p>s. Must stay in lockstep with folioReportSel's index computation.
+                "function paraNode(sroot,para){\n" +
+                "  var ps=sroot.querySelectorAll('p');\n" +
+                "  if(ps.length)return ps[para]||null;\n" +
+                "  var kids=sroot.children||[];\n" +
+                "  return kids[para]||null;\n" +
+                "}\n" +
                 "window.__folioPaintHighlights=function(items){\n" +
                 "  unwrap();\n" +
-                // A highlight always lives within one chapter, so match per root: iterate
-                // every shadow root (or `[document.body]` when paged / non-shadow) and run
-                // the collect→match→wrap loop over THAT root's text.
-                // `full` (whitespace-stripped text) is stable across wraps — surroundContents only
-                // splits nodes, it never removes characters — so collect once per root and refresh the
-                // node/offset map only after a wrap actually mutates the DOM.
-                "  var roots=folioRoots(),ri;\n" +
-                "  for(ri=0;ri<roots.length;ri++){\n" +
-                "    var root=roots[ri],c=collect(root);\n" +
-                "    for(var k=0;k<items.length;k++){\n" +
-                "      var it=items[k],needle=norm(it.t||'');\n" +
-                "      if(!needle)continue;\n" +
-                "      var pos=0,guard=0;\n" +
-                "      while(guard++<40){\n" +
-                "        var hit=c.full.indexOf(needle,pos);\n" +
-                "        if(hit<0||!wrap(c,hit,needle.length,it.b,it.u,it.i))break;\n" +
-                "        pos=hit+needle.length;\n" +
-                "        c=collect(root);\n" +
+                "  var roots=folioRoots(),ri,k;\n" +
+                // When the document really has spine sections, a highlight whose section
+                // is not among them must NOT fall through to the legacy whole-document
+                // match: its chapter is simply not on screen, and matching anyway would
+                // light the first occurrence of its text in whatever chapter is.
+                "  var hasSecs=document.querySelectorAll('section[data-folio-spine]').length>0;\n" +
+                "  for(k=0;k<items.length;k++){\n" +
+                "    var it=items[k],needle=norm(it.t||'');\n" +
+                "    if(!needle)continue;\n" +
+                "    var done=false;\n" +
+                // Anchor ladder. 1) the section named by the highlight's spine, narrowed
+                // to the paragraph the selection recorded; 2) that whole section (the
+                // paragraph may have reflowed since — its INDEX is stale but the text
+                // still pins the spot to one occurrence); 3) a plain first-match walk
+                // over the roots, for paged documents that carry no spine sections at
+                // all (there the caller has already filtered the highlights to the one
+                // rendered chapter, so a first match IS the anchor).
+                "    if(it.s!=null&&it.s>=0&&hasSecs){\n" +
+                "      var all=document.querySelectorAll('section[data-folio-spine]'),i,sec=null;\n" +
+                "      for(i=0;i<all.length;i++){if(parseInt(all[i].getAttribute('data-folio-spine'),10)===it.s){sec=all[i];break;}}\n" +
+                "      if(sec){\n" +
+                "        var sroot=sec.shadowRoot||sec;\n" +
+                "        if(it.p!=null&&it.p>=0){\n" +
+                "          var pn=paraNode(sroot,it.p);\n" +
+                "          if(pn)done=paintIn(pn,needle,it);\n" +
+                "        }\n" +
+                "        if(!done)done=paintIn(sroot,needle,it);\n" +
+                "      }\n" +
+                "    }else{\n" +
+                "      for(ri=0;ri<roots.length&&!done;ri++){\n" +
+                "        done=paintIn(roots[ri],needle,it);\n" +
                 "      }\n" +
                 "    }\n" +
                 "  }\n" +

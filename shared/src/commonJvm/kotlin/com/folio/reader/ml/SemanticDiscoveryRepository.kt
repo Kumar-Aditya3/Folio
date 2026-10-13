@@ -79,12 +79,20 @@ class SemanticDiscoveryRepository(
      * cached) and never throws — a missing model just leaves the session null. Called when the
      * reader detects a selection, so warming overlaps the moment before the reader taps Echoes.
      */
-    suspend fun warm() = kotlinx.coroutines.coroutineScope {
-        // Overlap the two independent one-time costs — the ONNX session init and the resident-index
-        // build — instead of paying them back to back, so the first Echoes tap resolves sooner.
-        val session = launch { runCatching { semanticSearch.warm() } }
-        val index = launch { runCatching { semanticSearch.preload() } }
-        session.join(); index.join()
+    suspend fun warm() {
+        // Warm the ONNX session only. The resident-index build used to launch here too —
+        // "the reader may tap Echoes, so have the whole-library index ready" — but a
+        // selection is how a highlight is *made*, and the overwhelming majority of
+        // selections become highlights, not Echoes taps. Paying a whole-library vector
+        // preload for every first selection pegged the CPU for the better part of a
+        // minute and, worse, monopolised the database: one JDBC connection behind a
+        // single monitor means the streaming index read blocks every other query, so
+        // backing out and reopening the book left the reader stuck on its loading plate.
+        // The session is the cheap half (init + one dot embed); the index build moves to
+        // the tap that actually needs it — `moreLikeThis` preloads internally, so an
+        // Echoes tap that finds no index built pays the build once, exactly as search
+        // already does.
+        runCatching { semanticSearch.warm() }
     }
 
     /** Releases the embedder session (its ~50 MB native footprint); keeps the small index resident. */
