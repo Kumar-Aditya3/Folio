@@ -402,6 +402,15 @@ internal fun tierColour(gammaLuma: Float, hueDeg: Float, chromaTarget: Float): C
         l = solveL(chroma)
         chroma = affordable(l)
     }
+    // Solve for the lightness of the chroma actually returned, last.
+    //
+    // The loop above ends on `chroma = affordable(l)`, which can only *reduce* the chroma
+    // `l` was solved for — and a colour that is less chromatic than the one its lightness
+    // was chosen for no longer carries the target luminance. That is the one promise this
+    // function makes ("luminance is pinned and only chroma rises"), and it was off by up to
+    // 0.034 on Cyberpunk's warm pool, which is exactly what `vividAddsChromaButHoldsLuminance`
+    // measures. One more bisection closes it.
+    l = solveL(chroma)
     return oklchToColor(l, chroma, hueDeg)
 }
 

@@ -91,6 +91,18 @@ internal val FOLIO_LIGHTS: Map<String, FolioLight> = mapOf(
     "sakura" to FolioLight(0.34f, 0.15f, 0.45f, 0.085f, 0.08f, 0.60f),
     "honey" to FolioLight(0.28f, 0.18f, 0.35f, 0.08f, 0.07f, 0.40f),
     "dawn" to FolioLight(0.70f, 0.14f, 0.50f, 0.085f, 0.08f, 0.55f),
+
+    // ── Loud rooms: the light *is* the subject. These three packs exist to look like
+    //    somewhere — a neon city, a Miami evening, a lit chandelier — so each puts its
+    //    source where that place puts it and lends the shelf most of its colour.
+    //
+    //    P7: they had no entry at all, so all three fell through to FolioLight.Default
+    //    and got the quiet resting room: a neon theme lit like a reading room, which is
+    //    exactly the failure this table exists to prevent ("they would get the quiet
+    //    default and nobody would notice on a device").
+    "cyberpunk" to FolioLight(0.18f, 0.12f, 0.60f, 0.095f, 0.085f, 0.70f),
+    "vice" to FolioLight(0.78f, 0.22f, 0.55f, 0.09f, 0.08f, 0.65f),
+    "aurum" to FolioLight(0.50f, 0.14f, 0.32f, 0.085f, 0.075f, 0.45f),
 )
 
 /**

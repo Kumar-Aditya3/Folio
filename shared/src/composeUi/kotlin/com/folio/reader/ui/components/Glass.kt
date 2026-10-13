@@ -361,6 +361,21 @@ fun FolioGlassRoot(
 }
 
 /**
+ * Whether the §20 in-flow upgrade is actually **live** where this is read: the user has
+ * not opted into minimal glass, and the device plus this screen can carry a real blur.
+ *
+ * Call sites that own a painted well ([folioSunken]) or a flat panel ([folioPanel] and
+ * friends) use this to choose materials: `true` -> the full [folioVeil] glass, so the
+ * room frosts through the surface the way the section cards already do; `false` -> the
+ * painted material exactly as shipped. Keeping the choice at the call site (rather than
+ * teaching every material to promote) preserves the deliberate designs — a chart well
+ * stays a well when the user asked for minimal glass, and nothing changes on a device
+ * that cannot blur.
+ */
+@Composable
+fun inFlowGlassActive(): Boolean = LocalGlassInFlowGlass.current && glassBlurred()
+
+/**
  * The two rungs of the backdrop ladder, as Haze z-indices on **one** registry.
  *
  * This is the fix for the defect that made every in-flow glass surface a flat tint, and

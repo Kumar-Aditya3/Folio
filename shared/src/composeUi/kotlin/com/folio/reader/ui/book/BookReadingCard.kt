@@ -47,6 +47,8 @@ import com.folio.reader.ui.components.finishEstimate
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.readingPaceWordsPerDay
 import com.folio.reader.ui.components.rememberEntryProgress
+import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.inFlowGlassActive
 import com.folio.reader.ui.statistics.ChartBar
 import com.folio.reader.ui.statistics.intensityFor
 import com.folio.reader.ui.statistics.shortMinutes
@@ -159,10 +161,21 @@ internal fun BookDescription(description: String) {
     // round it, sitting among `folioVeil`/`folioPanel` surfaces. `folioPanel` is the
     // material a resting block of grouped text is made of, and it is nesting-aware, so it
     // quiets itself if this card is ever placed inside another surface.
+    // §20: with minimal liquid glass off the block takes the veil material like the
+    // section cards around it; the flat panel stays for minimal glass and no-blur.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioPanel(FolioShapes.inset)
+            .then(
+                if (com.folio.reader.ui.components.inFlowGlassActive()) {
+                    Modifier.folioVeil(
+                        FolioShapes.inset,
+                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
+                    )
+                } else {
+                    Modifier.folioPanel(FolioShapes.inset)
+                }
+            )
     ) {
         var expanded by remember { mutableStateOf(false) }
         Column(

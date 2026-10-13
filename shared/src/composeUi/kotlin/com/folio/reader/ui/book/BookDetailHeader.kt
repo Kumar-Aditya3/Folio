@@ -50,6 +50,8 @@ import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.folioThemeRim
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberCoverLight
+import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.inFlowGlassActive
 import com.folio.reader.ui.theme.FolioAmbientSource
 import com.folio.reader.ui.theme.FolioCoverLightSource
 import com.folio.reader.ui.theme.FolioShapeFamily
@@ -288,11 +290,25 @@ private fun BookMetadataGrid(book: Book, accent: Color) {
     // This book's own well: the edgeStart family varies its trailing corners while
     // the leading edge stays square against the screen edge. One shape governs the
     // fill, the clip and the border, because folioSunken takes it once.
+    // §20: with minimal liquid glass off, the metadata well becomes real glass — the
+    // publisher/language/ISBN block sits between two glass sections (the hero above,
+    // the charts below) and read as the one dull slab in the middle. The gate keeps
+    // the shipped well under minimal glass or on a no-blur device.
     val wellShape = rememberFolioShape(book.id.hashCode(), FolioShapeFamily.edgeStart)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioSunken(wellShape, accent = accent)
+            .then(
+                if (com.folio.reader.ui.components.inFlowGlassActive()) {
+                    Modifier.folioVeil(
+                        wellShape,
+                        accent = accent,
+                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
+                    )
+                } else {
+                    Modifier.folioSunken(wellShape, accent = accent)
+                }
+            )
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
     ) {
         MetadataRow("Publisher", book.publisher ?: "—")

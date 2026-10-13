@@ -611,7 +611,22 @@ fun StatCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .folioSunken(FolioShapes.inset, accent = color)
+            // §20: with minimal liquid glass off, the stat figures join the section
+            // cards in real glass — a well is a chart's bed, but a lone figure sitting
+            // in one read as a dull painted tile next to live glass. The gate keeps the
+            // shipped well when the user opted into minimal glass or the device cannot
+            // blur, so nothing regresses there.
+            .then(
+                if (com.folio.reader.ui.components.inFlowGlassActive()) {
+                    Modifier.folioVeil(
+                        FolioShapes.inset,
+                        accent = color,
+                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
+                    )
+                } else {
+                    Modifier.folioSunken(FolioShapes.inset, accent = color)
+                }
+            )
             .padding(horizontal = 14.dp, vertical = 13.dp)
     ) {
         FolioFigure(
