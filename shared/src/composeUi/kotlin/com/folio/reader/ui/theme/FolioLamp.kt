@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import com.folio.reader.ui.theme.FieldMotion
 
 /**
  * The lamp — one light source in the room, strong enough to see.
@@ -121,7 +122,7 @@ private const val LAMP_EMISSION_FLOOR = 0.75f
 private const val LAMP_BREATH = 0.12f
 
 /** One breath of the lamp. Slower than the room's own light, on purpose. */
-private const val LAMP_PERIOD_MS = 61_000L
+private val LAMP_PERIOD_MS = FieldMotion.lampPeriodMs
 
 /** The least chroma a lamp carries, so a pale cover still lights the room in colour. */
 private const val LAMP_MIN_CHROMA = 0.45f

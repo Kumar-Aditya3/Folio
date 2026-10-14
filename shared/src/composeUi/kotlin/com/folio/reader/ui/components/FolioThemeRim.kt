@@ -27,6 +27,7 @@ import kotlin.math.sin
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionSpec
 import com.folio.reader.ui.theme.motionProfile
+import com.folio.reader.ui.theme.FieldMotion
 
 /**
  * The themed rim: a surface's outline carrying one light that travels around it.
@@ -73,7 +74,7 @@ import com.folio.reader.ui.theme.motionProfile
  * glint crossing ~2,600px of perimeter in 12s is brisk enough to read as a loading
  * state rather than as lighting.
  */
-internal const val RIM_PERIOD_MS = 24_000L
+internal val RIM_PERIOD_MS = FieldMotion.rimPeriodMs
 
 /**
  * How far the static ring is lifted from the palette's hairline toward its rim light.
@@ -93,7 +94,7 @@ internal const val RIM_METALLIC = 0.72f
  * edge shows that step. The cost is bounded by what moves: this invalidates the one
  * featured item per shelf, and the list cell stops the clock once it scrolls out.
  */
-private const val RIM_TICK_MS = 33L
+private val RIM_TICK_MS = FieldMotion.rimTickMs
 
 /**
  * The lit arc's angular width as a fraction of a full turn, at rest. Widened 0.30 → 0.34

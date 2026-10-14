@@ -17,6 +17,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
+import com.folio.reader.ui.theme.FieldMotion
 
 /**
  * The silk ribbon field on the hero — the structure frozen, only the mesh moving.
@@ -50,7 +51,7 @@ internal const val SILK_MOTION_TICK_MS = 16L
  * stretched to 48 s the wheels turn perceptibly slower while the 16 ms tick keeps it smooth.
  * The loop still closes exactly because only the integer `K_EPI` scroll depends on `p`.
  */
-internal const val SILK_PERIOD_MS = 48_000L
+internal val SILK_PERIOD_MS = FieldMotion.silkStrandPeriodMs
 
 /**
  * The glow halo around each thread. A thread is **not** drawn as a hard hairline with a halo
@@ -153,7 +154,7 @@ internal fun Modifier.folioSilk(
  * loops on related periods settle into a repeating lattice, which is the one thing a field
  * whose whole job is to never look like a pattern cannot do.
  */
-private val FIELD_PERIODS_MS = listOf(37_000L, 53_000L, 43_000L)
+private val FIELD_PERIODS_MS = FieldMotion.silkPeriodsMs
 
 // §Vibrancy — how far the bloom alpha travels from its measured base (0.20 dark / 0.46 light) to
 // the vivid / muted ends of the Muted ↔ Vivid lever. Both are 0 at VIBRANCY_NEUTRAL, so the base
@@ -185,7 +186,7 @@ private const val BLOOM_ALPHA_MUTE = 0.45f
  * `CompositionLocalProvider` cannot inject one into a subtree, and installing it globally
  * would throttle every shimmer skeleton and progress indicator in the app to 20 Hz too.
  */
-private const val FIELD_TICK_MS = FolioTokens.fieldAnimationFrameMs
+private val FIELD_TICK_MS = FieldMotion.silkTickMs
 
 /**
  * The silk as the **whole app's background**, behind every tab — not a hero-local field.

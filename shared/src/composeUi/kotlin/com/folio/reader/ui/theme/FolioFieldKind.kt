@@ -186,34 +186,40 @@ sealed interface FolioFieldChoice {
 const val FOLIO_FIELD_PLAIN = "PLAIN"
 
 /**
- * The single reserved key under which the user's **global** background-animation choice is stored
- * in `ReaderSettings.fieldOverrides`. The animation selector is global: one choice applies across
+ * The reserved key under which the user's **global** background-animation choice is stored in
+ * `ReaderSettings.fieldOverrides`. The selector is global by default: one choice applies across
  * every theme, so switching themes re-colours the field but never changes the animation style.
  *
  * It is not a valid `ThemePack.id` (the leading underscores guarantee no collision), so it rides
- * the same `Map<String, String>` serialization/sync path with no migration. Any legacy per-pack
- * entries written by older builds are simply ignored by [folioFieldChoiceFor] in favour of this
- * global key.
+ * the same `Map<String, String>` serialization/sync path with no migration. A reader who wants one
+ * theme to differ writes that theme's own pack id as the key instead, and [folioFieldChoiceFor]
+ * resolves per-theme-first — so the per-pack entries older builds wrote are honoured again rather
+ * than ignored.
  */
 const val FOLIO_FIELD_GLOBAL_KEY = "__global_field__"
 
 /**
- * Resolves the effective [FolioFieldChoice] from the user's [overrides] map
- * (`ReaderSettings.fieldOverrides`). The selection is global — keyed on [FOLIO_FIELD_GLOBAL_KEY],
- * not on [packId] — so changing the theme never changes the animation style. [packId] is retained
- * only for the designed-default fall-through.
+ * Resolves the effective [FolioFieldChoice] from the user's [overrides] map.
  *
- * - absent global key -> the unified designed default ([folioFieldKindFor]).
- * - [FOLIO_FIELD_PLAIN] -> [FolioFieldChoice.Plain].
- * - a valid [FolioFieldKind] name -> that family.
- * - anything else (stale / malformed token) -> safe fall-through to the designed default, so a
- *   bad persisted value can never blank the background.
+ * The scope is **per theme first, then global**, so a reader who wants Gallery still and Arctic
+ * swirling can have it while every other theme keeps the one global choice:
+ *
+ * - a pack key for this `packId` -> that theme's own choice;
+ * - else the [FOLIO_FIELD_GLOBAL_KEY] -> the one global choice;
+ * - [FOLIO_FIELD_PLAIN] -> [FolioFieldChoice.Plain];
+ * - a valid [FolioFieldKind] name -> that family;
+ * - anything else (stale / malformed token) -> safe fall-through to the designed default, so a bad
+ *   persisted value can never blank the background.
+ *
+ * Reading the pack key first is what makes the per-theme entries older builds wrote start working
+ * again instead of being ignored — the picker has always accepted a `packId`, so this restores the
+ * scope its UI already implies.
  */
 fun folioFieldChoiceFor(
     packId: String,
     overrides: Map<String, String>,
 ): FolioFieldChoice {
-    val token = overrides[FOLIO_FIELD_GLOBAL_KEY]
+    val token = overrides[packId] ?: overrides[FOLIO_FIELD_GLOBAL_KEY]
         ?: return FolioFieldChoice.Animated(folioFieldKindFor(packId))
     if (token == FOLIO_FIELD_PLAIN) return FolioFieldChoice.Plain
     val kind = FolioFieldKind.entries.firstOrNull { it.name == token }

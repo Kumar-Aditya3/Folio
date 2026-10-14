@@ -82,7 +82,13 @@ const val AMBIENT_DRIFT_MAX = 0.05f
  * reading as a room (the same argument that holds §13.4's mesh at 18–30s, one
  * register slower).
  */
-internal val AMBIENT_PERIODS_MS = listOf(47_000L, 71_000L)
+/**
+ * The ambient light's periods, from the one background table ([MotionKey.AmbientSwing] and
+ * [MotionKey.AmbientBreath]) rather than being literals in this file. The two are distinct primes
+ * so the swing and the breath never beat in sync, and both are past ~45 s on purpose — past that a
+ * moving light stops reading as animation and starts reading as a room.
+ */
+internal val AMBIENT_PERIODS_MS = listOf(FieldMotion.ambientSwingPeriodMs, FieldMotion.ambientBreathPeriodMs)
 
 /**
  * The effective azimuth after the ambient light's contribution — the one pure

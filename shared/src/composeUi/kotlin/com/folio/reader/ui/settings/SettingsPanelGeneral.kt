@@ -139,32 +139,10 @@ fun GeneralSettingsPanel(
                 }
             }
 
-            // Global background-animation selection. One choice applies across every theme;
-            // changing the theme re-colours the field but never changes the animation style.
-            // Stored in settings.fieldOverrides under the reserved global key.
-            val selectedPack = packs.getOrNull(selectedPackIndex)
-            if (selectedPack != null) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Background animation", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Choose the animation applied across every theme, " +
-                            "or Plain for a still background.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                ThemeFieldOverridePicker(
-                    packId = selectedPack.id,
-                    current = settings.fieldOverrides[com.folio.reader.ui.theme.FOLIO_FIELD_GLOBAL_KEY],
-                    onChoose = { token ->
-                        val key = com.folio.reader.ui.theme.FOLIO_FIELD_GLOBAL_KEY
-                        val next = settings.fieldOverrides.toMutableMap().apply {
-                            if (token == null) remove(key) else put(key, token)
-                        }
-                        onSettingsChange(settings.copy(fieldOverrides = next))
-                    },
-                )
-            }
+            // The background-animation picker used to live here. It now lives in the
+            // Transparency ("Appearance") panel's Animations section, beside the motion
+            // preset and the levers — one home for every animation control in the app. The
+            // storage, the reserved key and the resolution are unchanged.
         }
 
         Column(

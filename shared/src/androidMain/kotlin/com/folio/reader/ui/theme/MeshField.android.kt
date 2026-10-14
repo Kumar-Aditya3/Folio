@@ -44,6 +44,9 @@ import io.androidpoet.mirage.halftoneDots
 import io.androidpoet.mirage.heatmap
 import io.androidpoet.mirage.liquidMetal
 import io.androidpoet.mirage.water
+import com.folio.reader.ui.theme.FieldMotion
+import com.folio.reader.ui.theme.rememberSlowPhases
+import kotlin.math.sin
 
 /**
  * Android side of the per-theme field: each [FolioFieldKind] is a different Mirage AGSL shader,
@@ -87,7 +90,38 @@ import io.androidpoet.mirage.water
  * the designer signed off, and the extra deepen pays for the light the pattern itself then adds
  * on top. The *hue* is still the ramp's, so the field keeps the theme's identity as a tint.
  */
+// A tau, for the slow-phase modulation below; kept local so the two clockless families
+// read their own phase without importing anything.
+private const val TAU = 6.2831853f
+
 private const val FIELD_DARK_BACK_FOOT = 0.35f
+
+/**
+ * The knobs nobody set. Every value below was previously the Mirage library's own default — a
+ * design decision being made by someone who never saw this app. Each is now named, here, with its
+ * reason, so a retune is one line rather than a hunt through the dispatch.
+ */
+// PulsingBorder is *named* for its pulse, and its breathing rate was the library default — a
+// notification's urgency in a reading app's background. A read-scale pulse instead.
+private const val PULSING_BORDER_PULSE = 0.15f
+private const val PULSING_BORDER_ROUNDNESS = 0.65f
+private const val PULSING_BORDER_SPOT_SIZE = 0.12f
+// ColorPanels slid at the library's count and its own generic ease. `fadeIn`/`fadeOut` are the
+// per-family easing curves — the "easing" the tuning review asked about, as uniforms.
+private const val COLOR_PANELS_DENSITY = 5f
+private const val COLOR_PANELS_EDGES = true
+private const val COLOR_PANELS_LENGTH = 0.75f
+private const val COLOR_PANELS_FADE_IN = 0.12f
+private const val COLOR_PANELS_FADE_OUT = 0.88f
+// PerlinNoise: persistence and lacunarity decide whether the cloud reads as weather or as
+// television static. The picker promises "slow Perlin cloud drift".
+private const val PERLIN_PERSISTENCE = 0.55f
+private const val PERLIN_LACUNARITY = 2.1f
+// Spiral: the strokes were mathematically perfect, which is the one thing a hand-drawn motif must
+// not be.
+private const val SPIRAL_NOISE = 0.06f
+private const val SPIRAL_NOISE_FREQUENCY = 1.6f
+private const val SPIRAL_STROKE_TAPER = 0.35f
 private const val FIELD_DARK_BACK_DEEPEN = 0.22f
 
 /**
@@ -156,6 +190,13 @@ actual fun FolioThemeField(
     // more of that colour. `up` is 0 at VIBRANCY_NEUTRAL, so the sink stays at its measured 0.52.
     val up = ((vibrancy - VIBRANCY_NEUTRAL) / (1f - VIBRANCY_NEUTRAL)).coerceIn(0f, 1f)
     val sink = FIELD_DARK_PALETTE_SINK * (1f - up * FIELD_DARK_SINK_RELAX)
+    // The resolved motion: the field's speed factor (from the preset, the field-motion lever and
+    // reduce-motion, which *crawls* the field rather than freezing it) and its amplitude factor.
+    // One entry point instead of a bare `animate` boolean whose `speed = 0` meaning was previously
+    // the app's only way to say less motion.
+    val motion = LocalMotion.current
+    val speedFactor = motion.fieldSpeedFactor
+    val amplitudeFactor = motion.fieldIntensityFactor
     // The field's working palette: the loud accents first (they carry the theme's identity), then
     // the softer aurora pools. Deduped and never empty. On a dark face every entry is sunk toward
     // the field's own base so the animation carries the theme's hue at the room's luminance
@@ -172,7 +213,7 @@ actual fun FolioThemeField(
     // the device's pixels and is scaled back up, which leaves the motion bit-for-bit as authored
     // and divides the fragment work by the square of the scale. See [FolioFieldCost].
     val scale = rememberFolioFieldScale(kind)
-    MirageField(kind, back, palette, isDark, animate, modifier.folioFieldDownsample(scale))
+    MirageField(kind, back, palette, isDark, amplitudeFactor, speedFactor, vibrancy, modifier.folioFieldDownsample(scale))
 }
 
 /** Pulls [n] colours from [src], cycling if the theme authored fewer. */
@@ -226,13 +267,40 @@ private fun MirageField(
     back: Color,
     palette: List<Color>,
     isDark: Boolean,
-    animate: Boolean,
+    amplitudeFactor: Float,
+    speedFactor: Float,
+    vibrancy: Float,
     modifier: Modifier,
 ) {
-    // Each family runs slow � a reading-app background breathes, it does not perform. `s()` scales
-    // a family's natural speed and collapses to a frozen frame under reduce-motion.
-    fun s(v: Float): Float = if (animate) v else 0f
-    // §Mirage dark brightness: the palette-dominated families (see FIELD_DARK_PALETTE_SINK_EXTRA)
+    // Each family runs slow - a reading-app background breathes, it does not perform. `s()` scales
+    // a family's *authored* rate ([FieldMotion.fieldSpeed]) by the reader's factor.
+    //
+    // What `speed` does *not* do: change the redraw rate. The shader repaints every vsync
+    // whatever the speed, because the clock lives inside Mirage as `withFrameNanos` - so
+    // changing it costs no frames, which is what makes it free to expose. `startFrame`, the
+    // library's other knob, is seeded by an unkeyed `remember` and is dead at every call site;
+    // `speed = 0` is the only value that stops the clock (a frozen frame - which reduce-motion
+    // no longer asks for: it asks for a crawl). Cost is governed separately, by
+    // [FolioFieldCost] (render scale) and [FolioFieldOccluder] (presence).
+    fun s(v: Float): Float = v * speedFactor
+    // The family's amplitude at this room's gain: a dark face sits at the dark end and a light
+    // face at the light end, with the vibrancy lever lifting the dark end continuously - the
+    // binary `if (isDark)` this replaces had no room for "a little brighter than dark", which is
+    // why every dark-mode brightness fix had to edit one family's literal.
+    fun amp(kind: FolioFieldKind): Float =
+        kind.fieldAmplitude().at(fieldGain(isDark, vibrancy)) * amplitudeFactor
+
+    // The two families whose shader has no `u_time` (Waves and DotGrid — see [isClockless]) cannot
+    // animate from inside the library, so their parameters are driven from here instead: one slow
+    // phase modulating a uniform. Gated on the family so the other twenty-three never re-read it —
+    // this is the one place in the dispatch where a changing value is read in the composition
+    // phase, and it is confined to the two families that have no other way to move.
+    val tickPhase = if (kind.isClockless()) {
+        rememberSlowPhases(listOf(FieldMotion.clocklessPeriodMs), FieldMotion.clocklessTickMs)
+            .value.firstOrNull() ?: 0f
+    } else {
+        0f
+    }    // §Mirage dark brightness: the palette-dominated families (see FIELD_DARK_PALETTE_SINK_EXTRA)
     // take an extra sink of their palette toward the field base so a night field reads as night
     // rather than at paper's luminance. The already-sunk `palette` is unchanged for every other
     // family, and light faces are untouched (`deep` == `palette`).
@@ -247,7 +315,7 @@ private fun MirageField(
             softness = 0.85f,
             // COLOUR ONLY — P9: dark 0.36 -> 0.26. The dark branch was within two points of
             // paper's, so the wall was lit as brightly at night as by day.
-            intensity = if (isDark) 0.26f else 0.38f,
+            intensity = amp(kind),
             noise = 0.28f,
             shape = GrainGradientShape.Corners,
             speed = s(0.3f),
@@ -336,8 +404,8 @@ private fun MirageField(
             // rays are the one family whose figure is *volumetric light*, so it is the loudest
             // of the twenty-five on a near-black page — and `dawn`/Dusk, the face the dark-mode
             // report was filed against, is the pack that draws it.
-            intensity = if (isDark) 0.42f else 0.65f,
-            bloom = if (isDark) 0.28f else 0.45f,
+            intensity = amp(kind),
+            bloom = amp(kind),
             speed = s(0.5f),
         )
         // LAGOON � turquoise, sand and coral drifting through moving water; blends, never whitens.
@@ -372,6 +440,11 @@ private fun MirageField(
             angle2 = -15f,
             gradient = 0.5f,
             blur = 0.3f,
+            density = COLOR_PANELS_DENSITY,
+            length = COLOR_PANELS_LENGTH,
+            edges = COLOR_PANELS_EDGES,
+            fadeIn = COLOR_PANELS_FADE_IN,
+            fadeOut = COLOR_PANELS_FADE_OUT,
             speed = s(0.4f),
         )
         FolioFieldKind.DotGrid -> DotGrid(
@@ -382,15 +455,17 @@ private fun MirageField(
             size = 2.4f,
             gapX = 34f,
             gapY = 34f,
+            // The grid "breathes": the depth of the dots' fade rides the slow phase, which is what
+            // the picker's description always claimed of this family.
             sizeRange = 0.5f,
-            opacityRange = 0.5f,
+            opacityRange = 0.5f * (0.5f + 0.5f * sin(tickPhase * TAU).toFloat()),
         )
         FolioFieldKind.NeuroNoise -> NeuroNoise(
             modifier = modifier,
             colorBack = back,
             colorMid = palette.cycle(2).last(),
             colorFront = palette.first(),
-            brightness = if (isDark) 0.05f else 0.04f,
+            brightness = amp(kind),
             contrast = 0.35f,
             speed = s(0.5f),
         )
@@ -401,6 +476,8 @@ private fun MirageField(
             proportion = 0.4f,
             softness = 0.25f,
             octaveCount = 3,
+            persistence = PERLIN_PERSISTENCE,
+            lacunarity = PERLIN_LACUNARITY,
             speed = s(0.3f),
         )
         FolioFieldKind.SimplexNoise -> SimplexNoise(
@@ -417,6 +494,9 @@ private fun MirageField(
             density = 1.1f,
             distortion = 0.2f,
             strokeWidth = 0.5f,
+            strokeTaper = SPIRAL_STROKE_TAPER,
+            noise = SPIRAL_NOISE,
+            noiseFrequency = SPIRAL_NOISE_FREQUENCY,
             softness = 0.3f,
             speed = s(0.5f),
         )
@@ -424,9 +504,10 @@ private fun MirageField(
             modifier = modifier,
             colorBack = back,
             colorFront = palette.first(),
+            // The bands roll: the spacing breathes with the slow phase rather than sitting still.
             frequency = 0.5f,
             amplitude = 0.6f,
-            spacing = 1.3f,
+            spacing = 1.3f * (1f + 0.06f * sin(tickPhase * TAU).toFloat()),
             proportion = 0.14f,
             softness = 0.2f,
         )
@@ -540,6 +621,9 @@ private fun MirageField(
             bloom = 0.3f,
             spots = 5,
             smoke = 0.3f,
+            roundness = PULSING_BORDER_ROUNDNESS,
+            spotSize = PULSING_BORDER_SPOT_SIZE,
+            pulse = PULSING_BORDER_PULSE,
             speed = s(0.7f),
         )
         FolioFieldKind.StaticMeshGradient -> StaticMeshGradient(

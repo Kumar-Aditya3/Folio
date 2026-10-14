@@ -10,6 +10,8 @@ import com.folio.reader.ui.theme.MotionChannel
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.MotionTier
 import com.folio.reader.ui.theme.ResolvedMotion
+import com.folio.reader.ui.theme.FolioFieldCost
+import com.folio.reader.ui.theme.fieldRenderScale
 import com.folio.reader.ui.theme.fieldSpeed
 import com.folio.reader.ui.theme.isClockless
 import com.folio.reader.ui.theme.isLoop
@@ -384,6 +386,63 @@ class MotionSchemaTest {
             }
         }
         assertTrue(combinations >= 3 * 3 * 2 * 4 * 4, "the fuzz did not cover the space")
+    }
+
+
+
+    // ── Motion must not move cost ────────────────────────────────────────────
+
+    @Test
+    fun theFieldLeversReachOnlyTheBackground() {
+        // Channel scoping, asserted: the two field levers move the room and nothing else, and the
+        // five foreground levers move their channel and nothing else. A lever that reaches further
+        // than its channel is the bug this catches.
+        val calmField = resolveMotion(MotionPreferences(fieldMotion = 0.25f), MotionTier.STANDARD, false)
+        val livelyField = resolveMotion(MotionPreferences(fieldMotion = 1.8f), MotionTier.STANDARD, false)
+        keys.filter { motionProfile(it).channel != MotionChannel.FIELD }.forEach { key ->
+            assertEquals(
+                calmField[key].durationMs, livelyField[key].durationMs,
+                "$key moved with the field-motion lever, which is background-only",
+            )
+        }
+        assertTrue(
+            calmField[MotionKey.AmbientSwing].durationMs != livelyField[MotionKey.AmbientSwing].durationMs,
+            "the field lever must reach the slow layers",
+        )
+        // And the field's cost is a *resolution* question, not a motion one: the render scale is a
+        // property of the family and no lever, preset or tier may reprice it.
+        val livelyConstrained = resolveMotion(
+            MotionPreferences(preset = MotionPreset.LIVELY, fieldMotion = 2f), MotionTier.CONSTRAINED, false,
+        )
+        keys.filter { motionProfile(it).channel != MotionChannel.FIELD }
+            .filter { motionProfile(it).durationMs > 0L }   // timers carry a dwell, not a duration
+            .forEach { key ->
+                // A loop is a cycle and is bounded as one; a transition is bounded as a transition.
+                val loop = motionProfile(key).isLoop
+                val band = if (loop) 200L..4_000L else 40L..800L
+                assertTrue(
+                    livelyConstrained[key].durationMs in band,
+                    "$key escaped ${if (loop) "the loop" else "the transition"} band on a lively " +
+                        "constrained device (${livelyConstrained[key].durationMs} ms)",
+                )
+            }
+        FolioFieldKind.entries.forEach { kind ->
+            assertTrue(
+                kind.fieldRenderScale() in FolioFieldCost.minScale..1f,
+                "$kind's render scale left its band",
+            )
+        }
+    }
+
+    @Test
+    fun theAmbientPeriodsComeFromTheOneBackgroundTable() {
+        // The ambient light's swing and breath are table rows now, so a field-motion preset can
+        // carry the whole room's tempo instead of only the shader's.
+        assertEquals(FieldMotion.ambientSwingPeriodMs, motionProfile(MotionKey.AmbientSwing).durationMs)
+        assertEquals(FieldMotion.ambientBreathPeriodMs, motionProfile(MotionKey.AmbientBreath).durationMs)
+        assertEquals(FieldMotion.silkPeriodMs, motionProfile(MotionKey.SilkDrift).durationMs)
+        assertEquals(FieldMotion.rimPeriodMs, motionProfile(MotionKey.RimBeam).durationMs)
+        assertEquals(FieldMotion.lampPeriodMs, motionProfile(MotionKey.LampBreath).durationMs)
     }
 
     private val backgroundKeys = setOf(

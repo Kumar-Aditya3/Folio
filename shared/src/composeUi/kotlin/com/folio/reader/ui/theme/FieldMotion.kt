@@ -43,9 +43,19 @@ internal object FieldMotion {
     val silkPeriodMs: Long get() = silkPeriodsMs.first()
     const val silkTickMs: Long = 50L
 
+    /** The silk *strands*' own period and tick: 48 s at 16 ms. Dead code with no call site, carried
+     * here so the one table still describes every slow layer the app has rather than forgetting
+     * three of them. */
+    const val silkStrandPeriodMs: Long = 48_000L
+    const val silkStrandTickMs: Long = 16L
+
     /** The themed rim's travelling beam: 24 s, sampled at 30 Hz. */
     const val rimPeriodMs: Long = 24_000L
     const val rimTickMs: Long = 33L
+
+    /** The one period that drives the clockless families' parameters (Waves and DotGrid). */
+    const val clocklessPeriodMs: Long = 41_000L
+    const val clocklessTickMs: Long = SLOW_MOTION_TICK_MS
 
     /** The lamp's bloom: the slowest of the set, so the room's light never appears to pulse. */
     const val lampPeriodMs: Long = 61_000L
