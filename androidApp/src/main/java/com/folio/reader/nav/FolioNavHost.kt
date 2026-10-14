@@ -14,6 +14,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -141,6 +142,8 @@ fun FolioNavHost(
             // also what closes the file's reduce-motion gap: navigation used to animate the same
             // whether or not the reader had asked for less motion.
             val navPushSpec = rememberMotionAnimation<Float>(MotionKey.NavPush)
+            // The slides are offsets, not alphas, so they take their own spec instance.
+            val navSlide = rememberMotionAnimation<IntOffset>(MotionKey.NavPush)
             val navPopSpec = rememberMotionAnimation<Float>(MotionKey.NavPop)
             val tabMorphSpec = rememberMotionAnimation<Float>(MotionKey.TabDissolve)
             val tabMorphMs = rememberMotionSpec(MotionKey.TabDissolve).durationMs.toInt()
@@ -163,7 +166,7 @@ fun FolioNavHost(
                     // cover still flies (clipped below the masthead — see sharedElementOrNoop). The
                     // outgoing tab is invisible from frame 0 (exit below), so nothing bleeds.
                     if (isTabMorph()) fadeIn(tabMorphSpec, initialAlpha = 1f)
-                    else fadeIn(navPushSpec) + slideInHorizontally(navPushSpec) { it / 24 }
+                    else fadeIn(navPushSpec) + slideInHorizontally(navSlide) { it / 24 }
                 },
                 exitTransition = {
                     // Outgoing tab drops to fully transparent on the *first* frame and stays there
@@ -175,18 +178,18 @@ fun FolioNavHost(
                         // The outgoing screen leaves on the *exit* row, not on a hand-rolled
                         // `motionFast + 60` — that sum was recomputed in this file and in
                         // DesignSystemTest, and is now one value in the motion table.
-                        fadeOut(navPopSpec) + slideOutHorizontally(navPushSpec) { -it / 40 }
+                        fadeOut(navPopSpec) + slideOutHorizontally(navSlide) { -it / 40 }
                     }
                 },
                 popEnterTransition = {
                     if (isTabMorph()) fadeIn(tabMorphSpec, initialAlpha = 1f)
-                    else fadeIn(navPushSpec) + slideInHorizontally(navPushSpec) { -it / 40 }
+                    else fadeIn(navPushSpec) + slideInHorizontally(navSlide) { -it / 40 }
                 },
                 popExitTransition = {
                     if (isTabMorph()) {
                         fadeOut(keyframes { durationMillis = tabMorphMs; 0f at 0 })
                     } else {
-                        fadeOut(navPopSpec) + slideOutHorizontally(navPushSpec) { it / 24 }
+                        fadeOut(navPopSpec) + slideOutHorizontally(navSlide) { it / 24 }
                     }
                 }
             ) {
