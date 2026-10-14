@@ -36,6 +36,9 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionSpec
+import com.folio.reader.ui.theme.motionProfile
 
 /**
  * Shimmer: the material a pane is made of *before* it has arrived.
@@ -111,14 +114,17 @@ fun rememberShimmerPhase(): State<Float> {
     if (!rememberMotionEnabled()) {
         return remember { mutableStateOf(SHIMMER_PARKED) }
     }
+    val sweep = rememberMotionSpec(MotionKey.ShimmerSweep)
     val transition = rememberInfiniteTransition(label = "shimmer")
     return transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
+        // The sweep's own row: duration and easing both come from the table, so a preset or the
+        // reduce-motion setting reaches the one never-ending animation the chrome owns.
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = FolioTokens.motionShimmer.toInt(),
-                easing = LinearEasing,
+                durationMillis = sweep.durationMs.toInt(),
+                easing = sweep.easing,
             ),
             repeatMode = RepeatMode.Restart,
         ),

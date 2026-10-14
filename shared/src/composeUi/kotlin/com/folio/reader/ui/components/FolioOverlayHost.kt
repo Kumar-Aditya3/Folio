@@ -58,6 +58,8 @@ import com.folio.reader.ui.theme.LocalFolioSectionAccent
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlin.math.roundToInt
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * §16 liquid glass — **the in-window overlay layer** (issue 3: opaque menus and dialogs).
@@ -281,24 +283,19 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
     // tap, so it may take the time to arrive from the trigger; closing is the user having
     // already decided, so it gets out of the way. A menu that fades out as slowly as it
     // faded in feels like latency.
+    // The pane's arrival and departure come from the motion table, where the two durations that
+    // used to be private constants here (160 in, 110 out) are one row each alongside every other
+    // animation in the app. The asymmetry is the table's too: entering decelerates, leaving
+    // accelerates, and reduce-motion shortens both rather than snapping them.
+    val enterSpec = rememberMotionAnimation<Float>(MotionKey.OverlayEnter)
+    val exitSpec = rememberMotionAnimation<Float>(MotionKey.OverlayExit)
+    val growEnterSpec = rememberMotionAnimation<Float>(MotionKey.SheetEnter)
     val fade by transition.animateFloat(
-        transitionSpec = {
-            if (!motion) snap() else if (targetState) {
-                tween(FOLIO_OVERLAY_ENTER_MS, easing = LinearOutSlowInEasing)
-            } else {
-                tween(FOLIO_OVERLAY_EXIT_MS, easing = FastOutLinearInEasing)
-            }
-        },
+        transitionSpec = { if (targetState) enterSpec else exitSpec },
         label = "folioOverlayFade",
     ) { if (it) 1f else 0f }
     val grow by transition.animateFloat(
-        transitionSpec = {
-            if (!motion) snap() else if (targetState) {
-                spring(dampingRatio = 0.86f, stiffness = 1500f)
-            } else {
-                tween(FOLIO_OVERLAY_EXIT_MS, easing = FastOutLinearInEasing)
-            }
-        },
+        transitionSpec = { if (targetState) growEnterSpec else exitSpec },
         label = "folioOverlayGrow",
     ) { if (it) 1f else FOLIO_OVERLAY_MENU_ENTER_SCALE }
 
@@ -776,10 +773,13 @@ private val FOLIO_MENU_ROW_HEIGHT = 36.dp
  */
 private const val FOLIO_OVERLAY_MENU_ENTER_SCALE = 0.96f
 
-/** Arrive in 160ms, leave in 110ms. See the transition note in [FolioOverlayHost]. */
-private const val FOLIO_OVERLAY_ENTER_MS = 160
-
-private const val FOLIO_OVERLAY_EXIT_MS = 110
+/**
+ * The pane's two durations used to live here as `FOLIO_OVERLAY_ENTER_MS` (160) and
+ * `FOLIO_OVERLAY_EXIT_MS` (110). They are now the `OverlayEnter` and `OverlayExit` rows of the
+ * motion table, where they sit beside every other animation in the app — so the overlay's feel is
+ * tunable with everything else instead of being the one transition with its own private constants.
+ * `MotionSchemaTest` pins the table to those two values, so the move is provably behaviour-neutral.
+ */
 
 /** The dialog pane's width ceiling, so a small confirm does not become a full-width slab. */
 private val FOLIO_OVERLAY_DIALOG_MAX_WIDTH = 420.dp

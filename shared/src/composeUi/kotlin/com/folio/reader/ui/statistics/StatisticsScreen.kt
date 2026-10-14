@@ -81,6 +81,8 @@ import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.paneFill
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.launch
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Duration of the skeleton → content handoff.
@@ -91,7 +93,7 @@ import kotlinx.coroutines.launch
  * settle, not an arrival — long enough to read as intentional, short enough that
  * the reader never waits on it.
  */
-private const val StatsHandoffFadeMs = 180
+/** The handoff fade's duration is the `StatsHandoffFade` row of the motion table. */
 
 // ---------------------------------------------------------------------------
 // Embeddable Stats Tab — no Scaffold / top bar of its own
@@ -176,11 +178,11 @@ fun StatisticsTabContent(
     // Sync when the host pushes a new value (e.g. after external settings change).
     LaunchedEffect(initialGoalMinutes) { goalMinutes = initialGoalMinutes }
 
-    // Rule 19: read once, use for both halves of the cross-fade. When motion is
-    // off the duration is 0ms and the two AnimatedVisibility blocks become a plain
-    // swap — same information, none of the motion.
+    // Rule 19: one spec for both halves of the cross-fade, from the motion table. The `motionEnabled`
+    // branch this used to carry is gone — reduce-motion now shortens the fade rather than removing
+    // it, so the two blocks stay a cross-fade and simply get quicker.
     val motionEnabled = rememberMotionEnabled()
-    val fadeMs = StatsHandoffFadeMs
+    val handoffSpec = rememberMotionAnimation<Float>(MotionKey.StatsHandoffFade)
 
     // Re-tap on the Stats nav item scrolls the tab back to its top. The tab
     // renders inside the library host's tab area, so the bus is the only way
@@ -209,7 +211,7 @@ fun StatisticsTabContent(
     AnimatedVisibility(
         visible = !ready,
         enter = EnterTransition.None,
-        exit = fadeOut(tween(if (motionEnabled) fadeMs else 0)),
+        exit = fadeOut(handoffSpec),
     ) {
         Box(
             modifier = Modifier
@@ -222,7 +224,7 @@ fun StatisticsTabContent(
 
     AnimatedVisibility(
         visible = ready,
-        enter = fadeIn(tween(if (motionEnabled) fadeMs else 0)),
+        enter = fadeIn(handoffSpec),
         exit = ExitTransition.None,
     ) {
         StatisticsContent(
@@ -604,7 +606,10 @@ private fun GoalDial(
     // without recomposing GoalDial every frame.
     val animatedFraction = animateFloatAsState(
         targetValue = fraction,
-        animationSpec = tween(durationMillis = 800, easing = LinearEasing),
+        // The dial's own row: 700 ms on the app's Enter curve, where this was a literal 800 ms
+        // LinearEasing — a number sweeping at constant speed for most of a second reads as
+        // mechanical, and it was the longest transition in the app.
+        animationSpec = rememberMotionAnimation<Float>(MotionKey.GoalDial),
         label = "goalRing",
     )
     // §13.5: the ring sweeps in once on entry; live goal changes keep using the

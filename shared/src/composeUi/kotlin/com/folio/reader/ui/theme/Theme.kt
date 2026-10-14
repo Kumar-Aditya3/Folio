@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.folio.reader.settings.MotionPreferences
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.ui.components.legibleOn
 
@@ -879,9 +880,21 @@ object FolioTheme {
         // And where the metallic-sheen lever enters, from
         // ReaderSettings.metallicSheen; MaterialTheme and every screen inherit it.
         sheen: FolioSheen = LocalFolioSheen.current,
+        // The app's motion, from ReaderSettings.motion. AppTheme is the true root on **both**
+        // platforms, so providing the resolved table here is what keeps them from diverging: a
+        // call site reads one `LocalMotion` and animates identically whether it is running on
+        // Android or the desktop. The default resolves the tuned table with no preset, no levers
+        // and no reduction, which is exactly the shipped motion — so a preview that re-enters
+        // this door (the Appearance mock-ups) animates as the app does, not as a special case.
+        motion: MotionPreferences = MotionPreferences(),
         content: @Composable () -> Unit
     ) {
         val typo = remember(fontTheme) { FolioTypography(fontTheme) }
+        val resolvedMotion = rememberResolvedMotion(motion)
+        CompositionLocalProvider(
+            LocalMotionPreferences provides motion,
+            LocalMotion provides resolvedMotion,
+        ) {
         MaterialTheme(
             darkTheme = isDark,
             colors = colors,
@@ -898,6 +911,7 @@ object FolioTheme {
             // resting on a page, not as the third box inside whichever settings panel
             // happens to contain the preview. See LocalFolioSurfaceDepth.
             FolioSurfaceRoot(content)
+        }
         }
     }
 }

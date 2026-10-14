@@ -1,6 +1,11 @@
 package com.folio.reader.ui.theme
 
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
@@ -599,18 +604,51 @@ val LocalMotion = compositionLocalOf { ResolvedMotion.Preview }
 val LocalMotionPreferences = compositionLocalOf { MotionPreferences() }
 
 /**
- * Resolves the app's motion from the reader's preferences, the device's tier and the platform's
- * reduce-motion flag. The root calls this once and provides [LocalMotion].
+ * Resolves the app's motion for [prefs], reading the device's tier and the platform's
+ * reduce-motion flag from the tree. The app root calls this once and provides [LocalMotion].
+ *
+ * Keyed on the preferences, the flag and the two capability facts, so it re-resolves when any of
+ * them changes and never on a frame that did not.
  */
 @Composable
-fun rememberMotion(): ResolvedMotion {
-    val prefs = LocalMotionPreferences.current
+fun rememberResolvedMotion(prefs: MotionPreferences): ResolvedMotion {
     val systemReduced = !rememberMotionEnabled()
     val caps = com.folio.reader.ui.components.LocalGlassCapabilities.current
-    val tier = motionTierFor(caps.budget, caps.blur)
-    return remember(prefs, systemReduced, tier) { resolveMotion(prefs, tier, systemReduced) }
+    return remember(prefs, systemReduced, caps.budget, caps.blur) {
+        resolveMotion(prefs, motionTierFor(caps.budget, caps.blur), systemReduced)
+    }
 }
+
+/**
+ * Resolves the app's motion from the reader's preferences as provided by the root. A subtree that
+ * only needs the resolved table should read [LocalMotion] (via [rememberMotionSpec]) instead.
+ */
+@Composable
+fun rememberMotion(): ResolvedMotion = rememberResolvedMotion(LocalMotionPreferences.current)
 
 /** The spec for one animation. The form every call site uses. */
 @Composable
 fun rememberMotionSpec(key: MotionKey): MotionSpec = LocalMotion.current[key]
+
+/**
+ * The spec for one animation as a Compose [AnimationSpec], which is what `animate*AsState`,
+ * `updateTransition` and `AnimatedVisibility` actually take.
+ *
+ * The conversion is the whole reason a call site no longer has to think about reduce-motion or the
+ * device tier: a spring stays a spring on a capable device and becomes a short tween under
+ * reduce-motion, an instant under a press, and a snap when the table says there is nothing to
+ * animate. A call site that reads this cannot get those cases wrong, which is what the four
+ * hand-rolled reduce-motion implementations this replaced all managed to do differently.
+ */
+@Composable
+fun <T> rememberMotionAnimation(key: MotionKey): FiniteAnimationSpec<T> {
+    val spec = LocalMotion.current[key]
+    return remember(spec) { spec.toAnimationSpec() }
+}
+
+/** See [rememberMotionAnimation]. Pure, so a test can pin the mapping without a composition. */
+fun <T> MotionSpec.toAnimationSpec(): FiniteAnimationSpec<T> = when {
+    spring != null -> spring(dampingRatio = spring.dampingRatio, stiffness = spring.stiffness)
+    durationMs <= 0L -> snap()
+    else -> tween(durationMillis = durationMs.toInt(), easing = easing)
+}

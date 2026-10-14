@@ -83,7 +83,10 @@ import com.folio.reader.ui.theme.panelFill
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.border
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Legacy name, new material. Every existing call site keeps working, but the
@@ -728,13 +731,17 @@ fun FolioStatusBanner(message: String, modifier: Modifier = Modifier) {
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
     val canBlur = caps.blur && backdrop != null
+    val bannerSpec = rememberMotionAnimation<Float>(MotionKey.StatusBanner)
+    val bannerSlide = rememberMotionAnimation<IntOffset>(MotionKey.StatusBanner)
 
     androidx.compose.animation.AnimatedVisibility(
         visible = message.isNotBlank(),
-        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) +
-            androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(220)) { it / 2 },
-        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) +
-            androidx.compose.animation.slideOutVertically(androidx.compose.animation.core.tween(200)) { it / 2 },
+        // Four literals (180/220 in, 160/200 out) collapsed to the banner's own row: the banner is
+        // one object arriving and leaving, not two animations that happen to share a surface.
+        enter = androidx.compose.animation.fadeIn(bannerSpec) +
+            androidx.compose.animation.slideInVertically(animationSpec = bannerSlide) { it / 2 },
+        exit = androidx.compose.animation.fadeOut(bannerSpec) +
+            androidx.compose.animation.slideOutVertically(animationSpec = bannerSlide) { it / 2 },
         modifier = modifier
     ) {
         Row(

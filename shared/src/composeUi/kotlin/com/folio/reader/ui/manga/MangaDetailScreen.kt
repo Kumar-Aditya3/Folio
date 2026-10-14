@@ -89,6 +89,8 @@ import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 @Composable
 fun MangaDetailScreen(
@@ -398,10 +400,11 @@ fun MangaDetailScreen(
             )
         }
 
+        val swapSpec = rememberMotionAnimation<Float>(MotionKey.MangaContentSwap)
         androidx.compose.animation.AnimatedVisibility(
             visible = refreshNoticeVisible && refreshNotice != null,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(200)),
+            enter = fadeIn(swapSpec),
+            exit = fadeOut(swapSpec),
             modifier = Modifier.align(Alignment.TopCenter).zIndex(1f).fillMaxWidth(),
         ) {
             Box(

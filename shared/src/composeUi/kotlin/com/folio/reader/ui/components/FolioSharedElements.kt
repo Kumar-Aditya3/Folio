@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioTopInset
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.motionProfile
 
 /**
  * Shared-element keys for content that morphs between list/grid and
@@ -94,7 +96,7 @@ object FolioSharedKeys {
  * that hands off to a chart or hero animation reads as one continuous motion.
  */
 internal val folioMorphBounds = BoundsTransform { _, _ ->
-    tween(FolioTokens.motionMorph.toInt(), easing = FastOutSlowInEasing)
+    tween(motionProfile(MotionKey.CoverMorph).durationMs.toInt(), easing = motionProfile(MotionKey.CoverMorph).easing)
 }
 
 /**
@@ -106,7 +108,8 @@ internal val folioMorphBounds = BoundsTransform { _, _ ->
  * [LocalTabMorphActive] is set — keeps the cover flight but strips the float. See Issue 3.
  */
 internal val folioTabMorphBounds = BoundsTransform { _, _ ->
-    tween(FolioTokens.motionTabMorph.toInt(), easing = FastOutSlowInEasing)
+    val spec = motionProfile(MotionKey.TabDissolve)
+    tween(spec.durationMs.toInt(), easing = spec.easing)
 }
 
 /**

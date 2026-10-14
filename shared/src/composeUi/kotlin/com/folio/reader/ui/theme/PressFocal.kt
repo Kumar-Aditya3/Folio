@@ -92,9 +92,12 @@ fun rememberFolioPressFocal(interactionSource: InteractionSource): FolioPressFoc
             }
         }
     }
+    // The press focal's own spring, from the motion table: a soft overshoot that reads as the
+    // surface catching the light under the finger. Reduce-motion resolves it to an instant, so the
+    // `motion` gate this used to carry is now the table's job.
     val strength = animateFloatAsState(
         targetValue = if (pressing && motion) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 700f),
+        animationSpec = rememberMotionAnimation(MotionKey.PressFocal),
         label = "folioPressFocal",
     )
     return remember(interactionSource, point, strength, origin) {

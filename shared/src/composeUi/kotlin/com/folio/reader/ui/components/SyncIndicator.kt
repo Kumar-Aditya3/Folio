@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.sync.SyncState
@@ -32,6 +33,9 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 private enum class SyncPillPhase { HIDDEN, SYNCING, SUCCESS, ERROR, QUOTA_LIMITED }
 
@@ -93,10 +97,15 @@ fun SyncIndicator(
         phase = SyncPillPhase.HIDDEN
     }
 
+    val pillSpec = rememberMotionAnimation<Float>(MotionKey.SyncPill)
+    val pillSlide = rememberMotionAnimation<IntOffset>(MotionKey.SyncPill)
+    val pulse = rememberMotionSpec(MotionKey.SyncPulse)
     AnimatedVisibility(
         visible = phase != SyncPillPhase.HIDDEN && syncState.isConfigured,
-        enter = fadeIn(tween(220)) + slideInVertically(animationSpec = tween(260), initialOffsetY = { -it / 2 }),
-        exit = fadeOut(tween(200)) + slideOutVertically(animationSpec = tween(240), targetOffsetY = { -it / 2 }),
+        // One enter/exit pair from the table, where there used to be four literals (220/260 in,
+        // 200/240 out) that disagreed about how long the same pill takes to arrive and leave.
+        enter = fadeIn(pillSpec) + slideInVertically(animationSpec = pillSlide, initialOffsetY = { -it / 2 }),
+        exit = fadeOut(pillSpec) + slideOutVertically(animationSpec = pillSlide, targetOffsetY = { -it / 2 }),
         modifier = modifier
     ) {
         Surface(
@@ -133,6 +142,9 @@ fun SyncIndicator(
 
 @Composable
 private fun SyncPillIcon(phase: SyncPillPhase) {
+    // The pill's pulse reads its own row; this composable is separate from the one that hosts the
+    // pill's enter/exit, so it resolves the spec here rather than receiving it.
+    val pulse = rememberMotionSpec(MotionKey.SyncPulse)
     when (phase) {
         SyncPillPhase.ERROR -> Icon(
             imageVector = Icons.Filled.Warning,
@@ -151,8 +163,8 @@ private fun SyncPillIcon(phase: SyncPillPhase) {
         SyncPillPhase.QUOTA_LIMITED -> {
             val alpha = rememberBreatheAlpha(
                 initialValue = 0.55f,
-                durationMillis = 2400,
-                easing = LinearEasing,
+                durationMillis = pulse.dwellMs.toInt(),
+                easing = pulse.easing,
                 label = "quota-breathe",
             )
             Icon(
@@ -166,8 +178,8 @@ private fun SyncPillIcon(phase: SyncPillPhase) {
         SyncPillPhase.SYNCING -> {
             val alpha = rememberBreatheAlpha(
                 initialValue = 0.35f,
-                durationMillis = 700,
-                easing = FastOutSlowInEasing,
+                durationMillis = pulse.durationMs.toInt(),
+                easing = pulse.easing,
                 label = "sync-pulse",
             )
             Icon(

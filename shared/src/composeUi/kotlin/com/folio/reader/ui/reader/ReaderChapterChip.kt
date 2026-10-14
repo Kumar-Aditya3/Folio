@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import com.folio.reader.ui.components.folioPressable
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioTheme
@@ -26,6 +27,9 @@ import com.folio.reader.ui.theme.readerVeilAlpha
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 /**
  * End-of-chapter summary (§5.3): floats above the bottom bar, fades in and out on
@@ -40,13 +44,18 @@ internal fun ReaderChapterChipHost(
     aboveBar: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // The chip's own row: it fades and rises on one spec, and its dwell is the table's timer row
+    // rather than the raw token — so the chip's life and its motion are stated in one place.
+    val chipSpec = rememberMotionAnimation<Float>(MotionKey.EndOfChapterChip)
+    val chipSlide = rememberMotionAnimation<IntOffset>(MotionKey.EndOfChapterChip)
+    val chipDwellMs = rememberMotionSpec(MotionKey.ChipDwell).dwellMs
     // The last text must survive the exit fade — a nulled chip must not blank the
     // pill while it is still fading out.
     var lastText by remember { mutableStateOf("") }
     LaunchedEffect(chip) {
         if (chip != null) {
             lastText = chip
-            delay(FolioTokens.chipAutoDismiss)
+            delay(chipDwellMs)
             onDismiss()
         }
     }
@@ -58,20 +67,10 @@ internal fun ReaderChapterChipHost(
     AnimatedVisibility(
         visible = chip != null,
         modifier = modifier,
-        // Pair the fade with a small rise so the chip lifts into place rather than
-        // simply appearing. Gated on reduce-motion, which keeps the plain fade.
-        enter = if (motion) {
-            fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                slideInVertically(tween(FolioTokens.motionStandard.toInt())) { it / 3 }
-        } else {
-            fadeIn(tween(FolioTokens.motionStandard.toInt()))
-        },
-        exit = if (motion) {
-            fadeOut(tween(FolioTokens.motionStandard.toInt())) +
-                slideOutVertically(tween(FolioTokens.motionStandard.toInt())) { it / 3 }
-        } else {
-            fadeOut(tween(FolioTokens.motionStandard.toInt()))
-        },
+        // The fade carries the small rise on the table's own spec, which shortens under
+        // reduce-motion instead of switching the rise off — a shorter lift still says "here".
+        enter = fadeIn(chipSpec) + slideInVertically(chipSlide) { it / 3 },
+        exit = fadeOut(chipSpec) + slideOutVertically(chipSlide) { it / 3 },
     ) {
         Box(Modifier.padding(bottom = if (aboveBar) FolioTokens.barHeight else FolioTokens.space3)) {
             Text(

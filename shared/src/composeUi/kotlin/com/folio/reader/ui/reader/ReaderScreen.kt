@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Chapter
@@ -45,6 +46,8 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
 import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Words per estimated page in continuous mode, which has no real page turns.
@@ -880,23 +883,21 @@ fun ReaderScreen(
         // Left floating controls panel (skipped on occluding platforms — the
         // heavyweight browser window would cover it; the top bar carries the actions).
         if (!occludes) {
+        // The rail's own row in the motion table. It used to be four literal 300 ms specs here,
+        // slower than the 220 ms chrome it belongs to and outside the reduce-motion contract
+        // entirely — the biggest gap the migration closes.
+        val railSpec = rememberMotionAnimation<Float>(MotionKey.ReaderRail)
+        val railSlide = rememberMotionAnimation<IntOffset>(MotionKey.ReaderRail)
         androidx.compose.animation.AnimatedVisibility(
             visible = showControls,
             enter = androidx.compose.animation.slideInHorizontally(
                 initialOffsetX = { -it },
-                animationSpec = androidx.compose.animation.core.tween(
-                    durationMillis = 300,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
-                )
-            ) + androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
-            ),
+                animationSpec = railSlide
+            ) + androidx.compose.animation.fadeIn(animationSpec = railSpec),
             exit = androidx.compose.animation.slideOutHorizontally(
                 targetOffsetX = { -it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
-            ) + androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 300)
-            ),
+                animationSpec = railSlide
+            ) + androidx.compose.animation.fadeOut(animationSpec = railSpec),
             modifier = Modifier.align(Alignment.CenterStart).statusBarsPadding()
         ) {
             ReaderFloatingRail(

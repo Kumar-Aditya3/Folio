@@ -26,6 +26,9 @@ import com.folio.reader.ui.components.FolioSharedElementScope
 import com.folio.reader.ui.theme.FolioSection
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 /**
  * The four bottom-bar destinations — the set the §17 tab dissolve applies to.
@@ -133,6 +136,14 @@ fun FolioNavHost(
         // §17 shared elements: one transition scope spans every destination, so a
         // cover tapped on a shelf is the same object that lands on the detail page.
         FolioSharedElementProvider(sharedTransitionScope = this, tabMorphActive = tabMorphActive) {
+            // The navigation transitions' rows in the motion table, hoisted out of the NavHost's
+            // lambdas because those lambdas are not composable and cannot read the table. This is
+            // also what closes the file's reduce-motion gap: navigation used to animate the same
+            // whether or not the reader had asked for less motion.
+            val navPushSpec = rememberMotionAnimation<Float>(MotionKey.NavPush)
+            val navPopSpec = rememberMotionAnimation<Float>(MotionKey.NavPop)
+            val tabMorphSpec = rememberMotionAnimation<Float>(MotionKey.TabDissolve)
+            val tabMorphMs = rememberMotionSpec(MotionKey.TabDissolve).durationMs.toInt()
             NavHost(
                 navController = navController,
                 // Home is the first of the four bar items and the app's opening
@@ -151,32 +162,31 @@ fun FolioNavHost(
                     // swaps instantly, but the transition stays live for the morph window so the
                     // cover still flies (clipped below the masthead — see sharedElementOrNoop). The
                     // outgoing tab is invisible from frame 0 (exit below), so nothing bleeds.
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
-                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                        slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                    if (isTabMorph()) fadeIn(tabMorphSpec, initialAlpha = 1f)
+                    else fadeIn(navPushSpec) + slideInHorizontally(navPushSpec) { it / 24 }
                 },
                 exitTransition = {
                     // Outgoing tab drops to fully transparent on the *first* frame and stays there
                     // for the morph window (keyframes: 0 at 0), kept composed only so the flying
                     // cover still has a source. None of the old tab is ever painted behind the bar.
                     if (isTabMorph()) {
-                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        fadeOut(keyframes { durationMillis = tabMorphMs; 0f at 0 })
                     } else {
-                        fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                            slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                        // The outgoing screen leaves on the *exit* row, not on a hand-rolled
+                        // `motionFast + 60` — that sum was recomputed in this file and in
+                        // DesignSystemTest, and is now one value in the motion table.
+                        fadeOut(navPopSpec) + slideOutHorizontally(navPushSpec) { -it / 40 }
                     }
                 },
                 popEnterTransition = {
-                    if (isTabMorph()) fadeIn(tween(FolioTokens.motionTabMorph.toInt()), initialAlpha = 1f)
-                    else fadeIn(tween(FolioTokens.motionStandard.toInt())) +
-                        slideInHorizontally(tween(FolioTokens.motionStandard.toInt())) { -it / 40 }
+                    if (isTabMorph()) fadeIn(tabMorphSpec, initialAlpha = 1f)
+                    else fadeIn(navPushSpec) + slideInHorizontally(navPushSpec) { -it / 40 }
                 },
                 popExitTransition = {
                     if (isTabMorph()) {
-                        fadeOut(keyframes { durationMillis = FolioTokens.motionTabMorph.toInt(); 0f at 0 })
+                        fadeOut(keyframes { durationMillis = tabMorphMs; 0f at 0 })
                     } else {
-                        fadeOut(tween(FolioTokens.motionFast.toInt() + 60)) +
-                            slideOutHorizontally(tween(FolioTokens.motionStandard.toInt())) { it / 24 }
+                        fadeOut(navPopSpec) + slideOutHorizontally(navPushSpec) { it / 24 }
                     }
                 }
             ) {

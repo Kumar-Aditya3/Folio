@@ -432,6 +432,11 @@ class MainActivity : ComponentActivity() {
                         // The metallic-sheen lever: provided through AppTheme so every
                         // paint site — surfaces, films, masthead, capsule, lamp — reads it.
                         sheen = com.folio.reader.ui.theme.FolioSheen(model.globalSettings.metallicSheen),
+                        // The reader's motion preferences, resolved inside AppTheme — the
+                        // app's true root on both platforms — so one `LocalMotion` serves
+                        // every animation in the tree and Android and desktop cannot drift
+                        // apart. See ui/theme/Motion.kt.
+                        motion = model.globalSettings.motion,
                     ) {
                     // §17 living glass: the room's slow animated light, provided
                     // once at the Android root. Every material's sheen and the

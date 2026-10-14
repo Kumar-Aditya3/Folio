@@ -39,6 +39,8 @@ import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.sectionAccent
 import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * The app's one slider. Material3 still owns the gesture handling, keyboard
@@ -90,9 +92,10 @@ fun FolioSlider(
         atmos.sunkenFill.copy(alpha = 0.5f)
     }
 
+    // The press scale's own spring: the slider halo and a pressed surface are the same gesture.
     val halo by animateDpAsState(
         targetValue = if (engaged) HaloActive else HaloResting,
-        animationSpec = spring(stiffness = 900f),
+        animationSpec = rememberMotionAnimation(MotionKey.PressScale),
         label = "sliderHalo",
     )
 

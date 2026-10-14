@@ -59,6 +59,8 @@ import com.folio.reader.ui.components.folioTypeGround
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.launch
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 @Composable
 internal fun SourceSearchResults(
@@ -179,9 +181,12 @@ internal fun GlobalSourceSection(
             }
         }
         Spacer(Modifier.height(FolioTokens.space1))
+        val swapSpec = rememberMotionAnimation<Float>(MotionKey.MangaContentSwap)
         AnimatedContent(
             targetState = result.loading,
-            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            // One pair from the table: the manga screens used 220/160 here and 200 elsewhere
+            // for the same content swap.
+            transitionSpec = { fadeIn(swapSpec) togetherWith fadeOut(swapSpec) },
             label = "source-section-${result.source.id}",
         ) { loading ->
             when {

@@ -37,6 +37,8 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * **The page block.** Position carried by the material of the page rather than by
@@ -334,7 +336,7 @@ fun PageBlock(
     var dragging by remember { mutableStateOf(false) }
     val shown by animateFloatAsState(
         targetValue = target,
-        animationSpec = if (motion && !dragging) tween(180) else snap(),
+        animationSpec = if (!dragging) rememberMotionAnimation<Float>(MotionKey.ProgressBars) else snap(),
         label = "page-block-fraction",
     )
     // Held in a state rather than keyed into pointerInput: the caller's lambda is

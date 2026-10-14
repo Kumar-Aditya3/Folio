@@ -1167,6 +1167,12 @@ fun main(args: Array<String>) {
                 opacity = globalSettings.surfaceOpacity(),
                 vibrancy = com.folio.reader.ui.theme.FolioVibrancy(globalSettings.vibrancy),
                 sheen = com.folio.reader.ui.theme.FolioSheen(globalSettings.metallicSheen),
+                // The reader's motion preferences, resolved inside AppTheme — the app's true
+                // root on both platforms — so the desktop animates from the same table as
+                // Android rather than from its own idea of what a transition costs. Desktop
+                // provides no field overrides (its ground plane is the static ramp), but every
+                // foreground animation is shared code and must resolve identically.
+                motion = globalSettings.motion,
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

@@ -69,6 +69,9 @@ import com.folio.reader.ui.theme.rememberFolioHaptics
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 /**
  * The glass capsule every floating reader island is cut from — the back button, the title,
@@ -276,6 +279,7 @@ internal fun ReaderTopBar(
                     }
                 }
                 val bookmarkMotion = rememberMotionEnabled()
+                val bookmarkSpec = rememberMotionAnimation<Float>(MotionKey.BookmarkGlyphSwap)
                 val bookmarkHaptics = rememberFolioHaptics()
                 IconButton(onClick = {
                     bookmarkHaptics.play(FolioHaptic.Confirm)
@@ -285,8 +289,7 @@ internal fun ReaderTopBar(
                         targetState = isBookmarked,
                         transitionSpec = {
                             if (bookmarkMotion) {
-                                fadeIn(tween(FolioTokens.motionStandard.toInt())) togetherWith
-                                    fadeOut(tween(FolioTokens.motionStandard.toInt()))
+                                fadeIn(bookmarkSpec) togetherWith fadeOut(bookmarkSpec)
                             } else {
                                 EnterTransition.None togetherWith ExitTransition.None
                             }
@@ -622,9 +625,11 @@ fun BottomPageBlock(
 /** Floating sync indicator pill — manages its own visibility (hides when idle). */
 @Composable
 internal fun BoxScope.ReaderSyncPill(showControls: Boolean, syncState: com.folio.reader.sync.SyncState) {
+    // The pill's own row. This was a literal 220 ms that ignored reduce-motion outright — the pill
+    // slid whether or not the reader had asked for less motion.
     val pillTop by animateDpAsState(
         targetValue = if (showControls) 60.dp else 0.dp,
-        animationSpec = tween(220),
+        animationSpec = rememberMotionAnimation<Dp>(MotionKey.SyncPill),
         label = "sync-pill-top"
     )
     Box(

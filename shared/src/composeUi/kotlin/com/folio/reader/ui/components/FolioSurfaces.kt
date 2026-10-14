@@ -93,6 +93,9 @@ import com.folio.reader.ui.theme.swungBy
 import com.folio.reader.ui.theme.LocalFolioSurfaceFill
 import kotlin.math.abs
 import kotlin.math.min
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 /**
  * Folio's material system.
@@ -1855,7 +1858,9 @@ fun Modifier.folioPressable(
     val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
     val scale by animateFloatAsState(
         targetValue = if (pressed && motion) scaleTo else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 900f),
+        // The press scale's row in the motion table — one spring shared with the slider halo,
+        // where two sites used to disagree (NoBouncy/900 here, 0.78/900 in PressFocal).
+        animationSpec = rememberMotionAnimation<Float>(MotionKey.PressScale),
         label = "pressScale",
     )
     return this.graphicsLayer {
@@ -1897,7 +1902,7 @@ fun Modifier.folioGlassPress(
     // A slight overshoot on release — liquid, not sloppy (damping ≈ 0.75).
     val press by animateFloatAsState(
         targetValue = if (pressed) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 700f),
+        animationSpec = rememberMotionAnimation<Float>(MotionKey.PressFocal),
         label = "glassPress",
     )
     val atmos = FolioTheme.atmosphere
@@ -1983,16 +1988,16 @@ private fun Modifier.pressTick(interactionSource: MutableInteractionSource): Mod
 @Composable
 fun rememberFolioSheetMorphShape(resting: RoundedCornerShape): Shape {
     val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    // The sheet's own row: the corner sweep runs on the table's sheet spec rather than a literal
+    // 320 ms, so a preset or lever reaches it like every other surface.
+    val sheetMorphSpec = rememberMotionAnimation<Float>(MotionKey.SheetEnter)
     var value by remember { mutableFloatStateOf(if (motion) 1f else 0f) }
     LaunchedEffect(motion) {
         if (motion) {
             androidx.compose.animation.core.animate(
                 initialValue = 1f,
                 targetValue = 0f,
-                animationSpec = androidx.compose.animation.core.tween(
-                    320,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
-                ),
+                animationSpec = sheetMorphSpec,
             ) { v, _ -> value = v }
         } else {
             value = 0f
@@ -2023,6 +2028,8 @@ fun Modifier.folioSheetDragToDismiss(onDismiss: () -> Unit): Modifier {
     val tick = rememberGlassTick()
     val scope = rememberCoroutineScope()
     val currentOnDismiss by rememberUpdatedState(onDismiss)
+    // The slide-out spec, hoisted: the drag callbacks below are not composable scopes.
+    val dismissSpec = rememberMotionAnimation<Float>(MotionKey.SheetDismiss)
     val offset = remember { mutableFloatStateOf(0f) }
     return this
         .graphicsLayer { translationX = offset.floatValue }
@@ -2038,7 +2045,7 @@ fun Modifier.folioSheetDragToDismiss(onDismiss: () -> Unit): Modifier {
                                 initialValue = offset.floatValue,
                                 targetValue = maxPx,
                                 animationSpec = if (motion) {
-                                    androidx.compose.animation.core.tween(160)
+                                    dismissSpec
                                 } else {
                                     androidx.compose.animation.core.snap()
                                 },

@@ -16,9 +16,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.Easing
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.coroutines.delay
+import com.folio.reader.ui.theme.FolioEasing
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.motionProfile
 
 /**
  * §13.5 chart entry progress, 0f→1f over [FolioTokens.motionEmphasis] with
@@ -88,10 +92,17 @@ fun rememberEntryState(vararg identity: Any?): State<Float> {
  */
 fun folioFadeSwap(
     motionEnabled: Boolean,
+    /**
+     * The swap's own duration and curve, from [MotionKey.ShelfFadeSwap]. A parameter rather than a
+     * lookup because a `transitionSpec` lambda is not composable and cannot read the motion table —
+     * the caller hoists `rememberMotionSpec(...)` out of the lambda and passes it in.
+     */
+    durationMs: Long = fadeSwapEnterMs,
+    easing: Easing = FolioEasing.Enter,
     sizeTransform: SizeTransform? = null,
 ): ContentTransform = ContentTransform(
-    fadeIn(tween(if (motionEnabled) fadeSwapEnterMs.toInt() else 0)),
-    fadeOut(tween(if (motionEnabled) fadeSwapExitMs.toInt() else 0)),
+    fadeIn(tween(if (motionEnabled) durationMs.toInt() else 0, easing = easing)),
+    fadeOut(tween(if (motionEnabled) durationMs.toInt() else 0, easing = easing)),
     sizeTransform = sizeTransform.takeIf { motionEnabled },
 )
 
@@ -112,20 +123,36 @@ fun folioSizeTransformEligible(itemCount: Int): Boolean =
 
 internal const val sizeTransformMaxItems = 8
 
+/** `motionEmphasis`, the bar's growth time — see [MotionKey.ChartEntry]. */
+internal val chartEntryBarMs: Int = motionProfile(MotionKey.ChartEntry).durationMs.toInt()
+
+/** How long each bar waits for the one before it. Enough to read as a sweep, not a wave. */
+private const val CHART_STAGGER_MS = 40
+
+/** The Rule 15 peak cap's own fade, after its bar has finished growing. */
+private const val CHART_CAP_DELAY_MS = 80
+
 /**
  * The spec each swap's size runs on, matching the enter fade exactly. A size that
  * outlives its fade keeps the two views' containers animating after one of them
  * is invisible, which reads as the page still settling when it has finished.
  */
-internal fun folioSwapSizeTransform(): SizeTransform = SizeTransform(
+internal fun folioSwapSizeTransform(
+    durationMs: Long = fadeSwapEnterMs,
+    easing: Easing = FolioEasing.Enter,
+): SizeTransform = SizeTransform(
     clip = false,
     sizeAnimationSpec = { _, _ ->
-        tween(fadeSwapEnterMs.toInt(), easing = FastOutSlowInEasing)
+        tween(durationMs.toInt(), easing = easing)
     },
 )
 
+/**
+ * The swap's fallback duration: `motionFast + 60`, which used to be recomputed inline in
+ * `FolioNavHost` and in `DesignSystemTest` as well as here. One definition now, and the motion
+ * table ([MotionKey.ShelfFadeSwap]) is the authority callers pass in.
+ */
 private val fadeSwapEnterMs = FolioTokens.motionFast + 60
-private val fadeSwapExitMs = FolioTokens.motionFast
 private object NeverSwapped
 
 /**
@@ -167,9 +194,13 @@ internal fun chartStagger(
     entry: Float,
     index: Int,
     count: Int,
-    barMs: Int = 320,
-    staggerMs: Int = 40,
-    capDelayMs: Int = 80,
+    /**
+     * The bar's own growth time, from [MotionKey.ChartEntry] — the table is the authority, and a
+     * caller that has the resolved spec passes its duration so a preset or lever applies.
+     */
+    barMs: Int = chartEntryBarMs,
+    staggerMs: Int = CHART_STAGGER_MS,
+    capDelayMs: Int = CHART_CAP_DELAY_MS,
 ): Pair<Float, Float> {
     val total = staggerMs * (count - 1).coerceAtLeast(0) + barMs + capDelayMs * 2
     val t = entry * total

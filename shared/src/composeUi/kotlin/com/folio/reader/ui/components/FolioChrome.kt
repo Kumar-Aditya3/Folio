@@ -75,6 +75,8 @@ import com.folio.reader.ui.theme.lightDirection
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Screen chrome: the collapsing masthead and the controls that live in it.
@@ -886,8 +888,9 @@ fun FolioSegmented(
     val targetWidth = slotWidths[clamped]
     // Liquid, not sloppy: a touch of overshoot on the glide (damping ≈ 0.78),
     // matching the press springs' own calibration.
-    val glideSpec: AnimationSpec<Dp> =
-        if (motion) spring(dampingRatio = 0.78f, stiffness = 480f) else snap()
+    // Liquid, not sloppy: the table's own glide spring (damping 0.78), which resolves to an
+    // instant under reduce-motion — so the gate this used to spell out is no longer needed here.
+    val glideSpec: AnimationSpec<Dp> = rememberMotionAnimation(MotionKey.SegmentedIndicator)
     val indicatorLeft by animateDpAsState(targetLeft, glideSpec, label = "segmentLeft")
     val indicatorWidth by animateDpAsState(targetWidth, glideSpec, label = "segmentWidth")
     Box(

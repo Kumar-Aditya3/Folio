@@ -49,6 +49,8 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * The manga shelf's chrome: the Books/Manga/Documents switch, the category chips,
@@ -169,10 +171,11 @@ fun MangaLibraryRail(
         }
 
         if (!searchActive) {
+            val swapSpec = rememberMotionAnimation<Float>(MotionKey.MangaContentSwap)
             AnimatedVisibility(
                 visible = updatingLibrary || showNewChaptersNotice,
-                enter = expandVertically() + fadeIn(tween(200)),
-                exit = fadeOut(tween(300)),
+                enter = expandVertically() + fadeIn(swapSpec),
+                exit = fadeOut(swapSpec),
             ) {
                 Row(
                     modifier = Modifier

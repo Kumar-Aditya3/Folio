@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import com.folio.reader.model.Bookmark
 import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Highlight
@@ -24,6 +25,8 @@ import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioSheetDragToDismiss
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Scrim plus the three end-edge slide-in panels (TOC, annotations, quick
@@ -68,14 +71,18 @@ internal fun BoxScope.ReaderSidePanels(
 
     // Panels sit in reserved space on occluding platforms; a horizontal slide
     // into that strip reads as janky, so fade there and slide elsewhere.
+    // The panels' own row in the motion table: they travel further than the rail, so they take
+    // slightly longer than it, and both now honour reduce-motion (they previously ignored it).
+    val panelSpec = rememberMotionAnimation<Float>(MotionKey.ReaderSidePanels)
+    val panelSlide = rememberMotionAnimation<IntOffset>(MotionKey.ReaderSidePanels)
     val panelEnter = androidx.compose.animation.slideInHorizontally(
         initialOffsetX = { it },
-        animationSpec = androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-    ) + androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(300))
+        animationSpec = panelSlide
+    ) + androidx.compose.animation.fadeIn(animationSpec = panelSpec)
     val panelExit = androidx.compose.animation.slideOutHorizontally(
         targetOffsetX = { it },
-        animationSpec = androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-    ) + androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(300))
+        animationSpec = panelSlide
+    ) + androidx.compose.animation.fadeOut(animationSpec = panelSpec)
 
     // Global scrim for sidebar sheets: only fades in/out statically, does not slide!
     androidx.compose.animation.AnimatedVisibility(

@@ -131,6 +131,8 @@ import com.folio.reader.ui.theme.rememberFolioPressFocal
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 
 /**
  * Home, recomposed as a reading room rather than a dashboard.
@@ -907,26 +909,31 @@ private fun LedgerStrip(
     // colour warms to the streak accent as the goal is met — instead of swapping
     // to a separate full ring and flipping the accent instantly. All motion-gated,
     // so reduce-motion lands on the final value and hue at once.
+    // The ring's rows in the motion table, replacing four `motionStandard` reads: the minutes
+    // ledger and the bar are feedback, the ring and its colours are the ring.
+    val ringSpec = rememberMotionAnimation<Float>(MotionKey.ProgressRing)
+    val barSpec = rememberMotionAnimation<Int>(MotionKey.ProgressBars)
+    val ringColorSpec = rememberMotionAnimation<Color>(MotionKey.ProgressRing)
     val animatedTodayMinutes by animateIntAsState(
         targetValue = state.todayMinutes.toInt(),
-        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        animationSpec = if (motion) barSpec else snap(),
         label = "todayMinutes",
     )
     val ringProgress by animateFloatAsState(
         targetValue = goalFraction,
-        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        animationSpec = if (motion) ringSpec else snap(),
         label = "goalRingProgress",
     )
     val ringColor by animateColorAsState(
         targetValue = if (met) (climate?.tint() ?: colors.accentStreak)
         else (climate?.tint() ?: colors.accentProgress),
-        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        animationSpec = if (motion) ringColorSpec else snap(),
         label = "goalRingColor",
     )
     val ringTrack by animateColorAsState(
         targetValue = if (met) colors.accentStreak.copy(alpha = 0.18f)
         else colors.accentProgress.copy(alpha = 0.14f),
-        animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
+        animationSpec = if (motion) ringColorSpec else snap(),
         label = "goalRingTrack",
     )
     val statsInteraction = rememberFolioInteraction()

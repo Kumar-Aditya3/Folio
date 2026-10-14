@@ -24,6 +24,9 @@ import kotlin.math.PI
 import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.sin
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionSpec
+import com.folio.reader.ui.theme.motionProfile
 
 /**
  * The themed rim: a surface's outline carrying one light that travels around it.
@@ -152,7 +155,11 @@ private const val DEFAULT_EVENT_GAP_NS = 16_666_667L
  * §17 specular band's own sweep: the same "a light catching glass" gesture, and the
  * eye reads anything past this as a second, separate animation.
  */
-internal val RIM_SETTLE_MS = FolioTokens.motionLiquidSweep
+/**
+ * The rim's settle, from [MotionKey.LiquidSweep]'s row — the same value the nav capsule's sweep
+ * reads, so the light crossing either surface is one motion, not two similar ones.
+ */
+internal val RIM_SETTLE_MS = motionProfile(MotionKey.LiquidSweep).durationMs
 
 /**
  * How far reading progress may move the parked head, as a fraction of a turn.
