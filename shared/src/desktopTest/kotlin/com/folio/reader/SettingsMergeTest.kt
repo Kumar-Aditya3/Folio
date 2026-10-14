@@ -149,7 +149,17 @@ class SettingsMergeTest {
         // editorialReading defaults to false, so the non-default fixture value is true.
         // This one was missing from the fixture and had been failing the field-count guard
         // by one since the field landed.
-        editorialReading = true
+        editorialReading = true,
+        // motion defaults to MotionPreferences() — STANDARD, FOLLOW_SYSTEM, every lever null — so
+        // the non-default fixture value moves the preset and the reduce mode and sets two levers.
+        // One serializable field like documentSettings, so the field-count guard counts it; the
+        // omission would fail that guard by one.
+        motion = com.folio.reader.settings.MotionPreferences(
+            preset = com.folio.reader.settings.MotionPreset.LIVELY,
+            reduceMotion = com.folio.reader.settings.ReduceMotionMode.REDUCED,
+            readerChrome = 1.3f,
+            fieldIntensity = 0.5f,
+        )
     )
 
     @Test

@@ -242,7 +242,17 @@ data class ReaderSettings(
      * serializer-driven diff/merge/sync untouched; empty default means every existing install
      * keeps today's per-pack defaults with no migration.
      */
-    val fieldOverrides: Map<String, String> = emptyMap()
+    val fieldOverrides: Map<String, String> = emptyMap(),
+    /**
+     * The reader's motion preferences — one preset plus seven channel levers, resolved against the
+     * app's tuned per-animation table (`com.folio.reader.ui.theme.motionProfile`).
+     *
+     * App-level, like [eyeProtection] and [minimalLiquidGlass]: motion is a property of the reader's
+     * device and disposition rather than of a book, so this is deliberately outside the per-book
+     * override lists and [BookReaderSettings] never snapshots it. Every field defaults, so a row
+     * written before this existed decodes to today's behaviour with no migration.
+     */
+    val motion: MotionPreferences = MotionPreferences()
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(

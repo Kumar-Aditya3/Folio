@@ -908,6 +908,7 @@ fun ReaderScreen(
                 onBookmarkClick = onBookmarkClick,
                 onOpenToc = openToc,
                 onOpenAnnotations = openAnnotations,
+                onSearchClick = onSearchClick,
                 echoesEnabled = echoesEnabled,
                 onOpenEchoes = openEchoesAction
             )
