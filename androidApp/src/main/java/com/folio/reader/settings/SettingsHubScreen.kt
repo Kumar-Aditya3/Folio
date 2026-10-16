@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Description
@@ -172,6 +173,13 @@ fun SettingsHubScreen(
                         subtitle = "Author your own palette and gradient",
                         accent = colors.accentDiscovery,
                         onClick = { onOpenSettings(FolioSettingsCategory.CUSTOM_THEME) }
+                    )
+                    HubRow(
+                        icon = Icons.Filled.Animation,
+                        title = "Animations",
+                        subtitle = "How much the app and the background move",
+                        accent = colors.accentDiscovery,
+                        onClick = { onOpenSettings(FolioSettingsCategory.ANIMATIONS) }
                     )
                     HubRow(
                         icon = Icons.Filled.Opacity,

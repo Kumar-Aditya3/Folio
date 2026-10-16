@@ -163,9 +163,7 @@ class SilkTest {
     @Test
     fun everyThemeHasAVibrance() {
         val ids = listOf(
-            "light", "warm", "silver", "arctic", "sakura", "honey", "moss", "dawn",
-            "lagoon", "rouge", "dark", "midnight", "dusk", "espresso", "ember",
-            "peacock", "graphite", "blossom", "abyss", "garnet",
+            "classic", "paper", "forest", "ocean", "editorial", "blush", "acid",
         )
         for (id in ids) {
             val v = silkVibranceFor(id)
@@ -175,7 +173,7 @@ class SilkTest {
             assertTrue(v <= 1.6f, "$id has a vibrance high enough to clip: $v")
         }
         assertTrue(
-            silkVibranceFor("graphite") < silkVibranceFor("ember"),
+            silkVibranceFor("classic") < silkVibranceFor("acid"),
             "a near-neutral room must want less vibrance than a saturated one",
         )
     }

@@ -59,7 +59,7 @@ data class FolioLight(
 }
 
 /**
- * The ten authored lights — one per [ThemePack].
+ * The seven authored lights — one per [ThemePack].
  *
  * Grouped by what each pack is *for*. A quiet reading pack keeps its light where it
  * always was and lends almost no colour; a loud pack puts its source somewhere with
@@ -78,19 +78,15 @@ data class FolioLight(
  */
 internal val FOLIO_LIGHTS: Map<String, FolioLight> = mapOf(
     // ── Quiet readers: the page is the point. Low, off-centre, barely borrowed.
-    "gallery" to FolioLight(0.28f, 0.16f, 0.35f, 0.075f, 0.07f, 0.30f),
-    "manuscript" to FolioLight(0.24f, 0.22f, 0.25f, 0.07f, 0.06f, 0.20f),
-    "silver" to FolioLight(0.30f, 0.16f, 0.30f, 0.065f, 0.06f, 0.25f),
-    "arctic" to FolioLight(0.32f, 0.14f, 0.45f, 0.08f, 0.07f, 0.40f),
-    "rouge" to FolioLight(0.52f, 0.14f, 0.40f, 0.08f, 0.07f, 0.45f),
+    "classic" to FolioLight(0.28f, 0.16f, 0.35f, 0.075f, 0.07f, 0.30f),
+    "paper" to FolioLight(0.24f, 0.22f, 0.25f, 0.07f, 0.06f, 0.20f),
+    "editorial" to FolioLight(0.52f, 0.14f, 0.40f, 0.08f, 0.07f, 0.45f),
 
     // ── Colourful but composed: a named hue, a settled position, half the colour
     //    on loan to the shelf.
-    "moss" to FolioLight(0.22f, 0.24f, 0.40f, 0.085f, 0.07f, 0.45f),
-    "lagoon" to FolioLight(0.26f, 0.20f, 0.55f, 0.095f, 0.08f, 0.60f),
-    "sakura" to FolioLight(0.34f, 0.15f, 0.45f, 0.085f, 0.08f, 0.60f),
-    "honey" to FolioLight(0.28f, 0.18f, 0.35f, 0.08f, 0.07f, 0.40f),
-    "dawn" to FolioLight(0.70f, 0.14f, 0.50f, 0.085f, 0.08f, 0.55f),
+    "forest" to FolioLight(0.22f, 0.24f, 0.40f, 0.085f, 0.07f, 0.45f),
+    "ocean" to FolioLight(0.26f, 0.20f, 0.55f, 0.095f, 0.08f, 0.60f),
+    "blush" to FolioLight(0.34f, 0.15f, 0.45f, 0.085f, 0.08f, 0.60f),
 
     // ── Loud rooms: the light *is* the subject. These three packs exist to look like
     //    somewhere — a neon city, a Miami evening, a lit chandelier — so each puts its
@@ -100,9 +96,7 @@ internal val FOLIO_LIGHTS: Map<String, FolioLight> = mapOf(
     //    and got the quiet resting room: a neon theme lit like a reading room, which is
     //    exactly the failure this table exists to prevent ("they would get the quiet
     //    default and nobody would notice on a device").
-    "cyberpunk" to FolioLight(0.18f, 0.12f, 0.60f, 0.095f, 0.085f, 0.70f),
-    "vice" to FolioLight(0.78f, 0.22f, 0.55f, 0.09f, 0.08f, 0.65f),
-    "aurum" to FolioLight(0.50f, 0.14f, 0.32f, 0.085f, 0.075f, 0.45f),
+    "acid" to FolioLight(0.18f, 0.12f, 0.60f, 0.095f, 0.085f, 0.70f),
 )
 
 /**

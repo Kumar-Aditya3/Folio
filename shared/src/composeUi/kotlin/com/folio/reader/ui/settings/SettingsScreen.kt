@@ -133,6 +133,9 @@ fun SettingsScreen(
                                     SettingsCategory.CUSTOM_THEME ->
                                         CustomThemeSettingsPanel(settings, onSettingsChange)
 
+                                    SettingsCategory.ANIMATIONS ->
+                                        AnimationsSettingsPanel(settings, onSettingsChange)
+
                                     SettingsCategory.TRANSPARENCY ->
                                         TransparencySettingsPanel(settings, onSettingsChange)
 
@@ -260,6 +263,9 @@ fun SettingsScreen(
                                     SettingsCategory.CUSTOM_THEME ->
                                         CustomThemeSettingsPanel(settings, onSettingsChange)
 
+                                    SettingsCategory.ANIMATIONS ->
+                                        AnimationsSettingsPanel(settings, onSettingsChange)
+
                                     SettingsCategory.TRANSPARENCY ->
                                         TransparencySettingsPanel(settings, onSettingsChange)
 
@@ -338,6 +344,9 @@ fun SettingsScreen(
 enum class SettingsCategory(val displayName: String, val routeName: String) {
     GENERAL("General", "general"),
     CUSTOM_THEME("Custom theme", "custom_theme"),
+    // Its own destination, not a section inside Transparency: a reader who finds the app busy
+    // should not have to guess that the fix sits behind the panel about glass solidity.
+    ANIMATIONS("Animations", "animations"),
     TRANSPARENCY("Transparency", "transparency"),
     DEFAULTS("Reader defaults", "defaults"),
     DOCUMENTS("Documents", "documents"),

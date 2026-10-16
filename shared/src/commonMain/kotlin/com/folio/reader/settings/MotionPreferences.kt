@@ -52,6 +52,13 @@ data class MotionPreferences(
     val fieldMotion: Float? = null,
     /** Background field amplitude, 0..1. A direct multiplier on each family's intensity. */
     val fieldIntensity: Float? = null,
+    /**
+     * The background family's own **pattern size** — how many blobs, how big the cells, how far
+     * apart the dots, how many bands. `1f` is the authored size and `2f` makes the motif twice as
+     * large. Unlike the other two field levers this one is genuinely universal: it rides the
+     * library's own sizing, so it reaches every family at once, and no preset changes it.
+     */
+    val fieldScale: Float? = null,
     /** Reader chrome: the top/bottom bars, the floating rail, the side panels, the selection toolbar. */
     val readerChrome: Float? = null,
     /** Sheets, menus, dialogs, overlays and the navigation push/pop transitions. */

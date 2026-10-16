@@ -99,18 +99,29 @@ class ThemeSchemeTest {
         // faces. Persisted settings still name them, so byId must land on the
         // family's survivor rather than silently dropping the user onto LIGHT.
         val expected = mapOf(
-            "grape" to AppPalette.DUSK,
-            "lava" to AppPalette.EMBER,
-            "acid" to AppPalette.PEACOCK,
-            "ocean" to AppPalette.PEACOCK,
-            "midnightneon" to AppPalette.MIDNIGHT,
+            "grape" to AppPalette.MAGENTA,
+            "lava" to AppPalette.ESPRESSO,
+            "acid" to AppPalette.LIME,
+            "ocean" to AppPalette.CYAN,
+            "midnightneon" to AppPalette.TEAL,
             "oled" to AppPalette.DARK,
-            // Folded into the nine rooms when the palette set was consolidated.
-            "matcha" to AppPalette.MOSS,
+            // Folded into the seven iconic packs when the palette set was consolidated.
+            "matcha" to AppPalette.COOL,
             "clay" to AppPalette.WARM,
-            "citrine" to AppPalette.HONEY,
-            "toxiclime" to AppPalette.PEACOCK,
+            "citrine" to AppPalette.WARM,
+            "toxiclime" to AppPalette.LIME,
             "cocoa" to AppPalette.ESPRESSO,
+            // The eleven retired families, each landing on the face that carries its character.
+            "silver" to AppPalette.LIGHT,
+            "moss" to AppPalette.COOL,
+            "peacock" to AppPalette.TEAL,
+            "garnet" to AppPalette.BROWN,
+            "abyss" to AppPalette.DEEPSEA,
+            "vaporwave" to AppPalette.MAGENTA,
+            // Code-editor themes, folded by temperature.
+            "dracula" to AppPalette.MAGENTA,
+            "nord_dark" to AppPalette.DARK,
+            "gruvbox_light" to AppPalette.WARM,
         )
         for ((legacy, survivor) in expected) {
             assertEquals(survivor, AppPalette.byId(legacy),
@@ -120,26 +131,26 @@ class ThemeSchemeTest {
 
     @Test
     fun flipThemeModeSwapsTheActivePackSides() {
-        // Honey/honey → Ember/ember and back: both faces of the pack follow.
+        // Paper/warm → Ember/ember and back: both faces of the pack follow.
         //
         // The page pair is the pack's own (`ThemePack("honey", …, "honey", "ember")`), not
         // sepia: sepia is Manuscript's page, and Honey carries its own reader theme.
-        val honey = ReaderSettings(appThemeId = "honey", themeId = "honey")
-        val ember = flipThemeMode(honey)
-        assertEquals("ember", ember.appThemeId)
+        val paper = ReaderSettings(appThemeId = "warm", themeId = "paper")
+        val ember = flipThemeMode(paper)
+        assertEquals("espresso", ember.appThemeId)
         assertEquals("ember", ember.themeId)
         val back = flipThemeMode(ember)
-        assertEquals("honey", back.appThemeId)
-        assertEquals("honey", back.themeId)
+        assertEquals("warm", back.appThemeId)
+        assertEquals("paper", back.themeId)
     }
 
     @Test
     fun flipThemeModeLeavesIndependentReaderThemesAlone() {
         // A reader theme chosen outside the pack system is a deliberate
         // decision; the switch flips the chrome and leaves the page alone.
-        val mixed = ReaderSettings(appThemeId = "honey", themeId = "dracula")
+        val mixed = ReaderSettings(appThemeId = "warm", themeId = "dracula")
         val flipped = flipThemeMode(mixed)
-        assertEquals("ember", flipped.appThemeId)
+        assertEquals("espresso", flipped.appThemeId)
         assertEquals("dracula", flipped.themeId)
     }
 
@@ -147,14 +158,15 @@ class ThemeSchemeTest {
     fun flipThemeModeHonoursCustomThemesAndLegacyIds() {
         // A custom app theme owns its polarity — the switch is disabled in the
         // UI, and a call is a defensive no-op.
-        val custom = ReaderSettings(appThemeId = "honey", customAppTheme = CustomAppTheme())
+        val custom = ReaderSettings(appThemeId = "warm", customAppTheme = CustomAppTheme())
         assertEquals(custom, flipThemeMode(custom))
-        // A persisted id from before the curation still flips inside the
-        // surviving family: "ocean" resolves to Peacock, Moss's dark face.
-        val legacy = ReaderSettings(appThemeId = "ocean", themeId = "peacock")
+        // A persisted id from before the consolidation still flips inside the
+        // surviving family: "ocean" resolves to Cyan, the Ocean pack's light face,
+        // so the pair it flips to is the Ocean pack's own page.
+        val legacy = ReaderSettings(appThemeId = "ocean", themeId = "ocean")
         val flipped = flipThemeMode(legacy)
-        assertEquals("moss", flipped.appThemeId)
-        assertEquals("moss", flipped.themeId)
+        assertEquals("deepsea", flipped.appThemeId)
+        assertEquals("abyss", flipped.themeId)
     }
 
     // ── §12.3 semantic accent roles ─────────────────────────────────────────

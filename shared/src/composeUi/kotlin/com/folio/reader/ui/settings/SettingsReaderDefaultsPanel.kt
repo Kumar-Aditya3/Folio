@@ -15,16 +15,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.LayoutMode
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.Theme
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.DropdownMenuButton
 import com.folio.reader.ui.components.FolioEyebrow
 import com.folio.reader.ui.document.DocumentReaderMode
 import com.folio.reader.ui.manga.MangaReaderMode
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.ThemePack
 
 /**
  * The starting point every book and manga is given — and the one screen that
@@ -61,6 +64,14 @@ fun ReaderDefaultsPanel(
     onOpenDocumentSettings: (() -> Unit)? = null,
 ) {
     val colors = FolioTheme.colors
+
+    // The page's polarity is read back off the selected theme rather than kept in a
+    // `remember` beside it: a remembered copy drifts the moment the theme is set
+    // anywhere else — the app-theme cards, `flipThemeMode`, a book's own override —
+    // and the toggle would then describe a page that is not the one on screen.
+    val readerTheme = Theme.getPreset(settings.themeId)
+    val isDarkMode = readerTheme.isDark
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -72,6 +83,76 @@ fun ReaderDefaultsPanel(
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
+
+        // Light/Dark Mode Toggle for Reader Themes
+        FolioEyebrow("Reader Theme", accent = colors.accentProgress)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isDarkMode) "Dark Mode" else "Light Mode",
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = "Toggle between light and dark variants of your chosen theme pack",
+                    style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            com.folio.reader.ui.components.FolioSegmented(
+                options = listOf("Light", "Dark"),
+                selectedIndex = if (isDarkMode) 1 else 0,
+                onSelect = { index ->
+                    // The switch applies the other face of the same pack — the same rule
+                    // `flipThemeMode` uses for the app palette. A page whose pack is gone,
+                    // or that was chosen on its own (Dracula, Nord…), is left alone rather
+                    // than guessed at.
+                    val pack = ThemePack.ALL.firstOrNull {
+                        it.readerThemeId(true) == settings.themeId ||
+                            it.readerThemeId(false) == settings.themeId
+                    }
+                    if (pack != null) {
+                        onSettingsChange(settings.copy(themeId = pack.readerThemeId(index == 1)))
+                    }
+                },
+                modifier = Modifier.width(140.dp),
+            )
+        }
+        
+        Text(
+            "The selected theme's light or dark variant will apply automatically when toggled.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        
+        Spacer(Modifier.width(12.dp))
+        
+        // Theme Picker — one row per pack, named for the face this mode selects. The
+        // options and the lookup are the same list, so a label can never fail to
+        // resolve back to a theme id (the old version labelled rows "Paper/Ember" and
+        // then looked them up by `Theme.name`, which is a `NoSuchElementException`).
+        val themeChoices = themePickerChoices(isDarkMode)
+        DropdownMenuButton(
+            label = "Theme",
+            selected = readerTheme.name,
+            options = themeChoices.map { it.second },
+            onChange = { label ->
+                themeChoices.firstOrNull { it.second == label }?.let { (id, _) ->
+                    onSettingsChange(settings.copy(themeId = id))
+                }
+            },
+        )
+        Text(
+            "Choose from iconic themes like Classic/Paper/Forest/Ocean/Editorial/Blush/Acid Rave.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        
+        Spacer(Modifier.width(12.dp))
 
         FolioEyebrow("Books", accent = colors.accentProgress)
         val pageModes = proseModes(settings.layoutMode)
@@ -270,3 +351,18 @@ fun MangaReaderMode.readableLabel(): String = when (this) {
     MangaReaderMode.PAGED_RTL -> "Paged (right to left)"
     MangaReaderMode.PAGED_VERTICAL -> "Paged (vertical)"
 }
+
+/**
+ * The reader-theme picker's options: one row per pack, showing the face the current
+ * light/dark mode selects, as `readerThemeId to label`.
+ *
+ * The label is the theme's own name, which is exactly the string [ReaderDefaultsPanel]
+ * looks back up — so the list and the lookup cannot drift apart. Packs are the unit
+ * here because that is what the Light/Dark switch flips: the two faces of one pack are
+ * the same theme at morning and at night, which is why the toggle sits above the picker.
+ */
+private fun themePickerChoices(isDarkMode: Boolean): List<Pair<String, String>> =
+    ThemePack.ALL.map { pack ->
+        val id = pack.readerThemeId(isDarkMode)
+        id to Theme.getPreset(id).name
+    }

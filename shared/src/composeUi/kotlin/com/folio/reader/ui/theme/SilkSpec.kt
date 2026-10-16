@@ -28,15 +28,13 @@ import androidx.compose.ui.graphics.Color
  * device and in every session, and can be pinned by a test.
  */
 internal fun silkVibranceFor(packId: String): Float = when (packId) {
-    // Near-neutral rooms: almost none. Their whole character is the absence of chroma.
-    "graphite", "silver" -> 1.06f
-    // Cool, low-chroma rooms. A little, or the mesh reads as grey.
-    "arctic", "midnight", "abyss" -> 1.16f
-    // The rest of the dark rooms carry real hue and have headroom for it.
-    "dark", "dusk", "espresso", "ember", "peacock", "blossom", "garnet", "cyberpunk", "vice", "aurum" -> 1.26f
+    // The monochrome room: almost none. Its whole character is the absence of chroma.
+    "classic" -> 1.06f
     // Light rooms. The mesh is drawn at a far lower alpha over paper, so it needs more
     // before it is visible at all — but not so much that it stops reading as paper.
-    "light", "warm", "honey", "moss", "dawn", "lagoon", "rouge", "sakura", "neonday", "viceday", "champagne" -> 1.20f
+    "paper", "forest", "ocean", "editorial" -> 1.20f
+    // The two rooms that carry real hue and have headroom for it.
+    "blush", "acid" -> 1.26f
     else -> 1.18f
 }
 

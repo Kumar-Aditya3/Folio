@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,16 +15,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.MotionPreferences
 import com.folio.reader.settings.MotionPreset
 import com.folio.reader.settings.ReduceMotionMode
 import com.folio.reader.settings.ReaderSettings
-import com.folio.reader.ui.components.DropdownMenuButton
 import com.folio.reader.ui.components.FolioSegmented
+import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.theme.FOLIO_FIELD_GLOBAL_KEY
+import com.folio.reader.ui.theme.FieldLever
+import com.folio.reader.ui.theme.fieldFactor
 import com.folio.reader.ui.theme.LocalFolioPackId
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.MotionChannel
+import com.folio.reader.ui.theme.factorFor
 
 /**
  * The **Animations** section, inside the Transparency panel — the panel the Settings hub's
@@ -51,51 +57,56 @@ import com.folio.reader.ui.theme.FolioTokens
  * fresh install is in, and the state that renders the app exactly as it was tuned.
  */
 
-/** The two places a lever can be read from. */
-private enum class LeverScope { AUTO, CUSTOM }
-
 /**
- * One lever: a label, why it exists, and a control that can return to the preset.
+ * One lever as a **slider**, with the value it currently resolves to and a way back to Auto.
  *
- * The values are multipliers in the app's own convention — **higher is more motion** — and they are
- * offered as stops rather than as a continuous range because a multiplier is only meaningful
- * against the preset it multiplies, and three good stops beat sixty bad ones.
+ * Auto is not a seventh stop on the track — it is the slider *sitting at the effective value*
+ * (the lever if set, otherwise the preset's). So the control always shows what the app is doing
+ * right now, and dragging it off that point is what pins it; the Auto button that appears next to
+ * the value is how you hand it back. This is why a slider rather than a dropdown with fixed
+ * stops: a multiplier is continuous in nature and the useful values are not round numbers.
  */
 @Composable
-private fun LeverRow(
+private fun LeverSlider(
     title: String,
     subtitle: String,
-    current: Float?,
-    stops: List<Float>,
-    onLeverChange: (Float?) -> Unit,
+    value: Float,
+    auto: Boolean,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+    onResetAuto: () -> Unit,
 ) {
     val colors = FolioTheme.colors
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = FolioTheme.typography.bodyLarge,
+                    color = colors.onSurface,
+                )
+            }
             Text(
-                text = title,
-                style = FolioTheme.typography.bodyLarge,
-                color = colors.onSurface,
+                text = if (auto) "Auto" else times(value),
+                style = FolioTheme.typography.labelLarge,
+                color = if (auto) colors.onSurfaceVariant else colors.onSurface,
             )
-            Text(
-                text = subtitle,
-                style = FolioTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-            )
+            if (!auto) {
+                // Handing the lever back is one tap, and the hint says what it will return to.
+                TextButton(onClick = onResetAuto) { Text("Auto") }
+            }
         }
-        val values = buildList {
-            add("Auto")
-            stops.forEach { add(times(it)) }
-        }
-        val selected = if (current == null) "Auto" else times(current)
-        DropdownMenuButton(
-            label = title,
-            selected = selected,
-            options = values,
-            onChange = { chosen -> onLeverChange(if (chosen == "Auto") null else stops.firstOrNull { times(it) == chosen }) },
+        FolioSlider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            accent = colors.accentProgress,
+        )
+        Text(
+            text = subtitle,
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.padding(top = FolioTokens.space1),
         )
     }
 }
@@ -104,8 +115,17 @@ private fun LeverRow(
 private fun times(v: Float): String =
     if (v == v.toInt().toFloat()) "${v.toInt()}×" else "${(v * 100).toInt()}%"
 
+/**
+ * The Animations destination, in full.
+ *
+ * It is its own destination rather than a section inside Transparency, because a reader looking for
+ * "the app moves too much" should not have to know that the answer lives behind the panel about how
+ * solid the glass is. Everything that animates — the room behind the screens, the reader's chrome,
+ * the sheets, the covers — is in one place, and the family picker that used to live in Themes is
+ * here too, beside the controls that decide how that family behaves.
+ */
 @Composable
-internal fun AnimationsSettingsSection(
+fun AnimationsSettingsPanel(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
@@ -205,40 +225,50 @@ internal fun AnimationsSettingsSection(
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
-        LeverRow(
+        LeverSlider(
             title = "Reader chrome",
             subtitle = "The bars, the floating rail, the side panels and the selection toolbar.",
-            current = motion.readerChrome,
-            stops = listOf(0.5f, 0.75f, 1.25f, 1.5f, 2f),
-            onLeverChange = { v -> edit { it.copy(readerChrome = v) } },
+            value = if (motion.readerChrome == null) motion.factorFor(MotionChannel.CHROME) else motion.readerChrome,
+            auto = motion.readerChrome == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(readerChrome = v) } },
+            onResetAuto = { edit { it.copy(readerChrome = null) } },
         )
-        LeverRow(
+        LeverSlider(
             title = "Sheets and overlays",
             subtitle = "Menus, dialogs, sheets and the navigation transitions.",
-            current = motion.sheetsOverlays,
-            stops = listOf(0.5f, 0.75f, 1.25f, 1.5f, 2f),
-            onLeverChange = { v -> edit { it.copy(sheetsOverlays = v) } },
+            value = if (motion.sheetsOverlays == null) motion.factorFor(MotionChannel.SHEET) else motion.sheetsOverlays,
+            auto = motion.sheetsOverlays == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(sheetsOverlays = v) } },
+            onResetAuto = { edit { it.copy(sheetsOverlays = null) } },
         )
-        LeverRow(
+        LeverSlider(
             title = "Covers and morphs",
             subtitle = "The cover morph, the tab dissolve and the bookmark swap.",
-            current = motion.coverMorph,
-            stops = listOf(0.75f, 0.9f, 1.25f, 1.5f),
-            onLeverChange = { v -> edit { it.copy(coverMorph = v) } },
+            value = if (motion.coverMorph == null) motion.factorFor(MotionChannel.MORPH) else motion.coverMorph,
+            auto = motion.coverMorph == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(coverMorph = v) } },
+            onResetAuto = { edit { it.copy(coverMorph = null) } },
         )
-        LeverRow(
+        LeverSlider(
             title = "Progress feedback",
             subtitle = "Rings, bars, the goal dial, shimmer and the sync pill.",
-            current = motion.progressFeedback,
-            stops = listOf(0.5f, 0.75f, 1.25f, 1.5f, 2f),
-            onLeverChange = { v -> edit { it.copy(progressFeedback = v) } },
+            value = if (motion.progressFeedback == null) motion.factorFor(MotionChannel.FEEDBACK) else motion.progressFeedback,
+            auto = motion.progressFeedback == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(progressFeedback = v) } },
+            onResetAuto = { edit { it.copy(progressFeedback = null) } },
         )
-        LeverRow(
+        LeverSlider(
             title = "Entry stagger",
             subtitle = "Charts and lists arriving one after another.",
-            current = motion.chartEntry,
-            stops = listOf(0.5f, 0.85f, 1.25f, 1.5f),
-            onLeverChange = { v -> edit { it.copy(chartEntry = v) } },
+            value = if (motion.chartEntry == null) motion.factorFor(MotionChannel.ENTRY) else motion.chartEntry,
+            auto = motion.chartEntry == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(chartEntry = v) } },
+            onResetAuto = { edit { it.copy(chartEntry = null) } },
         )
 
         // ── The living room ────────────────────────────────────────────────────────
@@ -254,21 +284,34 @@ internal fun AnimationsSettingsSection(
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
-        LeverRow(
+        LeverSlider(
             title = "Field motion",
             subtitle = "How fast the room drifts, and with it the light, the rim and the silk.",
-            current = motion.fieldMotion,
-            stops = listOf(0f, 0.25f, 0.5f, 1.5f, 2f),
-            onLeverChange = { v -> edit { it.copy(fieldMotion = v) } },
+            value = if (motion.fieldMotion == null) motion.fieldFactor(FieldLever.MOTION) else motion.fieldMotion,
+            auto = motion.fieldMotion == null,
+            range = 0f..2f,
+            onChange = { v -> edit { it.copy(fieldMotion = v) } },
+            onResetAuto = { edit { it.copy(fieldMotion = null) } },
         )
-        LeverRow(
+        LeverSlider(
             title = "Field intensity",
             subtitle = "How strongly the theme's colour is carried by that motion.",
-            current = motion.fieldIntensity,
-            stops = listOf(0f, 0.25f, 0.5f, 0.75f, 1f),
-            onLeverChange = { v -> edit { it.copy(fieldIntensity = v) } },
+            value = if (motion.fieldIntensity == null) motion.fieldFactor(FieldLever.INTENSITY) else motion.fieldIntensity,
+            auto = motion.fieldIntensity == null,
+            range = 0f..1f,
+            onChange = { v -> edit { it.copy(fieldIntensity = v) } },
+            onResetAuto = { edit { it.copy(fieldIntensity = null) } },
         )
 
+        LeverSlider(
+            title = "Pattern size",
+            subtitle = "How big the room's own motif is — the blobs, cells, dots and bands. Auto is the size the theme was designed at.",
+            value = if (motion.fieldScale == null) motion.fieldFactor(FieldLever.SCALE) else motion.fieldScale,
+            auto = motion.fieldScale == null,
+            range = 0.5f..2f,
+            onChange = { v -> edit { it.copy(fieldScale = v) } },
+            onResetAuto = { edit { it.copy(fieldScale = null) } },
+        )
         // ── The family, moved here ─────────────────────────────────────────────────
         Text(
             text = "Background animation",

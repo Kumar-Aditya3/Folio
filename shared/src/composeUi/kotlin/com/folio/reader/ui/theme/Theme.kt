@@ -219,60 +219,34 @@ data class FolioColors(
 // The AppPalette ids below are unchanged, so a persisted `appThemeId` still lands on its
 // own theme; only the colours behind them are new.
 
-// Gallery / Dark -- white-cube plaster, a cobalt placard, the red sold-dot, a brass rail.
+// Gallery / Dark -- the Classic pack: white-cube plaster, strictly monochrome. The art
+// supplies the only colour, so the room never does.
 val LightFolioColors = folioArtDirection("gallery", light = true)
 val DarkFolioColors = folioArtDirection("gallery", light = false)
 
-// Manuscript / Espresso -- vellum, rubric sienna, iron-gall indigo, verdigris, gold leaf.
+// Manuscript / Espresso -- the Paper pack: vellum, rubric sienna, iron-gall indigo, gold leaf.
 private val WarmFolioColors = folioArtDirection("manuscript", light = true)
 private val EspressoFolioColors = folioArtDirection("manuscript", light = false)
 
-// Silver / Graphite -- a gelatin-silver print: cool platinum, steel, an iridescent flash.
-private val SilverFolioColors = folioArtDirection("silver", light = true)
-private val GraphiteFolioColors = folioArtDirection("silver", light = false)
+// Forest / Midnight -- sage ground and conifer ink; at night teal-black with mint frost.
+val CoolFolioColors = folioArtDirection("forest", light = true)
+val TealFolioColors = folioArtDirection("forest", light = false)
 
-// Arctic / Midnight -- glacier blue, snow-shadow, aurora green, low-sun gold.
-private val ArcticFolioColors = folioArtDirection("arctic", light = true)
-private val MidnightFolioColors = folioArtDirection("arctic", light = false)
+// Ocean / Abyss -- pale aqua over navy ink; at depth, bioluminescent cyan only.
+val CyanFolioColors = folioArtDirection("ocean", light = true)
+val DeepSeaFolioColors = folioArtDirection("ocean", light = false)
 
-// Sakura / Blossom -- petal rose, young leaf, branch umber, spring sky.
-private val SakuraFolioColors = folioArtDirection("sakura", light = true)
-private val BlossomFolioColors = folioArtDirection("sakura", light = false)
+// Editorial / Crimson -- bone white with warm brown-black ink; at night burgundy and rose-gold.
+val BoneFolioColors = folioArtDirection("editorial", light = true)
+val BrownFolioColors = folioArtDirection("editorial", light = false)
 
-// Honey / Ember -- amber gold, hive-shade teal, propolis, clover; at night a dying coal.
-private val HoneyFolioColors = folioArtDirection("honey", light = true)
-private val EmberFolioColors = folioArtDirection("honey", light = false)
+// Blush / Vaporwave -- baby pink with rose ink; at night hot magenta and electric lavender.
+val PinkFolioColors = folioArtDirection("blush", light = true)
+val MagentaFolioColors = folioArtDirection("blush", light = false)
 
-// Moss / Peacock -- forest green, lichen, bark; at night teal + sapphire + bronze.
-private val MossFolioColors = folioArtDirection("moss", light = true)
-private val PeacockFolioColors = folioArtDirection("moss", light = false)
-
-// Dawn / Dusk -- lilac sky over an apricot horizon; at night violet with a last ember.
-private val DawnFolioColors = folioArtDirection("dawn", light = true)
-private val DuskFolioColors = folioArtDirection("dawn", light = false)
-
-// Lagoon / Abyss -- turquoise shallows, coral, sand; at depth, bioluminescence only.
-val LagoonFolioColors = folioArtDirection("lagoon", light = true)
-val AbyssFolioColors = folioArtDirection("lagoon", light = false)
-
-// Rouge / Garnet -- theatrical crimson, gilt, velvet plum, a cold counterpoint.
-val RougeFolioColors = folioArtDirection("rouge", light = true)
-val GarnetFolioColors = folioArtDirection("rouge", light = false)
-
-// Neon Day / Cyberpunk -- the neon city washed out by daylight and lit at night:
-// asphalt blue-black, neon cyan, magenta signage, electric amber.
-private val NeonDayFolioColors = folioArtDirection("cyberpunk", light = true)
-val CyberpunkFolioColors = folioArtDirection("cyberpunk", light = false)
-
-// Vice Day / Vice -- the decree pair: very black with pink shades at night,
-// blush-white heat and hot pink by day; a teal flash both ways.
-private val ViceDayFolioColors = folioArtDirection("vice", light = true)
-val ViceFolioColors = folioArtDirection("vice", light = false)
-
-// Champagne / Aurum -- black-tie gilding: aubergine-black lacquer with burnished
-// gold at night, champagne cream with deep gold-ochre by day.
-private val ChampagneFolioColors = folioArtDirection("aurum", light = true)
-val AurumFolioColors = folioArtDirection("aurum", light = false)
+// Acid Rave / Synthwave -- lime chartreuse with acid green; at night a black canvas, multi-neon.
+val LimeFolioColors = folioArtDirection("acid", light = true)
+val NeonFolioColors = folioArtDirection("acid", light = false)
 
 
 enum class AppPalette(
@@ -281,32 +255,21 @@ enum class AppPalette(
     val isDark: Boolean,
     val colors: FolioColors
 ) {
-    LIGHT("light", "Gallery", false, LightFolioColors),
-    WARM("warm", "Manuscript", false, WarmFolioColors),
-    SILVER("silver", "Silver", false, SilverFolioColors),
-    ARCTIC("arctic", "Arctic", false, ArcticFolioColors),
-    SAKURA("sakura", "Sakura", false, SakuraFolioColors),
-    HONEY("honey", "Honey", false, HoneyFolioColors),
-    MOSS("moss", "Moss", false, MossFolioColors),
-    DAWN("dawn", "Dawn", false, DawnFolioColors),
-    LAGOON("lagoon", "Lagoon", false, LagoonFolioColors),
-    ROUGE("rouge", "Rouge", false, RougeFolioColors),
-    DARK("dark", "Dark", true, DarkFolioColors),
-    MIDNIGHT("midnight", "Midnight", true, MidnightFolioColors),
-    DUSK("dusk", "Dusk", true, DuskFolioColors),
-    ESPRESSO("espresso", "Espresso", true, EspressoFolioColors),
-    EMBER("ember", "Ember", true, EmberFolioColors),
-    PEACOCK("peacock", "Peacock", true, PeacockFolioColors),
-    GRAPHITE("graphite", "Graphite", true, GraphiteFolioColors),
-    BLOSSOM("blossom", "Blossom", true, BlossomFolioColors),
-    ABYSS("abyss", "Abyss", true, AbyssFolioColors),
-    GARNET("garnet", "Garnet", true, GarnetFolioColors),
-    NEONDAY("neonday", "Neon Day", false, NeonDayFolioColors),
-    CYBERPUNK("cyberpunk", "Cyberpunk", true, CyberpunkFolioColors),
-    VICEDAY("viceday", "Vice Day", false, ViceDayFolioColors),
-    VICE("vice", "Vice", true, ViceFolioColors),
-    CHAMPAGNE("champagne", "Champagne", false, ChampagneFolioColors),
-    AURUM("aurum", "Aurum", true, AurumFolioColors);
+    LIGHT("light", "Classic", false, LightFolioColors),
+    WARM("warm", "Paper", false, WarmFolioColors),
+    COOL("cool", "Forest", false, CoolFolioColors),
+    CYAN("cyan", "Ocean", false, CyanFolioColors),
+    BONE("bone", "Editorial", false, BoneFolioColors),
+    PINK("pink", "Blush", false, PinkFolioColors),
+    LIME("lime", "Acid Rave", false, LimeFolioColors),
+    DARK("dark", "Charcoal", true, DarkFolioColors),
+    ESPRESSO("espresso", "Ember", true, EspressoFolioColors),
+    TEAL("teal", "Midnight", true, TealFolioColors),
+    DEEPSEA("deepsea", "Abyss", true, DeepSeaFolioColors),
+    BROWN("brown", "Crimson", true, BrownFolioColors),
+    MAGENTA("magenta", "Vaporwave", true, MagentaFolioColors),
+    NEON("neon", "Synthwave", true, NeonFolioColors);
+
 
     companion object {
         /**
@@ -315,28 +278,75 @@ enum class AppPalette(
          * their ids land on the nearest survivor instead of dropping the user
          * onto LIGHT.
          */
+        /**
+         * Palettes that no longer exist, each landing on the surviving pack face that
+         * carries its character. The set is the seven iconic packs plus every id that was
+         * ever persisted — the curation's own names, the old reader-theme ids, and the
+         * code-editor themes that were dropped for having no atmospheric intent. A
+         * persisted `appThemeId` naming any of them resolves to a real room instead of
+         * silently dropping the reader onto Classic.
+         */
         private val legacyIds: Map<String, AppPalette> = mapOf(
-            "grape" to DUSK,
-            "lava" to EMBER,
-            "acid" to PEACOCK,
-            "ocean" to PEACOCK,
-            "midnightneon" to MIDNIGHT,
+            // ── the curation's own names ──
+            "grape" to MAGENTA,
+            "lava" to ESPRESSO,
+            "midnightneon" to TEAL,
             "oled" to DARK,
-            // Folded into the nine rooms when the palette set was consolidated.
-            "matcha" to MOSS,
-            "sherbet" to SAKURA,
-            "bubblegum" to SAKURA,
-            "hyperpop" to ROUGE,
-            "rainbow" to DAWN,
+            "onyx" to DARK,
+            "matcha" to COOL,
+            "sherbet" to PINK,
+            "bubblegum" to PINK,
+            "hyperpop" to BONE,
+            "rainbow" to PINK,
             "clay" to WARM,
-            "citrine" to HONEY,
-            "synthwave" to GARNET,
-            "vaporwave" to ABYSS,
-            "neontokyo" to MIDNIGHT,
-            "toxiclime" to PEACOCK,
-            "retrosunset" to EMBER,
+            "citrine" to WARM,
+            "toxiclime" to LIME,
+            "retrosunset" to ESPRESSO,
             "cocoa" to ESPRESSO,
-            "onyx" to EMBER,
+            "neonday" to CYAN,
+            "viceday" to PINK,
+            // ── the eleven retired art-direction families, named by their own id ──
+            "silver" to LIGHT,
+            "arctic" to CYAN,
+            "sakura" to PINK,
+            "honey" to WARM,
+            "moss" to COOL,
+            "dawn" to PINK,
+            "lagoon" to CYAN,
+            "rouge" to BONE,
+            "midnight" to TEAL,
+            "dusk" to MAGENTA,
+            "ember" to ESPRESSO,
+            "peacock" to TEAL,
+            "graphite" to DARK,
+            "blossom" to MAGENTA,
+            "abyss" to DEEPSEA,
+            "garnet" to BROWN,
+            "cyberpunk" to NEON,
+            "vice" to MAGENTA,
+            "champagne" to BONE,
+            "aurum" to BROWN,
+            // ── the old reader-theme ids ──
+            "white" to LIGHT,
+            "paper" to WARM,
+            "sepia" to WARM,
+            "gray" to LIGHT,
+            "oled_black" to DARK,
+            "vaporwave" to MAGENTA,
+            "acid" to LIME,
+            "acid_rave" to LIME,
+            "ocean" to CYAN,
+            "synthwave" to NEON,
+            "neontokyo" to NEON,
+            // ── code-editor themes: no atmospheric intent, folded by temperature ──
+            "nord_light" to LIGHT,
+            "nord_dark" to DARK,
+            "solarized_light" to WARM,
+            "solarized_dark" to ESPRESSO,
+            "dracula" to MAGENTA,
+            "monokai" to DARK,
+            "gruvbox_light" to WARM,
+            "gruvbox_dark" to ESPRESSO,
         )
 
         fun byId(id: String): AppPalette =
@@ -347,8 +357,8 @@ enum class AppPalette(
 /**
  * One theme, two faces: every pack carries a light side and a dark side, and
  * the Settings toggle applies the other face of the same pack. The two names
- * are the pair's identity Ã¢â‚¬â€ "Honey" is the same theme as "Ember", at morning
- * and at night Ã¢â‚¬â€ and the picker crossfades between them as the mode flips.
+ * are the pair's identity — "Blush" is the same theme as "Vaporwave", at morning and
+ * at night — and the picker crossfades between them as the mode flips.
  */
 data class ThemePack(
     val id: String,
@@ -365,23 +375,26 @@ data class ThemePack(
 
     companion object {
         val ALL = listOf(
-            ThemePack("gallery", "Gallery", "Dark", "light", "dark", "white", "dark"),
-            ThemePack("manuscript", "Manuscript", "Espresso", "warm", "espresso", "sepia", "espresso"),
-            ThemePack("silver", "Silver", "Graphite", "silver", "graphite", "gray", "graphite"),
-            ThemePack("arctic", "Arctic", "Midnight", "arctic", "midnight", "arctic", "midnight"),
-            ThemePack("sakura", "Sakura", "Blossom", "sakura", "blossom", "paper", "blossom"),
-            ThemePack("honey", "Honey", "Ember", "honey", "ember", "honey", "ember"),
-            ThemePack("moss", "Moss", "Peacock", "moss", "peacock", "moss", "peacock"),
-            ThemePack("dawn", "Dawn", "Dusk", "dawn", "dusk", "dawn", "dusk"),
-            ThemePack("lagoon", "Lagoon", "Abyss", "lagoon", "abyss", "lagoon", "abyss"),
-            ThemePack("rouge", "Rouge", "Garnet", "rouge", "garnet", "rouge", "garnet"),
-            ThemePack("cyberpunk", "Neon Day", "Cyberpunk", "neonday", "cyberpunk", "white", "midnight"),
-            // P7: the light side read `blossom`, which is a *dark* page — so Vice Day paired a
-            // light app palette with a dark reader theme, the exact mismatch a pack exists to
-            // prevent (and `readerAndAppDarknessAgreePerPack` caught it). Bubblegum is the
-            // blush-pink page Vice Day's "blush-white heat, hot pink signage" is asking for.
-            ThemePack("vice", "Vice Day", "Vice", "viceday", "vice", "bubblegum", "midnight"),
-            ThemePack("aurum", "Champagne", "Aurum", "champagne", "aurum", "sepia", "espresso"),
+            // Classic / Charcoal - Default Clean
+            ThemePack("classic", "Classic", "Charcoal", "light", "dark", "classic", "charcoal"),
+            
+            // Paper / Ember - Warm Analog  
+            ThemePack("paper", "Paper", "Ember", "warm", "espresso", "paper", "ember"),
+            
+            // Forest / Midnight - Cool Natural
+            ThemePack("forest", "Forest", "Midnight", "cool", "teal", "forest", "midnight"),
+            
+            // Ocean / Abyss - Deep Cool
+            ThemePack("ocean", "Ocean", "Abyss", "cyan", "deepsea", "ocean", "abyss"),
+            
+            // Editorial / Crimson - Bold Statement
+            ThemePack("editorial", "Editorial", "Crimson", "bone", "brown", "editorial", "crimson"),
+            
+            // Blush / Vaporwave - Pink Future ✨
+            ThemePack("blush", "Blush", "Vaporwave", "pink", "magenta", "blush", "vaporwave"),
+            
+            // Acid Rave / Synthwave - Neon High-Energy ⚡
+            ThemePack("acid", "Acid Rave", "Synthwave", "lime", "neon", "acid", "synthwave"),
         )
     }
 }

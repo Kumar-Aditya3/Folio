@@ -532,6 +532,11 @@ actual fun HtmlContentSurface(
             }
         }
     }
+    // `docCommitted` is scoped to the load key, so the remembered chrome client cannot
+    // read it directly: that would capture the first load's MutableState and go stale on
+    // the next chapter. Same reason as the bridge above — read it through
+    // rememberUpdatedState.
+    val docCommittedNow by rememberUpdatedState(docCommitted)
     // Both layout modes talk through document.title: the paged engine always did,
     // and the continuous bridge joined it when chapter windows arrived, so one
     // parser covers progress, links, taps, edges, selections and extend requests.
@@ -543,6 +548,22 @@ actual fun HtmlContentSurface(
                 if (READER_DEBUG_LOG && t.startsWith("folio-")) android.util.Log.i("FolioLoad", "title=${t.take(140)}")
                 when {
                     t.startsWith("folio-progress:") -> {
+                        // A report only means something from the document that is actually
+                        // on screen. `docCommitted` is scoped to the load key, so this drops
+                        // the OUTGOING chapter's trailing reports while the incoming document
+                        // is still being built — the window in which they used to land on the
+                        // new chapter and overwrite the resume fraction `setChapter` had just
+                        // written. That is the "chapter progress resets to the beginning"
+                        // report: leaving a chapter from its top (fraction ~0) reset the
+                        // previous chapter to its start instead of its end.
+                        //
+                        // Suppressing them costs nothing. The first report the new document
+                        // emits after committing is its seeded position, which the host
+                        // already holds, and a plain open never needed it to establish
+                        // anything. Every load path sets `docCommitted` — onPageFinished, the
+                        // engine's `folio-painted`, and both fallback-inject outcomes — so
+                        // this cannot latch progress off.
+                        if (!docCommittedNow) return
                         val parts = t.split(':')
                         if (parts.size < 5) return
                         val f = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return

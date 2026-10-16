@@ -29,6 +29,13 @@ import com.folio.reader.ui.theme.folioBarTopInset
 /** Route values for `settings/{category}` (§3.5 FOLIO_IMPLEMENTATION_SPEC). */
 object FolioSettingsCategory {
     const val THEMES = "themes"
+
+    /**
+     * Animations — how much the app and the living room move. Its own destination rather than a
+     * section inside Transparency: a reader looking for "this app is too busy" should not have to
+     * know that the answer is behind the panel about how solid the glass is.
+     */
+    const val ANIMATIONS = "animations"
     const val TRANSPARENCY = "transparency"
     const val CUSTOM_THEME = "custom_theme"
     const val DEFAULTS = "defaults"

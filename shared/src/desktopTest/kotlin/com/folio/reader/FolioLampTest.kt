@@ -312,7 +312,7 @@ class FolioLampTest {
     /** The seat is the pack's, and the cover only leans it — never relocates it. */
     @Test
     fun theCoverLeansTheLightAndNeverMovesItSomewhereElse() {
-        val palette = AppPalette.HONEY
+        val palette = AppPalette.WARM
         val light = folioLightFor(palette)
         val seat = Offset(w * light.sourceX, h * light.sourceY)
         val far = Offset(w * 0.95f, h * 0.9f)

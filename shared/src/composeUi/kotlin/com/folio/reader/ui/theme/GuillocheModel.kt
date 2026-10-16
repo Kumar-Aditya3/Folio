@@ -225,39 +225,19 @@ internal val GuillocheGeometry.character: GuillocheCharacter
  *
  * Keyed on the **pack id**, not the palette id, because `guillocheSpecFor` is called
  * with the pack (`"lagoon"`), and because the two faces of a pack are one theme and must
- * therefore draw one figure. The nine §26 families map onto the eleven packs the way
- * `FOLIO_ART_DIRECTIONS` maps them onto palettes; `gallery` and `system` are the two
- * packs with no §26 family of their own, so they borrow the two calmest constructions.
+ * therefore draw one figure. The §26 families map onto the seven packs the way
+ * `FOLIO_ART_DIRECTIONS` maps them onto palettes, and each pack is given the construction
+ * its character asks for — a bare ruling for the white cube, a printed plate for vellum,
+ * the rave's circuitry for Acid Rave.
  */
 private val PACK_GEOMETRY: Map<String, GuillocheGeometry> = mapOf(
-    "lagoon" to GuillocheGeometry.SWEEP,          // Aurora Ocean
-    "abyss" to GuillocheGeometry.SWEEP,
-    "dawn" to GuillocheGeometry.ORBITAL,          // Nebula Electric
-    "dusk" to GuillocheGeometry.ORBITAL,
-    "moss" to GuillocheGeometry.ORGANIC,          // Bioluminescent Forest
-    "peacock" to GuillocheGeometry.ORGANIC,
-    "manuscript" to GuillocheGeometry.EDITORIAL,  // Terracotta Tide
-    "espresso" to GuillocheGeometry.EDITORIAL,
-    "arctic" to GuillocheGeometry.CRYSTALLINE,    // Arctic Glass
-    "midnight" to GuillocheGeometry.CRYSTALLINE,
-    "honey" to GuillocheGeometry.RAYS,            // Solar Eclipse
-    "ember" to GuillocheGeometry.RAYS,
-    "rouge" to GuillocheGeometry.ORNAMENTAL,      // Jade Noir
-    "garnet" to GuillocheGeometry.ORNAMENTAL,
-    "sakura" to GuillocheGeometry.PLAYFUL,        // Mint & Coral Editorial
-    "blossom" to GuillocheGeometry.PLAYFUL,
-    "silver" to GuillocheGeometry.MINIMAL,        // Moonstone
-    "graphite" to GuillocheGeometry.MINIMAL,
-    "cyberpunk" to GuillocheGeometry.CRYSTALLINE,  // the neon city's circuitry
-    "neonday" to GuillocheGeometry.CRYSTALLINE,
-    "vice" to GuillocheGeometry.PLAYFUL,            // neon signage, palm chrome
-    "viceday" to GuillocheGeometry.PLAYFUL,
-    "aurum" to GuillocheGeometry.ORNAMENTAL,        // baroque gold leaf
-    "champagne" to GuillocheGeometry.ORNAMENTAL,
-    // The two packs with no §26 family: the achromatic Gallery/Dark pair borrows the
-    // printed-plate calm (it is the app's default look and should not shout), and the
-    // dynamic System pack borrows the tidal sweep (it must sit under any wallpaper).
-    "gallery" to GuillocheGeometry.EDITORIAL,
+    "classic" to GuillocheGeometry.MINIMAL,      // the white cube: a bare ruling
+    "paper" to GuillocheGeometry.EDITORIAL,      // vellum, a printed plate
+    "forest" to GuillocheGeometry.ORGANIC,       // bioluminescent forest
+    "ocean" to GuillocheGeometry.SWEEP,          // tidal, the deepest room
+    "editorial" to GuillocheGeometry.ORNAMENTAL, // the literary press
+    "blush" to GuillocheGeometry.PLAYFUL,        // Y2K, neon signage
+    "acid" to GuillocheGeometry.CRYSTALLINE,     // the rave's circuitry
 )
 
 /** A pack's geometry family. An unknown id (a preview, a test) gets the neutral sweep. */

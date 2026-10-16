@@ -757,9 +757,6 @@ fun TransparencySettingsPanel(
             }
         ) { Text("Reset to designed values") }
 
-        // The Animations section, hosted here because this is the panel the Settings hub's
-        // "Appearance" row opens — one home for every animation control in the app.
-        AnimationsSettingsSection(settings = settings, onSettingsChange = onSettingsChange)
     }
 }
 

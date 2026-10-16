@@ -114,7 +114,8 @@ class MotionSchemaTest {
         val fieldKeys = keys.filter { motionProfile(it).channel == MotionChannel.FIELD }
         assertEquals(
             setOf(
-                MotionKey.FieldMotion, MotionKey.FieldIntensity, MotionKey.AmbientSwing,
+                MotionKey.FieldMotion, MotionKey.FieldIntensity, MotionKey.FieldScale,
+                MotionKey.AmbientSwing,
                 MotionKey.AmbientBreath, MotionKey.SilkDrift, MotionKey.RimBeam, MotionKey.LampBreath,
             ),
             fieldKeys.toSet(),
@@ -153,7 +154,7 @@ class MotionSchemaTest {
         val json = Json { encodeDefaults = true }.encodeToString(MotionPreferences.serializer(), MotionPreferences())
         assertEquals(
             setOf(
-                "preset", "reduceMotion", "fieldMotion", "fieldIntensity",
+                "preset", "reduceMotion", "fieldMotion", "fieldIntensity", "fieldScale",
                 "readerChrome", "sheetsOverlays", "coverMorph", "progressFeedback", "chartEntry",
             ),
             Json.parseToJsonElement(json).jsonObject.keys,
@@ -211,6 +212,24 @@ class MotionSchemaTest {
         assertTrue(calm[MotionKey.AmbientSwing].durationMs > lively[MotionKey.AmbientSwing].durationMs)
         // And a calmer room is a quieter one.
         assertTrue(calm.fieldIntensityFactor < lively.fieldIntensityFactor)
+        // No profile changes the room's size: a profile is a tempo.
+        assertEquals(1f, calm.fieldScaleFactor)
+        assertEquals(1f, lively.fieldScaleFactor)
+    }
+
+    @Test
+    fun thePatternSizeLeverIsTheReadersOwnAndDefaultsToOne() {
+        // Size is taste, not tempo and not cost: no preset moves it, no tier moves it, and an
+        // untouched install resolves to exactly the size the library renders by default.
+        val base = resolveMotion(MotionPreferences(), MotionTier.STANDARD, false)
+        assertEquals(1f, base.fieldScaleFactor)
+        val big = resolveMotion(MotionPreferences(fieldScale = 2f), MotionTier.STANDARD, false)
+        assertEquals(2f, big.fieldScaleFactor)
+        // And it reaches only the field — never a foreground animation. Same tier, same reduce
+        // state on both sides, so the only difference between the two resolutions is the lever.
+        keys.filter { motionProfile(it).channel != MotionChannel.FIELD }.forEach { key ->
+            assertEquals(base[key].durationMs, big[key].durationMs, "$key moved with the size lever")
+        }
     }
 
     @Test

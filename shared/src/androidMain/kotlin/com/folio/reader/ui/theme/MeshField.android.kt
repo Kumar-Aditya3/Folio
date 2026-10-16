@@ -197,6 +197,12 @@ actual fun FolioThemeField(
     val motion = LocalMotion.current
     val speedFactor = motion.fieldSpeedFactor
     val amplitudeFactor = motion.fieldIntensityFactor
+
+    // The family's own pattern size, through the library's sizing rather than through 25 separate
+    // per-family multipliers. `SizingParams(scale = 1f)` is exactly what the library uses when the
+    // argument is omitted, so an untouched install renders byte-for-byte as before; only a reader
+    // who moves the size lever changes anything.
+    val sizing = SizingParams(scale = motion.fieldScaleFactor)
     // The field's working palette: the loud accents first (they carry the theme's identity), then
     // the softer aurora pools. Deduped and never empty. On a dark face every entry is sunk toward
     // the field's own base so the animation carries the theme's hue at the room's luminance
@@ -213,7 +219,7 @@ actual fun FolioThemeField(
     // the device's pixels and is scaled back up, which leaves the motion bit-for-bit as authored
     // and divides the fragment work by the square of the scale. See [FolioFieldCost].
     val scale = rememberFolioFieldScale(kind)
-    MirageField(kind, back, palette, isDark, amplitudeFactor, speedFactor, vibrancy, modifier.folioFieldDownsample(scale))
+    MirageField(kind, back, palette, isDark, amplitudeFactor, speedFactor, vibrancy, sizing, modifier.folioFieldDownsample(scale))
 }
 
 /** Pulls [n] colours from [src], cycling if the theme authored fewer. */
@@ -270,6 +276,7 @@ private fun MirageField(
     amplitudeFactor: Float,
     speedFactor: Float,
     vibrancy: Float,
+    sizing: SizingParams,
     modifier: Modifier,
 ) {
     // Each family runs slow - a reading-app background breathes, it does not perform. `s()` scales
@@ -319,6 +326,7 @@ private fun MirageField(
             noise = 0.28f,
             shape = GrainGradientShape.Corners,
             speed = s(0.3f),
+            sizing = sizing,
         )
         // MANUSCRIPT � ink bleeding through laid paper; Stripes are the scribe's ruled lines pulled
         // out of true by a moderate warp and swirl.
@@ -333,6 +341,7 @@ private fun MirageField(
             swirl = 0.7f,
             swirlIterations = 10,
             speed = s(0.35f),
+            sizing = sizing,
         )
         // SILVER � the silver-halide grain of a darkroom print: a Bayer dither over a slow swirl.
         FolioFieldKind.Dithering -> Dithering(
@@ -343,6 +352,7 @@ private fun MirageField(
             type = DitheringType.Bayer4x4,
             size = 2f,
             speed = s(0.5f),
+            sizing = sizing,
         )
         // ARCTIC � aurora curtains twisting over ice strata. Low twist, high softness, gentle noise.
         FolioFieldKind.Swirl -> Swirl(
@@ -357,6 +367,7 @@ private fun MirageField(
             noiseFrequency = 0.4f,
             noise = 0.22f,
             speed = s(0.3f),
+            sizing = sizing,
         )
         // SAKURA � petals orbiting on the wind: discrete soft bodies drifting across the field.
         FolioFieldKind.DotOrbit -> DotOrbit(
@@ -368,6 +379,7 @@ private fun MirageField(
             spreading = 1f,
             stepsPerColor = 4,
             speed = s(0.9f),
+            sizing = sizing,
         )
         // HONEY � viscous drops coalescing. Few, large, slow balls.
         FolioFieldKind.Metaballs -> Metaballs(
@@ -377,6 +389,7 @@ private fun MirageField(
             count = 8f,
             size = 0.9f,
             speed = s(0.6f),
+            sizing = sizing,
         )
         // MOSS � a cellular colony spreading over stone: Voronoi cells with a gap and a faint glow.
         FolioFieldKind.Voronoi -> Voronoi(
@@ -389,6 +402,7 @@ private fun MirageField(
             gap = 0.05f,
             glow = 0.15f,
             speed = s(0.35f),
+            sizing = sizing,
         )
         // DAWN � volumetric sun-shafts from a low, off-screen source, with bloom.
         FolioFieldKind.GodRays -> GodRays(
@@ -407,6 +421,7 @@ private fun MirageField(
             intensity = amp(kind),
             bloom = amp(kind),
             speed = s(0.5f),
+            sizing = sizing,
         )
         // LAGOON � turquoise, sand and coral drifting through moving water; blends, never whitens.
         FolioFieldKind.MeshGradient -> MeshGradient(
@@ -417,6 +432,7 @@ private fun MirageField(
             grainMixer = 0f,
             grainOverlay = 0f,
             speed = s(0.7f),
+            sizing = sizing,
         )
         // ROUGE � a turbulent ring of smoke in a single spotlight: the house before curtain.
         FolioFieldKind.SmokeRing -> SmokeRing(
@@ -429,6 +445,7 @@ private fun MirageField(
             thickness = 0.7f,
             innerShape = 0.7f,
             speed = s(0.4f),
+            sizing = sizing,
         )
 
         // --- Opt-in families (per-theme override picker). Each still eats this theme's palette. ---
@@ -446,6 +463,7 @@ private fun MirageField(
             fadeIn = COLOR_PANELS_FADE_IN,
             fadeOut = COLOR_PANELS_FADE_OUT,
             speed = s(0.4f),
+            sizing = sizing,
         )
         FolioFieldKind.DotGrid -> DotGrid(
             modifier = modifier,
@@ -459,6 +477,7 @@ private fun MirageField(
             // the picker's description always claimed of this family.
             sizeRange = 0.5f,
             opacityRange = 0.5f * (0.5f + 0.5f * sin(tickPhase * TAU).toFloat()),
+            sizing = sizing,
         )
         FolioFieldKind.NeuroNoise -> NeuroNoise(
             modifier = modifier,
@@ -468,6 +487,7 @@ private fun MirageField(
             brightness = amp(kind),
             contrast = 0.35f,
             speed = s(0.5f),
+            sizing = sizing,
         )
         FolioFieldKind.PerlinNoise -> PerlinNoise(
             modifier = modifier,
@@ -479,6 +499,7 @@ private fun MirageField(
             persistence = PERLIN_PERSISTENCE,
             lacunarity = PERLIN_LACUNARITY,
             speed = s(0.3f),
+            sizing = sizing,
         )
         FolioFieldKind.SimplexNoise -> SimplexNoise(
             modifier = modifier,
@@ -486,6 +507,7 @@ private fun MirageField(
             stepsPerColor = 2,
             softness = 0.4f,
             speed = s(0.3f),
+            sizing = sizing,
         )
         FolioFieldKind.Spiral -> Spiral(
             modifier = modifier,
@@ -499,6 +521,7 @@ private fun MirageField(
             noiseFrequency = SPIRAL_NOISE_FREQUENCY,
             softness = 0.3f,
             speed = s(0.5f),
+            sizing = sizing,
         )
         FolioFieldKind.Waves -> Waves(
             modifier = modifier,
@@ -510,6 +533,7 @@ private fun MirageField(
             spacing = 1.3f * (1f + 0.06f * sin(tickPhase * TAU).toFloat()),
             proportion = 0.14f,
             softness = 0.2f,
+            sizing = sizing,
         )
         // --- Image-filter families ------------------------------------------------------------
         // See [FILTER_SIZING] and [filterSource] for why these six are shaped differently from
@@ -625,11 +649,13 @@ private fun MirageField(
             spotSize = PULSING_BORDER_SPOT_SIZE,
             pulse = PULSING_BORDER_PULSE,
             speed = s(0.7f),
+            sizing = sizing,
         )
         FolioFieldKind.StaticMeshGradient -> StaticMeshGradient(
             modifier = modifier,
             colors = (listOf(back) + deep).cycle(5),
             mixing = 0.93f,
+            sizing = sizing,
         )
         FolioFieldKind.StaticRadialGradient -> StaticRadialGradient(
             modifier = modifier,
@@ -638,6 +664,7 @@ private fun MirageField(
             radius = 0.85f,
             falloff = 0.3f,
             mixing = 0.5f,
+            sizing = sizing,
         )
     }
 }

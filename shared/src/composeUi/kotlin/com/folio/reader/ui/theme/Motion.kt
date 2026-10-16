@@ -190,6 +190,13 @@ enum class MotionKey {
     /** The field's amplitude factor row. Carries no duration; see [ResolvedMotion.fieldIntensityFactor]. */
     FieldIntensity,
 
+    /**
+     * The field's pattern size: how many blobs, how wide the cells, how far apart the dots, how
+     * many bands — whatever the family draws. A factor row like the other two; see
+     * [ResolvedMotion.fieldScaleFactor].
+     */
+    FieldScale,
+
     /** The ambient light's horizontal swing period. */
     AmbientSwing,
 
@@ -319,6 +326,7 @@ internal fun motionProfile(key: MotionKey): MotionSpec = when (key) {
     // exposed on ResolvedMotion.
     MotionKey.FieldMotion -> MotionSpec(0L, FolioEasing.Continuous, channel = MotionChannel.FIELD)
     MotionKey.FieldIntensity -> MotionSpec(0L, FolioEasing.Continuous, channel = MotionChannel.FIELD)
+    MotionKey.FieldScale -> MotionSpec(0L, FolioEasing.Continuous, channel = MotionChannel.FIELD)
     // The slow layers. Long enough that the eye reads a room rather than an animation; the tick is
     // how often their phase is re-read (a draw-phase read, so it costs no recomposition).
     MotionKey.AmbientSwing -> MotionSpec(FieldMotion.ambientSwingPeriodMs, FolioEasing.Continuous, tickMs = FieldMotion.ambientTickMs, channel = MotionChannel.FIELD)
@@ -354,6 +362,7 @@ fun motionTierFor(glassBudget: Float, canBlur: Boolean = true): MotionTier =
 private data class ProfileFactors(
     val field: Float,
     val fieldIntensity: Float,
+    val fieldScale: Float,
     val chrome: Float,
     val sheets: Float,
     val morph: Float,
@@ -363,11 +372,12 @@ private data class ProfileFactors(
 
 private fun MotionPreset.factors(): ProfileFactors = when (this) {
     // Slower chrome and feedback, a quieter room at half speed.
-    MotionPreset.CALM -> ProfileFactors(0.5f, 0.6f, 0.75f, 0.8f, 0.85f, 0.75f, 0.85f)
+    // Size stays 1: a profile is a *tempo*, and Calm is not a smaller room.
+    MotionPreset.CALM -> ProfileFactors(0.5f, 0.6f, 1f, 0.75f, 0.8f, 0.85f, 0.75f, 0.85f)
     // Exactly the shipped values.
-    MotionPreset.STANDARD -> ProfileFactors(1f, 1f, 1f, 1f, 1f, 1f, 1f)
+    MotionPreset.STANDARD -> ProfileFactors(1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f)
     // Quicker chrome and feedback, a livelier room.
-    MotionPreset.LIVELY -> ProfileFactors(1.5f, 0.85f, 1.25f, 1.2f, 1.15f, 1.3f, 1.2f)
+    MotionPreset.LIVELY -> ProfileFactors(1.5f, 0.85f, 1f, 1.25f, 1.2f, 1.15f, 1.3f, 1.2f)
 }
 
 private fun ProfileFactors.forChannel(channel: MotionChannel): Float = when (channel) {
@@ -466,7 +476,8 @@ private fun MotionSpec.underTier(tier: MotionTier, key: MotionKey): MotionSpec =
 }
 
 /** A lever multiplies the preset's factor; a lever set to `null` follows the preset. */
-private fun MotionPreferences.factorFor(channel: MotionChannel): Float {
+/** The factor these preferences resolve to for [channel]: the lever if set, else the preset. */
+internal fun MotionPreferences.factorFor(channel: MotionChannel): Float {
     val base = preset.factors().forChannel(channel)
     val lever = when (channel) {
         MotionChannel.FIELD -> fieldMotion
@@ -494,6 +505,12 @@ class ResolvedMotion internal constructor(
     val fieldSpeedFactor: Float,
     /** Multiplier on the field's per-family amplitude. `1f` is the authored value. */
     val fieldIntensityFactor: Float,
+
+    /**
+     * Multiplier on the family's own pattern size — the blobs, cells, dot spacing and band
+     * counts it draws. `1f` is the authored size, so a fresh install is untouched.
+     */
+    val fieldScaleFactor: Float,
     /** Which device class this was resolved for. */
     val tier: MotionTier,
 ) {
@@ -510,6 +527,20 @@ class ResolvedMotion internal constructor(
          */
         val Preview: ResolvedMotion = resolveMotion(MotionPreferences(), MotionTier.STANDARD, systemReduced = false)
     }
+}
+
+/** The three background levers, so a slider can show what `Auto` currently resolves to. */
+internal enum class FieldLever { MOTION, INTENSITY, SCALE }
+
+/**
+ * The factor a field lever resolves to: the lever if the reader has moved it, otherwise the
+ * preset's own. This is what an `Auto` slider should sit at, so dragging away from it is a
+ * visible change rather than a jump.
+ */
+internal fun MotionPreferences.fieldFactor(lever: FieldLever): Float = when (lever) {
+    FieldLever.MOTION -> factorFor(MotionChannel.FIELD)
+    FieldLever.INTENSITY -> fieldIntensity ?: preset.factors().fieldIntensity
+    FieldLever.SCALE -> fieldScale ?: preset.factors().fieldScale
 }
 
 /**
@@ -532,6 +563,8 @@ fun resolveMotion(
     }
     val speedFactor = prefs.factorFor(MotionChannel.FIELD)
     val intensityFactor = prefs.fieldIntensity ?: prefs.preset.factors().fieldIntensity
+    // Scale has no channel lever to clash with: it is its own field, not the FIELD tempo.
+    val scaleFactor = prefs.fieldScale ?: prefs.preset.factors().fieldScale
 
     val table = MotionKey.entries.associateWith { key ->
         val base = motionProfile(key)
@@ -548,6 +581,8 @@ fun resolveMotion(
         // The tier's own field damping rides on top of the reader's choice.
         fieldIntensityFactor = intensityFactor *
             if (tier == MotionTier.CONSTRAINED) 0.7f else 1f,
+        // Size is a taste question, not a performance one: no tier quietly changes it.
+        fieldScaleFactor = scaleFactor,
         tier = tier,
     )
 }

@@ -548,6 +548,9 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
         com.folio.reader.settings.FolioSettingsCategory.CUSTOM_THEME ->
             com.folio.reader.settings.SettingsCustomThemeScreen(navModel, onBack)
 
+        com.folio.reader.settings.FolioSettingsCategory.ANIMATIONS ->
+            com.folio.reader.settings.SettingsAnimationsScreen(navModel, onBack)
+
         com.folio.reader.settings.FolioSettingsCategory.TRANSPARENCY ->
             com.folio.reader.settings.SettingsTransparencyScreen(navModel, onBack)
 

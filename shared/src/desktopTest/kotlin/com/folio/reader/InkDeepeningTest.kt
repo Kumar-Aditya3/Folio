@@ -110,7 +110,7 @@ class InkDeepeningTest {
         // hue an ink carried can only shrink, never grow. (Their inks were never
         // perfectly achromatic to begin with — #202124 carries a whisper of
         // blue — so the premise is monotonicity, not purity.)
-        for (id in listOf("light", "dark", "silver", "graphite")) {
+        for (id in listOf("light", "dark")) {
             val c = AppPalette.byId(id).colors
             val d = deepenInkRoles(c)
             assertTrue(
