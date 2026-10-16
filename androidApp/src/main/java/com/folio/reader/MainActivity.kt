@@ -34,6 +34,7 @@ import com.folio.reader.importer.IncomingContent
 import com.folio.reader.importer.IncomingContentResult
 import com.folio.reader.importer.isAlreadyInLibrary
 import com.folio.reader.importer.isNewImport
+import com.folio.reader.model.Document
 import com.folio.reader.nav.FolioDestination
 import com.folio.reader.nav.FolioNavCallbacks
 import com.folio.reader.nav.FolioNavHost
@@ -1161,13 +1162,16 @@ class MainActivity : ComponentActivity() {
         return ShareableFile(named, "application/epub+zip")
     }
 
-    /** Only the characters a filesystem rejects: international titles must survive intact. */
+    /**
+     * Only the characters a filesystem rejects: international titles must survive intact.
+     * Shared by the book and document share paths, so the empty fallback is neutral.
+     */
     private fun sanitizeFileName(title: String): String = title
         .replace(Regex("""[\\/:*?"<>|\s*\x00-\x1F]"""), " ")
         .trim()
         .trimEnd('.')
         .take(120)
-        .ifBlank { "book" }
+        .ifBlank { "file" }
 
     private fun shareBooks(bookIds: Set<String>) {
         appScope.launch(Dispatchers.IO) {
@@ -1182,12 +1186,34 @@ class MainActivity : ComponentActivity() {
             val files = documentIds.mapNotNull { id ->
                 val document = runCatching { graph.documentRepository.getDocument(id) }.getOrNull()
                     ?: return@mapNotNull null
-                val file = document.localPath?.let(::File)?.takeIf(File::isFile)
-                    ?: return@mapNotNull null
-                ShareableFile(file, document.mimeType.ifBlank { "*/*" })
+                namedDocumentCopy(document)
             }
             withContext(Dispatchers.Main) { shareFiles(files) }
         }
+    }
+
+    /**
+     * Documents are stored as `<documentDir>/original.<ext>` (see `AndroidPlatform`), so sharing
+     * `localPath` directly makes the receiver see "original.pdf". Copy it into the cache dir
+     * under the name it was imported with. Each document gets its own subdirectory: two imports
+     * that happen to share a filename would otherwise overwrite each other while the share
+     * sheet is still resolving the URIs, and the receiver would get the same file twice.
+     */
+    private fun namedDocumentCopy(document: Document): ShareableFile? {
+        val source = document.localPath?.let(::File)?.takeIf(File::isFile) ?: return null
+        // The stored file's extension *is* the canonical one the importer chose, so taking it
+        // from the source keeps the shared name and the bytes in agreement.
+        val extension = source.extension.ifBlank { "bin" }
+        // `originalFilename` normally carries the extension already; only its stem is used so
+        // the shared file always ends in the canonical extension rather than a stale one.
+        val stem = document.originalFilename
+            .substringAfterLast('/')
+            .substringBeforeLast('.')
+            .ifBlank { document.title }
+        val named = File(File(cacheDir, "share/${document.id}"), "${sanitizeFileName(stem)}.$extension")
+        named.parentFile?.mkdirs()
+        runCatching { source.copyTo(named, overwrite = true) }.getOrNull() ?: return null
+        return ShareableFile(named, document.mimeType.ifBlank { "*/*" })
     }
 
     private fun shareFiles(files: List<ShareableFile>) {

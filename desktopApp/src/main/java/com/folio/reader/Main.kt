@@ -1093,13 +1093,27 @@ fun main(args: Array<String>) {
                 bookIds.forEach { id ->
                     File(deps.platform.fileSystem.getBookEpubPath(id))
                         .takeIf(File::isFile)
-                        ?.let { sources += it to "original.epub" }
+                        ?.let { source ->
+                            // The importer stores every book as `<bookDir>/original.epub`, so
+                            // exporting it under `source.name` hands the user "original.epub".
+                            // Same reasoning as the document branch below.
+                            val title = runCatching { deps.bookRepository.getBook(id)?.title }
+                                .getOrNull()?.takeIf { it.isNotBlank() } ?: "book"
+                            val safe = title
+                                .replace(Regex("""[\\/:*?"<>|\x00-\x1F]"""), " ")
+                                .trim()
+                                .ifBlank { "book" }
+                            sources += source to "$safe.epub"
+                        }
                 }
                 documentIds.forEach { id ->
                     val document = runCatching { deps.documentRepository.getDocument(id) }.getOrNull()
                         ?: return@forEach
                     document.localPath?.let(::File)?.takeIf(File::isFile)?.let { source ->
-                        val name = File(document.originalFilename).name.ifBlank { source.name }
+                        // The stored file is `<documentDir>/original.<ext>`; exporting it under
+                        // `source.name` would hand the user back "original.pdf".
+                        val name = File(document.originalFilename).name
+                            .ifBlank { "${document.title}.${source.extension.ifBlank { "bin" }}" }
                         sources += source to name
                     }
                 }
