@@ -1022,6 +1022,20 @@ fun Modifier.folioVeil(
      * site may invent a feather distance; see [FolioEdgeRole].
      */
     edge: FolioEdgeRole? = null,
+    /**
+     * Whether this surface may cast its own elevation shadow.
+     *
+     * `true` for everything that is opaque enough to hide one. A **translucent** surface
+     * must pass `false`: Android occludes a cast shadow by the caster's own alpha, so a
+     * 60% pane passes ~40% of an *opaque* shadow through its fill, densest just inside the
+     * silhouette. See [com.folio.reader.ui.theme.FolioAtmosphere.shadowAmbient] — that
+     * colour is opaque on both faces (black on a dark one, a deepened ink on a light one),
+     * so what leaks through is a hard dark block inside the shape rather than a soft halo
+     * under it. The reader chrome is the family that hits this: it is the only glass in the
+     * app that sits over content Compose cannot blur (a native WebView), so it carries the
+     * user's transparency knob verbatim and thins all the way down.
+     */
+    castShadow: Boolean = true,
 ): Modifier {
     val atmos = FolioTheme.atmosphere
     val caps = LocalGlassCapabilities.current
@@ -1465,7 +1479,20 @@ fun Modifier.folioVeil(
             // block" a light-mode Settings screen shows. Whether a surface is in the page's flow
             // is a property of how the caller placed it, so the caller's own tier is what
             // decides; an in-flow surface never casts, upgraded or not.
-            if (embedded || tier == FolioGlassTier.InFlow) {
+            //
+            // **The reader chrome adds the third case** ([castShadow] = false), and it is the
+            // same case again with the thinnest fill in the app. The reader's bars, rail and
+            // islands sit over a native WebView, so they are the one family that cannot be
+            // given a backdrop to blur and must carry `readerVeilAlpha` verbatim — which the
+            // user can drag to the floor. `atmos.shadowAmbient` is opaque on both faces, so
+            // the lower that knob goes the more of an opaque shadow passes back through the
+            // island's own fill: at the 0.57 measured in the report roughly 43% of it lands
+            // inside the silhouette, and what the eye sees is not a shadow under a pill but a
+            // hard dark block *in* it — the "in-reader UI looks blocky at low transparency"
+            // report. A lid still casts (nothing can leak through an opaque plane, so the
+            // only part of the shadow that survives is the halo outside it, which is the part
+            // that was ever doing any work); anything thinner does not.
+            if (embedded || tier == FolioGlassTier.InFlow || !castShadow) {
                 Modifier
             } else {
                 Modifier.shadow(

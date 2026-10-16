@@ -86,12 +86,18 @@ internal fun Modifier.readerIsland(
     shape: Shape = RoundedCornerShape(FolioTokens.radiusReaderIsland),
 ): Modifier {
     val chrome = rememberFolioChromeMaterial()
+    // The island's shadow is only honest while the island is a lid. Under that, the fill is
+    // thinner than the shadow behind it and `Modifier.shadow` starts painting *into* the
+    // pill instead of under it — see [folioVeil]'s `castShadow`. At the shipped 1f this is
+    // inert; it is the transparency slider that turns the shadow into a dark block.
+    val fillAlpha = FolioTheme.readerVeilAlpha
     return this.folioVeil(
         shape = shape,
         elevation = FolioTokens.elevationVeil,
         fillColor = chrome.plane,
-        fillAlpha = FolioTheme.readerVeilAlpha,
+        fillAlpha = fillAlpha,
         weight = chrome.weight,
+        castShadow = fillAlpha >= 1f,
     )
 }
 
@@ -383,6 +389,9 @@ internal fun ReaderFloatingRail(
     onOpenEchoes: () -> Unit = {}
 ) {
     val chrome = rememberFolioChromeMaterial()
+    // Same rule as [readerIsland]: the rail is chrome over the page, so its shadow may only
+    // be cast while its own fill is a lid. See [folioVeil]'s `castShadow`.
+    val railAlpha = FolioTheme.readerVeilAlpha
     Box(
         modifier = Modifier
             .padding(start = 12.dp)
@@ -393,8 +402,9 @@ internal fun ReaderFloatingRail(
             .folioVeil(
                 FolioShapes.card,
                 fillColor = chrome.plane,
-                fillAlpha = FolioTheme.readerVeilAlpha,
+                fillAlpha = railAlpha,
                 weight = chrome.weight,
+                castShadow = railAlpha >= 1f,
             )
             .padding(vertical = 12.dp)
     ) {
