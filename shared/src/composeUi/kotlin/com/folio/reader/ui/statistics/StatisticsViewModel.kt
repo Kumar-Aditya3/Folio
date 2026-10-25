@@ -20,6 +20,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -144,8 +146,15 @@ data class StatisticsUiState(
     /** Heatmap built from manga-only sessions (contentLocator starting with "manga-page"). */
     val heatmapManga: List<StatDay> = emptyList(),
     val currentlyReading: List<ReadingInProgress> = emptyList(),
+    /** Full eligible manga ranking, before the mixed allocation's eight-row cap. */
+    val mostReadManga: List<com.folio.reader.manga.MangaTopEntry> = emptyList(),
     /** §12.5 top-books leaderboard: books ranked by window reading minutes. */
     val topBooks: List<TopBook> = emptyList(),
+    val readingTime: List<ReadingTimeEntry> = emptyList(),
+    /** Eligible, exclusion-filtered library time before the visible-row cap. */
+    val readingTimeTotalMinutes: Long = 0,
+    val readingTitlesOpened: Int = 0,
+    val readingLibrarySize: Int = 0,
     /** §12.5 genre breakdown: window minutes per tag, largest first. */
     val genres: List<TagSlice> = emptyList(),
     /** Longest single sitting in the window, minutes. */
@@ -186,7 +195,9 @@ class StatisticsViewModel(
      * to MANGA_SOURCE rows in [exclusions] so the manga statistics resolve them
      * through the same source-id path everything else uses.
      */
-    private val mangaBackend: com.folio.reader.manga.MangaBackend? = null
+    private val mangaBackend: com.folio.reader.manga.MangaBackend? = null,
+    private val mangaRepository: com.folio.reader.manga.MangaRepository? = null,
+    private val mangaCategoryRepository: com.folio.reader.manga.MangaCategoryRepository? = null,
 ) {
     companion object {
         /** Days of history pulled into every calculation. */
@@ -224,50 +235,58 @@ class StatisticsViewModel(
      * is computed — one question, answered in exactly one place. Without it the
      * legacy pipeline runs untouched.
      */
+    private fun mangaLibraryFlow(): Flow<List<com.folio.reader.manga.MangaEntry>> =
+        // Category membership also invalidates this query even when the entry list
+        // compares equal. Re-resolve category exclusions on those revisions too.
+        mangaRepository?.observeLibrary() ?: flowOf(emptyList())
+
+    /** Favouriting is not a prerequisite for counting time. Resolve only missing read subjects. */
+    private suspend fun readingManga(sessions: List<ReadingSession>, library: List<com.folio.reader.manga.MangaEntry>)
+        : List<com.folio.reader.manga.MangaEntry> {
+        val repository = mangaRepository ?: return library
+        val known = library.associateByTo(LinkedHashMap()) { it.id }
+        val readIds = sessions.asSequence().filter { it.isMangaSession() }.map { it.bookId }.toSet()
+        for (id in readIds) if (id !in known) repository.get(id)?.let { known[id] = it }
+        return known.values.toList()
+    }
+
     val state: Flow<StatisticsUiState> = if (statsExclusionRepository == null) {
         combine(
             sessionRepository.observeSessionsSince(
-                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
-            ),
-            // One library query: the reading/finished subsets are strict, order-preserving filters
-            // of it (both order by COALESCE(last_opened_at, added_at) DESC). Dropping the separate
-            // getCurrentlyReading/getFinishedBooks flows also keeps Statistics off progressRevision,
-            // so it no longer re-runs on every reading-progress tick.
-            bookRepository.getAllBooks()
-        ) { sessions, books ->
-            val inProgress = books.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED }
-            val finished = books.filter { it.status == BookStatus.FINISHED }
-            buildState(localSessions(sessions, books), inProgress, finished, books)
+                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)),
+            bookRepository.getAllBooks(), mangaLibraryFlow()
+        ) { sessions, books, manga ->
+            val resolvedManga = readingManga(sessions, manga)
+            buildState(localSessions(sessions, books),
+                books.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED },
+                books.filter { it.status == BookStatus.FINISHED }, books, resolvedManga)
         }
     } else {
         combine(
             sessionRepository.observeSessionsSince(
-                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)
-            ),
-            bookRepository.getAllBooks(),
-            statsExclusionRepository.observeExclusions()
-        ) { sessions, allBooks, exclusions ->
-            val inProgress = allBooks.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED }
-            val finished = allBooks.filter { it.status == BookStatus.FINISHED }
+                today().minus(DatePeriod(days = historyDays)).atStartOfDayIn(timeZone)),
+            bookRepository.getAllBooks(), observedExclusions(), mangaLibraryFlow()
+        ) { sessions, books, exclusions, manga ->
             val scope = StatsScope(exclusions)
-            val excluded = excludedBookIds(allBooks, scope)
-            // Direct BOOK rows also cover sessions whose book row is gone
-            // (deleted) — there are no groups left to resolve for those.
-            val directBooks = exclusions.mapNotNull { (kind, id) ->
-                if (kind == Scope.BOOK) id else null
-            }.toSet()
-            buildState(
-                localSessions(sessions, allBooks)
-                    .filterNot { it.bookId in excluded || it.bookId in directBooks },
-                inProgress.filterNot { it.id in excluded },
-                finished.filterNot { it.id in excluded },
-                // The drill core renders every book it is given — unread ones
-                // included, and those carry no sessions for the filter above to
-                // catch — so exclusions must land in the book list itself
-                // (§11.2/Rule 18). The leaderboard is unaffected: it only ever
-                // resolved ids whose sessions already survived.
-                allBooks.filterNot { it.id in excluded }
-            )
+            val excluded = excludedBookIds(books, scope)
+            val directBooks = exclusions.filter { it.first == Scope.BOOK }.mapTo(HashSet()) { it.second }
+            val resolvedManga = readingManga(sessions, manga)
+            val passingManga = resolvedManga.filter { entry ->
+                val categories = if (scope.hasRules(Scope.MANGA_CATEGORY))
+                    mangaCategoryRepository?.categoriesFor(entry.id).orEmpty() else emptySet()
+                scope.includesManga(entry.id, categories, entry.sourceId)
+            }
+            val passingIds = passingManga.mapTo(HashSet()) { it.id }
+            val excludedManga = resolvedManga.filter { it.id !in passingIds }.mapTo(HashSet()) { it.id }
+            exclusions.filter { it.first == Scope.MANGA }.forEach { excludedManga.add(it.second) }
+            val local = localSessions(sessions, books).filter { session ->
+                if (session.isMangaSession()) session.bookId !in excludedManga
+                else session.bookId !in excluded && session.bookId !in directBooks
+            }
+            val passingBooks = books.filterNot { it.id in excluded || it.id in directBooks }
+            buildState(local,
+                passingBooks.filter { it.status == BookStatus.READING || it.status == BookStatus.PAUSED },
+                passingBooks.filter { it.status == BookStatus.FINISHED }, passingBooks, passingManga)
         }
     }
 
@@ -304,14 +323,17 @@ class StatisticsViewModel(
      * exclusion a reader set in Settings resolves to every source of that
      * extension before the manga statistics compute with it.
      */
-    val exclusions: Flow<Set<Pair<Scope, String>>> =
-        statsExclusionRepository?.observeExclusions()?.let { flow ->
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observedExclusions(): Flow<Set<Pair<Scope, String>>> =
+        (statsExclusionRepository?.observeExclusions() ?: flowOf(emptySet())).flatMapLatest { raw ->
             val backend = mangaBackend
-            if (backend == null) flow
-            else combine(flow, backend.observeSources()) { raw, sources ->
+            if (backend == null || raw.none { it.first == Scope.EXTENSION }) flowOf(raw)
+            else backend.observeSources().map { sources ->
                 com.folio.reader.statistics.expandExtensionExclusions(raw, sources)
             }
-        } ?: flowOf(emptySet())
+        }
+
+    val exclusions: Flow<Set<Pair<Scope, String>>> = observedExclusions()
 
     /**
      * [state], [ready] and [exclusions] as process-wide hot flows.
@@ -515,7 +537,8 @@ class StatisticsViewModel(
         sessions: List<ReadingSession>,
         inProgress: List<Book>,
         finished: List<Book>,
-        books: List<Book> = emptyList()
+        books: List<Book> = emptyList(),
+        manga: List<com.folio.reader.manga.MangaEntry> = emptyList(),
     ): StatisticsUiState {
         val today = today()
         val weekStart = today.minus(DatePeriod(days = 6))
@@ -555,11 +578,11 @@ class StatisticsViewModel(
         // map and drop out naturally. Sessions arrive exclusion-filtered, so an
         // excluded title can never appear here (Rule 18).
         val bookMap = books.associateBy { it.id }
-        val minutesByBook = sessions
+        val minutesByBook = bookSessions
             .groupBy { it.bookId }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
         val topBooks = minutesByBook
-            .filterValues { it > 0L }
+            .filter { (id, minutes) -> minutes > 0L && id in bookMap }
             .entries
             .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })
             .take(TOP_BOOKS_CAP)
@@ -595,6 +618,7 @@ class StatisticsViewModel(
         // one aggregation, two instruments. `books` arrives exclusion-filtered
         // in both combine branches, so the core obeys §11.2 for free.
 
+        val timeEntries = readingTimeEntries(thisYear, books, manga)
         return StatisticsUiState(
             hasData = sessions.isNotEmpty(),
             timeThisWeekMs = thisWeek.sumOf { it.durationMs },
@@ -631,10 +655,18 @@ class StatisticsViewModel(
                         it.normalizedProgress,
                         sessions.filter { s -> s.bookId == it.id },
                         sessions
-                    )
+                    ),
+                    coverPath = it.coverPath,
                 )
             },
+            mostReadManga = timeEntries.asSequence().filter { it.isManga }.take(5).map {
+                com.folio.reader.manga.MangaTopEntry(it.id, it.title, it.minutes)
+            }.toList(),
             topBooks = topBooks,
+            readingTime = timeEntries.take(8),
+            readingTimeTotalMinutes = timeEntries.sumOf { it.minutes },
+            readingTitlesOpened = timeEntries.size,
+            readingLibrarySize = books.size + manga.count { it.inLibrary },
             genres = genres,
             longestSessionMinutes = timed.maxOfOrNull { it.durationMs / 60_000 } ?: 0L,
             daysActiveThisYear = readDays.size,

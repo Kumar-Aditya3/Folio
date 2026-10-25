@@ -1,5 +1,11 @@
 ﻿package com.folio.reader
 
+import com.folio.reader.settings.AppSettingsStore
+import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.DiscoverMode
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import com.folio.reader.database.BookRepository
 import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.database.StatsExclusionRepository
@@ -103,7 +109,7 @@ class HomeMangaCardsTest {
 
     private class FakeMangaRepo : MangaRepository {
         val entries = LinkedHashMap<String, MangaEntry>()
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) { entries[manga.id] = manga }
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) { entries[manga.id] = manga }
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) { entries.remove(mangaId) }
         override suspend fun get(mangaId: String): MangaEntry? = entries[mangaId]
         override suspend fun findBySourceUrl(sourceId: Long, url: String): MangaEntry? =
@@ -166,9 +172,9 @@ class HomeMangaCardsTest {
         override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory =
             MangaCategory(id = name, name = name)
         override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) {}
-        override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean = true
+        override suspend fun delete(id: String, emitSyncEvent: Boolean, removeExclusiveManga: Boolean): Boolean = true
         override fun observeCategories(): Flow<List<MangaCategory>> = flowOf(emptyList())
-        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {}
+        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean, addToLibrary: Boolean) {}
         override suspend fun categoriesFor(mangaId: String): Set<String> = byManga[mangaId].orEmpty()
         override suspend fun get(id: String): MangaCategory? = null
         override suspend fun getCategoryByName(name: String): MangaCategory? = null
@@ -189,6 +195,7 @@ class HomeMangaCardsTest {
     ) : MangaBackend {
         var browseCount = 0
         var lastMode: BrowseMode? = null
+        var lastSource: Long? = null
         override val supportsExtensions: Boolean = false
         override fun observeSources(): Flow<List<MangaSourceInfo>> = flowOf(sources)
         override suspend fun getFilterTemplate(sourceId: Long): List<MangaFilter> = emptyList()
@@ -201,6 +208,7 @@ class HomeMangaCardsTest {
         ): MangaBrowsePage {
             browseCount++
             lastMode = mode
+            lastSource = sourceId
             if (fail) throw IllegalStateException("network down")
             return latest ?: MangaBrowsePage(emptyList(), false)
         }
@@ -294,7 +302,8 @@ class HomeMangaCardsTest {
         chapters: FakeChapterRepo? = null,
         categories: FakeCategoryRepo? = null,
         backend: MangaBackend? = null,
-        stats: MangaStatisticsRepository? = null
+        stats: MangaStatisticsRepository? = null,
+        settings: AppSettingsStore? = null
     ): HomeViewModel = HomeViewModel(
         bookRepository = FakeBookRepo(books),
         sessionRepository = FakeSessionRepo(),
@@ -304,13 +313,89 @@ class HomeMangaCardsTest {
         mangaChapterRepository = chapters,
         mangaCategoryRepository = categories,
         mangaBackend = backend,
-        mangaStatisticsRepository = stats
+        mangaStatisticsRepository = stats,
+        settingsStore = settings
     )
+
+    @Test fun discoverDefaultsRemainOptInAndSelectionsRoundTrip() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val initial = json.decodeFromString<ReaderSettings>("{}")
+        assertEquals(DiscoverMode.DEFAULT, initial.discoverMode)
+        assertTrue(initial.discoverExtensionPackages.isEmpty())
+        val custom = initial.copy(discoverMode = DiscoverMode.SELECTED_EXTENSIONS,
+            discoverExtensionPackages = setOf("chosen.extension", "another.extension"))
+        assertEquals(custom, json.decodeFromString<ReaderSettings>(json.encodeToString(ReaderSettings.serializer(), custom)))
+    }
+
+    @Test fun selectedDiscoverUsesOnlyAllowedExtensionPackagesAndCanUseAnUnreadSource() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val settings = AppSettingsStore().apply { publish(ReaderSettings(
+            discoverMode = DiscoverMode.SELECTED_EXTENSIONS, discoverExtensionPackages = setOf("chosen"))) }
+        val backend = DiscoverBackend(listOf(
+            MangaSourceInfo(10, "Usual", "en", extensionPkg = "usual", supportsLatest = true),
+            MangaSourceInfo(20, "Chosen", "en", extensionPkg = "chosen", supportsLatest = true),
+            MangaSourceInfo(30, "Unidentified", "en", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New title")), false))
+        val repo = FakeMangaRepo().apply { upsert(entry("usual", 10)) }
+        val state = withTimeout(5_000) { homeViewModel(mangaRepo = repo,
+            history = FakeHistoryRepo(listOf(historyRow("usual"))), backend = backend, settings = settings)
+            .state.first { it.discover.isNotEmpty() } }
+        assertEquals(setOf(20L), state.discover.map { it.sourceId }.toSet())
+        assertEquals(20L, backend.lastSource)
+    }
+
+    @Test fun hiddenAndEmptySelectedDiscoverDoNotBrowseEvenWhenTheDefaultCacheIsWarm() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply { upsert(entry("anchor")) }
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Usual", "en", extensionPkg = "usual", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New title")), false))
+        val history = FakeHistoryRepo(listOf(historyRow("anchor")))
+        withTimeout(5_000) { homeViewModel(mangaRepo = repo, history = history, backend = backend)
+            .state.first { it.discover.isNotEmpty() } }
+        assertEquals(1, backend.browseCount)
+        for (mode in listOf(DiscoverMode.HIDDEN, DiscoverMode.SELECTED_EXTENSIONS)) {
+            val settings = AppSettingsStore().apply { publish(ReaderSettings(discoverMode = mode)) }
+            val state = withTimeout(5_000) { homeViewModel(mangaRepo = repo, history = history,
+                backend = backend, settings = settings).state.first { it.loaded } }
+            assertTrue(state.discover.isEmpty(), "A cached shelf leaked into $mode")
+            assertEquals(1, backend.browseCount, "Disabled Discover made a browse request")
+        }
+    }
+
+    @Test fun discoverModeChangesClearOldRowsLiveAndRespectExistingExclusions() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val settings = AppSettingsStore()
+        val repo = FakeMangaRepo().apply { upsert(entry("usual", 10)); upsert(entry("chosen", 20)) }
+        val backend = DiscoverBackend(listOf(
+            MangaSourceInfo(10, "Usual", "en", extensionPkg = "usual", supportsLatest = true),
+            MangaSourceInfo(20, "Chosen", "en", extensionPkg = "chosen", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New title")), false))
+        val exclusions = FakeExclusionRepo()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val state = homeViewModel(mangaRepo = repo,
+                history = FakeHistoryRepo(listOf(historyRow("usual"), historyRow("chosen"))),
+                backend = backend, settings = settings, exclusions = exclusions)
+                .state.stateIn(scope, SharingStarted.Eagerly, com.folio.reader.ui.home.HomeUiState())
+            withTimeout(5_000) { state.first { it.discover.firstOrNull()?.sourceId == 10L } }
+            settings.publish(settings.current.copy(discoverMode = DiscoverMode.SELECTED_EXTENSIONS,
+                discoverExtensionPackages = setOf("chosen")))
+            withTimeout(5_000) { state.first { it.discover.firstOrNull()?.sourceId == 20L } }
+            exclusions.add(Scope.EXTENSION, "chosen")
+            withTimeout(5_000) { state.first { it.discover.isEmpty() } }
+            settings.publish(settings.current.copy(discoverMode = DiscoverMode.HIDDEN))
+            delay(80)
+            assertTrue(state.value.discover.isEmpty())
+            settings.publish(settings.current.copy(discoverMode = DiscoverMode.DEFAULT))
+            withTimeout(5_000) { state.first { it.discover.firstOrNull()?.sourceId == 10L } }
+            assertEquals(setOf("chosen"), settings.current.discoverExtensionPackages)
+        } finally { scope.cancel() }
+    }
 
     // ── §11.4 acceptance ─────────────────────────────────────────────────────
 
     @Test
-    fun `manga continue caps at three and skips removed or out-of-library manga`() = runBlocking {
+    fun `manga continue skips removed or out-of-library manga and retains metadata`() = runBlocking {
         val repo = FakeMangaRepo().apply {
             upsert(entry("m1"))
             upsert(entry("m2", inLibrary = false))
@@ -338,6 +423,19 @@ class HomeMangaCardsTest {
         // m3's history chapter name is blank → the unread-count fallback shows.
         assertEquals("4 unread", state.mangaContinue.first { it.mangaId == "m3" }.caption)
         assertTrue(state.mangaContinue.all { it.webUrl == null })
+        Unit
+    }
+
+    @Test
+    fun `recent manga queue keeps twelve passing titles beyond the desk preview`() = runBlocking {
+        val repo = FakeMangaRepo().apply {
+            for (index in 1..18) if (index != 4) upsert(entry("m$index", inLibrary = index != 2))
+        }
+        val state = homeViewModel(mangaRepo = repo,
+            history = FakeHistoryRepo((1..18).map { historyRow("m$it") }),
+            chapters = FakeChapterRepo()).state.first { it.mangaSettled }
+        assertEquals((1..18).filter { it != 2 && it != 4 }.take(12).map { "m$it" },
+            state.mangaContinue.map { it.mangaId })
         Unit
     }
 

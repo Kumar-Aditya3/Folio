@@ -2,6 +2,7 @@
 
 package com.folio.reader.ui.manga
 
+import com.folio.reader.ui.components.*
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.tween
@@ -155,7 +156,7 @@ fun MangaDetailScreen(
         if (!m.inLibrary) null else ({
             Box(Modifier.onSizeChanged { railPx = it.height }) {
                 val myCategories = remember(allCategories, myCategoryIds) {
-                    allCategories.filter { it.id in myCategoryIds }
+                    allCategories.filter { it.id in myCategoryIds.orEmpty() }
                 }
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -306,7 +307,6 @@ fun MangaDetailScreen(
                             onRemoveFromLibrary?.invoke(m) ?: viewModel.toggleInLibrary()
                         } else {
                             categoryPrompt = true
-                            viewModel.toggleInLibrary()
                         }
                     }) {
                         Icon(
@@ -376,15 +376,18 @@ fun MangaDetailScreen(
             )
         }
 
-        // Adding to the library asks for the shelf right away; dismissing keeps the
-        // default shelf so a manga is never left without a home.
+        // Adding is staged until the shelf selection is confirmed.
         if (categoryPrompt) {
             CategoryPickerDialog(
                 categories = allCategories,
-                initialSelected = myCategoryIds,
+                initialSelected = allCategories.takeIf { it.isNotEmpty() }?.let { categories ->
+                    setOf((categories.firstOrNull { it.id == com.folio.reader.manga.MangaCategory.MAIN_ID }
+                        ?: categories.first()).id)
+                },
                 onCreate = { name -> viewModel.createCategory(name) },
-                onApply = { viewModel.setCategories(it) },
+                onApply = { viewModel.setCategories(it, addToLibrary = true) },
                 onDismiss = { categoryPrompt = false },
+                title = "Add to library",
             )
         }
 
@@ -436,99 +439,69 @@ fun MangaDetailScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
         ) {
-            item {
-                // §16 P6: dense metadata gets a plate under it. Title, author, artist and status
-                // are the densest run of small type on the screen, and they were lying straight on
-                // the animated field — the same legibility report the page wash answers, but here
-                // the block is small enough that a panel is the better answer than a wash: it
-                // groups the four lines with the cover they describe.
-                //
-                // Issue 4: the plate is the *in-flow veil*, not `folioPanel`. `folioPanel` paints
-                // `atmos.panelFill`, which is an opaque colour, so the block this comment calls a
-                // plate was in fact a solid lid laid over the field — the "an opaque field behind
-                // the entire thing" report — and it ignored the Transparency preference. The
-                // in-flow veil is the same material `FolioSectionCard` and `ChapterRow` already
-                // use on this very screen, so the header now agrees with the rows under it and
-                // the field still moves through all of them.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .folioVeil(
-                            FolioShapes.card,
-                            tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                        )
-                        .padding(FolioTokens.space3),
-                    horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),
-                ) {
-                    // §17 shared element: the plate flies in from the shelf cell
-                    // the reader tapped, rather than being drawn fresh here.
-                    //
-                    // `contentSize` because this is a destination across several
-                    // different sizes: a grid cell hands over `coverFeature`, a
-                    // rail cell a `width = null` fill, a history row `coverInline`,
-                    // and this box is 110dp at a 0.68 ratio. Under the API default
-                    // the placeholder follows the interpolated bounds while the
-                    // cover inside keeps its own size, so they agree only on the
-                    // last frame and the cover jumps into place as the flight ends.
-                    // `contentSize` keeps the artwork the size of its box.
-                    //
-                    // The attachment stays ahead of `.width(110.dp)` so the box is
-                    // the shared node and the plate is what travels inside it.
-                    Box(
-                        modifier = Modifier
-                            .sharedElementOrNoop(
-                                FolioSharedKeys.mangaCover(m.id),
-                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
-                            )
-                            .width(110.dp)
-                            .aspectRatio(0.68f)
-                            .glassPanel(RoundedCornerShape(FolioTokens.radiusChip)),
-                    ) {
-                        MangaCover(
-                            backend = backend,
-                            sourceId = m.sourceId,
-                            thumbnailUrl = m.thumbnailUrl,
-                            coverPath = m.coverPath,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            m.title,
-                            style = FolioTheme.typography.headlineSmall,
-                            color = FolioTheme.colors.onSurface,
-                            // Paired with the shelf tile's title and with a history
-                            // row's, so the run of text travels with its cover from
-                            // whichever surface the reader came in from.
-                            modifier = Modifier.sharedTextOrNoop(
-                                FolioSharedKeys.mangaTitle(m.id)
-                            ),
-                        )
-                        listOfNotNull(m.author, m.artist).distinct().forEach {
-                            Text(it, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant)
+            item(key = "title-scene") {
+                FolioArtworkScene(FolioArtwork("manga:${m.id}", m.coverPath, m.sourceId, m.thumbnailUrl),
+                    Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = FolioTokens.space3),
+                        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+                        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val coverWidth = (maxWidth * .36f).coerceAtMost(132.dp)
+                            val cover: @Composable () -> Unit = {
+                                MangaCoverPlate(backend, m.sourceId, m.thumbnailUrl, m.coverPath,
+                                    width = coverWidth, haloStrength = .08f,
+                                    modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(m.id),
+                                        placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize))
+                            }
+                            val identity: @Composable () -> Unit = {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FolioEyebrow(m.sourceName, accent = FolioTheme.colors.accentDiscovery)
+                                    Text(m.title, style = FolioTheme.typography.headlineMedium,
+                                        color = FolioTheme.colors.onSurface,
+                                        modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(m.id)))
+                                    listOfNotNull(m.author, m.artist).distinct().forEach {
+                                        Text(it, style = FolioTheme.typography.bodyMedium,
+                                            color = FolioTheme.colors.onSurfaceVariant)
+                                    }
+                                    Text(when (m.status) {
+                                        MangaStatus.ONGOING -> "Ongoing"
+                                        MangaStatus.COMPLETED -> "Completed"
+                                        MangaStatus.LICENSED -> "Licensed"
+                                        MangaStatus.PUBLISHING_FINISHED -> "Publishing finished"
+                                        MangaStatus.CANCELLED -> "Cancelled"
+                                        MangaStatus.ON_HIATUS -> "On hiatus"
+                                        MangaStatus.UNKNOWN -> m.sourceName
+                                    }, style = FolioTheme.typography.labelMedium,
+                                        color = FolioTheme.colors.onSurfaceVariant)
+                                }
+                            }
+                            if (maxWidth < 310.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f)
+                                Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) { cover(); identity() }
+                            else Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                cover(); Box(Modifier.weight(1f)) { identity() }
+                            }
                         }
-                        Text(
-                            when (m.status) {
-                                MangaStatus.ONGOING -> "Ongoing"
-                                MangaStatus.COMPLETED -> "Completed"
-                                MangaStatus.LICENSED -> "Licensed"
-                                MangaStatus.PUBLISHING_FINISHED -> "Publishing finished"
-                                MangaStatus.CANCELLED -> "Cancelled"
-                                MangaStatus.ON_HIATUS -> "On hiatus"
-                                MangaStatus.UNKNOWN -> m.sourceName
+                    ResumeReadingButton(
+                        label = "$continueLabel reading",
+                        subtitle = "${chapters.count { !it.read }} unread · ${chapters.size} chapters",
+                        progress = if (chapters.isEmpty()) 0f else chapters.count { it.read }.toFloat() / chapters.size,
+                        enabled = displayChapters.isNotEmpty(),
+                        onClick = { if (resumeMorph() < 0.5f) launchContinue() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { resumeTopPx.floatValue = it.positionInWindow().y }
+                            .graphicsLayer {
+                                val f = resumeMorph()
+                                alpha = 1f - f
+                                translationY = -resumeLiftPx * f
                             },
-                            style = FolioTheme.typography.bodySmall,
-                            color = FolioTheme.colors.primary,
-                        )
+                    )
                     }
                 }
             }
 
             item {
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
-                ) {
+                FolioReferencePanel {
                     if (m.inLibrary) {
                         // Bedded like Start: the toggle reads as a surface with glass
                         // behind it, not an outline floating on nothing (see
@@ -545,7 +518,6 @@ fun MangaDetailScreen(
                         Button(
                             onClick = {
                                 categoryPrompt = true
-                                viewModel.toggleInLibrary()
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -558,19 +530,7 @@ fun MangaDetailScreen(
                     // series-level action like its neighbours, not chrome. It reports its own
                     // position so the masthead knows when to take over, and lifts as it fades
                     // so the two copies read as one control moving rather than two swapping.
-                    ResumeReadingButton(
-                        label = continueLabel,
-                        enabled = displayChapters.isNotEmpty(),
-                        onClick = { if (resumeMorph() < 0.5f) launchContinue() },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onGloballyPositioned { resumeTopPx.floatValue = it.positionInWindow().y }
-                            .graphicsLayer {
-                                val f = resumeMorph()
-                                alpha = 1f - f
-                                translationY = -resumeLiftPx * f
-                            },
-                    )
+
                     // Downloads are online-source-only: a local series is already on disk in
                     // full, and queueing it would just extract the archive into duplicate
                     // page files. Queues every unread chapter; disabled once caught up so it
@@ -605,9 +565,7 @@ fun MangaDetailScreen(
                     Text(message, color = FolioTheme.colors.error, style = FolioTheme.typography.bodyMedium)
                 }
                 item {
-                    // A bot check is not a network error: it needs a browser view, and
-                    // clearing it reloads the chapter list by itself.
-                    MangaChallengePrompt(onCleared = { viewModel.refresh() })
+                    MangaChallengePrompt(sourceId = manga?.sourceId)
                 }
             }
 
@@ -778,19 +736,18 @@ fun MangaDetailScreen(
 private fun ResumeReadingButton(
     label: String,
     enabled: Boolean,
+    subtitle: String = "",
+    progress: Float? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 12.dp),
-    ) {
-        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(label, maxLines = 1)
-    }
+    if (progress == null) Button(onClick = onClick, enabled = enabled, modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp)) {
+        Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp)); Text(label, maxLines = 1)
+    } else FolioActionDock(label, subtitle, onClick, modifier, progress = progress,
+        enabled = enabled, accent = FolioTheme.colors.accentDiscovery)
+
 }
 
 /**
@@ -810,9 +767,9 @@ private fun MangaPanelAction(
         modifier = Modifier
             .fillMaxWidth()
             .clip(FolioShapes.inset)
-            .folioSunken(FolioShapes.inset)
+            .folioReference(FolioShapes.inset)
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {

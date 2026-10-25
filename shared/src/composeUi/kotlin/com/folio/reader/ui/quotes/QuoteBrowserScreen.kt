@@ -1,5 +1,11 @@
 package com.folio.reader.ui.quotes
 
+import com.folio.reader.ui.components.*
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -90,7 +96,8 @@ fun QuoteBrowserScreen(
     onBack: () -> Unit,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onMangaNoteClick: (MangaQuoteItem) -> Unit = {},
-    viewModel: QuoteBrowserViewModel
+    viewModel: QuoteBrowserViewModel,
+    onOpenRelated: ((RelatedPassage) -> Unit)? = null,
 ) {
     var viewMode by remember { mutableStateOf(QuoteBrowserViewModel.ViewMode.LIST) }
     var filter by remember { mutableStateOf(QuoteBrowserViewModel.FilterState()) }
@@ -188,6 +195,7 @@ fun QuoteBrowserScreen(
                 state = relatedState,
                 onClose = { viewModel.closeRelated() },
                 modifier = Modifier.align(Alignment.BottomCenter),
+                onOpen = onOpenRelated,
             )
         }
 
@@ -388,6 +396,7 @@ private fun QuoteGrid(
     onEditTags: (QuoteDisplayItem) -> Unit = {},
     onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
+    var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 280.dp),
         contentPadding = PaddingValues(
@@ -407,6 +416,8 @@ private fun QuoteGrid(
             QuoteCard(
                 item = item, onQuoteClick = onQuoteClick, onEditTags = onEditTags,
                 onFindRelated = onFindRelated,
+                expanded = expandedId == item.quote.id,
+                onExpand = { expandedId = if (expandedId == item.quote.id) null else item.quote.id },
             )
         }
         items(mangaItems, key = { "m:${it.note.id}" }) { item ->
@@ -457,88 +468,48 @@ private fun QuoteList(
  * the quote — the strongest available signal, and it was previously reduced to a
  * 4dp strip on top of a grey box.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun QuoteCard(
+internal fun QuoteCard(
     item: QuoteDisplayItem,
     onQuoteClick: (QuoteDisplayItem) -> Unit,
     onEditTags: (QuoteDisplayItem) -> Unit = {},
     onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
+    expanded: Boolean = false,
+    onExpand: () -> Unit = {},
 ) {
-    val highlightColor = item.highlight?.effectiveColor
-    val accent = highlightColor?.let { androidx.compose.ui.graphics.Color(it) }
-        ?: FolioTheme.colors.accentAnnotation
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onQuoteClick(item) }
-    ) {
-        FolioCallout(accent = accent) {
-            Text(
-                text = "\u201C${item.quote.text}\u201D",
-                style = FolioTheme.typography.quote,
-                color = FolioTheme.colors.onSurface,
-                maxLines = 6,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = item.book.title,
-                style = FolioTheme.typography.titleSmall,
-                color = FolioTheme.colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            item.chapter?.let { chapter ->
-                Text(
-                    text = chapter.title,
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+    val accent = item.highlight?.effectiveColor?.let { Color(it) } ?: FolioTheme.colors.accentAnnotation
+    FolioPaperSheet(accent = accent, layered = true) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onExpand),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            FolioCoverPlate(item.book.coverPath, item.book.title, item.book.displayAuthor, width = 30.dp, small = true, suppressFallbackText = true)
+            Column(Modifier.weight(1f)) {
+                Text(item.book.title, style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                item.chapter?.let { Text(it.title, style = FolioTheme.typography.labelSmall,
+                    color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-
-            if (item.note != null) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Box(
-                    modifier = Modifier
-                        .folioSunken(com.folio.reader.ui.theme.FolioShapes.inset)
-                        .padding(10.dp)
-                ) {
-                    Text(
-                        text = item.note.content,
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurface,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
+        }
+        Text("\u201C${item.quote.text}\u201D", style = FolioTheme.typography.quote, color = FolioTheme.colors.onSurface,
+            maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand)
+                .semantics { stateDescription = if (expanded) "Expanded quote" else "Collapsed quote" })
+        TextButton(onClick = onExpand) { Text(if (expanded) "Close note" else "Open note & actions") }
+        AnimatedVisibility(expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item.note?.let {
+                    FolioEyebrow("Your note", accent = accent)
+                    Text(it.content, style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurface)
                 }
-            }
-
-            if (item.highlight != null) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    item.tags.take(3).forEach { tag ->
-                        TagChip(tag = tag)
-                    }
-                    if (item.tags.size > 3) {
-                        Text(
-                            "+${item.tags.size - 3}",
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant
-                        )
-                    }
+                if (item.highlight != null) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item.tags.forEach { TagChip(it) }
                     AddTagChip(onClick = { onEditTags(item) })
-                    onFindRelated?.let { find ->
-                        RelatedChip(compact = false, onClick = { find(item) })
-                    }
+                    onFindRelated?.let { find -> RelatedChip(onClick = { find(item) }) }
+                }
+                FolioArtworkScene(FolioArtwork("book:${item.book.id}", item.book.coverPath), Modifier.fillMaxWidth()) {
+                    FolioActionDock("Open passage", item.chapter?.title.orEmpty(), { onQuoteClick(item) },
+                        accent = accent, accessibilityLabel = "Read passage in ${item.book.title}")
                 }
             }
         }
@@ -557,7 +528,7 @@ private fun QuoteListItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onQuoteClick(item) }
-            .padding(vertical = 4.dp)
+            .folioPaper().padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             val highlightColor = item.highlight?.effectiveColor
@@ -703,7 +674,8 @@ private fun RelatedChip(compact: Boolean = false, onClick: () -> Unit) {
  * its neighbours possible at all.
  */
 @Composable
-private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Modifier = Modifier) {
+private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Modifier = Modifier,
+    onOpen: ((RelatedPassage) -> Unit)? = null) {
     // Glass over content, like every other over-content panel — a sheet rising
     // from the bottom, so its top corners are rounded. A pop-up: detached from the
     // opacity knobs and pinned to the highest opacity its own glass allows.
@@ -711,7 +683,7 @@ private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Mod
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .folioVeil(panelShape, fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE)
+            .folioVeil(panelShape, fillAlpha = FolioSurfaceOpacity.POPUP_GLASS)
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2)
     ) {
         Row(
@@ -762,7 +734,7 @@ private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Mod
                     modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(state.passages) { passage -> RelatedPassageRow(passage) }
+                    items(state.passages) { passage -> RelatedPassageRow(passage, onOpen) }
                 }
             }
         }
@@ -770,8 +742,10 @@ private fun RelatedPanel(state: RelatedState, onClose: () -> Unit, modifier: Mod
 }
 
 @Composable
-private fun RelatedPassageRow(passage: RelatedPassage) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+private fun RelatedPassageRow(passage: RelatedPassage, onOpen: ((RelatedPassage) -> Unit)? = null) {
+    Column(modifier = Modifier.fillMaxWidth().then(if (onOpen == null) Modifier else
+        Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { onOpen(passage) })
+        .heightIn(min = 48.dp).padding(vertical = 4.dp)) {
         Text(
             text = "\u201C${passage.text}\u201D",
             style = FolioTheme.typography.bodySmall,
@@ -780,6 +754,7 @@ private fun RelatedPassageRow(passage: RelatedPassage) {
             overflow = TextOverflow.Ellipsis
         )
         Spacer(modifier = Modifier.height(2.dp))
+        if (onOpen != null) Text("Open chapter", style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.primary)
         Text(
             text = listOfNotNull(passage.bookTitle, passage.chapterTitle)
                 .filter { it.isNotBlank() }

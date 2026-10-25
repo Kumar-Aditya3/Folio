@@ -230,7 +230,7 @@ class DocumentLibraryViewModel(
     }
 
     suspend fun createCategory(name: String): String? =
-        runCatching { categoryRepository.create(name).id }.getOrNull()
+        categoryRepository.create(name).id
 
     fun renameCategory(id: String, name: String) {
         scope.launch { categoryRepository.rename(id, name) }
@@ -247,40 +247,39 @@ class DocumentLibraryViewModel(
     suspend fun categoriesFor(documentId: String): Set<String> =
         categoryRepository.categoriesFor(documentId)
 
-    fun setCategoriesFor(documentId: String, categoryIds: Set<String>) {
-        scope.launch {
-            val target = categoryIds.ifEmpty {
-                categoryRepository.defaultCategory()?.let { setOf(it.id) } ?: return@launch
-            }
-            categoryRepository.assign(documentId, target)
+    suspend fun setCategoriesFor(documentId: String, categoryIds: Set<String>) {
+        val target = categoryIds.ifEmpty {
+            setOf(requireNotNull(categoryRepository.defaultCategory()) { "No default category is available." }.id)
         }
+        categoryRepository.assign(documentId, target)
     }
+
+    private var bulkPickerDocumentIds: Set<String>? = null
 
     fun requestBulkCategories() {
         val ids = selectedIds.value
         if (ids.isEmpty()) return
+        bulkPickerDocumentIds = ids
         scope.launch {
             val assignments = ids.map { categoryRepository.categoriesFor(it) }
-            bulkPickerInitial.value = sharedCategoryIds(assignments)
+            if (bulkPickerDocumentIds == ids) bulkPickerInitial.value = sharedCategoryIds(assignments)
         }
     }
 
     fun closeBulkPicker() {
         bulkPickerInitial.value = null
+        bulkPickerDocumentIds = null
         // The picked documents have been re-categorised and may no longer be on the
         // current category; drop the selection so stale off-screen selections don't linger.
         clearSelection()
     }
 
-    fun applyBulkCategories(categoryIds: Set<String>) {
-        val ids = selectedIds.value
-        if (ids.isEmpty()) return
-        scope.launch {
-            val target = categoryIds.ifEmpty {
-                categoryRepository.defaultCategory()?.let { setOf(it.id) } ?: return@launch
-            }
-            ids.forEach { categoryRepository.assign(it, target) }
+    suspend fun applyBulkCategories(categoryIds: Set<String>) {
+        val ids = checkNotNull(bulkPickerDocumentIds) { "No documents are selected." }
+        val target = categoryIds.ifEmpty {
+            setOf(requireNotNull(categoryRepository.defaultCategory()) { "No default category is available." }.id)
         }
+        ids.forEach { categoryRepository.assign(it, target) }
     }
 
     fun toggleSelection(documentId: String) {

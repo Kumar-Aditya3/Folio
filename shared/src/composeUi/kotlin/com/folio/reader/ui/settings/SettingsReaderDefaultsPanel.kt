@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.LayoutMode
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.withDocumentReaderMode
 import com.folio.reader.settings.Theme
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.DropdownMenuButton
@@ -224,9 +225,7 @@ fun ReaderDefaultsPanel(
             options = docModes.map { it.second },
             onChange = { label ->
                 onSettingsChange(
-                    settings.copy(
-                        documentReaderMode = docModes.first { it.second == label }.first.name
-                    )
+                    settings.withDocumentReaderMode(docModes.first { it.second == label }.first.name)
                 )
             },
         )

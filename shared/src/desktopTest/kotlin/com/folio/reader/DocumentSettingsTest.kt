@@ -3,6 +3,8 @@ package com.folio.reader
 import com.folio.reader.settings.DocumentSettings
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
+import com.folio.reader.settings.LayoutMode
+import com.folio.reader.settings.withDocumentReaderMode
 import com.folio.reader.settings.toReaderSettings
 import com.folio.reader.settings.withFrom
 import kotlin.test.Test
@@ -66,5 +68,31 @@ class DocumentSettingsTest {
         val docs = DocumentSettings(customTheme = custom)
         assertNotEquals(docs, DocumentSettings())
         assertEquals(custom, docs.toReaderSettings().customTheme)
+    }
+
+    @Test
+    fun sharedPageModeEnablesTheAnimatedWordLayoutWithoutChangingBookSettings() {
+        val before = ReaderSettings(fontFamily = "Georgia", themeId = "dusk", layoutMode = LayoutMode.CONTINUOUS,
+            documentSettings = DocumentSettings(fontFamily = "Literata", fontSize = 19f, themeId = "sepia"))
+        val paged = before.withDocumentReaderMode("SINGLE_PAGE")
+        assertEquals("SINGLE_PAGE", paged.documentReaderMode)
+        assertEquals(LayoutMode.PAGINATED, paged.documentSettings.layoutMode)
+        assertEquals(LayoutMode.PAGINATED, paged.documentSettings.toReaderSettings(paged).layoutMode)
+        assertEquals(before, paged.copy(documentReaderMode = before.documentReaderMode,
+            documentSettings = before.documentSettings))
+        assertEquals(before.documentSettings.copy(layoutMode = LayoutMode.PAGINATED), paged.documentSettings)
+        val continuous = paged.withDocumentReaderMode("CONTINUOUS")
+        assertEquals("CONTINUOUS", continuous.documentReaderMode)
+        assertEquals(before.documentSettings, continuous.documentSettings)
+    }
+
+    @Test
+    fun explicitWordLayoutRemainsAuthoritativeUntilTheSharedModeIsChanged() {
+        val defaults = ReaderSettings(documentReaderMode = "SINGLE_PAGE",
+            documentSettings = DocumentSettings(layoutMode = LayoutMode.CONTINUOUS))
+        assertEquals(LayoutMode.CONTINUOUS, defaults.documentSettings.toReaderSettings(defaults).layoutMode)
+        val explicitPage = defaults.documentSettings.copy(layoutMode = LayoutMode.PAGINATED)
+        assertEquals(LayoutMode.PAGINATED, explicitPage.toReaderSettings(defaults).layoutMode)
+        assertEquals("SINGLE_PAGE", defaults.documentReaderMode)
     }
 }

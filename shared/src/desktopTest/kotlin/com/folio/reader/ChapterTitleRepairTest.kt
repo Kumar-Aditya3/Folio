@@ -54,7 +54,7 @@ class ChapterTitleRepairTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-repair-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-repair-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         bookRepository = JdbcBookRepository(database)

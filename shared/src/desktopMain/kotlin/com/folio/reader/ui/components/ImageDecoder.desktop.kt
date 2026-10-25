@@ -86,6 +86,12 @@ actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
 private val fontFamilyCache = java.util.concurrent.ConcurrentHashMap<String, FontFamily?>()
 
 actual fun systemFontFamily(name: String): FontFamily? {
+    // Generic reader choices must not depend on installed-family alias matching.
+    when (name.trim().lowercase()) {
+        "serif" -> return FontFamily.Serif
+        "sans serif", "sans-serif" -> return FontFamily.SansSerif
+        "monospace" -> return FontFamily.Monospace
+    }
     fontFamilyCache[name]?.let { return it }
     if (fontFamilyCache.containsKey(name)) return null
     // FontMgr loads the skiko native lib; in headless unit-test environments that

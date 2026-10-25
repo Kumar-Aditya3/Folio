@@ -107,7 +107,7 @@ class HomeColdStartTest {
      * provably is not waiting on it.
      */
     private class GatedMangaRepo(private val release: CompletableDeferred<Unit>) : MangaRepository {
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {}
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) {}
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) {}
         override suspend fun get(mangaId: String): MangaEntry? {
             release.await()

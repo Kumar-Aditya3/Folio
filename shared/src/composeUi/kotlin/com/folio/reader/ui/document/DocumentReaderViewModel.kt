@@ -56,6 +56,9 @@ class DocumentReaderViewModel(
     private var documentId: String? = null
     private var bookmarkJob: Job? = null
     private var persistJob: Job? = null
+    private var previewJob: Job? = null
+    private var windowJob: Job? = null
+    private var navigationNonce = 0L
 
     // ── Reflowable windowing state (continuous layout) ───────────────────────
     // Mirrors ReaderContentLoader/ReaderViewModel for EPUB, but every chunk is
@@ -78,6 +81,10 @@ class DocumentReaderViewModel(
         this.documentId = documentId
         bookmarkJob?.cancel()
         persistJob?.cancel()
+        previewJob?.cancel()
+        windowJob?.cancel()
+        reflowableChunks = emptyList()
+        extending.set(false)
         // A fresh state that keeps the mode: the document changes, the reader's
         // own defaults do not.
         _state.value = DocumentReaderState(mode = _state.value.mode)
@@ -110,9 +117,12 @@ class DocumentReaderViewModel(
 
             when (document.format) {
                 DocumentFormat.PDF -> {
-                    val savedPage = (saved?.locator as? DocumentLocator.FixedPage)?.pageIndex ?: 0
+                    val locator = (saved?.locator as? DocumentLocator.FixedPage)
+                        ?: DocumentLocator.FixedPage(pageIndex = 0)
                     _state.value = _state.value.copy(
-                        currentPage = savedPage.coerceAtLeast(0),
+                        currentPage = locator.pageIndex.coerceAtLeast(0),
+                        fixedPageLocator = locator.copy(pageIndex = locator.pageIndex.coerceAtLeast(0)),
+                        fixedPageNavigationRequest = FixedPageNavigationRequest(locator, 1f, ++navigationNonce),
                         normalizedProgress = saved?.normalizedProgress?.coerceIn(0.0, 1.0)
                             ?: document.normalizedProgress.coerceIn(0.0, 1.0),
                         loadState = DocumentReaderLoadState.Ready(DocumentReaderContent.Pdf(path))
@@ -172,6 +182,7 @@ class DocumentReaderViewModel(
         _state.value = _state.value.copy(
             normalizedProgress = progress,
             reflowableLocator = locator,
+            reflowableLocationCount = chunks.size,
             reflowableWindow = liveWindow,
             reflowableAnchorChapterId = "document-chunk-$anchorIndex",
             reflowableWindowOp = null,
@@ -196,39 +207,186 @@ class DocumentReaderViewModel(
             return
         }
         val page = _state.value.currentPage.coerceIn(0, pageCount - 1)
+        val locator = _state.value.fixedPageLocator.copy(pageIndex = page)
         _state.value = _state.value.copy(
             pageCount = pageCount,
             currentPage = page,
+            fixedPageLocator = locator,
+            fixedPageNavigationRequest = _state.value.fixedPageNavigationRequest?.copy(locator = locator),
             normalizedProgress = pageProgress(page, pageCount)
         )
         persistFixedPage()
     }
 
     fun setCurrentPage(pageIndex: Int) {
+        if (_state.value.preview != null) return
         val count = _state.value.pageCount
         val page = if (count > 0) pageIndex.coerceIn(0, count - 1) else pageIndex.coerceAtLeast(0)
         _state.value = _state.value.copy(
             currentPage = page,
+            fixedPageLocator = if (page == _state.value.currentPage) _state.value.fixedPageLocator
+                else DocumentLocator.FixedPage(pageIndex = page),
+            fixedPageNavigationRequest = null,
             normalizedProgress = pageProgress(page, count)
         )
         persistFixedPage()
     }
 
     fun seekToProgress(progress: Float) {
-        val clamped = progress.coerceIn(0f, 1f)
-        if (_state.value.document?.format == DocumentFormat.PDF) {
-            val count = _state.value.pageCount
-            if (count > 0) setCurrentPage((clamped * (count - 1)).roundToInt())
-        } else {
-            // The bottom-bar fraction is whole-document; store it directly rather
-            // than through the section-local conversion. The surface's own seek is
-            // section-local (an engine limitation), and the next progress report
-            // re-derives the global value from the visible chunk.
-            updateReflowableGlobalProgress(clamped)
+        val origin = _state.value.navigationPoint() ?: return
+        val target = progressTarget(progress) ?: return
+        if (target.normalizedProgress == origin.normalizedProgress) return
+        cancelPreview()
+        _state.value = _state.value.copy(returnPoint = origin)
+        navigateTo(target)
+    }
+
+    internal fun previewProgress(progress: Float, origin: DocumentNavigationPoint? = null) {
+        val target = progressTarget(progress) ?: return
+        showPreview(target, documentNavigationLabel(target, _state.value.pageCount), origin)
+    }
+
+    internal fun windowSeekFraction(progress: Float): Float {
+        val (index, local) = reflowableLanding(progress.toDouble(), reflowableChunks.size)
+        val first = if (windowRange.isEmpty()) index else windowRange.first
+        return ((index - first + local) / liveWindow.size.coerceAtLeast(1)).coerceIn(0f, 1f)
+    }
+
+    internal fun onFixedPageChanged(pageIndex: Int) {
+        if (_state.value.fixedPageNavigationRequest == null) setCurrentPage(pageIndex)
+    }
+
+    internal fun previewBookmark(bookmark: DocumentBookmark, origin: DocumentNavigationPoint? = null) {
+        if (bookmark.documentId != documentId) return
+        val state = _state.value
+        val progress = when (val locator = bookmark.locator) {
+            is DocumentLocator.FixedPage -> pageProgress(locator.pageIndex, state.pageCount)
+            is DocumentLocator.Reflowable -> reflowableLocatorProgress(
+                locator, reflowableChunks.size,
+                // Legacy bookmarks predate fraction fallbacks; their character offset is approximate.
+                if (locator.characterOffset > 0) locator.characterOffset.toDouble() /
+                    reflowableChunks.sumOf { it.html.length }.coerceAtLeast(1) else state.normalizedProgress,
+            )
+        }
+        val target = DocumentNavigationPoint(bookmark.locator, progress, state.mode, state.rotationDegrees)
+        showPreview(target, bookmark.label ?: documentNavigationLabel(target, state.pageCount), origin)
+    }
+
+    private fun showPreview(target: DocumentNavigationPoint, label: String, origin: DocumentNavigationPoint?) {
+        val start = _state.value.preview?.origin ?: origin ?: _state.value.navigationPoint() ?: return
+        previewJob?.cancel()
+        val preview = DocumentNavigationPreview(start, target, label,
+            loading = target.locator is DocumentLocator.Reflowable && reflowableChunks.isNotEmpty())
+        _state.value = _state.value.copy(preview = preview)
+        if (target.locator is DocumentLocator.Reflowable && reflowableChunks.isNotEmpty()) {
+            val (index, local) = reflowableLanding(target.normalizedProgress, reflowableChunks.size)
+            val html = reflowableChunks[index].html
+            previewJob = scope.launch {
+                val excerpt = try { withContext(ioDispatcher) { documentPreviewExcerpt(html, local) } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+                if (_state.value.preview === preview) {
+                    _state.value = _state.value.copy(preview = preview.copy(excerpt = excerpt, loading = false))
+                }
+            }
+        }
+    }
+
+    internal fun cancelPreview() {
+        previewJob?.cancel()
+        _state.value = _state.value.copy(preview = null)
+    }
+
+    internal fun commitPreview() {
+        val preview = _state.value.preview ?: return
+        cancelPreview()
+        _state.value = _state.value.copy(returnPoint = preview.origin, controlsVisible = true)
+        navigateTo(preview.target)
+    }
+
+    internal fun returnToOrigin() {
+        val origin = _state.value.returnPoint ?: return
+        cancelPreview()
+        _state.value = _state.value.copy(returnPoint = null, controlsVisible = true)
+        navigateTo(origin)
+    }
+
+    internal fun clearReturnPoint() {
+        _state.value = _state.value.copy(returnPoint = null)
+    }
+
+    private fun progressTarget(progress: Float): DocumentNavigationPoint? {
+        if (!progress.isFinite()) return null
+        val state = _state.value
+        if (state.loadState !is DocumentReaderLoadState.Ready) return null
+        val fraction = progress.coerceIn(0f, 1f).toDouble()
+        return when (state.document?.format) {
+            DocumentFormat.PDF -> {
+                if (state.pageCount <= 0) return null
+                val page = (fraction * (state.pageCount - 1)).roundToInt()
+                DocumentNavigationPoint(DocumentLocator.FixedPage(pageIndex = page), pageProgress(page, state.pageCount),
+                    state.mode, state.rotationDegrees)
+            }
+            null -> null
+            else -> DocumentNavigationPoint(reflowableLocator(progress = fraction), fraction)
+        }
+    }
+
+    private fun navigateTo(point: DocumentNavigationPoint) {
+        val id = documentId ?: return
+        when (val target = point.locator) {
+            is DocumentLocator.FixedPage -> {
+                if (_state.value.document?.format != DocumentFormat.PDF) return
+                val page = target.pageIndex.coerceIn(0, (_state.value.pageCount - 1).coerceAtLeast(0))
+                val locator = target.copy(pageIndex = page)
+                setMode(point.mode)
+                _state.value = _state.value.copy(
+                    currentPage = page, fixedPageLocator = locator, fixedPageZoom = point.zoom,
+                    rotationDegrees = point.rotationDegrees,
+                    normalizedProgress = pageProgress(page, _state.value.pageCount),
+                    fixedPageNavigationRequest = FixedPageNavigationRequest(locator, point.zoom, ++navigationNonce),
+                )
+                persistFixedPage()
+            }
+            is DocumentLocator.Reflowable -> {
+                if (_state.value.document?.format == DocumentFormat.PDF || reflowableChunks.isEmpty()) return
+                val progress = point.normalizedProgress.coerceIn(0.0, 1.0)
+                val (index, local) = reflowableLanding(progress, reflowableChunks.size)
+                windowJob?.cancel()
+                extending.set(false)
+                val from = (index - READER_WINDOW_PRELOAD).coerceAtLeast(0)
+                val to = (index + READER_WINDOW_PRELOAD).coerceAtMost(reflowableChunks.lastIndex)
+                windowRange = from..to
+                liveWindow = reflowableChunks.subList(from, to + 1).toList()
+                currentChunkIndex = index
+                windowOpAck.value = ++windowNonce
+                _state.value = _state.value.copy(
+                    normalizedProgress = progress, reflowableLocator = target,
+                    reflowableWindow = liveWindow, reflowableAnchorChapterId = reflowableChunks[index].chapterId,
+                    reflowableScrollOffset = local, reflowableWindowOp = null,
+                    reflowableSeekRequest = progress.toFloat() to ++navigationNonce,
+                )
+                schedulePersist(DocumentPosition(id, target, progress))
+            }
+        }
+    }
+
+    internal fun updateFixedPageViewport(locator: DocumentLocator.FixedPage, zoom: Float) {
+        val state = _state.value
+        if (state.preview != null || state.fixedPageNavigationRequest != null || locator.pageIndex != state.currentPage) return
+        if (locator == state.fixedPageLocator && zoom == state.fixedPageZoom) return
+        _state.value = state.copy(fixedPageLocator = locator, fixedPageZoom = zoom)
+        persistFixedPage()
+    }
+
+    internal fun onFixedPageNavigationApplied(nonce: Long) {
+        if (_state.value.fixedPageNavigationRequest?.nonce == nonce) {
+            _state.value = _state.value.copy(fixedPageNavigationRequest = null)
         }
     }
 
     fun updateReflowablePage(currentPage: Int, pageCount: Int) {
+        if (_state.value.preview != null) return
         _state.value = _state.value.copy(
             currentPage = currentPage.coerceIn(1, pageCount.coerceAtLeast(1)),
             pageCount = pageCount.coerceAtLeast(1)
@@ -257,7 +415,10 @@ class DocumentReaderViewModel(
         val local = progress.coerceIn(0f, 1f)
         val chunkCount = reflowableChunks.size.coerceAtLeast(1)
         val global = ((currentChunkIndex + local) / chunkCount).coerceIn(0f, 1f)
-        updateReflowableGlobalProgress(global, characterOffset)
+        recordReflowableProgress(global.toDouble(), reflowableLocator(
+            characterOffset, reflowableChunks.getOrNull(currentChunkIndex)?.chapterId ?: DOCUMENT_REFLOWABLE_SECTION,
+            local.toDouble(),
+        ))
     }
 
     /**
@@ -268,9 +429,13 @@ class DocumentReaderViewModel(
      */
     fun updateReflowableGlobalProgress(progress: Float, characterOffset: Int = 0) {
         val clamped = progress.coerceIn(0f, 1f).toDouble()
-        val locator = reflowableLocator(characterOffset)
-        _state.value = _state.value.copy(normalizedProgress = clamped, reflowableLocator = locator)
-        schedulePersist(DocumentPosition(requireDocumentId(), locator, clamped))
+        recordReflowableProgress(clamped, reflowableLocator(characterOffset, progress = clamped))
+    }
+
+    private fun recordReflowableProgress(progress: Double, locator: DocumentLocator.Reflowable) {
+        if (_state.value.preview != null) return
+        _state.value = _state.value.copy(normalizedProgress = progress, reflowableLocator = locator)
+        schedulePersist(DocumentPosition(requireDocumentId(), locator, progress))
     }
 
     /**
@@ -282,7 +447,7 @@ class DocumentReaderViewModel(
     fun extendReflowableWindow(forward: Boolean) {
         if (extending.getAndSet(true)) return
         if (hasPendingReflowableWindowOp()) { extending.set(false); return }
-        scope.launch {
+        windowJob = scope.launch {
             try {
                 var added = false
                 for (i in 0 until READER_WINDOW_PRELOAD) {
@@ -357,6 +522,7 @@ class DocumentReaderViewModel(
      * whole-document progress conversion, without reloading anything.
      */
     fun onReflowableVisibleSection(spineIndex: Int) {
+        if (_state.value.preview != null) return
         val chunks = reflowableChunks
         if (chunks.isEmpty() || spineIndex < 0 || spineIndex > chunks.lastIndex) return
         currentChunkIndex = spineIndex
@@ -426,7 +592,7 @@ class DocumentReaderViewModel(
         val count = _state.value.pageCount
         if (count <= 0) return
         val page = _state.value.currentPage.coerceIn(0, count - 1)
-        schedulePersist(DocumentPosition(requireDocumentId(), DocumentLocator.FixedPage(pageIndex = page), pageProgress(page, count)))
+        schedulePersist(DocumentPosition(requireDocumentId(), _state.value.fixedPageLocator.copy(pageIndex = page), pageProgress(page, count)))
     }
 
     private fun schedulePersist(position: DocumentPosition) {
@@ -445,7 +611,7 @@ class DocumentReaderViewModel(
 
     private fun currentLocator(): DocumentLocator? = when (_state.value.loadState) {
         is DocumentReaderLoadState.Ready -> when (_state.value.document?.format) {
-            DocumentFormat.PDF -> DocumentLocator.FixedPage(pageIndex = _state.value.currentPage)
+            DocumentFormat.PDF -> _state.value.fixedPageLocator.copy(pageIndex = _state.value.currentPage)
             null -> null
             else -> _state.value.reflowableLocator ?: reflowableLocator()
         }
@@ -467,7 +633,8 @@ class DocumentReaderViewModel(
         private fun samePlace(first: DocumentLocator, second: DocumentLocator): Boolean = when {
             first is DocumentLocator.FixedPage && second is DocumentLocator.FixedPage -> first.pageIndex == second.pageIndex
             first is DocumentLocator.Reflowable && second is DocumentLocator.Reflowable ->
-                first.sectionId == second.sectionId && first.characterOffset == second.characterOffset
+                first.sectionId == second.sectionId && first.characterOffset == second.characterOffset &&
+                    first.domLocator == second.domLocator
             else -> false
         }
     }

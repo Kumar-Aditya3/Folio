@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.network
 
+import com.folio.reader.manga.MangaSiteAccessException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
@@ -63,8 +64,9 @@ fun Call.asObservableSuccess(): Observable<Response> {
     @Suppress("DEPRECATION")
     return asObservable().doOnNext { response ->
         if (!response.isSuccessful) {
+            val error = HttpException(response)
             response.close()
-            throw HttpException(response.code)
+            throw error
         }
     }
 }
@@ -84,7 +86,8 @@ private suspend fun Call.await(callStack: Array<StackTraceElement>): Response {
         this.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 if (continuation.isCancelled) return
-                val exception = IOException(e.message, e).apply { stackTrace = callStack }
+                val exception = (if (e is MangaSiteAccessException) e else IOException(e.message, e))
+                    .apply { stackTrace = callStack }
                 continuation.resumeWithException(exception)
             }
 
@@ -109,8 +112,9 @@ suspend fun Call.awaitSuccess(): Response {
     val callStack = Exception().stackTrace.run { copyOfRange(1, size) }
     val response = await(callStack)
     if (!response.isSuccessful) {
+        val error = HttpException(response).apply { stackTrace = callStack }
         response.close()
-        throw HttpException(response.code).apply { stackTrace = callStack }
+        throw error
     }
     return response
 }

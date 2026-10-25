@@ -557,7 +557,7 @@ function folioReportSel(){
   }
   if(!sel)sel=window.getSelection();
   var text=sel?(sel.toString()||'').trim():'';
-  if(!sel||sel.isCollapsed||text.length<3){document.title='folio-selclear:'+(++nonce);return;}
+  if(!sel||sel.isCollapsed||text.length<3){window.__folioHideSelTools();document.title='folio-selclear:'+(++nonce);return;}
   var sc0=null;try{sc0=sel.getRangeAt(0).startContainer;}catch(e){return;}
   var node=sc0?(sc0.nodeType===1?sc0:sc0.parentElement):null;
   if(!node){document.title='folio-selclear:'+(++nonce);return;}
@@ -571,9 +571,10 @@ function folioReportSel(){
   if(p){for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
   else{var kids=scope.children||[],blk=node;while(blk&&blk.parentElement&&blk.parentElement!==scope)blk=blk.parentElement;for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}
   var spine=-1;if(sec){spine=parseInt(sec.getAttribute('data-folio-spine'),10);if(isNaN(spine))spine=-1;}
-  document.title='folio-sel2:'+spine+':'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
+  document.title=window.folioSelectionMessage(spine,idx,text,sel,++nonce);
 }
-window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}catch(e){}var a=secs(),i;for(i=0;i<a.length;i++){try{if(a[i].shadowRoot&&a[i].shadowRoot.getSelection)a[i].shadowRoot.getSelection().removeAllRanges();}catch(e){}}};
+${ReaderSelectionGeometry.js}
+window.__folioClearSel=function(){window.__folioHideSelTools();try{window.getSelection().removeAllRanges();}catch(e){}var a=secs(),i;for(i=0;i<a.length;i++){try{if(a[i].shadowRoot&&a[i].shadowRoot.getSelection)a[i].shadowRoot.getSelection().removeAllRanges();}catch(e){}}};
 document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioReportSel,220);});
 if(window.ResizeObserver){var _folioRO=function(){try{window.__folioFxlRescale();}catch(e){}stickLayout();schedule();};new ResizeObserver(_folioRO).observe(document.documentElement);if(document.body)new ResizeObserver(_folioRO).observe(document.body);}
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){stickLayout();schedule();setTimeout(function(){stickLayout();schedule();},150);});

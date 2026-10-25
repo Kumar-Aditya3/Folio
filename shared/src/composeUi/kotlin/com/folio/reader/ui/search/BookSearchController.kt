@@ -1,5 +1,7 @@
 package com.folio.reader.ui.search
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,6 +13,9 @@ import com.folio.reader.ml.SearchMode
 import com.folio.reader.ml.SemanticHit
 import com.folio.reader.ml.SemanticSearchRepository
 import com.folio.reader.model.Book
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -162,21 +167,11 @@ class BookSearchController(
     /** True when this build can offer the Meaning/Best modes at all. */
     val semanticAvailable: Boolean get() = semanticSearchRepository != null
 
-    /**
-     * Loads the vector index into memory so the first semantic keystroke does not pay for it.
-     *
-     * The rail should call this when it opens, mirroring the full-screen search's preload — without
-     * it the ~60 MB matrix build happens lazily inside the first `search`, on the critical path, and
-     * the first in-book/meaning query stalls. A no-op when there is no model or nothing indexed, and
-     * safe to call repeatedly (a second call while loaded returns immediately).
-     */
-    suspend fun preload() {
-        // Warm the same scope the search will query — the open book when set, else the whole
-        // library — so the first query reuses the index instead of rebuilding a different scope.
-        semanticSearchRepository?.preload(contentBookId)
-        // Open the ONNX session now too, off the critical path, so the first query pays neither
-        // the index build nor the ~100-300ms session construction.
-        semanticSearchRepository?.warm()
+    /** Stop abandoned work while retaining the query and results for back navigation. */
+    fun cancelSearch() {
+        searchJob?.cancel()
+        searchJob = null
+        searching = false
     }
 
     /** Drops the in-memory index when the rail closes, freeing the ~60 MB it holds. */
@@ -244,7 +239,7 @@ class BookSearchController(
                     val indexed = repository.isLoaded || repository.canAnswer()
                     val hits = runCatching {
                         repository.search(query = q, mode = activeMode, bookId = contentBookId)
-                    }.getOrElse { emptyList() }
+                    }.getOrElse { if (it is CancellationException) throw it else emptyList() }
                     if (hits.isNotEmpty()) return@withContext RailSearchOutcome(hits = hits)
                     if (indexed) return@withContext RailSearchOutcome(semanticAnswered = true)
                 }
@@ -315,3 +310,18 @@ private data class RailSearchOutcome(
     /** The exact-search result, when the semantic path could not run. */
     val exactOutcome: BookSearchOutcome? = null,
 )
+
+/** A search interaction owns its work; merely opening it does not initialize the ML stack. */
+@Composable
+internal fun BookSearchSession(controller: BookSearchController?, active: Boolean) {
+    LaunchedEffect(controller, active) {
+        if (controller == null || !active) return@LaunchedEffect
+        try {
+            awaitCancellation()
+        } finally {
+            controller.cancelSearch()
+            // Structured cleanup survives disposal, but native session teardown stays off Main.
+            withContext(NonCancellable) { controller.releaseEmbedder() }
+        }
+    }
+}

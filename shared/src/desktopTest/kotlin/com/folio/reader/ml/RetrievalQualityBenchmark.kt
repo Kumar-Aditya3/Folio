@@ -64,7 +64,7 @@ class RetrievalQualityBenchmark {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-bench-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-bench-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         searchRepository = JdbcSearchRepository(database)

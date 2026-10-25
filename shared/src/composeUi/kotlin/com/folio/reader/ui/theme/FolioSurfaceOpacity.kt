@@ -104,14 +104,21 @@ data class FolioSurfaceOpacity(
         /**
          * The pinned fill for **pop-ups** — dialogs, menus, sheets and the reader's
          * side panels/drawers/composers. These are deliberately detached from every
-         * user opacity knob ([panel], [readerChrome]) and painted at the highest
-         * opacity their own glass material allows, so a pop-up is never see-through
-         * however transparent the room's chrome is set. `1f` is a solid lid by the
-         * knob contract (see [glassTierAlpha]); the surface still wears its own veil
-         * rim and sheen, it just does not bleed the page or scrim behind it. Pass
-         * this to `folioVeil`/`FolioDialog`/`FolioMenu` instead of a knob accessor.
+         * user opacity knob ([panel], [readerChrome]) — a pop-up must not go
+         * see-through however transparent the room's chrome is set — but they are
+         * **glass**, not the lid they shipped as. 1f was the original design ("a
+         * pop-up is never see-through") and it read exactly as that: a solid box
+         * pasted over a room where every nearby surface is translucent glass. The
+         * fix is not to hand pop-ups to the knobs, it is to give them their own
+         * designed glass point, the way every other tier has one: 0.70 sits just
+         * above the panel's blurred tier ([PANEL_GLASS_BLURRED]) — a frontmost pane
+         * carries small, transient text, so it keeps a little more body than a
+         * resting panel — while the scrim under it (0.32 of `shadowAmbient`) and
+         * the pane's real blur keep page text from bleeding through at contrast.
+         * The veil rim and sheen are unchanged; pass this to
+         * `folioVeil`/`FolioDialog`/`FolioMenu` instead of a knob accessor.
          */
-        const val POPUP_OPAQUE = 1f
+        const val POPUP_GLASS = 0.70f
     }
 }
 
@@ -167,11 +174,11 @@ fun FolioSurfaceOpacity.panelFill(canBlur: Boolean): Float =
  * cards are veils, while Home's, Stats' and the library shelves' cards are raised panes
  * and flat panels. This scale is **identity at the knob's designed rest**
  * ([FolioSurfaceOpacity.PANEL_GLASS]) — nothing changes at rest, on any surface, on any
- * device — and below it every plane-class fill thins with the same proportion the veils
- * thin by, while `1f` still means solid.
+ * device — and below it every plane-class fill thins proportionally. Above the designed rest it
+ * ramps to a fully opaque fill, so `1f` means solid even for a lightly tinted dock.
  */
 fun FolioSurfaceOpacity.panelKnobScale(designAlpha: Float): Float =
-    (designAlpha * (panel / FolioSurfaceOpacity.PANEL_GLASS)).coerceIn(FolioSurfaceOpacity.MIN, 1f)
+    glassTierAlpha(panel, FolioSurfaceOpacity.PANEL_GLASS, designAlpha)
 
 /**
  * The masthead's fill, as the alphas of the stops its gradient is built from.
@@ -332,33 +339,29 @@ fun glassWeightScale(readerChrome: Boolean): Float {
  * sample — so there is nothing Compose behind them to blur and translucency alone
  * would let page text bleed through at full contrast. They therefore follow the
  * knob verbatim (near-solid by default) and are not tiered: see
- * [readerPanelVeilAlpha] for the side panels, which do have a backdrop to frost.
+ * [readerPanelVeilAlpha] for sheets, whose body also depends on backdrop availability.
  */
 val FolioTheme.readerVeilAlpha: Float
     @Composable
     @ReadOnlyComposable
     get() = LocalFolioSurfaceOpacity.current.readerChrome.coerceIn(FolioSurfaceOpacity.MIN, 1f)
 
+/** Reader sheets use the raw opacity without blur, where page text stays sharp. */
+internal fun readerPanelAlpha(knob: Float, canBlur: Boolean): Float {
+    val alpha = knob.coerceIn(FolioSurfaceOpacity.MIN, 1f)
+    return if (canBlur) glassTierAlpha(alpha, FolioSurfaceOpacity.PANEL_GLASS,
+        FolioSurfaceOpacity.PANEL_GLASS_BLURRED) else alpha
+}
+
 /**
- * Fill alpha for the reader *side panels* (TOC, notes, settings sheet, Echoes).
- *
- * Unlike the bars, these open over a full-screen scrim that dims the page behind
- * them (see `ReaderSidePanels`), so translucency does not expose sharp page text —
- * only the already-dimmed scrim and the theme's own ambient pools. The fill
- * therefore tiers down to [FolioSurfaceOpacity.PANEL_GLASS_BLURRED] exactly like an
- * app panel ([panelFill]) **whether or not real blur is available**: the scrim is
- * the backdrop, so a no-blur device still reads translucent glass over dimmed
- * colour instead of the near-opaque raw knob (the "still opaque" report). The knob
- * still governs: `1f` is a solid lid, and the transparency slider thins the panels
- * proportionally.
+ * The reader opacity setting governs sheets and popups as well as bars. Thin the fill
+ * only when there is a real backdrop to diffuse. A WebView cannot supply that backdrop,
+ * so its settings drawer needs the setting's full body to suppress sharp page text.
  */
 val FolioTheme.readerPanelVeilAlpha: Float
     @Composable
-    @ReadOnlyComposable
-    get() {
-        val knob = LocalFolioSurfaceOpacity.current.readerChrome.coerceIn(FolioSurfaceOpacity.MIN, 1f)
-        return glassTierAlpha(knob, FolioSurfaceOpacity.PANEL_GLASS, FolioSurfaceOpacity.PANEL_GLASS_BLURRED)
-    }
+    get() = readerPanelAlpha(LocalFolioSurfaceOpacity.current.readerChrome,
+        com.folio.reader.ui.components.glassBlurred())
 
 /**
  * How much *weight* a glass surface carries — the perceptual depth plane it sits

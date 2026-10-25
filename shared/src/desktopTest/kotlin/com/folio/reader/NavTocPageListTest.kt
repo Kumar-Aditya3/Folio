@@ -28,7 +28,7 @@ class NavTocPageListTest {
     private lateinit var tempRoot: File
 
     @BeforeTest
-    fun setUp() { tempRoot = createTempDir("folio-navtoc-") }
+    fun setUp() { tempRoot = kotlin.io.path.createTempDirectory("folio-navtoc-").toFile() }
 
     @AfterTest
     fun tearDown() { tempRoot.deleteRecursively() }

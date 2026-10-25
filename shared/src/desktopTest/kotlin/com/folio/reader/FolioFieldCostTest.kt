@@ -61,16 +61,23 @@ class FolioFieldCostTest {
     }
 
     @Test
-    fun `the unified default takes the aggressive tier`() {
-        // Every theme wears FOLIO_FIELD_UNIFIED unless the user picks otherwise, so its budget is
-        // the one almost every session actually pays. MeshGradient sizes entirely through
-        // getObjectUV, which normalises against u_resolution, so its picture is identical at any
-        // render scale — there is nothing to trade.
-        assertEquals(
-            FolioFieldCost.scaleSoft,
-            FOLIO_FIELD_UNIFIED.fieldRenderScale(),
-            "the default field is not on the invariant-sizing tier",
-        )
+    fun `the unified default stays within the half-resolution budget`() {
+        // DotOrbit carries a pattern-space term and uses the grain tier. The previous
+        // expectation referred to MeshGradient, which is no longer the selected default.
+        assertTrue(FOLIO_FIELD_UNIFIED.fieldRenderScale() <= FolioFieldCost.scaleGrain,
+            "the default field exceeded the half-resolution budget")
+    }
+
+    @Test
+    fun `new fields retain fine material detail without paying full-screen fragment cost`() {
+        assertEquals(FolioFieldCost.scaleSoft, FolioFieldKind.MeshGradient.fieldRenderScale())
+        assertEquals(FolioFieldCost.scaleSoft, FolioFieldKind.PerlinNoise.fieldRenderScale())
+        for (kind in listOf(
+            FolioFieldKind.LiquidMetal, FolioFieldKind.Metaballs, FolioFieldKind.Water,
+            FolioFieldKind.Heatmap, FolioFieldKind.SmokeRing, FolioFieldKind.ColorPanels,
+        )) {
+            assertEquals(0.5f, kind.fieldRenderScale(), "$kind loses its fine material features")
+        }
     }
 
     @Test

@@ -10,12 +10,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -24,7 +20,7 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
 /**
- * The way out of a bot check.
+ * Browser inspection for a blocked source, without an automatic retry handshake.
  *
  * Some sources sit behind a Cloudflare challenge that cannot be cleared without a
  * human: a checkbox, a slider, an image puzzle. The network layer publishes the
@@ -35,29 +31,18 @@ import com.folio.reader.ui.theme.FolioTokens
  * Renders nothing when nothing is blocked, or on a platform with no WebView to
  * open (desktop registers no solver).
  *
- * [onCleared] fires once the challenge is gone, which is the moment a failed load
- * is worth retrying — the caller passes its own reload.
+ * Closing the browser is not proof of source access. The screen's explicit Retry
+ * action verifies the result using the extension's normal request.
  */
 @Composable
 fun MangaChallengePrompt(
     modifier: Modifier = Modifier,
-    onCleared: () -> Unit = {},
+    sourceId: Long? = null,
 ) {
     val challenge by MangaChallenges.pending.collectAsState()
-    // The bus emptying is the "solved" signal: the WebView clears it as soon as the
-    // site hands over a clearance cookie, so the screen underneath can reload itself
-    // instead of asking the reader to press Retry.
-    var wasBlocked by remember { mutableStateOf(challenge != null) }
-    LaunchedEffect(challenge) {
-        if (challenge != null) {
-            wasBlocked = true
-        } else if (wasBlocked) {
-            wasBlocked = false
-            onCleared()
-        }
-    }
 
     val target = challenge ?: return
+    if (sourceId != null && target.sourceId != null && sourceId != target.sourceId) return
     if (!MangaChallenges.canSolve) return
 
     Column(
@@ -66,14 +51,14 @@ fun MangaChallengePrompt(
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space1),
     ) {
         Text(
-            text = "${target.host} is asking for a bot check before it will answer.",
+            text = "${target.host}: ${target.reason.message} Return here and retry the source to verify access.",
             style = MaterialTheme.typography.bodySmall,
             color = FolioTheme.colors.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Button(onClick = { MangaChallenges.solve(target) }) {
             Icon(Icons.Filled.Public, contentDescription = null)
-            Text("  Solve in browser view")
+            Text("  Open browser view")
         }
     }
 }

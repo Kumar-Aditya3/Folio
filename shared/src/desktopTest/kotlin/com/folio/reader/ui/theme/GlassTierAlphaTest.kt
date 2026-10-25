@@ -118,7 +118,8 @@ class GlassTierAlphaTest {
         // painted the same opaque lid and the top-bar slider did nothing across two
         // thirds of its travel. `material` has to stay strictly increasing instead.
         var previous = -1f
-        for (step in 1..20) {
+        // Persisted values below MIN are deliberately clamped to the same value.
+        for (step in (FolioSurfaceOpacity.MIN * 20).toInt()..20) {
             val knob = step / 20f
             val fill = FolioSurfaceOpacity(topBar = knob).topBarFill(blurred = true)
             assertTrue(

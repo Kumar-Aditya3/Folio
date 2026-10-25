@@ -59,6 +59,23 @@ expect fun FolioThemeField(
 /** Whether the Mirage field can draw on this platform: Android API 33+ only. */
 expect fun folioThemeFieldSupported(): Boolean
 
+/** A closed, backdrop-toned colour loop for large facets and revolving panels. */
+internal fun folioFacetedFieldPalette(
+    back: Color,
+    pools: List<Color>,
+    accents: List<Color>,
+    colourShare: Float,
+): List<Color> {
+    val share = colourShare.coerceIn(0f, 1f)
+    if (share == 0f) return List(4) { back }
+    // Ambient lights are designed to coexist; foreground/status accents are not large fills.
+    val sources = pools.take(2).ifEmpty { accents.take(2) }
+    val first = mixOklab(back, sources.firstOrNull() ?: back, share)
+    val second = mixOklab(back, sources.getOrNull(1) ?: sources.firstOrNull() ?: back, share)
+    // Bridge both directions so wrapping the shader's palette never jumps between distant hues.
+    return listOf(first, mixOklab(first, second, 0.4f), second, mixOklab(first, second, 0.6f))
+}
+
 /**
  * The whole ground plane, stacked. The fallback ramp-plus-bloom field is painted first as the
  * universal base; the per-theme Mirage shader is layered opaquely over it when the platform can

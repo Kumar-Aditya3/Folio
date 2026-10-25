@@ -289,7 +289,9 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
             collectionRepository = graph.collectionRepository,
             // EXTENSION exclusions expand to source ids through the backend's
             // source list, so the manga statistics resolve them too.
-            mangaBackend = graph.mangaBackend
+            mangaBackend = graph.mangaBackend,
+            mangaRepository = graph.mangaRepository,
+            mangaCategoryRepository = graph.mangaCategoryRepository
         )
     }
     val mangaBrowseVM by lazy {
@@ -474,11 +476,12 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         targetSpineIndex: Int?,
         targetFraction: Float?,
         targetHighlightId: String?,
+        targetLocator: String?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,
         onOpenEcho: (String, Int?, Float?) -> Unit
-    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, targetHighlightId, onBack, onOpenSearch, onOpenSettings, onOpenEcho)
+    ) = ReaderRoute(this, bookId, targetSpineIndex, targetFraction, targetHighlightId, targetLocator, onBack, onOpenSearch, onOpenSettings, onOpenEcho)
 
     @Composable
     override fun documentReaderContent(
@@ -496,23 +499,26 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     ) = BookDetailRoute(this, bookId, onBack, onStartReading, onOpenTags)
 
     @Composable
-    override fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) =
-        SearchRoute(this, onBack, onOpenReader)
+    override fun searchContent(
+        onBack: () -> Unit,
+        onOpenReader: (String, Int?, Float?) -> Unit,
+        contentBookId: String?,
+    ) = SearchRoute(this, onBack, onOpenReader, contentBookId)
 
     @Composable
     override fun settingsContent(category: String, onBack: () -> Unit) =
         SettingsRoute(this, category, onBack)
 
     @Composable
-    override fun tagsContent(onBack: () -> Unit, onOpenBookDetail: (String) -> Unit, onOpenReader: (String) -> Unit) =
+    override fun tagsContent(onBack: () -> Unit, onOpenBookDetail: (String) -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit) =
         TagsRoute(this, onBack, onOpenBookDetail, onOpenReader)
 
     @Composable
-    override fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit) =
+    override fun quotesContent(onBack: () -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit, onOpenMangaDetail: (String) -> Unit) =
         QuotesRoute(this, onBack, onOpenReader, onOpenMangaDetail)
 
     @Composable
-    override fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit) =
+    override fun revisitContent(onBack: () -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit, onOpenMangaDetail: (String) -> Unit) =
         RevisitRoute(this, onBack, onOpenReader, onOpenMangaDetail)
 
     @Composable

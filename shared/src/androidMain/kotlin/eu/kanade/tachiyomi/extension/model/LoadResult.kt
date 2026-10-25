@@ -10,5 +10,5 @@ sealed interface LoadResult {
      * the extensions screen shows it so the failure stops being an extension that
      * silently vanished from the list.
      */
-    data class Error(val reason: String) : LoadResult
+    data class Error(val reason: String, val pkgName: String? = null) : LoadResult
 }

@@ -33,6 +33,9 @@ interface Source {
 
     /**
      * Returns the list of filters for the source.
+     *
+     * Sources that fetch their filter values from the site override this; the whole
+     * fetch-and-cache pipeline lives in the extension library, not here.
      */
     fun getFilterList(): FilterList = FilterList()
 

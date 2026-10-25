@@ -29,6 +29,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -317,6 +319,7 @@ fun PageBlock(
     chapterStops: List<Float> = emptyList(),
     stateLabel: String? = null,
     onSeek: ((Float) -> Unit)? = null,
+    onPreview: ((Float?) -> Unit)? = null,
     rtl: Boolean = LocalLayoutDirection.current == LayoutDirection.Rtl,
 ) {
     val palette = remember(paper, ink) { pageBlockPalette(paper, ink) }
@@ -333,9 +336,10 @@ fun PageBlock(
     // Direct manipulation stays direct: under a finger the leaf tracks exactly, and
     // only a jump (chapter change, annotation, restore) is eased. §13.3: with motion
     // off this settles immediately, which is the correct static form.
-    var dragging by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<Float?>(null) }
+    val dragging = preview != null
     val shown by animateFloatAsState(
-        targetValue = target,
+        targetValue = preview ?: target,
         animationSpec = if (!dragging) rememberMotionAnimation<Float>(MotionKey.ProgressBars) else snap(),
         label = "page-block-fraction",
     )
@@ -347,32 +351,15 @@ fun PageBlock(
     Spacer(
         modifier = modifier
             .then(stateLabel?.let { label -> Modifier.semantics { contentDescription = label } } ?: Modifier)
-            .then(
-                if (onSeek == null) {
-                    Modifier
-                } else {
-                    Modifier.pointerInput(rtl) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            dragging = true
-                            seek?.invoke(blockFractionAt(down.position.x, size.width, rtl))
-                            // Consumed so the page under the chrome does not also read
-                            // this as its centre tap and hide the cue being dragged.
-                            down.consume()
-                            do {
-                                val event = awaitPointerEvent()
-                                event.changes.forEach { change ->
-                                    if (change.pressed) {
-                                        seek?.invoke(blockFractionAt(change.position.x, size.width, rtl))
-                                        change.consume()
-                                    }
-                                }
-                            } while (event.changes.any { it.pressed })
-                            dragging = false
-                        }
-                    }
+            .folioSeekGesture(onSeek != null, rtl,
+                onPreview = { preview = it; onPreview?.invoke(it) },
+                onCommit = { seek?.invoke(it) })
+            .semantics {
+                if (onSeek != null) {
+                    progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(target, 0f..1f)
+                    setProgress { seek?.invoke(it.coerceIn(0f, 1f)); true }
                 }
-            )
+            }
             .drawWithCache {
                 val w = size.width
                 val h = size.height

@@ -13,6 +13,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -29,7 +30,7 @@ class MangaRemoveClearsCategoriesTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-manga-remove-categories-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-manga-remove-categories-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
     }
 
@@ -86,5 +87,54 @@ class MangaRemoveClearsCategoriesTest {
             mangaId in categoryRepo.mangaIdsInCategory(fantasy.id),
             "Fantasy must stay empty after the manga is re-added",
         )
+    }
+
+    @Test
+    fun confirmedAdditionSavesLibraryFlagAndChosenCategoriesTogether() = runBlocking {
+        val categories = JdbcMangaCategoryRepository(database)
+        val manga = JdbcMangaRepository(database)
+        categories.ensureSeeded()
+        val fantasy = categories.create("Fantasy")
+        val entry = MangaEntry("add", 7L, "S", "/add", "Add", inLibrary = false)
+        manga.upsert(entry, emitSyncEvent = false)
+
+        categories.assign(entry.id, setOf(fantasy.id), addToLibrary = true)
+
+        assertTrue(requireNotNull(manga.get(entry.id)).inLibrary)
+        assertEquals(setOf(fantasy.id), categories.categoriesFor(entry.id))
+        assertFalse(entry.id in categories.mangaIdsInCategory(MangaCategory.MAIN_ID))
+    }
+
+    @Test
+    fun failedAdditionDoesNotLeaveTheMangaInLibraryOrReplaceItsShelves() = runBlocking {
+        val categories = JdbcMangaCategoryRepository(database)
+        val manga = JdbcMangaRepository(database)
+        categories.ensureSeeded()
+        val entry = MangaEntry("failed-add", 7L, "S", "/failed-add", "Add", inLibrary = false)
+        manga.upsert(entry, emitSyncEvent = false)
+
+        assertFailsWith<IllegalArgumentException> {
+            categories.assign(entry.id, setOf(MangaCategory.MAIN_ID, "missing"), addToLibrary = true)
+        }
+
+        assertFalse(requireNotNull(manga.get(entry.id)).inLibrary)
+        assertTrue(categories.categoriesFor(entry.id).isEmpty())
+    }
+
+    @Test
+    fun staleSourceMetadataCannotUndoAnAdditionOrRemoval() = runBlocking {
+        val manga = JdbcMangaRepository(database)
+        val stale = MangaEntry("refresh", 7L, "S", "/refresh", "Before", inLibrary = false)
+        manga.upsert(stale, emitSyncEvent = false)
+        manga.setInLibrary(stale.id, true)
+        manga.upsert(stale.copy(title = "After add"), preserveLibraryState = true)
+        assertTrue(requireNotNull(manga.get(stale.id)).inLibrary)
+        assertEquals("After add", manga.get(stale.id)?.title)
+
+        val staleAdded = requireNotNull(manga.get(stale.id))
+        manga.setInLibrary(stale.id, false)
+        manga.upsert(staleAdded.copy(title = "After removal"), preserveLibraryState = true)
+        assertFalse(requireNotNull(manga.get(stale.id)).inLibrary)
+        assertEquals("After removal", manga.get(stale.id)?.title)
     }
 }

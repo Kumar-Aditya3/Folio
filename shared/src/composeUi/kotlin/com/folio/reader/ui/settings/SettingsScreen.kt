@@ -37,8 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.RectangleShape
 import com.folio.reader.security.SyncCredentials
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.withDocumentReaderMode
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.folioVeil
+import com.folio.reader.ui.components.folioSettingsChoice
+import com.folio.reader.ui.components.folioReference
 import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.folioBarTopInset
@@ -147,7 +149,7 @@ fun SettingsScreen(
                                         settings = settings.documentSettings,
                                         pageMode = settings.documentReaderMode,
                                         onSettingsChange = { onSettingsChange(settings.copy(documentSettings = it)) },
-                                        onPageModeChange = { onSettingsChange(settings.copy(documentReaderMode = it)) },
+                                        onPageModeChange = { onSettingsChange(settings.withDocumentReaderMode(it)) },
                                         extraFonts = settings.customFonts.map { it.name },
                                     )
 
@@ -190,6 +192,10 @@ fun SettingsScreen(
                         ) {
                             item { SettingsLivePreview(settings) }
                         }
+                        if (showPreview && selectedCategory in setOf(SettingsCategory.GENERAL,
+                                SettingsCategory.CUSTOM_THEME, SettingsCategory.ANIMATIONS, SettingsCategory.TRANSPARENCY)) {
+                            item { FolioMaterialsPreview(settings) }
+                        }
                     }
                 }
             } else {
@@ -203,10 +209,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .width(200.dp)
                             .fillMaxHeight()
-                            .folioVeil(
-                                shape = RectangleShape,
-                                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                            )
+                            .folioReference(shape = RectangleShape)
                             .padding(top = topInset)
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -216,8 +219,7 @@ fun SettingsScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) FolioTheme.colors.primaryContainer else Color.Transparent)
+                                    .folioSettingsChoice(isSelected, RoundedCornerShape(12.dp))
                                     .clickable { selectedCategory = category }
                                     .padding(horizontal = 16.dp, vertical = 10.dp)
                             ) {
@@ -277,7 +279,7 @@ fun SettingsScreen(
                                         settings = settings.documentSettings,
                                         pageMode = settings.documentReaderMode,
                                         onSettingsChange = { onSettingsChange(settings.copy(documentSettings = it)) },
-                                        onPageModeChange = { onSettingsChange(settings.copy(documentReaderMode = it)) },
+                                        onPageModeChange = { onSettingsChange(settings.withDocumentReaderMode(it)) },
                                         extraFonts = settings.customFonts.map { it.name },
                                     )
 
@@ -319,6 +321,10 @@ fun SettingsScreen(
                             )
                         ) {
                             item { SettingsLivePreview(settings) }
+                        }
+                        if (showPreview && selectedCategory in setOf(SettingsCategory.GENERAL,
+                                SettingsCategory.CUSTOM_THEME, SettingsCategory.ANIMATIONS, SettingsCategory.TRANSPARENCY)) {
+                            item { FolioMaterialsPreview(settings) }
                         }
                     }
                 }

@@ -95,6 +95,9 @@ enum class MotionKey {
      */
     CoverMorph,
 
+    /** The Home shelf's direct-manipulation turn and release settle. */
+    ReadingShelfTurn,
+
     // ── Overlays ───────────────────────────────────────────────────────────────
     /** An anchored menu or dialog arriving. */
     OverlayEnter,
@@ -256,6 +259,8 @@ data class MotionSpec(
  * table is provably the old behaviour where it claims to be (`MotionSchemaTest` asserts it).
  */
 internal fun motionProfile(key: MotionKey): MotionSpec = when (key) {
+    MotionKey.ReadingShelfTurn -> MotionSpec(420L, FolioEasing.Enter,
+        spring = MotionSpring(dampingRatio = .9f, stiffness = 400f), channel = MotionChannel.MORPH)
     // ── Navigation ─────────────────────────────────────────────────────────────
     // A push is a state change, not a journey: standard duration, a short slide, no drama.
     MotionKey.NavPush -> MotionSpec(FolioTokens.motionStandard, FolioEasing.Enter, intensity = 1f, channel = MotionChannel.SHEET)

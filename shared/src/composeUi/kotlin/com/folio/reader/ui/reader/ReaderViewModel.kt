@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.folio.reader.ui.render.LinkClickResult
 import kotlinx.datetime.Clock
 import kotlin.time.Duration.Companion.days
@@ -53,6 +54,15 @@ class ReaderViewModel(
      */
     private val discoveryRepository: com.folio.reader.ml.SemanticDiscoveryRepository? = null,
     /**
+     * Full-text search over this book's indexed chapters, for the in-reader search panel.
+     *
+     * Nullable for the same reason as [discoveryRepository]: tests, and any host with no index
+     * wired, simply get a panel that answers "no matches" instead of crashing. The panel searches
+     * *this book only* — a reader who taps the magnifier mid-chapter wants the page in front of
+     * them, not the library behind it.
+     */
+    private val searchRepository: com.folio.reader.database.SearchRepository? = null,
+    /**
      * The book's own nav/NCX Contents rows, read from the archive on open. Defaults to none so
      * a caller that has no parser wired simply gets the chapter titles in Contents.
      */
@@ -72,6 +82,14 @@ class ReaderViewModel(
     private val _showAnnotations = MutableStateFlow(false)
     private val _showEchoes = MutableStateFlow(false)
     private val _echoes = MutableStateFlow<EchoesState>(EchoesState.Idle)
+    private val _showSearch = MutableStateFlow(false)
+    private val _searchQuery = MutableStateFlow("")
+    private val _searchResults =
+        MutableStateFlow<List<com.folio.reader.database.SearchResult>>(emptyList())
+    private val _searching = MutableStateFlow(false)
+    /** Guards against a superseded query's hits landing after a newer query's. */
+    private var searchRequest = 0
+    private var searchJob: kotlinx.coroutines.Job? = null
     /** Guards against a stale result landing after the reader moved on to a newer selection. */
     private var echoRequest = 0
     /** Warm the embedder/index once per opened book, on first selection. */
@@ -179,6 +197,11 @@ class ReaderViewModel(
     val showAnnotations: Flow<Boolean> = _showAnnotations
     val showEchoes: Flow<Boolean> = _showEchoes
     val echoes: Flow<EchoesState> = _echoes
+    /** The in-reader search panel: open state, the field's text, its hits, and whether it is running. */
+    val showSearch: Flow<Boolean> = _showSearch
+    val searchQuery: Flow<String> = _searchQuery
+    val searchResults: Flow<List<com.folio.reader.database.SearchResult>> = _searchResults
+    val isSearching: Flow<Boolean> = _searching
     /**
      * Declared [StateFlow], not the erased `Flow`, so callers read the current
      * value synchronously and cannot be handed an `initial` that disagrees with
@@ -290,6 +313,9 @@ class ReaderViewModel(
     suspend fun loadChapterHtml() = contentLoader.loadChapterHtml()
 
     fun reloadChapter() = contentLoader.reloadChapter()
+
+    suspend fun previewChapter(index: Int, fraction: Float, paragraph: Int?): ReaderPassagePreview? =
+        contentLoader.previewChapter(index, fraction, paragraph)
 
     fun updateScrollProgress(scrollFraction: Float, characterOffsetEstimate: Int = 0) {
         // While a chapter change is loading, ignore progress reports. The outgoing
@@ -511,18 +537,77 @@ class ReaderViewModel(
     fun toggleToc() {
         val next = !_showToc.value
         _showToc.value = next
-        if (next) { _showAnnotations.value = false; _showEchoes.value = false }
+        if (next) { _showAnnotations.value = false; _showEchoes.value = false; _showSearch.value = false }
     }
 
     fun toggleAnnotations() {
         val next = !_showAnnotations.value
         _showAnnotations.value = next
-        if (next) { _showToc.value = false; _showEchoes.value = false }
+        if (next) { _showToc.value = false; _showEchoes.value = false; _showSearch.value = false }
     }
 
     /** Closes the Echoes panel without discarding its results, so a reopen is instant. */
     fun closeEchoes() {
         _showEchoes.value = false
+    }
+
+    /**
+     * Opens/closes the in-reader search panel. The panels are mutually exclusive, so opening it
+     * closes Contents, Annotations and Echoes.
+     *
+     * The query and its hits are kept across a close: a reader who glances at the page and
+     * reopens the panel finds their search where they left it, the same way Contents keeps its
+     * scroll position.
+     */
+    fun toggleSearch() {
+        val next = !_showSearch.value
+        _showSearch.value = next
+        if (next) {
+            _showToc.value = false
+            _showAnnotations.value = false
+            _showEchoes.value = false
+        }
+    }
+
+    fun closeSearch() {
+        _showSearch.value = false
+    }
+
+    /**
+     * Runs the in-book query for the search panel.
+     *
+     * Scoped to the open book (`searchInBook`, not `search`) — that is the whole point of a
+     * search opened mid-chapter — and ordered **nearest first**: hits are sorted by how many
+     * chapters away they are from the one on screen, so the reader's own chapter answers before
+     * anything from the top of the book. The repository's own order (bm25, or plain row order on
+     * the non-FTS fallback) survives inside each distance as the tie-break, because `sortedWith`
+     * is stable.
+     *
+     * Debounced because this fires per keystroke; a superseded query is dropped by
+     * [searchRequest] rather than by cancellation alone, since a cancelled coroutine can still be
+     * past its last suspension point.
+     */
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+        searchJob?.cancel()
+        val repo = searchRepository
+        val bookId = currentBookId
+        if (query.isBlank() || repo == null || bookId == null) {
+            searchRequest++
+            _searchResults.value = emptyList()
+            _searching.value = false
+            return
+        }
+        val request = ++searchRequest
+        _searching.value = true
+        searchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(SEARCH_DEBOUNCE_MS)
+            val hits = runCatching { repo.searchInBook(bookId, query).first() }
+                .getOrDefault(emptyList())
+            if (request != searchRequest) return@launch
+            _searchResults.value = hits.nearestFirstTo(_currentChapterIndex.value)
+            _searching.value = false
+        }
     }
 
     /**
@@ -549,6 +634,7 @@ class ReaderViewModel(
     fun openEchoes(selectedText: String, excludeChunkId: String? = null) {
         _showToc.value = false
         _showAnnotations.value = false
+        _showSearch.value = false
         _showEchoes.value = true
         val repo = discoveryRepository
         val bookId = currentBookId
@@ -565,7 +651,7 @@ class ReaderViewModel(
             }.getOrDefault(emptyList())
             // Drop a result the reader has already superseded with a newer selection.
             if (request != echoRequest) return@launch
-            _echoes.value = if (result.isEmpty()) EchoesState.Empty else EchoesState.Results(result)
+            _echoes.value = if (result.isEmpty()) EchoesState.Empty else EchoesState.Results(result, selectedText)
         }
     }
 
@@ -580,8 +666,16 @@ class ReaderViewModel(
         endLocator: String,
         selectedText: String,
         color: com.folio.reader.model.HighlightColor = com.folio.reader.model.HighlightColor.YELLOW,
-        customColor: Int? = annotations.defaultHighlightColor()
-    ) = annotations.addHighlight(startLocator, endLocator, selectedText, color, customColor)
+        customColor: Int? = annotations.defaultHighlightColor(),
+        chapterId: String? = null,
+        spineIndex: Int? = null
+    ) = annotations.addHighlight(startLocator, endLocator, selectedText, color, customColor, chapterId, spineIndex)
+
+    fun addSelectionNote(chapterId: String, spineIndex: Int, paragraph: Int, text: String, note: String) {
+        annotations.addHighlight("/$spineIndex/$paragraph:0", "/$spineIndex/$paragraph:end", text,
+            chapterId = chapterId, spineIndex = spineIndex,
+            onSaved = { annotations.setHighlightNote(it, note) })
+    }
 
     fun removeHighlight(highlightId: String) = annotations.removeHighlight(highlightId)
 
@@ -612,14 +706,22 @@ class ReaderViewModel(
         if (echoesWarmed) viewModelScope.launch { runCatching { discoveryRepository?.releaseEmbedder() } }
 
         viewModelScope.launch {
-            runCatching {
-                sessionTracker.endActiveSession(session, position)
+            // Both calls below are blocking JDBC work — `endActiveSession` lands on
+            // `insertSession`'s `executeUpdate`, `persistOnClose` on `upsertPosition` and
+            // `updateNormalizedProgress` — and none of the repositories switch dispatcher
+            // themselves. `viewModelScope` is `Main.immediate`, so without this the close ran
+            // on the UI thread, and since `onDone()` is what pops the reader, back navigation
+            // sat waiting on four writes before the screen moved.
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    sessionTracker.endActiveSession(session, position)
 
-                if (bookId != null && position != null) {
-                    positionStore.persistOnClose(bookId, position)
+                    if (bookId != null && position != null) {
+                        positionStore.persistOnClose(bookId, position)
+                    }
+                }.onFailure { e ->
+                    println("❌ Error closing book: ${e.message}")
                 }
-            }.onFailure { e ->
-                println("❌ Error closing book: ${e.message}")
             }
             onDone()
         }
@@ -704,13 +806,26 @@ class ReaderViewModel(
     fun clearLinkClickResult() = links.clearLinkClickResult()
 }
 
-data class SearchResult(
-    val bookId: String,
-    val chapterId: String,
-    val spineIndex: Int,
-    val title: String,
-    val context: String
-)
+/**
+ * How long the search panel waits after the last keystroke before querying.
+ *
+ * Shorter than the full-screen search's 250 ms: that number protects a fan-out across every book
+ * in the library, while this is one FTS query against one book, which the reader should feel as
+ * immediate.
+ */
+private const val SEARCH_DEBOUNCE_MS = 120L
+
+/**
+ * Orders hits by how far they are from [anchor], the chapter on screen.
+ *
+ * The search panel's whole reason for existing: a reader on chapter 40 who searches a name should
+ * not be handed chapter 1 first. Distance first, then the repository's own ranking — `sortedWith`
+ * is stable, so equal distances keep the bm25 order they arrived in.
+ */
+private fun List<com.folio.reader.database.SearchResult>.nearestFirstTo(
+    anchor: Int
+): List<com.folio.reader.database.SearchResult> =
+    sortedWith(compareBy({ kotlin.math.abs(it.spineIndex - anchor) }, { it.spineIndex }))
 
 /**
  * What the Echoes panel is showing.
@@ -722,6 +837,6 @@ data class SearchResult(
 sealed interface EchoesState {
     data object Idle : EchoesState
     data object Loading : EchoesState
-    data class Results(val hits: List<com.folio.reader.ml.EchoHit>) : EchoesState
+    data class Results(val hits: List<com.folio.reader.ml.EchoHit>, val sourceText: String = "") : EchoesState
     data object Empty : EchoesState
 }

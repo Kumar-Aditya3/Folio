@@ -129,18 +129,13 @@ fun FolioFieldKind.fieldRenderScale(): Float = when (this) {
     FolioFieldKind.Dithering,
     FolioFieldKind.DotGrid -> FolioFieldCost.scalePattern
 
-    // Resolution-invariant sizing (getObjectUV / getResponsiveUV / getImageUV only): identical
-    // picture at any scale, so these take the most aggressive one.
+    // Broad gradients and cloud density tolerate the softest sampling. The custom programs use
+    // normalised field coordinates, so downsampling never grows their motif.
     FolioFieldKind.MeshGradient,
+    FolioFieldKind.PerlinNoise,
     FolioFieldKind.Swirl,
     FolioFieldKind.GodRays,
-    FolioFieldKind.SmokeRing,
-    FolioFieldKind.Metaballs,
-    FolioFieldKind.Heatmap,
     FolioFieldKind.GemSmoke,
-    FolioFieldKind.Water,
-    FolioFieldKind.ColorPanels,
-    FolioFieldKind.LiquidMetal,
     FolioFieldKind.StaticMeshGradient,
     FolioFieldKind.StaticRadialGradient -> FolioFieldCost.scaleSoft
 
@@ -156,21 +151,30 @@ fun FolioFieldKind.fieldRenderScale(): Float = when (this) {
     // Full scale. If it ever gains a clock, move it back to [FolioFieldCost.scaleGrain].
     FolioFieldKind.HalftoneDots -> FolioFieldCost.scalePattern
 
-    // Carry a getPatternUV term, so the grain / cell / stroke pitch grows with 1/scale.
+    // These Mirage families carry a getPatternUV term, so their grain / stroke pitch grows
+    // with 1/scale. The custom fields below have scale-invariant geometry instead.
     //
     // [FolioFieldKind.GrainGradient] is the mixed case and the reason the tiers are drawn here:
     // its shape comes from `getObjectUV` (invariant) and only its `noise = 0.28` canvas grain
     // from `getPatternUV`, so the lit wall is unchanged and the grain is twice the size.
     FolioFieldKind.GrainGradient,
-    FolioFieldKind.PerlinNoise,
     FolioFieldKind.SimplexNoise,
-    FolioFieldKind.Warp,
-    FolioFieldKind.Voronoi,
     FolioFieldKind.NeuroNoise,
-    FolioFieldKind.Spiral,
-    FolioFieldKind.Waves,
     FolioFieldKind.DotOrbit,
     FolioFieldKind.PulsingBorder -> FolioFieldCost.scaleGrain
+
+    // These independent fields have fine features worth resolving: smoke filaments, merging
+    // membranes, thermal isolines, caustics, glass rims and chrome reflections. Still quarter-area.
+    FolioFieldKind.Warp,
+    FolioFieldKind.Voronoi,
+    FolioFieldKind.Spiral,
+    FolioFieldKind.Waves,
+    FolioFieldKind.SmokeRing,
+    FolioFieldKind.Metaballs,
+    FolioFieldKind.Heatmap,
+    FolioFieldKind.Water,
+    FolioFieldKind.ColorPanels,
+    FolioFieldKind.LiquidMetal -> FolioFieldCost.scaleGrain
 }
 
 /**

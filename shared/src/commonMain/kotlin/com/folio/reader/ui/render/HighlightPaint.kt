@@ -39,14 +39,18 @@ object HighlightPaint {
         /** The chapter section the highlight lives in (-1: unknown — legacy rows). */
         @SerialName("s") val spine: Int,
         /** The paragraph the selection protocol indexed (-1: unknown). */
-        @SerialName("p") val paragraph: Int
+        @SerialName("p") val paragraph: Int,
+        @SerialName("n") val hasNote: Boolean,
     )
 
     /** Shared styling only; each mark carries its own colours so one page can mix them. */
     const val css: String =
         "mark.folio-hl{color:inherit;" +
                 "-webkit-box-decoration-break:clone;box-decoration-break:clone;" +
-                "border-radius:2px;padding:0;}"
+                "border-radius:2px;padding:0;}" +
+                "mark.folio-hl[data-folio-note='1']{position:relative;}" +
+                "mark.folio-hl[data-folio-note='1']::after{content:'';position:absolute;right:-5px;top:0.1em;" +
+                "width:3px;height:3px;border:1px solid currentColor;border-radius:50%;pointer-events:none;}"
 
     /** Wash + rule for one ARGB, tuned so text keeps its contrast on this theme. */
     fun colorsFor(argb: Int, isDark: Boolean): Pair<String, String> {
@@ -71,7 +75,8 @@ object HighlightPaint {
                 underline = underline,
                 spine = it.spineIndex,
                 paragraph = LOCATOR_PARA.find(it.startLocator)
-                    ?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: -1,
+                hasNote = it.noteId != null,
             )
         }
         return Json.encodeToString(ListSerializer(Mark.serializer()), marks)
@@ -134,8 +139,8 @@ object HighlightPaint {
                 // even when its raw indexes are not: the gap between them is all
                 // whitespace, and it stays inside the same mark.
                 "function gapIsWs(node,a,b){var s=node.nodeValue||'';for(var i=a;i<b;i++){if(!isWs(s.charAt(i)))return false;}}\n" +
-                "function wrap(c,h,len,bg,sh,mid){\n" +
-                "  var end=h+len,i=h,segs=[],seg=null,done=false;\n" +
+                "function wrap(c,h,len,bg,sh,mid,note){\n" +
+                "  var end=h+len,i=h,segs=[],seg=null,done=false,noted=false;\n" +
                 "  while(i<end){\n" +
                 "    var node=c.n[i];\n" +
                 "    if(seg&&seg.node===node&&(c.o[i]===seg.last+1||gapIsWs(node,seg.last+1,c.o[i]))){seg.last=c.o[i];}\n" +
@@ -149,6 +154,7 @@ object HighlightPaint {
                 "      r.setStart(g.node,g.first);r.setEnd(g.node,g.last+1);\n" +
                 "      var mk=document.createElement('mark');mk.className='folio-hl';\n" +
                 "      if(mid)mk.setAttribute('data-folio-hl',mid);\n" +
+                "      if(note&&!noted){mk.setAttribute('data-folio-note','1');mk.setAttribute('aria-description','Has a saved note');noted=true;}\n" +
                 "      mk.style.background=bg;if(sh)mk.style.boxShadow=sh;\n" +
                 "      r.surroundContents(mk);done=true;\n" +
                 "    }catch(e){}\n" +
@@ -165,7 +171,7 @@ object HighlightPaint {
                 "  while(guard++<3){\n" +
                 "    var hit=c.full.indexOf(needle);\n" +
                 "    if(hit<0)return false;\n" +
-                "    if(wrap(c,hit,needle.length,it.b,it.u,it.i))return true;\n" +
+                "    if(wrap(c,hit,needle.length,it.b,it.u,it.i,it.n))return true;\n" +
                 // A failed surroundContents may still have split nodes — re-map once.
                 "    c=collect(scope);\n" +
                 "  }\n" +

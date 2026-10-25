@@ -385,15 +385,16 @@ window.__folioRestyle=function(fc,sc){
   setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},400);
 };
 // Selection reporting: paged format folio-sel:<paraIndex>:<text>:<nonce> to the TOP title.
+${ReaderSelectionGeometry.js}
 function reportSel(){
   var sel=window.getSelection();var text=sel?(sel.toString()||'').trim():'';
-  if(!sel||sel.isCollapsed||text.length<3){report('folio-selclear:'+(++nonce));return;}
+  if(!sel||sel.isCollapsed||text.length<3){window.__folioHideSelTools();report('folio-selclear:'+(++nonce));return;}
   var sc0=null;try{sc0=sel.getRangeAt(0).startContainer;}catch(e){return;}
   var node=sc0?(sc0.nodeType===1?sc0:sc0.parentElement):null;var idx=0,ps=doc.querySelectorAll('p'),i;
   if(node){var p=null;for(var q=node;q;q=q.parentElement){if(q.tagName==='P'){p=q;break;}}
     if(p){for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
     else{var kids=bodyEl?bodyEl.children:[],blk=node;while(blk&&blk.parentElement&&blk.parentElement!==bodyEl)blk=blk.parentElement;for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}}
-  report('folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce));
+  report(window.folioSelectionMessage(-1,idx,text,sel,++nonce));
 }
 window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}catch(e){}};
 doc.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(reportSel,220);});

@@ -166,7 +166,7 @@ internal fun WebtoonReader(
                 if (extendingForward) {
                     item(key = "loading-indicator") {
                         Box(Modifier.fillMaxWidth().padding(FolioTokens.space4), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+                            CircularProgressIndicator(color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant, modifier = Modifier.size(32.dp))
                         }
                     }
                 }
@@ -176,7 +176,7 @@ internal fun WebtoonReader(
                             modifier = Modifier.fillMaxWidth().padding(FolioTokens.space4),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text("End of chapters", color = Color.White.copy(alpha = 0.7f))
+                            Text("End of chapters", color = com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant)
                         }
                     }
                 }

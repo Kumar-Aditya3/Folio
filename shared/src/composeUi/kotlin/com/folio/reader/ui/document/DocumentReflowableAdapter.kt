@@ -20,8 +20,14 @@ internal fun DocumentLocator.Reflowable.toSurfacePosition(
     scrollOffset = progress.coerceIn(0.0, 1.0)
 )
 
-internal fun reflowableLocator(characterOffset: Int = 0): DocumentLocator.Reflowable =
+internal fun reflowableLocator(
+    characterOffset: Int = 0,
+    sectionId: String = DOCUMENT_REFLOWABLE_SECTION,
+    progress: Double? = null,
+): DocumentLocator.Reflowable =
     DocumentLocator.Reflowable(
-        sectionId = DOCUMENT_REFLOWABLE_SECTION,
+        sectionId = sectionId,
+        // The existing paragraph/fraction seek grammar also gives bookmarks a scroll fallback.
+        domLocator = progress?.coerceIn(0.0, 1.0)?.let { "p::$it" },
         characterOffset = characterOffset.coerceAtLeast(0)
     )

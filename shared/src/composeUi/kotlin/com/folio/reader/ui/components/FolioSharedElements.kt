@@ -42,6 +42,7 @@ import com.folio.reader.ui.theme.motionProfile
  */
 object FolioSharedKeys {
     fun bookCover(bookId: String) = "book_cover:$bookId"
+    fun readingTrace(bookId: String) = "reading_trace:$bookId"
     fun mangaCover(mangaId: String) = "manga_cover:$mangaId"
     fun documentCover(documentId: String) = "document_cover:$documentId"
 
@@ -325,15 +326,15 @@ fun FolioContentMorphHost(
  * [boundsTransform] defaults to [folioMorphBounds]; pass a different spec only
  * when a morph should *not* match the app's standard cover timing.
  *
- * [placeHolderSize] picks what the *placeholder* — the box the registry draws
+ * [placeholderSize] picks what the *placeholder* — the box the registry draws
  * while a morph is in flight — is sized to:
  *
- * - [SharedTransitionScope.PlaceHolderSize.animatedSize] (the API default) sizes
+ * - [SharedTransitionScope.PlaceholderSize.AnimatedSize] (the API default) sizes
  *   it to the interpolated bounds. The box therefore moves and resizes smoothly,
  *   but whatever is drawn inside it keeps its own size, so for a morph between
  *   two *different* sizes the content only matches its box on the final frame —
  *   which is what a cover "jumping into place at the very end" looks like.
- * - [SharedTransitionScope.PlaceHolderSize.contentSize] sizes it to the content,
+ * - [SharedTransitionScope.PlaceholderSize.ContentSize] sizes it to the content,
  *   so the artwork is always the size of the box around it.
  *
  * The default here is deliberately `animatedSize`, matching the API and the rest
@@ -347,8 +348,8 @@ fun FolioContentMorphHost(
 fun Modifier.sharedElementOrNoop(
     key: Any,
     boundsTransform: BoundsTransform = folioMorphBounds,
-    placeHolderSize: SharedTransitionScope.PlaceHolderSize =
-        SharedTransitionScope.PlaceHolderSize.animatedSize,
+    placeholderSize: SharedTransitionScope.PlaceholderSize =
+        SharedTransitionScope.PlaceholderSize.AnimatedSize,
 ): Modifier {
     val enabled = rememberMorphAttachment()
     val scopes = LocalSharedElementScopes.current
@@ -373,14 +374,23 @@ fun Modifier.sharedElementOrNoop(
     return with(scopes.sharedTransitionScope) {
         val state = rememberSharedContentState(key)
         if (tabMorph) {
-            // Tab↔tab keeps the cover flight but on the shorter spec, with animatedSize, and — the
-            // fix — clipped to below the masthead so the cover never paints over the glass bar it
-            // flies past. The paired title/author does not morph (see sharedTextOrNoop).
+            // Tab↔tab keeps the cover flight but on the shorter spec, and — the fix — clipped
+            // to below the masthead so the cover never paints over the glass bar it flies past.
+            // The paired title/author does not morph (see sharedTextOrNoop).
+            //
+            // The placeholder is sized to the *content*, not the interpolated box. The two sides
+            // of a tab switch never share a cover token — the Library's featured plate is 116dp,
+            // Home's shelves are 112dp and their own `coverWidth` — so an `animatedSize`
+            // placeholder moves its box smoothly while the artwork inside keeps the size it had,
+            // and only catches up to the box on the last frame. That is the end-of-flight snap:
+            // the cover flies most of the way, then hops sideways into the spot it should have
+            // been easing into all along. `contentSize` keeps the artwork the size of the box
+            // around it for the whole flight, so there is nothing left to catch up.
             this@sharedElementOrNoop.sharedElement(
                 state,
                 scopes.animatedVisibilityScope,
                 boundsTransform = folioTabMorphBounds,
-                placeHolderSize = SharedTransitionScope.PlaceHolderSize.animatedSize,
+                placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                 clipInOverlayDuringTransition = tabClip,
             )
         } else {
@@ -388,7 +398,7 @@ fun Modifier.sharedElementOrNoop(
                 state,
                 scopes.animatedVisibilityScope,
                 boundsTransform = boundsTransform,
-                placeHolderSize = placeHolderSize,
+                placeholderSize = placeholderSize,
             )
         }
     }

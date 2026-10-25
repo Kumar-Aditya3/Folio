@@ -22,7 +22,7 @@ class FrontMatterTitleTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-epub-frontmatter-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-epub-frontmatter-").toFile()
     }
 
     @AfterTest

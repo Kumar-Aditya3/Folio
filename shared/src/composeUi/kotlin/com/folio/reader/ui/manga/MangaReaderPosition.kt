@@ -55,7 +55,7 @@ fun MangaReaderViewModel.onPageKeyVisible(key: String) {
         onPageChanged(index)
     }
 
-private fun MangaReaderViewModel.indexForPageKey(key: String): Int? {
+internal fun MangaReaderViewModel.indexForPageKey(key: String): Int? {
         val sep = key.lastIndexOf(':')
         if (sep <= 0 || sep == key.length - 1) return null
         val local = key.substring(sep + 1).toIntOrNull() ?: return null

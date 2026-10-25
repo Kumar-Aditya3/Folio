@@ -78,10 +78,20 @@ class MotionSchemaTest {
         // table cannot quietly retune the room.
         assertEquals(0.3f, FolioFieldKind.Swirl.fieldSpeed())
         assertEquals(0.3f, FolioFieldKind.GrainGradient.fieldSpeed())
-        assertEquals(0.7f, FolioFieldKind.MeshGradient.fieldSpeed())
-        assertEquals(0.8f, FolioFieldKind.Water.fieldSpeed())
+        assertEquals(0.9f, FolioFieldKind.MeshGradient.fieldSpeed())
+        assertEquals(0.9f, FolioFieldKind.Water.fieldSpeed())
         assertEquals(0.9f, FolioFieldKind.DotOrbit.fieldSpeed())
-        assertEquals(0.35f, FolioFieldKind.Warp.fieldSpeed())
+        assertEquals(0.85f, FolioFieldKind.Warp.fieldSpeed())
+    }
+
+    @Test
+    fun voronoiFacetsDriftMoreSlowlyThanTheRevolvingPanels() {
+        assertEquals(0.8f, FolioFieldKind.Voronoi.fieldSpeed())
+        assertEquals(0.9f, FolioFieldKind.ColorPanels.fieldSpeed())
+        val reduced = resolveMotion(MotionPreferences(), MotionTier.STANDARD, systemReduced = true)
+        val speed = requireNotNull(FolioFieldKind.Voronoi.fieldSpeed())
+        assertTrue(speed * reduced.fieldSpeedFactor > 0f)
+        assertTrue(speed * reduced.fieldSpeedFactor < speed)
     }
 
     @Test
@@ -127,12 +137,13 @@ class MotionSchemaTest {
         val clockless = FolioFieldKind.entries.filter { it.isClockless() }
         assertEquals(
             setOf(
-                FolioFieldKind.Waves, FolioFieldKind.DotGrid, FolioFieldKind.HalftoneDots,
+                FolioFieldKind.DotGrid, FolioFieldKind.HalftoneDots,
                 FolioFieldKind.StaticMeshGradient, FolioFieldKind.StaticRadialGradient,
             ),
             clockless.toSet(),
             "the set of families with no u_time uniform must not change silently",
         )
+        assertEquals(0.85f, FolioFieldKind.Waves.fieldSpeed(), "Waves now has its own travelling phase")
         FolioFieldKind.entries.forEach { kind ->
             val speed = kind.fieldSpeed()
             if (kind.isClockless()) {

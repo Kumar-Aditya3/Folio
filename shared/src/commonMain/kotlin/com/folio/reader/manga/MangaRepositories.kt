@@ -8,7 +8,8 @@ import kotlinx.coroutines.flow.first
 data class MangaChapterAggregate(val unread: Int, val progress: Float, val downloaded: Int)
 
 interface MangaRepository {
-    suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean = true)
+    /** Source metadata refreshes preserve a library decision made while the request was in flight. */
+    suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean = true, preserveLibraryState: Boolean = false)
     suspend fun delete(mangaId: String, emitSyncEvent: Boolean = true)
     suspend fun get(mangaId: String): MangaEntry?
     suspend fun findBySourceUrl(sourceId: Long, url: String): MangaEntry?
@@ -65,6 +66,11 @@ interface MangaStatisticsRepository {
     suspend fun getStatistics(
         exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>> = emptySet()
     ): MangaStatistics
+
+    /** Implementations with a live store refresh after library and reading-history changes. */
+    fun observeStatistics(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>> = emptySet()
+    ): Flow<MangaStatistics> = kotlinx.coroutines.flow.flow { emit(getStatistics(exclusions)) }
 }
 
 interface MangaNoteRepository {
@@ -73,6 +79,8 @@ interface MangaNoteRepository {
     suspend fun get(noteId: String): MangaNote?
     suspend fun notesForChapter(chapterId: String): List<MangaNote>
     fun observeNotesForChapter(chapterId: String): Flow<List<MangaNote>>
+    suspend fun notesForManga(mangaId: String): List<MangaNote>
+    fun observeNotesForManga(mangaId: String): Flow<List<MangaNote>>
 
     /** Every note in the library, newest first — used by the annotation hub. */
     fun observeAllNotes(): Flow<List<MangaNote>>
@@ -82,11 +90,20 @@ interface MangaCategoryRepository {
     suspend fun create(name: String, emitSyncEvent: Boolean = true): MangaCategory
     suspend fun rename(id: String, name: String, emitSyncEvent: Boolean = true)
 
-    /** Returns false when the delete was refused (Main survives while it is the only category). */
-    suspend fun delete(id: String, emitSyncEvent: Boolean = true): Boolean
+    /**
+     * Main survives while it is the only category. User-confirmed deletion also soft-removes
+     * exclusive members; remote tombstones only unlink, as their manga documents carry that flag.
+     */
+    suspend fun delete(id: String, emitSyncEvent: Boolean = true, removeExclusiveManga: Boolean = false): Boolean
 
     fun observeCategories(): Flow<List<MangaCategory>>
-    suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean = true)
+    /** On addition, library membership and the chosen shelves are committed atomically. */
+    suspend fun assign(
+        mangaId: String,
+        categoryIds: Set<String>,
+        emitSyncEvent: Boolean = true,
+        addToLibrary: Boolean = false,
+    )
     suspend fun categoriesFor(mangaId: String): Set<String>
     suspend fun get(id: String): MangaCategory?
     suspend fun getCategoryByName(name: String): MangaCategory?

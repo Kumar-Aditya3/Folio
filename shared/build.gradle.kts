@@ -63,6 +63,8 @@ kotlin {
                 // invisible to consumers so the blur seam cannot scatter (the whole
                 // library is imported by exactly one file, Glass.kt).
                 implementation(libs.haze)
+                implementation(libs.haze.blur)
+                implementation(libs.haze.glass)
             }
         }
 
@@ -122,6 +124,13 @@ kotlin {
             dependsOn(getByName("commonJvm"))
             dependsOn(getByName("composeUi"))
             dependencies {
+                // Material 3 desktop brings datetime 0.7.1 at runtime, while Folio's
+                // shared models still use the 0.6 Instant/Clock classes. The official
+                // compatibility runtime supplies both APIs. Keep source compilation on
+                // 0.6: switching its date arithmetic to 0.7 also changes return types.
+                runtimeOnly("org.jetbrains.kotlinx:kotlinx-datetime") {
+                    version { strictly("0.7.1-0.6.x-compat") }
+                }
                 // Desktop has no platform XmlPullParser; Android ships its own
                 // (bundling kxml2 there collided with framework classes in R8).
                 implementation(libs.kxml2)
@@ -148,7 +157,17 @@ kotlin {
                 implementation(libs.kotlin.test.junit5)
                 implementation(libs.junit.jupiter)
                 implementation(libs.kotlinx.coroutines.test)
-                runtimeOnly(libs.skiko.awt.runtime.windows.x64)
+                // Render verification runs offscreen in CI too. Load the native
+                // runtime for the test host rather than shipping Windows DLLs to Linux.
+                val hostOs = System.getProperty("os.name").lowercase()
+                val hostArch = System.getProperty("os.arch").lowercase()
+                val skikoOs = when {
+                    hostOs.startsWith("windows") -> "windows"
+                    hostOs.contains("mac") -> "macos"
+                    else -> "linux"
+                }
+                val skikoArch = if (hostArch in setOf("aarch64", "arm64")) "arm64" else "x64"
+                runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-$skikoOs-$skikoArch:${libs.versions.skiko.get()}")
                 // Reference tokenizer, test-only. Used to prove the hand-rolled WordPiece
                 // implementation matches the Rust reference, and to tokenize the
                 // SentencePiece multilingual model that the Phase 0b comparison needs.
@@ -160,7 +179,7 @@ kotlin {
 
 android {
     namespace = "com.folio.reader.shared"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24

@@ -34,7 +34,7 @@ class DocumentRepositoryTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-documents-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-documents-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         documents = ThumbnailDocumentRepository(
             database,

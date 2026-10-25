@@ -59,6 +59,7 @@ interface FolioNavModel {
         /** Highlight to scroll to once the book loads (Stats "kept passages" tap). Null = none.
          *  No default for the same @Composable-interface ABI reason as [targetFraction] above. */
         targetHighlightId: String?,
+        targetLocator: String?,
         onBack: () -> Unit,
         onOpenSearch: () -> Unit,
         onOpenSettings: () -> Unit,
@@ -83,19 +84,24 @@ interface FolioNavModel {
     )
 
     @Composable
-    fun searchContent(onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit)
+    fun searchContent(
+        onBack: () -> Unit,
+        onOpenReader: (String, Int?, Float?) -> Unit,
+        /** When set, the visit opens on this book's content instead of the whole library. */
+        contentBookId: String? = null,
+    )
 
     @Composable
     fun settingsContent(category: String, onBack: () -> Unit)
 
     @Composable
-    fun tagsContent(onBack: () -> Unit, onOpenBookDetail: (String) -> Unit, onOpenReader: (String) -> Unit)
+    fun tagsContent(onBack: () -> Unit, onOpenBookDetail: (String) -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit)
 
     @Composable
-    fun quotesContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit)
+    fun quotesContent(onBack: () -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit, onOpenMangaDetail: (String) -> Unit)
 
     @Composable
-    fun revisitContent(onBack: () -> Unit, onOpenReader: (String) -> Unit, onOpenMangaDetail: (String) -> Unit)
+    fun revisitContent(onBack: () -> Unit, onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit, onOpenMangaDetail: (String) -> Unit)
 
     @Composable
     fun mangaDetailContent(mangaId: String, onBack: () -> Unit, onRead: (String) -> Unit)

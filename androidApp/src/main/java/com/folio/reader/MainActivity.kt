@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -398,7 +399,16 @@ class MainActivity : ComponentActivity() {
                         )
                     )
                 }
-                onDispose { com.folio.reader.manga.MangaChallenges.solver = null }
+                // A blocked request waits for the window it opened. Android drops activity
+                // starts from the background without telling anyone, so say when one is
+                // possible rather than leaving the request to time out.
+                com.folio.reader.manga.MangaChallenges.canShowWindow = {
+                    lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                }
+                onDispose {
+                    com.folio.reader.manga.MangaChallenges.solver = null
+                    com.folio.reader.manga.MangaChallenges.canShowWindow = null
+                }
             }
             LaunchedEffect(isReadingScreen, appDark) {
                 // Outside the reader the status bar sits on the *page*, whose scrim
@@ -680,37 +690,25 @@ class MainActivity : ComponentActivity() {
                         // then open the first imported item.
                         pendingImportBooks?.let { books ->
                             val graph = (application as FolioApplication).graph
-                            var shelfCollections by remember {
-                                mutableStateOf(emptyList<com.folio.reader.model.Collection>())
-                            }
-                            LaunchedEffect(Unit) {
-                                shelfCollections = runCatching {
-                                    graph.collectionRepository.getAllCollections().first()
-                                }.getOrDefault(emptyList())
-                            }
+                            val shelfCollections by remember(graph) {
+                                graph.collectionRepository.getAllCollections()
+                            }.collectAsState(initial = emptyList())
                             if (shelfCollections.isNotEmpty()) {
                                 com.folio.reader.ui.library.BookImportCollectionsDialog(
                                     bookCount = books.size,
                                     collections = shelfCollections,
                                     onCreate = { name ->
-                                        runCatching {
-                                            graph.collectionRepository.getCollectionByName(name)?.id
-                                                ?: graph.collectionRepository.createCollection(name).id
-                                        }.getOrNull()
+                                        graph.collectionRepository.getCollectionByName(name)?.id
+                                            ?: graph.collectionRepository.createCollection(name).id
                                     },
                                     onSave = { ids ->
-                                        appScope.launch(Dispatchers.IO) {
-                                            if (ids.isNotEmpty()) {
-                                                books.forEach { book ->
-                                                    runCatching {
-                                                        graph.collectionRepository.assign(book.id, ids)
-                                                    }
-                                                }
+                                        withContext(Dispatchers.IO) {
+                                            val target = ids.ifEmpty {
+                                                setOf(requireNotNull(graph.collectionRepository.defaultCollection()) {
+                                                    "No default collection is available."
+                                                }.id)
                                             }
-                                            withContext(Dispatchers.Main) {
-                                                pendingImportBooks = null
-                                                openPendingImportRoute()
-                                            }
+                                            books.forEach { book -> graph.collectionRepository.assign(book.id, target) }
                                         }
                                     },
                                     onDismiss = {

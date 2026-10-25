@@ -35,7 +35,7 @@ class BackfillLoopTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-backfill-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-backfill-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         repository = JdbcChunkRepository(database)
     }

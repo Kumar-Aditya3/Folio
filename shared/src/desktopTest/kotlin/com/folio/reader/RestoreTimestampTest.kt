@@ -29,7 +29,7 @@ class RestoreTimestampTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-restore-timestamp-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-restore-timestamp-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         noteRepo = JdbcNoteRepository(database)
         bookmarkRepo = JdbcBookmarkRepository(database)

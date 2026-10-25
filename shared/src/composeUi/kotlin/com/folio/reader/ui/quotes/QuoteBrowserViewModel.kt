@@ -33,7 +33,11 @@ data class QuoteDisplayItem(
     val highlight: Highlight?,
     val note: Note?,
     val tags: List<Tag>
-)
+) {
+    val readerTarget: com.folio.reader.model.ReaderPassageTarget
+        get() = com.folio.reader.model.ReaderPassageTarget(book.id, highlight?.spineIndex ?: chapter?.spineIndex,
+            highlight?.startLocator ?: note?.locator, highlight?.id)
+}
 
 /**
  * Panel state for "more like this".

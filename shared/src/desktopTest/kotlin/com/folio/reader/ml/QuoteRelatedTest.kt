@@ -45,7 +45,7 @@ class QuoteRelatedTest {
 
     @BeforeEach
     fun setUp() = runBlocking {
-        tempRoot = createTempDir("folio-related-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-related-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         chunkRepository = JdbcChunkRepository(database)
         bookRepository = JdbcBookRepository(database)

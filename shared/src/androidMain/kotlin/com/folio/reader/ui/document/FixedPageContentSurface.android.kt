@@ -142,8 +142,11 @@ actual fun FixedPageContentSurface(
     onDocumentOpened: (Int) -> Unit,
     onCurrentPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
-    onError: (DocumentReaderError) -> Unit
+    onError: (DocumentReaderError) -> Unit,
+    navigationRequest: FixedPageNavigationRequest?,
+    onNavigationApplied: (Long) -> Unit,
+    onViewportPosition: (com.folio.reader.model.DocumentLocator.FixedPage, Float) -> Unit,
 ) = FixedPageSurfaceImpl(
     path, documentId, pageIndex, mode, rotationDegrees, resetZoomKey, modifier,
-    onDocumentOpened, onCurrentPageChanged, onTap, onError
+    onDocumentOpened, onCurrentPageChanged, onTap, onError, navigationRequest, onNavigationApplied, onViewportPosition
 )

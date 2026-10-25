@@ -446,8 +446,10 @@ fun fieldColorAtPoint(
 fun barGlassFor(atmos: FolioAtmosphere, tint: Color?, strength: Float): Color {
     val glass = atmos.barGlass
     if (tint == null || strength <= 0f) return glass
-    return mixG(glass, fieldColors(atmos, tint, strength).top, BAR_TINT_SHARE)
-        .copy(alpha = glass.alpha)
+    val lit = mixG(glass, fieldColors(atmos, tint, strength).top, BAR_TINT_SHARE)
+    val original = luminanceOf(glass)
+    val bounded = original + (luminanceOf(lit) - original).coerceIn(-.15f, .15f)
+    return matchLuma(lit, bounded).copy(alpha = glass.alpha)
 }
 
 /**

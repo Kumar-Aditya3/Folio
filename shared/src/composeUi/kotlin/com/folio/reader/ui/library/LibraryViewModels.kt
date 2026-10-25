@@ -228,44 +228,38 @@ class LibraryViewModel(
      * after apply, so unchecking removes as deliberately as checking adds.
      */
     val bulkCollectionPickerInitial = MutableStateFlow<Set<String>?>(null)
+    private var bulkPickerBookIds: Set<String>? = null
 
     fun requestBulkCollections() {
         val ids = selectedBookIds.value
         if (ids.isEmpty()) return
+        bulkPickerBookIds = ids
         scope.launch {
             val memberships: List<Set<String>> = ids.map { bookId ->
                 collectionRepository.getCollectionsForBook(bookId).mapTo(mutableSetOf()) { it.id }
             }
-            bulkCollectionPickerInitial.value =
-                memberships.reduceOrNull { a, b -> a intersect b } ?: emptySet()
+            if (bulkPickerBookIds == ids) {
+                bulkCollectionPickerInitial.value =
+                    memberships.reduceOrNull { a, b -> a intersect b } ?: emptySet()
+            }
         }
     }
 
     fun closeBulkPicker() {
         bulkCollectionPickerInitial.value = null
+        bulkPickerBookIds = null
         // The picked books have been re-shelved and may no longer be on the current
         // shelf; drop the selection so stale off-screen selections don't linger.
         clearSelection()
     }
 
-    /**
-     * Live-applies the picker's current set to every selected book — a full
-     * membership replace per book (the manga picker's `assign` contract), with
-     * the default shelf substituted for an empty set so a book never ends up
-     * shelfless. Selection stays, so a second collection can be filled without
-     * re-picking the books.
-     */
-    fun applyBulkCollections(collectionIds: Set<String>) {
-        val ids = selectedBookIds.value
-        if (ids.isEmpty()) return
-        scope.launch {
-            val target = collectionIds.ifEmpty {
-                runCatching { collectionRepository.defaultCollection() }.getOrNull()
-                    ?.let { setOf(it.id) }
-                    ?: return@launch
-            }
-            ids.forEach { bookId -> runCatching { collectionRepository.assign(bookId, target) } }
+    /** Saves the picker session's books; failures stay visible in the confirmation dialog. */
+    suspend fun applyBulkCollections(collectionIds: Set<String>) {
+        val ids = checkNotNull(bulkPickerBookIds) { "No books are selected." }
+        val target = collectionIds.ifEmpty {
+            setOf(requireNotNull(collectionRepository.defaultCollection()) { "No default collection is available." }.id)
         }
+        ids.forEach { bookId -> collectionRepository.assign(bookId, target) }
     }
 
     /** Creates (or finds) a collection by name; the picker's inline "new shelf" row. */
@@ -273,7 +267,7 @@ class LibraryViewModel(
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return null
         return collectionRepository.getCollectionByName(trimmed)?.id
-            ?: runCatching { collectionRepository.createCollection(trimmed).id }.getOrNull()
+            ?: collectionRepository.createCollection(trimmed).id
     }
 
     enum class ViewMode {

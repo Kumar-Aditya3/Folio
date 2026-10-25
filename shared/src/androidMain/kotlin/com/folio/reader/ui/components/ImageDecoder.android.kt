@@ -77,6 +77,7 @@ actual fun systemFontFamily(name: String): FontFamily? {
     val result = when {
         f.contains("mono") || f.contains("jetbrains") || f.contains("code") || 
             f.contains("courier") -> FontFamily.Monospace
+        f.contains("sans") -> FontFamily.SansSerif
         f.contains("serif") || f.contains("literata") || f.contains("merriweather") ||
             f.contains("garamond") || f.contains("lora") || f.contains("georgia") ||
             f.contains("times") || f.contains("playfair") || f.contains("crimson") ||

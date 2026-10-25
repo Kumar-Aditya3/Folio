@@ -335,7 +335,7 @@ fun rememberCoverAccent(coverPath: String?, fallback: Color): Color {
     return guardCoverContrast(raw, FolioTheme.colors.surface, fallback)
 }
 
-private fun sampleFromBitmap(bitmap: ImageBitmap): Color? {
+internal fun sampleFromBitmap(bitmap: ImageBitmap): Color? {
     val grid = coverGridOf(bitmap) ?: return null
     return sampleCoverAccent(grid.pixels)
 }

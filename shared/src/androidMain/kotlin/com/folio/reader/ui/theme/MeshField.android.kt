@@ -9,7 +9,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import io.androidpoet.mirage.ColorPanels
 import io.androidpoet.mirage.Dithering
 import io.androidpoet.mirage.DitheringShape
 import io.androidpoet.mirage.DitheringType
@@ -21,29 +20,16 @@ import io.androidpoet.mirage.GrainGradient
 import io.androidpoet.mirage.GrainGradientShape
 import io.androidpoet.mirage.HalftoneDotsGrid
 import io.androidpoet.mirage.HalftoneDotsType
-import io.androidpoet.mirage.LiquidMetalShape
-import io.androidpoet.mirage.MeshGradient
-import io.androidpoet.mirage.Metaballs
 import io.androidpoet.mirage.NeuroNoise
-import io.androidpoet.mirage.PerlinNoise
 import io.androidpoet.mirage.PulsingBorder
 import io.androidpoet.mirage.SimplexNoise
-import io.androidpoet.mirage.SmokeRing
-import io.androidpoet.mirage.Spiral
 import io.androidpoet.mirage.StaticMeshGradient
 import io.androidpoet.mirage.StaticRadialGradient
 import io.androidpoet.mirage.Swirl
-import io.androidpoet.mirage.Voronoi
-import io.androidpoet.mirage.Warp
-import io.androidpoet.mirage.WarpPattern
-import io.androidpoet.mirage.Waves
 import io.androidpoet.mirage.core.ShaderFit
 import io.androidpoet.mirage.core.SizingParams
 import io.androidpoet.mirage.gemSmoke
 import io.androidpoet.mirage.halftoneDots
-import io.androidpoet.mirage.heatmap
-import io.androidpoet.mirage.liquidMetal
-import io.androidpoet.mirage.water
 import com.folio.reader.ui.theme.FieldMotion
 import com.folio.reader.ui.theme.rememberSlowPhases
 import kotlin.math.sin
@@ -106,22 +92,6 @@ private const val FIELD_DARK_BACK_FOOT = 0.35f
 private const val PULSING_BORDER_PULSE = 0.15f
 private const val PULSING_BORDER_ROUNDNESS = 0.65f
 private const val PULSING_BORDER_SPOT_SIZE = 0.12f
-// ColorPanels slid at the library's count and its own generic ease. `fadeIn`/`fadeOut` are the
-// per-family easing curves — the "easing" the tuning review asked about, as uniforms.
-private const val COLOR_PANELS_DENSITY = 5f
-private const val COLOR_PANELS_EDGES = true
-private const val COLOR_PANELS_LENGTH = 0.75f
-private const val COLOR_PANELS_FADE_IN = 0.12f
-private const val COLOR_PANELS_FADE_OUT = 0.88f
-// PerlinNoise: persistence and lacunarity decide whether the cloud reads as weather or as
-// television static. The picker promises "slow Perlin cloud drift".
-private const val PERLIN_PERSISTENCE = 0.55f
-private const val PERLIN_LACUNARITY = 2.1f
-// Spiral: the strokes were mathematically perfect, which is the one thing a hand-drawn motif must
-// not be.
-private const val SPIRAL_NOISE = 0.06f
-private const val SPIRAL_NOISE_FREQUENCY = 1.6f
-private const val SPIRAL_STROKE_TAPER = 0.35f
 private const val FIELD_DARK_BACK_DEEPEN = 0.22f
 
 /**
@@ -164,7 +134,7 @@ private const val FIELD_DARK_SINK_RELAX = 0.5f
  * accents at close to paper's luminance — the "mirage is too bright in dark mode" report — so
  * their palette is sunk this much further toward the already-dark `back` before use. Dark only.
  */
-private const val FIELD_DARK_PALETTE_SINK_EXTRA = 0.42f
+private const val FIELD_DARK_PALETTE_SINK_EXTRA = 0.18f
 
 @Composable
 actual fun FolioThemeField(
@@ -203,12 +173,28 @@ actual fun FolioThemeField(
     // argument is omitted, so an untouched install renders byte-for-byte as before; only a reader
     // who moves the size lever changes anything.
     val sizing = SizingParams(scale = motion.fieldScaleFactor)
-    // The field's working palette: the loud accents first (they carry the theme's identity), then
-    // the softer aurora pools. Deduped and never empty. On a dark face every entry is sunk toward
-    // the field's own base so the animation carries the theme's hue at the room's luminance
-    // rather than at the accents' — see FIELD_DARK_PALETTE_SINK.
-    val palette = remember(pools, accents, isDark, back, sink) {
-        val authored = (accents + pools).distinct().ifEmpty { listOf(top, bottom) }
+    val authored = remember(pools, accents, top, bottom) {
+        (accents + pools).distinct().ifEmpty { listOf(top, bottom) }
+    }
+    val designedSource = remember(kind) { kind.designedFieldShader() }
+    val scale = rememberFolioFieldScale(kind)
+    if (designedSource != null) {
+        val colors = remember(back, authored, isDark, vibrancy) {
+            folioDesignedFieldColors(back, authored, isDark, vibrancy)
+        }
+        FolioDesignedField(
+            kind = kind,
+            source = designedSource,
+            colors = colors,
+            speedFactor = speedFactor,
+            intensity = amplitudeFactor,
+            patternScale = motion.fieldScaleFactor,
+            modifier = modifier.folioFieldDownsample(scale),
+        )
+        return
+    }
+    // Keep Dot Orbit and the remaining Mirage families on their original dark-face treatment.
+    val palette = remember(authored, isDark, back, sink) {
         if (!isDark) authored else authored.map { lerp(it, back, sink) }
     }
     // The field's pixel budget. Every family here is a full-screen AGSL pass whose clock lives
@@ -218,7 +204,6 @@ actual fun FolioThemeField(
     // the cost is cut by area instead of by rate: the family renders into a layer a fraction of
     // the device's pixels and is scaled back up, which leaves the motion bit-for-bit as authored
     // and divides the fragment work by the square of the scale. See [FolioFieldCost].
-    val scale = rememberFolioFieldScale(kind)
     MirageField(kind, back, palette, isDark, amplitudeFactor, speedFactor, vibrancy, sizing, modifier.folioFieldDownsample(scale))
 }
 
@@ -297,12 +282,8 @@ private fun MirageField(
     fun amp(kind: FolioFieldKind): Float =
         kind.fieldAmplitude().at(fieldGain(isDark, vibrancy)) * amplitudeFactor
 
-    // The two families whose shader has no `u_time` (Waves and DotGrid — see [isClockless]) cannot
-    // animate from inside the library, so their parameters are driven from here instead: one slow
-    // phase modulating a uniform. Gated on the family so the other twenty-three never re-read it —
-    // this is the one place in the dispatch where a changing value is read in the composition
-    // phase, and it is confined to the two families that have no other way to move.
-    val tickPhase = if (kind.isClockless()) {
+    // Only DotGrid needs parameter animation. Truly static families must not start this clock.
+    val tickPhase = if (kind == FolioFieldKind.DotGrid) {
         rememberSlowPhases(listOf(FieldMotion.clocklessPeriodMs), FieldMotion.clocklessTickMs)
             .value.firstOrNull() ?: 0f
     } else {
@@ -310,8 +291,11 @@ private fun MirageField(
     }    // §Mirage dark brightness: the palette-dominated families (see FIELD_DARK_PALETTE_SINK_EXTRA)
     // take an extra sink of their palette toward the field base so a night field reads as night
     // rather than at paper's luminance. The already-sunk `palette` is unchanged for every other
-    // family, and light faces are untouched (`deep` == `palette`).
-    val deep = if (isDark) palette.map { lerp(it, back, FIELD_DARK_PALETTE_SINK_EXTRA) } else palette
+    // family, and light faces are untouched (`deep` == `palette`). Facets and panels use their
+    // already-toned `palette` directly rather than sinking it twice.
+    val deep = remember(palette, back, isDark) {
+        if (isDark) palette.map { lerp(it, back, FIELD_DARK_PALETTE_SINK_EXTRA) } else palette
+    }
     when (kind) {
         // GALLERY � a vast plaster wall whose light drifts under canvas grain. Corners shape keeps
         // the gradient pooled in the corners like a lit room; high softness, low intensity, grain on.
@@ -326,21 +310,6 @@ private fun MirageField(
             noise = 0.28f,
             shape = GrainGradientShape.Corners,
             speed = s(0.3f),
-            sizing = sizing,
-        )
-        // MANUSCRIPT � ink bleeding through laid paper; Stripes are the scribe's ruled lines pulled
-        // out of true by a moderate warp and swirl.
-        FolioFieldKind.Warp -> Warp(
-            modifier = modifier,
-            colors = deep.cycle(4),
-            proportion = 0.5f,
-            softness = 1f,
-            shape = WarpPattern.Stripes,
-            shapeScale = 0.12f,
-            distortion = 0.22f,
-            swirl = 0.7f,
-            swirlIterations = 10,
-            speed = s(0.35f),
             sizing = sizing,
         )
         // SILVER � the silver-halide grain of a darkroom print: a Bayer dither over a slow swirl.
@@ -381,29 +350,6 @@ private fun MirageField(
             speed = s(0.9f),
             sizing = sizing,
         )
-        // HONEY � viscous drops coalescing. Few, large, slow balls.
-        FolioFieldKind.Metaballs -> Metaballs(
-            modifier = modifier,
-            colorBack = back,
-            colors = palette.cycle(5),
-            count = 8f,
-            size = 0.9f,
-            speed = s(0.6f),
-            sizing = sizing,
-        )
-        // MOSS � a cellular colony spreading over stone: Voronoi cells with a gap and a faint glow.
-        FolioFieldKind.Voronoi -> Voronoi(
-            modifier = modifier,
-            colors = deep.cycle(2),
-            stepsPerColor = 3,
-            colorGlow = deep.first(),
-            colorGap = back,
-            distortion = 0.4f,
-            gap = 0.05f,
-            glow = 0.15f,
-            speed = s(0.35f),
-            sizing = sizing,
-        )
         // DAWN � volumetric sun-shafts from a low, off-screen source, with bloom.
         FolioFieldKind.GodRays -> GodRays(
             modifier = modifier,
@@ -423,48 +369,8 @@ private fun MirageField(
             speed = s(0.5f),
             sizing = sizing,
         )
-        // LAGOON � turquoise, sand and coral drifting through moving water; blends, never whitens.
-        FolioFieldKind.MeshGradient -> MeshGradient(
-            modifier = modifier,
-            colors = deep.cycle(4),
-            distortion = 0.8f,
-            swirl = 0.12f,
-            grainMixer = 0f,
-            grainOverlay = 0f,
-            speed = s(0.7f),
-            sizing = sizing,
-        )
-        // ROUGE � a turbulent ring of smoke in a single spotlight: the house before curtain.
-        FolioFieldKind.SmokeRing -> SmokeRing(
-            modifier = modifier,
-            colorBack = back,
-            colors = palette.cycle(2),
-            noiseScale = 3f,
-            noiseIterations = 8,
-            radius = 0.28f,
-            thickness = 0.7f,
-            innerShape = 0.7f,
-            speed = s(0.4f),
-            sizing = sizing,
-        )
 
         // --- Opt-in families (per-theme override picker). Each still eats this theme's palette. ---
-        FolioFieldKind.ColorPanels -> ColorPanels(
-            modifier = modifier,
-            colorBack = back,
-            colors = palette.cycle(4),
-            angle1 = 20f,
-            angle2 = -15f,
-            gradient = 0.5f,
-            blur = 0.3f,
-            density = COLOR_PANELS_DENSITY,
-            length = COLOR_PANELS_LENGTH,
-            edges = COLOR_PANELS_EDGES,
-            fadeIn = COLOR_PANELS_FADE_IN,
-            fadeOut = COLOR_PANELS_FADE_OUT,
-            speed = s(0.4f),
-            sizing = sizing,
-        )
         FolioFieldKind.DotGrid -> DotGrid(
             modifier = modifier,
             colorBack = back,
@@ -489,18 +395,6 @@ private fun MirageField(
             speed = s(0.5f),
             sizing = sizing,
         )
-        FolioFieldKind.PerlinNoise -> PerlinNoise(
-            modifier = modifier,
-            colorBack = back,
-            colorFront = palette.first(),
-            proportion = 0.4f,
-            softness = 0.25f,
-            octaveCount = 3,
-            persistence = PERLIN_PERSISTENCE,
-            lacunarity = PERLIN_LACUNARITY,
-            speed = s(0.3f),
-            sizing = sizing,
-        )
         FolioFieldKind.SimplexNoise -> SimplexNoise(
             modifier = modifier,
             colors = (listOf(back) + palette).cycle(4),
@@ -509,88 +403,13 @@ private fun MirageField(
             speed = s(0.3f),
             sizing = sizing,
         )
-        FolioFieldKind.Spiral -> Spiral(
-            modifier = modifier,
-            colorBack = back,
-            colorFront = palette.first(),
-            density = 1.1f,
-            distortion = 0.2f,
-            strokeWidth = 0.5f,
-            strokeTaper = SPIRAL_STROKE_TAPER,
-            noise = SPIRAL_NOISE,
-            noiseFrequency = SPIRAL_NOISE_FREQUENCY,
-            softness = 0.3f,
-            speed = s(0.5f),
-            sizing = sizing,
-        )
-        FolioFieldKind.Waves -> Waves(
-            modifier = modifier,
-            colorBack = back,
-            colorFront = palette.first(),
-            // The bands roll: the spacing breathes with the slow phase rather than sitting still.
-            frequency = 0.5f,
-            amplitude = 0.6f,
-            spacing = 1.3f * (1f + 0.06f * sin(tickPhase * TAU).toFloat()),
-            proportion = 0.14f,
-            softness = 0.2f,
-            sizing = sizing,
-        )
         // --- Image-filter families ------------------------------------------------------------
         // See [FILTER_SIZING] and [filterSource] for why these six are shaped differently from
         // every branch above: they are not procedural composables, they are *image filters*, and
         // a filter with nothing to filter draws nothing at all.
-        FolioFieldKind.Water -> Box(
-            modifier
-                .water(
-                    colorBack = back,
-                    colorHighlight = palette.first(),
-                    // The caustic is a 5% colour mix at `highlights = 1`, so the old 0.1f was
-                    // three orders below visible even once there was an image to light.
-                    highlights = 0.75f,
-                    layering = 0.6f,
-                    waves = 0.45f,
-                    caustic = 0.4f,
-                    speed = s(0.8f),
-                    sizing = FILTER_SIZING,
-                )
-                // Animated filter: the shader supplies the motion, so the ramp it refracts is a
-                // frozen frame and costs one cached full-screen fill, not one per vsync.
-                .filterSource(animate = false),
-        )
         // Generative (`isImage` defaults to false): the shape is built from `getObjectUV`, not
         // from `u_image`, so the content is only there to make the layer renderable � a flat fill
         // is enough and a ramp would be thrown away.
-        FolioFieldKind.LiquidMetal -> Box(
-            modifier
-                .liquidMetal(
-                    colorBack = back,
-                    colorTint = palette.first(),
-                    repetition = 2f,
-                    softness = 0.12f,
-                    distortion = 0.08f,
-                    contour = 0.45f,
-                    shape = LiquidMetalShape.Diamond,
-                    speed = s(0.6f),
-                    sizing = FILTER_SIZING,
-                )
-                .background(back),
-        )
-        FolioFieldKind.Heatmap -> Box(
-            modifier
-                .heatmap(
-                    colors = deep.cycle(4),
-                    colorBack = back,
-                    contour = 0.5f,
-                    innerGlow = 0.5f,
-                    outerGlow = 0.5f,
-                    speed = s(0.6f),
-                    sizing = FILTER_SIZING,
-                )
-                // Isotherms are read off the blurred green channel of the content: with an empty
-                // layer the mixer was 0 everywhere and the field collapsed to flat `colorBack`.
-                // Over the ramp the drifting blooms become the hot spots.
-                .filterSource(animate = false),
-        )
         FolioFieldKind.GemSmoke -> Box(
             modifier
                 .gemSmoke(
@@ -666,6 +485,11 @@ private fun MirageField(
             mixing = 0.5f,
             sizing = sizing,
         )
+        FolioFieldKind.Warp, FolioFieldKind.Voronoi, FolioFieldKind.MeshGradient,
+        FolioFieldKind.ColorPanels, FolioFieldKind.Heatmap, FolioFieldKind.LiquidMetal,
+        FolioFieldKind.Metaballs, FolioFieldKind.Waves, FolioFieldKind.Water,
+        FolioFieldKind.Spiral, FolioFieldKind.PerlinNoise, FolioFieldKind.SmokeRing ->
+            error("$kind must use FolioDesignedField")
     }
 }
 

@@ -131,7 +131,7 @@ class HomeExtensionGatingTest {
     }
 
     private class EmptyMangaRepo : MangaRepository {
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {}
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) {}
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) {}
         override suspend fun get(mangaId: String): MangaEntry? = null
         override suspend fun findBySourceUrl(sourceId: Long, url: String): MangaEntry? = null

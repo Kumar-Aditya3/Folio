@@ -65,7 +65,7 @@ class RerankProbe {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-rerank-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-rerank-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         searchRepository = JdbcSearchRepository(database)

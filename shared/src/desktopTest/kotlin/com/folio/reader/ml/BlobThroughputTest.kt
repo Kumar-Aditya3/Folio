@@ -57,7 +57,7 @@ class BlobThroughputTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-blob-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-blob-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         repository = JdbcChunkRepository(database)
     }

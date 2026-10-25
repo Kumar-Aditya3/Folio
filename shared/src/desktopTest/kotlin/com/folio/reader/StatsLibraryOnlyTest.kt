@@ -35,7 +35,7 @@ class StatsLibraryOnlyTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-stats-lib-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-stats-lib-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         manga = JdbcMangaRepository(database)

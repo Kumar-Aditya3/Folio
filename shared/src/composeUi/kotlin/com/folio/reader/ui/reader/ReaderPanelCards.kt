@@ -142,31 +142,12 @@ internal fun ThemePreviewCard(theme: com.folio.reader.settings.Theme, selected: 
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Box(
-                Modifier
-                    .fillMaxWidth(0.55f)
-                    .height(7.dp)
-                    .background(Color(theme.headingText), RoundedCornerShape(4.dp))
-            )
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .background(Color(theme.secondaryText).copy(alpha = 0.75f), RoundedCornerShape(3.dp))
-            )
-            Box(
-                Modifier
-                    .fillMaxWidth(0.88f)
-                    .height(4.dp)
-                    .background(Color(theme.secondaryText).copy(alpha = 0.75f), RoundedCornerShape(3.dp))
-            )
-            Box(
-                Modifier
-                    .fillMaxWidth(0.66f)
-                    .height(4.dp)
-                    .background(Color(theme.secondaryText).copy(alpha = 0.55f), RoundedCornerShape(3.dp))
-            )
+            Text(theme.name, style = FolioTheme.typography.titleSmall, color = Color(theme.primaryText), maxLines = 1)
+            Text("The quiet between the lines", style = FolioTheme.typography.bodySmall,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                color = Color(theme.secondaryText), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+
         // Accent chip showing the theme's progress color
         Box(
             Modifier

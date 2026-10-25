@@ -28,7 +28,7 @@ class BookDataRevisionTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-book-revision-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-book-revision-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         repo = JdbcBookRepository(database)
     }

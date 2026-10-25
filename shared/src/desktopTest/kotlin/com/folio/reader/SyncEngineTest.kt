@@ -261,7 +261,7 @@ class SyncEngineTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-sync-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-sync-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         bookRepo = JdbcBookRepository(database)

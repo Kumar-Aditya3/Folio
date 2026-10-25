@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.datetime.Clock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
@@ -44,8 +47,14 @@ class JdbcMangaRepository(
     private val onRemovedFromLibrary: suspend (String) -> Unit = {},
 ) : com.folio.reader.manga.MangaRepository {
 
-    override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {
-        db.withConnection { conn ->
+    override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) {
+        val persisted = db.withConnection { conn ->
+            val inLibrary = if (preserveLibraryState) {
+                conn.prepareStatement("SELECT favorite FROM manga_library WHERE id = ?").use { stmt ->
+                    stmt.setString(1, manga.id)
+                    stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) == 1 else manga.inLibrary }
+                }
+            } else manga.inLibrary
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO manga_library (
@@ -67,20 +76,21 @@ class JdbcMangaRepository(
                 stmt.setInt(10, manga.status.value)
                 stmt.setString(11, manga.thumbnailUrl)
                 stmt.setString(12, manga.coverPath)
-                stmt.setInt(13, if (manga.inLibrary) 1 else 0)
+                stmt.setInt(13, if (inLibrary) 1 else 0)
                 stmt.setInt(14, if (manga.initialized) 1 else 0)
                 stmt.setLong(15, manga.addedAt.toEpochMilliseconds())
                 stmt.setLong(16, manga.updatedAt.toEpochMilliseconds())
                 stmt.setObject(17, manga.lastReadAt?.toEpochMilliseconds())
                 stmt.executeUpdate()
             }
+            manga.copy(inLibrary = inLibrary)
         }
         if (emitSyncEvent) {
             db.onEntityChanged?.invoke(
                 "manga",
                 manga.id,
                 "UPSERT",
-                mangaJson.encodeToString(com.folio.reader.firebase.FsManga.serializer(), manga.toFs())
+                mangaJson.encodeToString(com.folio.reader.firebase.FsManga.serializer(), persisted.toFs())
             )
         }
         db.bumpMangaData()
@@ -256,27 +266,27 @@ class JdbcMangaRepository(
                 ?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it) },
         )
     }
-
-    private fun MangaEntry.toFs() = com.folio.reader.firebase.FsManga(
-        id = id,
-        sourceId = sourceId,
-        sourceName = sourceName,
-        url = url,
-        title = title,
-        author = author,
-        artist = artist,
-        description = description,
-        genres = mangaJson.encodeToString(stringListSerializer, genres),
-        status = status.value,
-        thumbnailUrl = thumbnailUrl,
-        // Wire/DB field keeps its historical name; the domain calls it inLibrary.
-        favorite = inLibrary,
-        initialized = initialized,
-        addedAt = addedAt.toEpochMilliseconds(),
-        updatedAt = updatedAt.toEpochMilliseconds(),
-        deviceId = "",
-    )
 }
+
+private fun MangaEntry.toFs() = com.folio.reader.firebase.FsManga(
+    id = id,
+    sourceId = sourceId,
+    sourceName = sourceName,
+    url = url,
+    title = title,
+    author = author,
+    artist = artist,
+    description = description,
+    genres = mangaJson.encodeToString(stringListSerializer, genres),
+    status = status.value,
+    thumbnailUrl = thumbnailUrl,
+    // Wire/DB field keeps its historical name; the domain calls it inLibrary.
+    favorite = inLibrary,
+    initialized = initialized,
+    addedAt = addedAt.toEpochMilliseconds(),
+    updatedAt = updatedAt.toEpochMilliseconds(),
+    deviceId = "",
+)
 
 class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.manga.MangaChapterRepository {
 
@@ -712,22 +722,56 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
         if (emitSyncEvent) get(id)?.let { emitCategoryEvent(it, "UPSERT", isDeleted = false) }
     }
 
-    override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean {
-        val existing = get(id) ?: return false
-        // Main is the guaranteed home shelf: it can only be removed while another
-        // category exists, so the library never loses its last bucket.
-        if (id == MangaCategory.MAIN_ID && countCategories() <= 1) return false
-        db.withTransaction { conn ->
+    override suspend fun delete(id: String, emitSyncEvent: Boolean, removeExclusiveManga: Boolean): Boolean {
+        val now = Clock.System.now()
+        val deleted = db.withTransaction { conn ->
+            val existing = conn.prepareStatement("SELECT id, name, sort_order, updated_at FROM manga_categories WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapCategoryRow(rs) else null }
+            } ?: return@withTransaction null
+            if (id == MangaCategory.MAIN_ID) {
+                val count = conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT COUNT(*) FROM manga_categories").use { rs -> rs.next(); rs.getInt(1) }
+                }
+                if (count <= 1) return@withTransaction null
+            }
+            val exclusive = if (removeExclusiveManga) {
+                conn.prepareStatement(
+                    "SELECT m.id FROM manga_library m JOIN manga_category_map target ON target.manga_id = m.id " +
+                        "WHERE target.category_id = ? AND m.favorite = 1 AND NOT EXISTS " +
+                        "(SELECT 1 FROM manga_category_map other JOIN manga_categories c ON c.id = other.category_id " +
+                        "WHERE other.manga_id = m.id AND other.category_id <> ?)"
+                ).use { stmt ->
+                    stmt.setString(1, id)
+                    stmt.setString(2, id)
+                    stmt.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
+                }
+            } else emptyList()
+            // Soft removal keeps chapter progress, notes, history, and downloaded pages intact.
+            conn.prepareStatement("UPDATE manga_library SET favorite = 0, updated_at = ? WHERE id = ?").use { stmt ->
+                exclusive.forEach { mangaId ->
+                    stmt.setLong(1, now.toEpochMilliseconds())
+                    stmt.setString(2, mangaId)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.prepareStatement("DELETE FROM manga_category_map WHERE manga_id = ?").use { stmt ->
+                exclusive.forEach { mangaId -> stmt.setString(1, mangaId); stmt.addBatch() }
+                stmt.executeBatch()
+            }
             conn.prepareStatement("DELETE FROM manga_category_map WHERE category_id = ?").use {
                 it.setString(1, id); it.executeUpdate()
             }
             conn.prepareStatement("DELETE FROM manga_categories WHERE id = ?").use {
                 it.setString(1, id); it.executeUpdate()
             }
-        }
+            existing to exclusive
+        } ?: return false
         db.bumpMangaData()
         if (emitSyncEvent) {
-            emitCategoryEvent(existing.copy(updatedAt = kotlinx.datetime.Clock.System.now()), "DELETE", isDeleted = true)
+            deleted.second.forEach { emitMangaEvent(it) }
+            emitCategoryEvent(deleted.first.copy(updatedAt = now), "DELETE", isDeleted = true)
         }
         return true
     }
@@ -750,9 +794,33 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
     override fun observeCategoriesFor(mangaId: String): Flow<Set<String>> =
         db.mangaDataRevision.map { categoriesFor(mangaId) }
 
-    override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {
-        val previous = categoriesFor(mangaId)
-        db.withTransaction { conn ->
+    override suspend fun assign(
+        mangaId: String,
+        categoryIds: Set<String>,
+        emitSyncEvent: Boolean,
+        addToLibrary: Boolean,
+    ) {
+        val previous = db.withTransaction { conn ->
+            if (categoryIds.isNotEmpty()) {
+                val placeholders = categoryIds.joinToString(",") { "?" }
+                val count = conn.prepareStatement("SELECT COUNT(*) FROM manga_categories WHERE id IN ($placeholders)").use { stmt ->
+                    categoryIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    stmt.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                }
+                require(count == categoryIds.size) { "A selected category no longer exists. Reopen the picker and try again." }
+            }
+            val oldCategories = conn.prepareStatement("SELECT category_id FROM manga_category_map WHERE manga_id = ?").use { stmt ->
+                stmt.setString(1, mangaId)
+                stmt.executeQuery().use { rs -> buildSet { while (rs.next()) add(rs.getString(1)) } }
+            }
+            if (addToLibrary) {
+                require(categoryIds.isNotEmpty()) { "Choose at least one category." }
+                conn.prepareStatement("UPDATE manga_library SET favorite = 1, updated_at = ? WHERE id = ?").use { stmt ->
+                    stmt.setLong(1, Clock.System.now().toEpochMilliseconds())
+                    stmt.setString(2, mangaId)
+                    check(stmt.executeUpdate() == 1) { "Manga is no longer available." }
+                }
+            }
             conn.prepareStatement("DELETE FROM manga_category_map WHERE manga_id = ?").use {
                 it.setString(1, mangaId); it.executeUpdate()
             }
@@ -764,6 +832,7 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
                 }
                 stmt.executeBatch()
             }
+            oldCategories
         }
         db.bumpMangaData()
         if (emitSyncEvent) {
@@ -785,7 +854,19 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
                     get(categoryId)?.let { emitCategoryEvent(it, "UPSERT", isDeleted = false) }
                 }
             }
+            if (addToLibrary) emitMangaEvent(mangaId)
         }
+    }
+
+    private suspend fun emitMangaEvent(mangaId: String) {
+        val hook = db.onEntityChanged ?: return
+        val manga = JdbcMangaRepository(db).get(mangaId) ?: return
+        hook(
+            "manga",
+            mangaId,
+            "UPSERT",
+            mangaJson.encodeToString(com.folio.reader.firebase.FsManga.serializer(), manga.toFs()),
+        )
     }
 
     override suspend fun applyRemote(category: MangaCategory, mangaIds: Set<String>) {
@@ -879,14 +960,6 @@ class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.m
             out
         }
         orphaned.forEach { ensureMembership(it) }
-    }
-
-    private suspend fun countCategories(): Int = db.withConnection { conn ->
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery("SELECT COUNT(*) FROM manga_categories").use { rs ->
-                if (rs.next()) rs.getInt(1) else 0
-            }
-        }
     }
 
     private suspend fun insertCategoryRow(category: MangaCategory) {
@@ -1278,6 +1351,7 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
                 stmt.executeUpdate()
             }
         }
+        db.bumpMangaData()
         if (emitSyncEvent) {
             db.onEntityChanged?.invoke(
                 "manga_note",
@@ -1307,6 +1381,7 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
                 it.setString(1, noteId); it.executeUpdate()
             }
         }
+        db.bumpMangaData()
         if (emitSyncEvent && existing != null) {
             db.onEntityChanged?.invoke(
                 "manga_note",
@@ -1352,6 +1427,16 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
         emit(notesForChapter(chapterId))
     }
 
+    override suspend fun notesForManga(mangaId: String): List<MangaNote> = db.withConnection { conn ->
+        conn.prepareStatement("SELECT * FROM manga_notes WHERE manga_id = ? ORDER BY created_at DESC, id").use { stmt ->
+            stmt.setString(1, mangaId)
+            stmt.executeQuery().use { rs -> buildList { while (rs.next()) add(mapNote(rs)) } }
+        }
+    }
+
+    override fun observeNotesForManga(mangaId: String): Flow<List<MangaNote>> =
+        db.mangaDataRevision.map { notesForManga(mangaId) }.distinctUntilChanged()
+
     override fun observeAllNotes(): Flow<List<MangaNote>> = flow {
         val notes = db.withConnection { conn ->
             conn.prepareStatement("SELECT * FROM manga_notes ORDER BY created_at DESC").use { stmt ->
@@ -1377,6 +1462,14 @@ class JdbcMangaNoteRepository(private val db: Database) : com.folio.reader.manga
 }
 
 class JdbcMangaStatisticsRepository(private val db: Database) : com.folio.reader.manga.MangaStatisticsRepository {
+
+    override fun observeStatistics(
+        exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>>
+    ): Flow<com.folio.reader.manga.MangaStatistics> = kotlinx.coroutines.flow.combine(
+        db.mangaDataRevision, db.sessionDataRevision,
+    ) { _, _ -> getStatistics(exclusions) }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.IO)
 
     override suspend fun getStatistics(
         exclusions: Set<Pair<com.folio.reader.statistics.Scope, String>>

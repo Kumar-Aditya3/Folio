@@ -5,11 +5,16 @@ package com.folio.reader.ui.reader
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
@@ -17,11 +22,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
@@ -38,7 +54,6 @@ import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.pageBlockBandFraction
 import com.folio.reader.ui.components.pageBlockChapterStops
 import com.folio.reader.ui.components.pageBlockSeekTarget
-import com.folio.reader.ui.components.pageFoxing
 import com.folio.reader.ui.components.sharedElementOrNoop
 import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTheme
@@ -93,6 +108,13 @@ fun ReaderScreen(
     /** Fired on the first text selection so the embedder/index can warm before an Echoes tap. */
     onPrewarmEchoes: () -> Unit = {},
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
+    /** In-reader search sheet: the field, its hits (nearest first) and whether a query is running. */
+    showSearch: Boolean = false,
+    searchQuery: String = "",
+    searchResults: List<com.folio.reader.database.SearchResult> = emptyList(),
+    searching: Boolean = false,
+    onSearchQueryChange: (String) -> Unit = {},
+    onCloseSearch: () -> Unit = {},
     onChapterChange: (Int) -> Unit,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -110,6 +132,7 @@ fun ReaderScreen(
     onScrollProgress: (Float) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit = {},
     onHighlightParagraph: ((chapterId: String, paragraphIndex: Int, selectedText: String) -> Unit)? = null,
+    onNoteSelection: ((chapterId: String, paragraphIndex: Int, selectedText: String, note: String) -> Unit)? = null,
     onRetryChapter: (() -> Unit)? = null,
     onLinkClick: ((String) -> Unit)? = null,
     onResolveImage: suspend (chapterHref: String, src: String) -> String? = { _, _ -> null },
@@ -154,7 +177,9 @@ fun ReaderScreen(
      * view model has already positioned to the target chapter), by issuing the same fraction seek
      * the progress bar and annotation jumps use.
      */
-    initialSeekFraction: Float? = null
+    initialSeekFraction: Float? = null,
+    onPreviewChapter: suspend (Int, Float, Int?) -> ReaderPassagePreview? = { _, _, _ -> null },
+    initialLocator: String? = null,
 ) {
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
@@ -228,6 +253,16 @@ fun ReaderScreen(
     com.folio.reader.ui.components.ReaderSystemBars(showControls)
 
     var showReaderPanel by remember { mutableStateOf(false) }
+    var showEchoesWorkspace by remember { mutableStateOf(false) }
+    var seekPreview by remember { mutableStateOf<Float?>(null) }
+    var returnOrigin by remember(position?.bookId) { mutableStateOf<ReadingPosition?>(null) }
+    var selectionNote by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    var selectionNoteText by remember { mutableStateOf("") }
+    var selectionNoteDraftKey by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    var selectionNoteAnchor by remember { mutableStateOf<Rect?>(null) }
+    var noteInWorkspace by remember { mutableStateOf(false) }
+    fun keepOrigin() { if (returnOrigin == null) returnOrigin = position }
+
     // Bottom progress bar taps request a seek to a chapter fraction.
     var seekReq by remember { mutableStateOf<Pair<Float, Long>?>(null) }
     var seekNonce by remember { mutableStateOf(0L) }
@@ -236,10 +271,15 @@ fun ReaderScreen(
     // chrome action because the OS selection toolbar covers anything drawn near
     // the text on phones.
     var pageSelection by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    var pageSelectionBounds by remember { mutableStateOf<com.folio.reader.ui.render.ReaderSelectionBounds?>(null) }
+    var readerBounds by remember { mutableStateOf(Rect.Zero) }
+    var pageViewport by remember { mutableStateOf(Rect.Zero) }
+    var selectionToolbarSize by remember { mutableStateOf(IntSize.Zero) }
+    val clipboard = LocalClipboardManager.current
     var clearSelTick by remember { mutableStateOf(0L) }
     // Highlight whose note is being written in the glass composer.
     var noteDraftFor by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(currentChapterIndex) { pageSelection = null }
+    LaunchedEffect(currentChapterIndex) { pageSelection = null; pageSelectionBounds = null }
     // Warm the Echoes embedder/index the moment the reader first selects text, so a later Echoes
     // tap is near-instant rather than paying a cold ONNX session + index build. Idempotent in the VM.
     val hasSelectionForEchoes = pageSelection?.third?.isNotBlank() == true
@@ -320,6 +360,24 @@ fun ReaderScreen(
     val chapterStops = remember(chapters) {
         pageBlockChapterStops(chapters.map { it.wordCount })
     }
+    var scrubPassage by remember(seekPreview) { mutableStateOf<ReaderPassagePreview?>(null) }
+    var scrubLoading by remember(seekPreview) { mutableStateOf(seekPreview != null) }
+    val previewProvider by rememberUpdatedState(onPreviewChapter)
+    LaunchedEffect(seekPreview, chapters) {
+        scrubPassage = null
+        val fraction = seekPreview
+        if (fraction == null) { scrubLoading = false; return@LaunchedEffect }
+        scrubLoading = true
+        try {
+            kotlinx.coroutines.delay(100)
+            val landing = pageBlockSeekTarget(chapterStops, fraction)
+            scrubPassage = previewProvider(landing.chapterIndex, landing.chapterFraction, null)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            scrubPassage = null
+        } finally { scrubLoading = false }
+    }
     // The span of the book the page surface is actually rendering: one chapter in
     // paged mode, the whole chapter window in continuous mode. The fraction the
     // surface reports — and the fraction a seek is given — are fractions of *that*
@@ -351,6 +409,12 @@ fun ReaderScreen(
         bandFraction = position?.chapterProgress?.toFloat()
             ?: if (totalPages > 0) (currentPage.toFloat() / totalPages).coerceIn(0f, 1f) else 0f,
     )
+    val tracePassages = remember(highlights, notes, chapters) {
+        val liveNotes = notes.filterNot { it.isDeleted }.mapTo(HashSet()) { it.id }
+        val marked = highlights.map { if (it.noteId != null && it.noteId !in liveNotes) it.copy(noteId = null) else it }
+        com.folio.reader.model.readingTrace(0f, (chapters.maxOfOrNull { it.spineIndex } ?: 0) + 1,
+            emptyList(), marked, chapters).passages
+    }
     val showChapterLine = settings.showChapterTitle && !currentChapter?.title.isNullOrBlank()
     // The "how much is left" readout, mode-aware. The leaf block is a shape, not a number, so
     // this is the numeral the reader asked for — and it is what was missing in continuous mode:
@@ -402,6 +466,7 @@ fun ReaderScreen(
     // and can reload content, so a foreign chapter is asked for once: the pending
     // jump keeps the latest fraction and lands it when the chapter is on screen.
     val seekToBookFraction: (Float) -> Unit = { bookTarget ->
+        keepOrigin()
         val landing = pageBlockSeekTarget(chapterStops, bookTarget)
         if (landing.chapterIndex in renderedSpan) {
             val start = chapterStops.getOrElse(renderedSpan.first) { 0f }
@@ -437,7 +502,7 @@ fun ReaderScreen(
         val target = "p:$seekParagraph"
         if (index != currentChapterIndex) {
             pendingJump = Triple(index, target, null)
-        } else if (seekParagraph > 0) {
+        } else {
             issueTargetSeek(target)
         }
         if (seedFraction > 0.0) jumpSeed = index to seedFraction
@@ -449,19 +514,9 @@ fun ReaderScreen(
     // into each other in opposite directions.
     val readerThemePreset = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
 
-    fun Color.hex(): String = "#" + toArgb().toUInt().toString(16).padStart(8, '0').drop(2)
     val appColors = FolioTheme.colors
-    val appIsDark = appColors.background.red * 0.2126f +
-            appColors.background.green * 0.7152f +
-            appColors.background.blue * 0.0722f < 0.45f
-    val overlayColors = com.folio.reader.ui.render.OverlayColors(
-        bg = appColors.surface.hex(),
-        fg = appColors.onSurface.hex(),
-        accent = appColors.primary.hex(),
-        surface = appColors.surfaceVariant.hex(),
-        isDark = appIsDark,
-        veilAlpha = FolioTheme.readerVeilAlpha
-    )
+    val overlayColors = readerOverlayColors()
+    val appIsDark = overlayColors.isDark
     val quickFontNames = remember(settings.customFonts) {
         (platformBaseReaderFonts() + settings.customFonts.map { it.name }).distinct()
     }
@@ -473,7 +528,7 @@ fun ReaderScreen(
     // any, else every chapter in spine order.
     val tocEntries = bookToc.ifEmpty { chapters.mapIndexed { index, ch -> BookTocRow(ch.title, index) } }
     val overlayHtml = readerOverlayHtml(
-        occludes = occludes,
+        occludes = false,
         showReaderPanel = showReaderPanel,
         showToc = showToc,
         showAnnotations = showAnnotations,
@@ -523,6 +578,14 @@ fun ReaderScreen(
     // annotations panel performs. Keyed on the id so it re-arms only for a new target, not
     // on every scroll tick.
     var jumpedToTargetHighlight by remember(targetHighlightId) { mutableStateOf(false) }
+    var jumpedToInitialLocator by remember(initialLocator) { mutableStateOf(false) }
+    LaunchedEffect(initialLocator, targetHighlightId, isLoadingContent, chapterHtml, currentChapterIndex) {
+        val locator = initialLocator ?: return@LaunchedEffect
+        if (targetHighlightId != null || jumpedToInitialLocator || isLoadingContent || chapterHtml.isBlank()) return@LaunchedEffect
+        val chapter = currentChapter ?: return@LaunchedEffect
+        jumpToLocation(chapter.spineIndex, chapter.id, locator)
+        jumpedToInitialLocator = true
+    }
     LaunchedEffect(targetHighlightId, highlights, isLoadingContent, chapterHtml) {
         val hid = targetHighlightId ?: return@LaunchedEffect
         if (jumpedToTargetHighlight) return@LaunchedEffect
@@ -537,7 +600,27 @@ fun ReaderScreen(
             bookmarks.any { it.chapterId == pos.chapterId && locatorsMatch(it.locator, pos.spotLocator()) }
         } ?: false
     }
-    val selectionConsumed: () -> Unit = { pageSelection = null; clearSelTick++ }
+    val selectionConsumed: () -> Unit = { pageSelection = null; pageSelectionBounds = null; clearSelTick++ }
+    fun beginSelectionNote(inWorkspace: Boolean) {
+        val selected = pageSelection ?: return
+        if (onNoteSelection == null) return
+        if (selectionNoteDraftKey != selected) selectionNoteText = ""
+        selectionNoteDraftKey = selected
+        selectionNote = selected
+        selectionNoteAnchor = pageSelectionBounds?.let { readerSelectionRect(it, pageViewport) }
+        noteInWorkspace = inWorkspace
+        if (inWorkspace) {
+            showReaderPanel = false
+            if (!showAnnotations) onToggleAnnotations()
+        }
+        selectionConsumed()
+    }
+    fun closeSelectionNote(cancel: Boolean = false) {
+        selectionNote = null
+        if (cancel) { selectionNoteDraftKey = null; selectionNoteText = "" }
+        if (noteInWorkspace && showAnnotations) onToggleAnnotations()
+        noteInWorkspace = false
+    }
     val openToc: () -> Unit = {
         val opening = !showToc
         onToggleToc()
@@ -555,7 +638,15 @@ fun ReaderScreen(
             if (showToc) onToggleToc()
             if (showAnnotations) onToggleAnnotations()
             if (showEchoes) onCloseEchoes()
+            if (showSearch) onCloseSearch()
         }
+    }
+    // The magnifier opens the search sheet. It is the same end-edge surface as Contents, so it has
+    // to close the reading-settings panel too — that one is local state here, which the view
+    // model's own mutual exclusion cannot reach.
+    val openSearchAction: () -> Unit = {
+        showReaderPanel = false
+        onSearchClick()
     }
     // Echoes opens from the current selection; the VM runs the cross-book lookup and closes the
     // other panels. The reader panel is local state here, so close it too.
@@ -564,18 +655,29 @@ fun ReaderScreen(
         if (!text.isNullOrBlank()) {
             showReaderPanel = false
             onOpenEchoes(text)
-            pageSelection = null
+            selectionConsumed()
         }
     }
 
     // Reader chrome is app-themed: the reading theme paints the page only. The
     // inherited palette is passed through untouched so the user's chosen app theme
     // survives into the bars, panels and in-page overlays.
+    // WebView pages cannot be captured by Haze. Use the translucent painted material,
+    // rather than sampling the app field or selecting an optical pass with no input.
+    com.folio.reader.ui.components.FolioSuppressibleBackdrop(suppress = true) {
     FolioTheme.MaterialTheme(darkTheme = appIsDark, colors = appColors) {
     androidx.compose.runtime.CompositionLocalProvider(
         com.folio.reader.ui.render.LocalOverlayHtml provides overlayHtml,
         com.folio.reader.ui.render.LocalOverlayAction provides { a ->
-            handleReaderOverlayAction(
+            if (a.startsWith("sel:")) {
+                when (a.removePrefix("sel:")) {
+                    "keep" -> pageSelection?.let { selected ->
+                        onHighlightParagraph?.invoke(selected.first, selected.second, selected.third); selectionConsumed()
+                    }
+                    "note" -> beginSelectionNote(true)
+                    "copy" -> pageSelection?.let { clipboard.setText(AnnotatedString(it.third)); selectionConsumed() }
+                }
+            } else handleReaderOverlayAction(
                 a = a,
                 settings = settings,
                 highlights = highlights,
@@ -615,7 +717,11 @@ fun ReaderScreen(
         // the composition, which is the only thing that stops Mirage's per-vsync clock — a
         // draw-time skip would leave a full-rate frame request alive behind an opaque page.
         com.folio.reader.ui.theme.FolioFieldOccluder()
-        Box(modifier = Modifier.fillMaxSize().background(Color(readerThemePreset.background))) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(readerThemePreset.background))
+            .onGloballyPositioned { readerBounds = it.boundsInWindow() }) {
+        val workspaceLayout = readerWorkspaceLayout(maxWidth, maxHeight, LocalDensity.current.fontScale)
+        val workspaceOpen = showToc || showAnnotations || showSearch || showReaderPanel || showEchoes || showEchoesWorkspace || (noteInWorkspace && selectionNote != null)
+        val reservedEnd = if (workspaceOpen && workspaceLayout.docked) workspaceLayout.dockWidth else 0.dp
         // The reader's chrome and in-reader panels wear the calm glass unless the
         // reader is in editorial styling: dimmed, hue-stripped light catches so the
         // islands stop reading as shiny and book-edge-tinted. Scoped to the reader
@@ -625,24 +731,12 @@ fun ReaderScreen(
         ) {
         // Main content - fills entire screen, overlays positioned absolutely
         if (currentChapter != null) {
-            val reservedEnd = if (occludes) 0.dp else when {
-                showToc -> 260.dp
-                showAnnotations -> 300.dp
-                showEchoes -> 320.dp
-                showReaderPanel -> 280.dp
-                else -> 0.dp
-            }
-            val contentInsets = if (occludes) {
-                PaddingValues(
-                    top = if (showControls) 56.dp else 0.dp,
-                    bottom = if (showControls && settings.showProgress) {
-                        if (showChapterLine) pageBlockChromeHeightWithChapter else pageBlockChromeHeight
-                    } else 0.dp,
-                    end = reservedEnd
-                )
-            } else {
-                PaddingValues(0.dp)
-            }
+            val chromeBottom = if (occludes && showControls && settings.showProgress)
+                (if (showChapterLine) pageBlockChromeHeightWithChapter else pageBlockChromeHeight) + 14.dp else 0.dp
+            val nativePaneBottom = if (occludes && workspaceOpen && !workspaceLayout.docked)
+                workspaceLayout.sheetHeight + 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp
+            val contentInsets = PaddingValues(top = if (occludes && showControls) 56.dp else 0.dp,
+                bottom = maxOf(chromeBottom, nativePaneBottom), end = reservedEnd)
             ChapterContent(
                 chapter = currentChapter,
                 html = chapterHtml,
@@ -650,7 +744,7 @@ fun ReaderScreen(
                 loadError = loadError,
                 coverPath = coverPath,
                 settings = settings,
-                enabled = !showToc && !showAnnotations,
+                enabled = workspaceLayout.docked || (!showToc && !showAnnotations),
                 onTap = onToggleControls,
                 onScrollFraction = onScrollProgress,
                 onLongPress = onHighlightParagraph,
@@ -659,7 +753,7 @@ fun ReaderScreen(
                     // Reveal the chrome so Highlight is within reach the moment the
                     // reader selects a passage. A cleared selection leaves the chrome
                     // as the reader left it; a centre tap still hides it.
-                    if (text != null) onShowControls()
+                    if (text != null && occludes) onShowControls()
                 },
                 clearSelectionRequest = clearSelTick,
                 highlights = highlights,
@@ -673,7 +767,8 @@ fun ReaderScreen(
                 onResolveResource = onResolveResource,
                 seekRequest = seekReq,
                 seekTargetRequest = seekTargetReq,
-                modifier = Modifier.fillMaxSize().padding(contentInsets),
+                modifier = Modifier.fillMaxSize().padding(contentInsets).onGloballyPositioned { pageViewport = it.boundsInWindow() },
+                onSelectionBounds = { pageSelectionBounds = it },
                 position = position,
                 onPageChange = { page, total ->
                     if (pageReported && page != currentPage) {
@@ -738,29 +833,10 @@ fun ReaderScreen(
             )
         }
 
-        // Foxing: the page's outer margins wear a little, and the wear concentrates
-        // on the edge the reader's thumb has been working, so the page looks handled
-        // rather than printed. It carries no pointer modifier, so it never steals a
-        // tap from the page, and it is skipped where the page is a heavyweight native
-        // window that paints over Compose layers — there it would cost a layer and
-        // never appear. Decorative page texture, so it is parked unless the reader
-        // opts into the editorial look; the calm default leaves the margins clean.
-        if (!occludes && settings.showProgress && settings.editorialReading) {
-            androidx.compose.foundation.layout.Spacer(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pageFoxing(
-                        fraction = bookFraction,
-                        paper = Color(readerThemePreset.background),
-                        ink = Color(readerThemePreset.primaryText)
-                    )
-            )
-        }
-
         // Eye-protection: a warm amber wash over the reading surface, painted
         // below the chrome so the controls stay neutral. Global comfort setting;
         // intensity scales the warmth. Decorative only (no pointer modifier), so
-        // like pageFoxing it never intercepts taps to the page beneath.
+        // it never intercepts taps to the page beneath.
         if (settings.eyeProtection) {
             androidx.compose.foundation.layout.Spacer(
                 modifier = Modifier
@@ -828,6 +904,7 @@ fun ReaderScreen(
             }
         ) {
             ReaderTopBar(
+                modifier = Modifier.padding(end = reservedEnd),
                 bookTitle = bookTitle,
                 showClock = settings.showClock,
                 occludes = occludes,
@@ -837,7 +914,7 @@ fun ReaderScreen(
                 isBookmarked = isBookmarked,
                 bookmarkColor = Color(readerThemePreset.bookmark),
                 onBackPress = onBackPress,
-                onSearchClick = onSearchClick,
+                onSearchClick = openSearchAction,
                 onBookmarkClick = onBookmarkClick,
                 onOpenToc = openToc,
                 onOpenAnnotations = openAnnotations,
@@ -851,7 +928,7 @@ fun ReaderScreen(
         // position carried by the material of the page itself. Same explicit spec
         // and Rule 19 skip as the top bar above.
         androidx.compose.animation.AnimatedVisibility(
-            visible = settings.showProgress && showControls,
+            visible = settings.showProgress && showControls && !workspaceOpen,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = if (chromeMotion) {
                 androidx.compose.animation.fadeIn(chromeSpec) +
@@ -876,64 +953,109 @@ fun ReaderScreen(
                 chapterStops = chapterStops,
                 pagesLeftLabel = if (settings.showProgress) pagesLeftLabel else null,
                 editorial = settings.editorialReading,
-                onSeek = seekToBookFraction
+                readingTraceId = position?.bookId ?: morphBookId,
+                readingTrace = (com.folio.reader.ui.components.LocalReadingTraces.current[position?.bookId ?: morphBookId ?: ""]
+                    ?: com.folio.reader.model.ReadingTrace()).copy(
+                    progress = bookFraction,
+                    passages = tracePassages),
+                onPreview = { seekPreview = it },
+                onSeek = seekToBookFraction,
+                onOpenMap = openToc,
             )
         }
 
-        // Left floating controls panel (skipped on occluding platforms — the
-        // heavyweight browser window would cover it; the top bar carries the actions).
         if (!occludes) {
-        // The rail's own row in the motion table. It used to be four literal 300 ms specs here,
-        // slower than the 220 ms chrome it belongs to and outside the reduce-motion contract
-        // entirely — the biggest gap the migration closes.
-        val railSpec = rememberMotionAnimation<Float>(MotionKey.ReaderRail)
-        val railSlide = rememberMotionAnimation<IntOffset>(MotionKey.ReaderRail)
-        androidx.compose.animation.AnimatedVisibility(
-            visible = showControls,
-            enter = androidx.compose.animation.slideInHorizontally(
-                initialOffsetX = { -it },
-                animationSpec = railSlide
-            ) + androidx.compose.animation.fadeIn(animationSpec = railSpec),
-            exit = androidx.compose.animation.slideOutHorizontally(
-                targetOffsetX = { -it },
-                animationSpec = railSlide
-            ) + androidx.compose.animation.fadeOut(animationSpec = railSpec),
-            modifier = Modifier.align(Alignment.CenterStart).statusBarsPadding()
-        ) {
-            ReaderFloatingRail(
-                pageSelection = pageSelection,
-                onHighlightParagraph = onHighlightParagraph,
-                onSelectionConsumed = selectionConsumed,
-                isBookmarked = isBookmarked,
-                bookmarkColor = Color(readerThemePreset.bookmark),
-                onBookmarkClick = onBookmarkClick,
-                onOpenToc = openToc,
-                onOpenAnnotations = openAnnotations,
-                onSearchClick = onSearchClick,
-                echoesEnabled = echoesEnabled,
-                onOpenEchoes = openEchoesAction
-            )
-        }
+            val selection = pageSelection
+            val selectionVisible = selection != null && !showToc && !showAnnotations && !showSearch && !showReaderPanel && !showEchoes
+            var lastSelection by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+            var lastSelectionAnchor by remember { mutableStateOf<Rect?>(null) }
+            if (selectionVisible) {
+                lastSelection = selection
+                lastSelectionAnchor = pageSelectionBounds?.let { readerSelectionRect(it, pageViewport) }
+            }
+                val anchor = lastSelectionAnchor
+                val gap = with(LocalDensity.current) { 24.dp.toPx() }
+                val toolbarModifier = if (anchor != null) {
+                    Modifier.align(Alignment.TopStart).offset {
+                        val point = readerSelectionToolbarPosition(anchor, pageViewport, selectionToolbarSize, gap)
+                        androidx.compose.ui.unit.IntOffset(point.x - readerBounds.left.roundToInt(), point.y - readerBounds.top.roundToInt())
+                    }
+                } else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 88.dp)
+                val origin = if (anchor != null && readerSelectionToolbarPosition(anchor, pageViewport, selectionToolbarSize, gap).y < anchor.top)
+                    TransformOrigin(.5f, 1f) else TransformOrigin(.5f, 0f)
+                AnimatedReaderSelectionTools(selectionVisible,
+                    toolbarModifier.onSizeChanged { if (it != IntSize.Zero) selectionToolbarSize = it }, origin) {
+                    val displayed = lastSelection
+                    if (displayed != null) ReaderSelectionBar(displayed.third,
+                        onHighlight = {
+                            if (selectionVisible) {
+                                onHighlightParagraph?.invoke(displayed.first, displayed.second, displayed.third)
+                                selectionConsumed()
+                            }
+                        },
+                        onNote = onNoteSelection?.let { { if (selectionVisible) beginSelectionNote(workspaceLayout.docked) } },
+                        onEchoes = if (echoesEnabled) openEchoesAction else null,
+                        onDismiss = selectionConsumed)
+                }
+            val preview = seekPreview
+            if (preview != null) {
+                val landing = pageBlockSeekTarget(chapterStops, preview)
+                ReaderNavigationPreview(chapters.getOrNull(landing.chapterIndex)?.title.orEmpty(),
+                    "${landing.chapterIndex + 1} / ${chapters.size}  ·  ${(preview * 100).roundToInt()}%",
+                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 92.dp),
+                    passage = scrubPassage?.text, loading = scrubLoading)
+            } else if (returnOrigin != null && showControls && selection == null) {
+                val origin = returnOrigin!!
+                ReaderReturnButton(chapterLabel(origin.spineIndex, origin.chapterId), onClick = {
+                    jumpToLocation(origin.spineIndex, origin.chapterId, origin.spotLocator())
+                    returnOrigin = null
+                }, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 88.dp))
+            }
+            selectionNote?.takeIf { !noteInWorkspace }?.let { selected ->
+                NoteComposerDialog(passage = selected.third, noteContent = selectionNoteText,
+                    onNoteChange = { selectionNoteText = it },
+                    onSave = {
+                        onNoteSelection?.invoke(selected.first, selected.second, selected.third, selectionNoteText.trim())
+                        selectionNote = null; selectionNoteDraftKey = null; selectionNoteText = ""; selectionConsumed()
+                    },
+                    onDismiss = { selectionNote = null },
+                    onCancel = { closeSelectionNote(true) }, anchor = selectionNoteAnchor, autoFocus = true)
+            }
         }
 
         // Side panels (scrim included): Compose overlays on Android; page-side
         // glass overlays on desktop (the heavyweight browser would cover any
         // Compose overlay).
+        val editingSelection = selectionNote
         ReaderSidePanels(
             occludes = occludes,
             showToc = showToc,
             showAnnotations = showAnnotations,
             showReaderPanel = showReaderPanel,
-            showEchoes = showEchoes,
+            showEchoes = showEchoes || showEchoesWorkspace,
+            echoesEnabled = echoesEnabled,
             echoesState = echoesState,
-            onCloseEchoes = onCloseEchoes,
+            onCloseEchoes = { showEchoesWorkspace = false; onCloseEchoes() },
             onOpenEcho = onOpenEcho,
+            showSearch = showSearch,
+            searchQuery = searchQuery,
+            searchResults = searchResults,
+            searching = searching,
+            onSearchQueryChange = onSearchQueryChange,
+            // A hit is a chapter, so it lands the way a Contents row does — and the sheet gets out
+            // of the way, because the reader asked to see the page, not the results.
+            onSearchResultClick = { hit ->
+                keepOrigin()
+                jumpToChapter(hit.spineIndex)
+                onCloseSearch()
+            },
+            onCloseSearch = onCloseSearch,
             tocEntries = tocEntries,
             currentChapterIndex = currentChapterIndex,
             currentFraction = chapterFrac.toFloat(),
-            onTocRowClick = { row -> jumpToChapter(row.chapterIndex, row.paragraph, row.fraction.toDouble()) },
+            onTocRowClick = { row -> keepOrigin(); jumpToChapter(row.chapterIndex, row.paragraph, row.fraction.toDouble()); onToggleToc() },
             onToggleToc = onToggleToc,
-            onToggleAnnotations = onToggleAnnotations,
+            onToggleAnnotations = { if (showAnnotations) { selectionNote = null; noteInWorkspace = false }; onToggleAnnotations() },
             bookmarks = bookmarks,
             highlights = highlights,
             notes = notes,
@@ -942,7 +1064,7 @@ fun ReaderScreen(
             onRemoveNote = onRemoveNote,
             onSetHighlightNote = onSetHighlightNote,
             chapterLabel = { spine, chapterId -> chapterLabel(spine, chapterId) },
-            onJumpToAnnotation = { kind, id -> jumpToAnnotation(kind, id) },
+            onJumpToAnnotation = { kind, id -> keepOrigin(); jumpToAnnotation(kind, id) },
             settings = settings,
             onSettingsChange = onSettingsChange,
             onDismissReaderPanel = { showReaderPanel = false },
@@ -953,10 +1075,54 @@ fun ReaderScreen(
             scopeControlEnabled = scopeControlEnabled,
             overriddenFields = overriddenFields,
             onWriteGlobal = onWriteGlobal,
-            onResetBook = onResetBook
+            onResetBook = onResetBook,
+            onSelectTool = { tool ->
+                showReaderPanel = false
+                showEchoesWorkspace = false
+                if (showToc) onToggleToc()
+                if (showAnnotations) onToggleAnnotations()
+                if (showSearch) onCloseSearch()
+                if (showEchoes) onCloseEchoes()
+                when (tool) {
+                    ReaderTool.Contents -> onToggleToc()
+                    ReaderTool.Saved -> onToggleAnnotations()
+                    ReaderTool.Search -> onSearchClick()
+                    ReaderTool.Settings -> showReaderPanel = true
+                    ReaderTool.Echoes -> showEchoesWorkspace = true
+                    ReaderTool.Pages -> Unit
+                }
+            },
+            layout = workspaceLayout,
+            noteEditor = if (noteInWorkspace && editingSelection != null) { {
+                val selected = editingSelection
+                ReaderNoteEditor(selected.third, selectionNoteText, { selectionNoteText = it },
+                    onSave = {
+                        onNoteSelection?.invoke(selected.first, selected.second, selected.third, selectionNoteText.trim())
+                        closeSelectionNote(true)
+                    }, onCancel = { closeSelectionNote(true) }, embedded = true, autoFocus = true)
+            } } else null,
+            contents = {
+                val origin = returnOrigin
+                val originIndex = origin?.let { saved -> chapters.indexOfFirst { it.id == saved.chapterId || it.spineIndex == saved.spineIndex } }
+                val originFraction = originIndex?.takeIf { it >= 0 }?.let {
+                    pageBlockBandFraction(chapterStops, it, it, origin!!.chapterProgress.toFloat())
+                }
+                BookReadingMap(position?.bookId ?: morphBookId.orEmpty(), chapters, tocEntries, chapterStops,
+                    currentChapterIndex, bookFraction, originFraction,
+                    (com.folio.reader.ui.components.LocalReadingTraces.current[position?.bookId.orEmpty()]
+                        ?: com.folio.reader.model.ReadingTrace()).copy(progress = bookFraction, passages = tracePassages),
+                    onPreviewChapter = onPreviewChapter,
+                    onRead = { chapter, fraction, paragraph ->
+                        keepOrigin()
+                        if (paragraph != null) jumpToChapter(chapter, paragraph, fraction.toDouble())
+                        else seekToBookFraction(pageBlockBandFraction(chapterStops, chapter, chapter, fraction))
+                        if (showToc) onToggleToc()
+                    }, onDismiss = { if (showToc) onToggleToc() })
+            }
         )
         }
         }
         }
+    }
     }
 }

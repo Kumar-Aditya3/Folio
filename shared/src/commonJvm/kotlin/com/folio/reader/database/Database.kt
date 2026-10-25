@@ -71,6 +71,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
     val sessionDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpSessionData() { sessionDataRevision.value += 1 }
 
+    /** Saved-passage changes invalidate reading traces without reloading book lists. */
+    val annotationDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun bumpAnnotationData() { annotationDataRevision.value += 1 }
+
     /**
      * Bumped after every write to `chapter_chunks` / `chapter_vectors`.
      *
@@ -1273,6 +1277,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 stmt.setLong(15, highlight.deletedAt?.toEpochMilliseconds() ?: 0L)
                 stmt.executeUpdate()
             }
+            bumpAnnotationData()
         }
     }
 
@@ -1299,6 +1304,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 stmt.setString(2, highlightId)
                 stmt.executeUpdate()
             }
+            bumpAnnotationData()
         }
     }
 

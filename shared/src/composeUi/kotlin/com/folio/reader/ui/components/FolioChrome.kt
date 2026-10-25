@@ -914,6 +914,10 @@ fun FolioSegmented(
                         size = Size(indicatorWidth.toPx(), size.height),
                         cornerRadius = radius,
                     )
+                    drawLine(accentInk.copy(alpha = .78f),
+                        Offset(indicatorLeft.toPx() + indicatorWidth.toPx() * .25f, size.height - 2.dp.toPx()),
+                        Offset(indicatorLeft.toPx() + indicatorWidth.toPx() * .75f, size.height - 2.dp.toPx()),
+                        1.5.dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round)
                 }
             },
     ) {

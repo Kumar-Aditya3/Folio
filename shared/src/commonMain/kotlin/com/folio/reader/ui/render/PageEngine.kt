@@ -56,10 +56,11 @@ object PageEngine {
      * (paged engine, desktop continuous, Android continuous).
      */
     val selectionWatchJs: String = """
+${ReaderSelectionGeometry.js}
 function folioReportSel(){
   var sel=window.getSelection();
   var text=sel?(sel.toString()||'').trim():'';
-  if(!sel||sel.isCollapsed||text.length<3){document.title='folio-selclear:'+(++nonce);return;}
+  if(!sel||sel.isCollapsed||text.length<3){window.__folioHideSelTools();document.title='folio-selclear:'+(++nonce);return;}
   // Read the paragraph now: a later tap collapses the selection and the anchor is gone.
   var sc0=null;try{sc0=sel.getRangeAt(0).startContainer;}catch(e){return;}
   var node=sc0?(sc0.nodeType===1?sc0:sc0.parentElement):null;
@@ -71,7 +72,7 @@ function folioReportSel(){
       while(blk&&blk.parentElement&&blk.parentElement!==document.body)blk=blk.parentElement;
       for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}
   }
-  document.title='folio-sel:'+idx+':'+encodeURIComponent(text.slice(0,500))+':'+(++nonce);
+  document.title=window.folioSelectionMessage(-1,idx,text,sel,++nonce);
 }
 window.__folioClearSel=function(){try{window.getSelection().removeAllRanges();}catch(e){}};
 document.addEventListener('selectionchange',function(){clearTimeout(window.__folioSelT);window.__folioSelT=setTimeout(folioReportSel,220);});

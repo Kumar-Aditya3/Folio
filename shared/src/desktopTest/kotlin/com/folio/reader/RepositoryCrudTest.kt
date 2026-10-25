@@ -66,7 +66,7 @@ class RepositoryCrudTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-crud-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-crud-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         books = JdbcBookRepository(database)

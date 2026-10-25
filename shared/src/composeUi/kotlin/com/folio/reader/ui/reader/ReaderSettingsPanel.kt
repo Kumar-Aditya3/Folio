@@ -29,8 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
@@ -50,10 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioChip
@@ -62,15 +61,12 @@ import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSegmented
 import com.folio.reader.ui.components.FolioSlider
 import com.folio.reader.ui.components.FolioSliderRow
-import com.folio.reader.ui.components.folioVeil
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.components.folioSettingsChoice
 import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.FolioSurfaceOpacity
-import com.folio.reader.ui.theme.readerPanelVeilAlpha
 
 /** Smallest reader text size in sp — unchanged; users liked the low end. */
 private const val MIN_FONT_SIZE_SP = 12f
@@ -105,7 +101,6 @@ fun ReaderSettingsPanel(
     onWriteGlobal: ((ReaderSettings) -> Unit)? = null,
     onResetBook: (() -> Unit)? = null
 ) {
-    var fontMenuOpen by remember { mutableStateOf(false) }
     var applyToAll by remember { mutableStateOf(false) }
     val apply: (ReaderSettings) -> Unit = { updated ->
         if (scopeControlEnabled && applyToAll && onWriteGlobal != null) onWriteGlobal(updated)
@@ -128,17 +123,10 @@ fun ReaderSettingsPanel(
     )
     val accentText = rememberLegibleAccent(FolioTheme.colors.primary)
 
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(280.dp)
-            .folioVeil(panelShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.spaceBeat),
-        verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
-    ) {
+    Column(Modifier.readerPanelBody()) {
+        if (!LocalReaderWorkspace.current) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -156,32 +144,27 @@ fun ReaderSettingsPanel(
             }
         }
 
-        // §4.2: every write states which setting it is — this book's snapshot or
-        // the defaults every book follows.
+        }
+
         if (scopeControlEnabled) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space1)
-            ) {
-                Text(
-                    "Applies to:",
-                    style = FolioTheme.typography.labelLarge,
-                    color = FolioTheme.colors.onSurfaceVariant
-                )
-                FolioChip(
-                    selected = !applyToAll,
-                    onClick = { applyToAll = false },
-                    label = "This book",
-                    modifier = Modifier.semantics { selected = !applyToAll }
-                )
-                FolioChip(
-                    selected = applyToAll,
-                    onClick = { applyToAll = true },
-                    label = "All books",
-                    modifier = Modifier.semantics { selected = applyToAll }
-                )
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReaderLocationLabel("APPLIES TO")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FolioChip(selected = !applyToAll, onClick = { applyToAll = false }, label = "This book",
+                        modifier = Modifier.semantics { selected = !applyToAll })
+                    FolioChip(selected = applyToAll, onClick = { applyToAll = true }, label = "All books",
+                        modifier = Modifier.semantics { selected = applyToAll })
+                }
             }
         }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())
+            .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.spaceBeat)
+            // Content padding, not container padding: the rows keep their y when the keyboard
+            // opens or closes, and only the scrollable range below the last row grows.
+            .padding(bottom = readerImeBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+        ReadingTypeSpecimen(settings)
 
         // ── TEXT ────────────────────────────────────────────────────────────
         PanelSection("Text") {
@@ -197,7 +180,7 @@ fun ReaderSettingsPanel(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
                     IconButton(
                         onClick = { apply(settings.copy(fontSize = (settings.fontSize - 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
-                        modifier = Modifier.background(FolioTheme.colors.surfaceVariant, FolioShapes.chip)
+                        modifier = Modifier.folioSettingsChoice(false, FolioShapes.chip)
                     ) {
                         Text("A−", style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface)
                     }
@@ -209,7 +192,7 @@ fun ReaderSettingsPanel(
                     )
                     IconButton(
                         onClick = { apply(settings.copy(fontSize = (settings.fontSize + 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
-                        modifier = Modifier.background(FolioTheme.colors.surfaceVariant, FolioShapes.chip)
+                        modifier = Modifier.folioSettingsChoice(false, FolioShapes.chip)
                     ) {
                         Text("A+", style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface)
                     }
@@ -225,83 +208,13 @@ fun ReaderSettingsPanel(
                     Text("Typeface", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
                     OverrideDot("fontFamily" in overriddenFields)
                 }
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { fontMenuOpen = true }
-                            .background(FolioTheme.colors.surfaceVariant, FolioShapes.inset)
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            actualFontName(settings.fontFamily),
-                            style = FolioTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
-                            fontFamily = com.folio.reader.ui.components.systemFontFamily(
-                                actualFontName(settings.fontFamily)
-                            )
-                        )
-                        Icon(
-                            Icons.Filled.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = FolioTheme.colors.onSurfaceVariant
-                        )
-                    }
-                    // No `glassPanel` on the content any more: `DropdownMenu`'s own
-                    // `Surface` paints `surfaceContainer` *under* this modifier, so the
-                    // glass panel was a second plate laid over a Material plate that was
-                    // still there — and on a dark face that plate was near-black. The
-                    // ColorScheme now feeds `surfaceContainer` from the atmosphere's
-                    // `veilFill`, which is the material this panel was reaching for.
-                    com.folio.reader.ui.components.FolioMenu(
-                        expanded = fontMenuOpen,
-                        onDismissRequest = { fontMenuOpen = false },
-                        modifier = Modifier.width(248.dp),
-                        // Reader-owned menu, but a pop-up: pinned opaque, off the knobs.
-                        fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
-                    ) {
-                        availableFonts.forEach { font ->
-                            // The label is the app UI font (uniform size, aligned
-                            // rows); the specimen keeps each option's own face at a
-                            // fixed size so the font's character stays visible
-                            // without its optical size dictating the row.
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
-                                    ) {
-                                        Text(
-                                            actualFontName(font),
-                                            style = FolioTheme.typography.bodyMedium,
-                                            fontWeight = if (font == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = if (font == settings.fontFamily) accentText
-                                            else FolioTheme.colors.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            "Ag",
-                                            fontFamily = com.folio.reader.ui.components.systemFontFamily(
-                                                actualFontName(font)
-                                            ),
-                                            fontSize = 18.sp,
-                                            lineHeight = 22.sp,
-                                            color = FolioTheme.colors.onSurfaceVariant,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.width(34.dp)
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    apply(settings.copy(fontFamily = font))
-                                    fontMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
+                ReaderTypefacePicker(
+                    selectedFont = settings.fontFamily,
+                    fonts = availableFonts,
+                    displayName = ::actualFontName,
+                    customFonts = settings.customFonts,
+                    onSelect = { apply(settings.copy(fontFamily = it)) },
+                )
             }
 
             // Font weight — a first-class in-reader lever now the bundled faces
@@ -554,9 +467,8 @@ fun ReaderSettingsPanel(
             }
 
             // Editorial styling — restores the theme's expressive page look (coloured
-            // headings, tinted links, page-edge foxing, accent progress chip) and the
-            // glossy, book-edge-tinted reader chrome. Off by default so the page and its
-            // chrome stay calm. Global reading-appearance preference, so it always writes
+            // headings, tinted links and accent progress). The clean command material
+            // stays consistent; its light catch follows the metallic-sheen setting. Global reading-appearance preference, so it always writes
             // the defaults row.
             Row(
                 modifier = Modifier
@@ -572,7 +484,7 @@ fun ReaderSettingsPanel(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Editorial styling", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurface)
                     Text(
-                        "Coloured headings, tinted links and glossier chrome",
+                        "Accent headings, links and reading progress",
                         style = FolioTheme.typography.bodySmall,
                         color = FolioTheme.colors.onSurfaceVariant
                     )
@@ -595,11 +507,11 @@ fun ReaderSettingsPanel(
             }
         }
 
-        // All settings — frosted glass pill
+        // Same embedded choice treatment as the other settings actions.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .glassPanel(FolioShapes.inset)
+                .folioSettingsChoice(false, FolioShapes.inset)
                 .clickable { onOpenFullSettings() }
                 .padding(vertical = FolioTokens.space1),
             horizontalArrangement = Arrangement.Center,
@@ -612,6 +524,7 @@ fun ReaderSettingsPanel(
             )
         }
     }
+}
 }
 
 /** A titled group: an editorial eyebrow over its rows, so the panel reads in movements. */
@@ -641,11 +554,26 @@ private fun SegmentedRow(
             OverrideDot(overridden)
         }
         val index = options.indexOfFirst { it.first == selectedValue }.coerceAtLeast(0)
-        FolioSegmented(
-            options = options.map { it.second },
-            selectedIndex = index,
-            onSelect = { i -> onSelect(options[i].first) },
-        )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (LocalDensity.current.fontScale > 1.2f || maxWidth < 260.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    options.chunked(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            row.forEach { (value, title) ->
+                                val chosen = value == selectedValue
+                                Box(Modifier.weight(1f).selectable(chosen, role = Role.RadioButton,
+                                    onClick = { onSelect(value) }).folioSettingsChoice(chosen, FolioShapes.inset)
+                                    .padding(horizontal = 10.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+                                    Text(title, style = FolioTheme.typography.labelLarge,
+                                        color = if (chosen) FolioTheme.colors.primary else FolioTheme.colors.onSurface)
+                                }
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            } else FolioSegmented(options.map { it.second }, index, { onSelect(options[it].first) })
+        }
     }
 }
 
@@ -680,5 +608,25 @@ private fun LabeledSlider(
             onValueChange = onValueChange,
             valueRange = valueRange
         )
+    }
+}
+
+/** An actual type specimen, with the current page ink, chosen face and current reading size. */
+@Composable
+private fun ReadingTypeSpecimen(settings: ReaderSettings) {
+    val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+    val custom = settings.customFonts.firstOrNull { it.name == settings.fontFamily }
+    val family = remember(settings.fontFamily, settings.customFonts) {
+        custom?.let { com.folio.reader.ui.theme.UiFonts.fromFile(it.fileName, it.weight) }
+            ?: com.folio.reader.ui.components.systemFontFamily(settings.fontFamily)
+    }
+    Column(Modifier.fillMaxWidth().clip(com.folio.reader.ui.theme.FolioSoftShape(14.dp))
+        .background(Color(theme.background)).border(.75.dp, Color(theme.divider), com.folio.reader.ui.theme.FolioSoftShape(14.dp))
+        .padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Aa  /  ${settings.fontSize.toInt()}", style = FolioTheme.typography.labelSmall,
+            color = Color(theme.secondaryText))
+        Text("A little room to get lost.", style = FolioTheme.typography.bodyLarge.copy(
+            fontSize = settings.fontSize.sp,
+            fontFamily = family), color = Color(theme.primaryText))
     }
 }

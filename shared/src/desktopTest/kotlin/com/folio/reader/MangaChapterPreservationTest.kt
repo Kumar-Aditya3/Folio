@@ -27,7 +27,7 @@ class MangaChapterPreservationTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-manga-preserve-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-manga-preserve-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         chapters = JdbcMangaChapterRepository(database)
     }

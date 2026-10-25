@@ -22,7 +22,7 @@ class SchemaInitTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-schema-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-schema-").toFile()
     }
 
     @AfterTest

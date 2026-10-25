@@ -59,7 +59,6 @@ import com.folio.reader.ui.theme.DAYLIGHT_RIM_TINT_MAX
 import com.folio.reader.ui.theme.DAYLIGHT_WASH_ALPHA_MAX
 import com.folio.reader.ui.theme.FolioAmbient
 import com.folio.reader.ui.theme.FolioAtmosphere
-import com.folio.reader.ui.theme.FolioGlassLens
 import com.folio.reader.ui.theme.FolioGlassTier
 import com.folio.reader.ui.theme.FolioPressFocal
 import com.folio.reader.ui.theme.folioPressFocalOrigin
@@ -78,7 +77,6 @@ import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.fieldColors
 import com.folio.reader.ui.theme.fieldDrift
 import com.folio.reader.ui.theme.fieldT
-import com.folio.reader.ui.theme.folioGlassLens
 import com.folio.reader.ui.theme.folioLiquidGlass
 import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.rememberShaderSupported
@@ -439,6 +437,7 @@ fun Modifier.folioRaised(
     // everything else to the panel knob — or a blurred surface ignores the
     // transparency slider from the inside.
     val paneWeightScale = com.folio.reader.ui.theme.glassWeightScale(false)
+    val optical = blurred && tier == FolioGlassTier.Overlay && shape is RoundedCornerShape
     val blurLayer = if (blurred) {
         Modifier
             .clip(shape)
@@ -473,25 +472,17 @@ fun Modifier.folioRaised(
                 // is a ninth of the fill cost at the same visual radius, not a thinner
                 // frost.
                 inputScale = FolioGlassCost.resolve(FolioGlassCost.pane, caps),
+                shape = shape,
+                optical = optical,
+                planeTint = fillColor,
+                alpha = if (optical) fillColor.alpha else 1f,
+                lightGain = sheenGain,
             )
     } else {
         Modifier
     }
-    // §16.2 the lens — the term that makes a pane read as glass rather than as a tint over
-    // the screen. It is the *displacement* of the real room at the edge, so it only belongs
-    // where there is a room showing through: an opaque raised lid has none, and an embedded
-    // pane's backdrop is its parent's own glass. See [folioGlassLens].
-    //
-    // Gated on `specular` with the rest of the material's light response, and on an AGSL
-    // platform, so the pref-off and pre-33 chains stay exactly what they were.
-    val roomPlate = if (effectiveTier == FolioGlassTier.Overlay) glassRoomPlate() else null
-    val lensable = pane && !embedded && caps.specular && rememberShaderSupported()
-    val lensing = lensable && roomPlate != null
-    // §18 — the edge, off the one ladder. An embedded raised slab takes the shorter
-    // `Inset` ramp; an overlay pane (a modal, a hero with the page running under it) takes
-    // `Pane`; everything in the page's own flow takes `Card`, which is the rung that
-    // matters most here because `folioRaised` is also the material under Home's blocks,
-    // Stats' blocks and the library's shelf items.
+    // Haze 2 now owns both refraction and the silhouette lighting.
+    val lensing = optical
     val edgeProfile = (
         when {
             embedded -> FolioEdgeRole.Inset
@@ -503,32 +494,6 @@ fun Modifier.folioRaised(
     // its alpha at 1 and only moves in colour, so a lid stays a lid.
     val raisedFoot = lerp(fillColor, folioFieldBottom(atmos), FOLIO_PLANE_ROOM_SHARE)
         .copy(alpha = fillColor.alpha * FOLIO_PLANE_RAMP_FOOT)
-    val lensLayer = if (lensing) {
-        val (lensLx, lensLy) = daylight.lightDirection()
-        Modifier.folioGlassLens(
-            plate = roomPlate,
-            shape = shape,
-            // The pane's **whole** plane, not a fraction of it. This used to be
-            // `fillColor.alpha * 0.35f`, on the reasoning that "the full alpha is already
-            // painted underneath, and re-applying it inside the lens would mute the one
-            // thing the pass exists to show". The premise is wrong: the lens does not
-            // composite *over* the plane, it composites over the *room* and then replaces
-            // the plane at its own alpha, so a third of the plane inside the band against
-            // the whole of it outside is a material step, and the step's boundary is a
-            // closed curve — the hero's reported "shape inside the card". Carrying the
-            // full plane makes the band the same material as the body, displaced.
-            tint = fillColor,
-            highlight = light,
-            lightX = lensLx,
-            lightY = lensLy,
-            // The metallic-sheen knob reaches the lens as the specular *catch* only:
-            // the refraction, dispersion and far wall are the glass, the catch is the
-            // metal, and only the metal dims.
-            specular = FolioGlassLens.specular * sheenGain,
-        )
-    } else {
-        Modifier
-    }
     return this
         .then(blurLayer)
         .then(
@@ -551,8 +516,7 @@ fun Modifier.folioRaised(
         // value inside a hard clip, which is the step function the whole §18 note is about.
         // It is also the material behind Home's and Stats' blocks and the library shelf
         // items, so it is the same box at a different scale. See [folioSurfacePlane].
-        .folioSurfacePlane(shape, fillColor, edgeProfile, raisedFoot)
-        .then(lensLayer)
+        .then(if (optical) Modifier else Modifier.folioSurfacePlane(shape, fillColor, edgeProfile, raisedFoot))
         .drawWithCache {
             // §18: the catch is laid *inside the feather*, not on the silhouette — a sheen
             // whose brightest row *is* the surface's outer edge is a second boundary cue
@@ -577,7 +541,7 @@ fun Modifier.folioRaised(
                 // a metal pane also catches the room's light on its chamfer. The broad wash
                 // stays off: a second light next to a rim is still what the eye reads as a
                 // nested rectangle.
-                if (effectiveTier == FolioGlassTier.Overlay) {
+                if (!lensing && effectiveTier == FolioGlassTier.Overlay) {
                     val (start, end) = daylightGradient(size, daylight, ambient.value)
                     val sheen = if (pane) {
                         Brush.linearGradient(
@@ -719,7 +683,12 @@ fun Modifier.folioPanel(
         .copy(alpha = fill.alpha * FOLIO_PLANE_RAMP_FOOT)
     return this
         .then(
-            if (embedded) {
+            // §21 light-mode shadows: the panel is translucent (`folioPanelPlane` tiers
+            // with the Cards and Sheets knob), so its 2dp shadow passed through its own
+            // fill as a dark band hugging the silhouette — the same nested-box artifact
+            // the veil carried, at resting-surface scale. Same rule as every other
+            // material now: only a near-lid casts (see FOLIO_CAST_SHADOW_MIN_ALPHA).
+            if (embedded || fill.alpha < FOLIO_CAST_SHADOW_MIN_ALPHA) {
                 Modifier
             } else {
                 Modifier.shadow(
@@ -963,6 +932,20 @@ fun folioVeilPlane(
 }
 
 /**
+ * The opacity a surface must reach before it may cast an elevation shadow.
+ *
+ * Android occludes a cast shadow by the caster's own alpha, so a translucent surface passes
+ * the shadow *through itself* — densest just inside the silhouette, under the rim, inside the
+ * hairline. That is the dark rounded band the eye reads as a nested box, and on a light face
+ * (where `shadowScale` is 1 and `shadowSpot` is near-black ink) it is glaring. The glass
+ * families are translucent by design now — panels tier to 0.62 blurred, pop-ups sit at
+ * `POPUP_GLASS` — so the honest rule is the one [folioRaised] already states: only a
+ * near-lid casts. A surface thinner than this carries no cast shadow; the feathered plane,
+ * the rim ramp and the blur carry its separation instead.
+ */
+private const val FOLIO_CAST_SHADOW_MIN_ALPHA = 0.97f
+
+/**
  * Glass over content: bars, floating navigation, sheets. Near-opaque by default on
  * purpose — Android cannot blur a separate native surface (the reader page), so
  * translucency alone would let text bleed through at full contrast. The glass is
@@ -1036,6 +1019,8 @@ fun Modifier.folioVeil(
      * user's transparency knob verbatim and thins all the way down.
      */
     castShadow: Boolean = true,
+    /** Small reader strips need shallow light catches rather than a pane's raised bevel. */
+    reliefGain: Float = 1f,
 ): Modifier {
     val atmos = FolioTheme.atmosphere
     val caps = LocalGlassCapabilities.current
@@ -1049,7 +1034,7 @@ fun Modifier.folioVeil(
     // §17 sheen, the in-flow top catch, the bevel's lit rim, the lens's specular and
     // the film's glints. The fill, hairline, blur, wall and shadow are untouched. The
     // calm-reader request folds straight into it so one multiply dims every catch.
-    val sheenGain = folioSheenGain() *
+    val sheenGain = folioSheenGain() * reliefGain.coerceIn(0f, 1f) *
         if (calmGlass) com.folio.reader.ui.theme.FOLIO_READER_CALM_SHEEN else 1f
     // The colour every light catch is drawn in. Normally the theme's rimLight, which
     // on dark reading themes carries the secondary hue — that is the "book colour" on
@@ -1138,7 +1123,7 @@ fun Modifier.folioVeil(
     // what lets the bottom of a card meet the bottom of the field instead of cutting
     // across it. Small on purpose: this is agreement with the room, not a second gradient.
     val planeFoot = lerp(fill, folioFieldBottom(atmos), FOLIO_PLANE_ROOM_SHARE)
-        .copy(alpha = fill.alpha * FOLIO_PLANE_RAMP_FOOT)
+        .copy(alpha = if (fill.alpha >= 1f) 1f else fill.alpha * FOLIO_PLANE_RAMP_FOOT)
     val daylight = LocalFolioDaylight.current
     // §17 living light, draw-phase read — see folioRaised. This is the layer
     // that makes liquid glass read as liquid at rest: the specular highlight
@@ -1152,7 +1137,8 @@ fun Modifier.folioVeil(
     // §20.1 (see folioRaised's note): the frost and the body thin with the
     // surface's own knob.
     val weightScale = com.folio.reader.ui.theme.glassWeightScale(fillAlpha != null)
-    val blurLayer = if (blurred) {
+    val optical = blurred && fill.alpha < .999f && tier == FolioGlassTier.Overlay && shape is RoundedCornerShape
+    val blurLayer = if (blurred && fill.alpha < .999f) {
         Modifier
             .clip(shape)
             .folioGlassEffect(
@@ -1209,50 +1195,16 @@ fun Modifier.folioVeil(
                 // device's [GlassCapabilities.budget] is spent on top of it. See
                 // [FolioGlassCost] for why this is a cost lever and not a look one.
                 inputScale = FolioGlassCost.resolve(glass.inputScale, caps),
+                shape = shape,
+                optical = optical,
+                planeTint = fill,
+                lightGain = sheenGain,
             )
     } else {
         Modifier
     }
-
-    // §16.2 the lens. This is the pass that was missing, and the reason the whole material
-    // read as "a shade of tint": nothing above or below this line *moves* the room. A fill,
-    // a hairline, a painted sheen and an additive film are all paint, and paint on a
-    // translucent plane is a tint however carefully it is mixed. Glass is a displacement —
-    // see [folioGlassLens].
-    //
-    // It needs the real room, which is what the §16 room rung now captures
-    // ([glassRoomPlate]); a null plate means there is nothing behind this surface to bend
-    // and the painted bevel below stands in unchanged.
-    //
-    // Only an overlay asks for it. An in-flow veil sits on the page rather than over content,
-    // so there is no room behind it to displace. (The second reason this comment used to give
-    // — that `glassRoomPlate` reads `backdrop.areas` *in composition*, so declining to call it
-    // spares the subscription — no longer applies: the plate now resolves its rung in the draw
-    // phase under `Snapshot.withoutReadObservation` and the composition read is gone. The tier
-    // decision stands on the first reason alone, which was always the real one.)
-    // See [FolioGlassTier].
-    val roomPlate = if (effectiveTier == FolioGlassTier.Overlay) glassRoomPlate() else null
-    val lensing = caps.specular && !embedded && rememberShaderSupported() && roomPlate != null
-    val lensLayer = if (lensing) {
-        val (lensLx, lensLy) = daylight.lightDirection()
-        Modifier.folioGlassLens(
-            plate = roomPlate,
-            shape = shape,
-            // The veil's **whole** plane. See the matching note in [folioRaised]: a
-            // fraction of it inside the band against all of it outside is a material step
-            // on a closed curve, and that curve is the "nested rounded rect" this file has
-            // chased across every tier. Full plane, displaced — same material, moved.
-            tint = fill,
-            highlight = catchLight,
-            lightX = lensLx,
-            lightY = lensLy,
-            // The metallic-sheen knob reaches the lens as the specular catch only;
-            // the refraction is the glass and does not dim. See [folioRaised].
-            specular = FolioGlassLens.specular * sheenGain,
-        )
-    } else {
-        Modifier
-    }
+    // Haze 2 now owns both refraction and the silhouette lighting.
+    val lensing = optical
 
     // Specular 2.0: the highlight tracks the virtual sun along the same axis
     // every other material uses, laid inside the shape rather than over its
@@ -1279,7 +1231,7 @@ fun Modifier.folioVeil(
     // a few dp inside it — invisible on a dark face, glaring on a light one, and the source
     // of the nested rounded rectangle every block on a light-mode Settings screen showed.
     // See [drawFolioInsetBrush].
-    val sheenLayer = if (caps.specular && effectiveTier == FolioGlassTier.Overlay) {
+    val sheenLayer = if (lensing) Modifier else if (caps.specular && effectiveTier == FolioGlassTier.Overlay) {
         Modifier.drawWithCache {
             val stack = folioEdgeStack(shape, edgeProfile)
             onDrawBehind {
@@ -1354,21 +1306,33 @@ fun Modifier.folioVeil(
     // included, which is where the user reported the pill boundary reading as a hard edge.
     // Struck on the edge stack's core instead, the whole bevel lands inside the feather:
     // the slab keeps its thickness and stops ringing its own outline.
-    val bevelLayer = if (caps.specular && !embedded && !lensing && effectiveTier == FolioGlassTier.Overlay) {
+    val bevelLayer = if (reliefGain >= .5f && caps.specular && !embedded && !lensing && effectiveTier == FolioGlassTier.Overlay) {
         Modifier.drawWithCache {
             val path = folioEdgeCorePath(shape, edgeProfile)
             val rimPx = FolioTokens.glassRimWidth.toPx()
             onDrawBehind {
                 val (start, end) = daylightGradient(size, daylight, ambient.value)
                 val light = catchLight
-                val wall = Brush.linearGradient(
-                    0f to atmos.shadowSpot.copy(
-                        alpha = atmos.shadowSpot.alpha * FolioTokens.glassDepthAlpha,
-                    ),
-                    0.45f to Color.Transparent,
-                    start = start,
-                    end = end,
-                )
+                // The wall is a shadow painted *inside* the surface — the one depth cue in
+                // the material that is literal darkness. On a dark face it is black on a
+                // near-black page and reads as the slab's far face; on paper it is
+                // near-black ink at 30% against a white catch, and it is the single most
+                // prominent of the "shadow-like structures" the light-mode report named —
+                // a dark band ringing the inside of every overlay surface. Paper loses
+                // the wall and keeps the lit rim plus the hairline ramp as its edge; the
+                // dark face keeps both.
+                val wall = if (atmos.isDark) {
+                    Brush.linearGradient(
+                        0f to atmos.shadowSpot.copy(
+                            alpha = atmos.shadowSpot.alpha * FolioTokens.glassDepthAlpha,
+                        ),
+                        0.45f to Color.Transparent,
+                        start = start,
+                        end = end,
+                    )
+                } else {
+                    null
+                }
                 val rim = Brush.linearGradient(
                     0f to Color.Transparent,
                     0.55f to light.copy(alpha = light.alpha * FolioTokens.glassRimCoreAlpha * sheenGain),
@@ -1379,7 +1343,9 @@ fun Modifier.folioVeil(
                 // Depth wall first, lit rim over it: on the sun side the light wins,
                 // on the anti-sun side the wall is all that shows, so the two never
                 // fight on the same edge.
-                drawPath(path, wall, style = Stroke(width = rimPx))
+                if (wall != null) {
+                    drawPath(path, wall, style = Stroke(width = rimPx))
+                }
                 drawPath(path, rim, style = Stroke(width = rimPx))
             }
         }
@@ -1423,7 +1389,7 @@ fun Modifier.folioVeil(
     // already records what its rim degenerates into. The film itself — the travelling glint
     // — is kept: that is light *on* the glass, which refraction does not supply.
     val refract = LocalFolioGuillocheActive.current && !lensing
-    val filmLayer = if (blurred && caps.specular) {
+    val filmLayer = if (blurred && caps.specular && !lensing) {
         val (filmLx, filmLy) = daylight.lightDirection()
         Modifier.folioLiquidGlass(
             // The surface's own fill is the accent: the film's body sheen should be made of
@@ -1492,7 +1458,21 @@ fun Modifier.folioVeil(
             // report. A lid still casts (nothing can leak through an opaque plane, so the
             // only part of the shadow that survives is the halo outside it, which is the part
             // that was ever doing any work); anything thinner does not.
-            if (embedded || tier == FolioGlassTier.InFlow || !castShadow) {
+            // **And the fourth case is opacity itself** (see FOLIO_CAST_SHADOW_MIN_ALPHA).
+            // The three guards above were keyed on *placement* — embedded, in-flow, caller
+            // opt-out — but the leak they all describe is a function of the fill's alpha,
+            // not of where the surface sits. An Overlay-tier veil at the panel's blurred
+            // tier (0.62) or a pop-up at POPUP_GLASS (0.70) passed 30–38% of its 10dp
+            // shadow through itself as a dark ring just inside the outline — the
+            // "nested box" that made light mode read as a stack of stacked rectangles.
+            // Only a near-lid casts now; everything thinner is separated by its plane,
+            // rim and blur instead.
+            if (
+                embedded ||
+                tier == FolioGlassTier.InFlow ||
+                !castShadow ||
+                fill.alpha < FOLIO_CAST_SHADOW_MIN_ALPHA
+            ) {
                 Modifier
             } else {
                 Modifier.shadow(
@@ -1513,8 +1493,7 @@ fun Modifier.folioVeil(
         // along the surface's own normal, so there is no depth at which the boundary can be
         // measured. The vertical decay survives inside it, now also carrying a little of the
         // page's own colour at the foot. See [folioSurfacePlane] and FOLIO_PLANE_ROOM_SHARE.
-        .folioSurfacePlane(shape, fill, edgeProfile, planeFoot)
-        .then(lensLayer)
+        .then(if (optical) Modifier else Modifier.folioSurfacePlane(shape, fill, edgeProfile, planeFoot))
         .then(sheenLayer)
         .then(bevelLayer)
         .then(filmLayer)

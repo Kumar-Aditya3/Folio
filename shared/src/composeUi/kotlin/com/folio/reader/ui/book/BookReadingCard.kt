@@ -166,20 +166,11 @@ internal fun BookDescription(description: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (com.folio.reader.ui.components.inFlowGlassActive()) {
-                    Modifier.folioVeil(
-                        FolioShapes.inset,
-                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                    )
-                } else {
-                    Modifier.folioPanel(FolioShapes.inset)
-                }
-            )
+
     ) {
         var expanded by remember { mutableStateOf(false) }
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(

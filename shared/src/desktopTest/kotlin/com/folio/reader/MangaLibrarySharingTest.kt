@@ -50,8 +50,8 @@ class MangaLibrarySharingTest {
             delegate.observeLibrary().onStart { librarySubscriptions++ }
 
         override fun observeAll(): Flow<List<MangaEntry>> = delegate.observeAll()
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) =
-            delegate.upsert(manga, emitSyncEvent)
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) =
+            delegate.upsert(manga, emitSyncEvent, preserveLibraryState)
 
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) =
             delegate.delete(mangaId, emitSyncEvent)
@@ -86,11 +86,11 @@ class MangaLibrarySharingTest {
         override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) =
             delegate.rename(id, name, emitSyncEvent)
 
-        override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean =
-            delegate.delete(id, emitSyncEvent)
+        override suspend fun delete(id: String, emitSyncEvent: Boolean, removeExclusiveManga: Boolean): Boolean =
+            delegate.delete(id, emitSyncEvent, removeExclusiveManga)
 
-        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) =
-            delegate.assign(mangaId, categoryIds, emitSyncEvent)
+        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean, addToLibrary: Boolean) =
+            delegate.assign(mangaId, categoryIds, emitSyncEvent, addToLibrary)
 
         override suspend fun categoriesFor(mangaId: String): Set<String> = delegate.categoriesFor(mangaId)
         override suspend fun get(id: String): MangaCategory? = delegate.get(id)

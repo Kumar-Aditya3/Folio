@@ -71,6 +71,8 @@ data class ReaderSettings(
     val mangaUpdateIntervalHours: Int = 0,
     /** §13.3: tint the Home hero from the current book's cover. Contrast-guarded, so on by default. */
     val homeCoverTint: Boolean = true,
+    /** Optional Home composition. Global only; existing installs retain the classic layout. */
+    val homeReadingDesk: Boolean = false,
     /**
      * Light the room from what is being read: the field, the colour pools, the
      * bars' glass and the dissolve under the nav all take the featured cover's
@@ -187,6 +189,9 @@ data class ReaderSettings(
      * being an index to answer from, so the flag only hides it, never fabricates it.
      */
     val semanticDiscovery: Boolean = true,
+    /** Home Discover is unchanged until a reader explicitly chooses another mode. */
+    val discoverMode: DiscoverMode = DiscoverMode.DEFAULT,
+    val discoverExtensionPackages: Set<String> = emptySet(),
     /**
      * Document reader (PDF and the generated reflowable formats) default page
      * mode — the compose layer's `DocumentReaderMode` name, kept as a string

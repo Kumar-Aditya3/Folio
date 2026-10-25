@@ -60,10 +60,9 @@ internal fun EchoesPanel(
     )
     Column(
         modifier = Modifier
-            .fillMaxHeight()
-            .width(320.dp)
-            .folioVeil(panelShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
+            .readerPanelBody()
     ) {
+        if (!LocalReaderWorkspace.current) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -89,6 +88,7 @@ internal fun EchoesPanel(
             }
         }
         HorizontalDivider(color = FolioTheme.colors.outlineVariant)
+        }
 
         when (state) {
             is EchoesState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.TopCenter) {
@@ -99,16 +99,30 @@ internal fun EchoesPanel(
                 contentAlignment = Alignment.TopCenter,
             ) {
                 Text(
-                    "No echoes found.",
+                    if (state == EchoesState.Idle) "Select a passage, then choose Echoes to follow its ideas across your library." else "No echoes found for this passage.",
                     style = FolioTheme.typography.bodyMedium,
                     color = FolioTheme.colors.onSurfaceVariant,
                 )
             }
             is EchoesState.Results -> LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 12.dp, top = 12.dp, end = 12.dp,
+                    bottom = 12.dp + readerImeBottomPadding(),
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (state.sourceText.isNotBlank()) item(key = "source-passage") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp)) {
+                        Text("FROM YOUR SELECTION", style = FolioTheme.typography.labelSmall,
+                            color = FolioTheme.colors.accentAnnotation)
+                        Text(state.sourceText, style = FolioTheme.typography.bodyMedium,
+                            color = FolioTheme.colors.onSurfaceVariant, maxLines = 3,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                        Text("Follow a passage · Back returns to your reading", style = FolioTheme.typography.labelSmall,
+                            color = FolioTheme.colors.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                    }
+                }
                 itemsIndexed(state.hits, key = { i, hit -> hit.chunkId ?: "${hit.bookId}:${hit.charStart}:$i" }) { _, hit ->
                     EchoFragmentCard(hit = hit, onOpenEcho = onOpenEcho)
                 }
@@ -123,7 +137,7 @@ private fun EchoFragmentCard(
     hit: EchoHit,
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit,
 ) {
-    val accent = rememberCoverAccent(hit.coverPath, FolioTheme.colors.accentDiscovery)
+    val accent = FolioTheme.colors.accentAnnotation
     // Resonance → presence. The floor is MIN_SIMILARITY (0.35); map the useful band to a gentle
     // fill so a stronger echo reads as a warmer, more solid fragment. The band is widened so a
     // strong echo is clearly more present than a faint one, and edged with a resonance-tied

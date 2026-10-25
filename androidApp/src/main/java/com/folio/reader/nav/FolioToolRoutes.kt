@@ -15,12 +15,13 @@ fun TagsRoute(
     navModel: FolioNavModelImpl,
     onBack: () -> Unit,
     onOpenBookDetail: (String) -> Unit,
-    onOpenReader: (String) -> Unit
+    onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit
 ) {
     val graph = navModel.graph
     TagManagerScreen(
         onBack = onBack,
-        onHighlightClick = { _, book -> onOpenReader(book.id) },
+        onHighlightClick = { highlight, book -> onOpenReader(com.folio.reader.model.ReaderPassageTarget(book.id,
+            highlight.spineIndex, highlight.startLocator, highlight.id)) },
         onBookClick = { book -> onOpenBookDetail(book.id) },
         viewModel = remember {
             TagManagerViewModel(
@@ -42,7 +43,7 @@ fun TagsRoute(
 fun QuotesRoute(
     navModel: FolioNavModelImpl,
     onBack: () -> Unit,
-    onOpenReader: (String) -> Unit,
+    onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit,
     onOpenMangaDetail: (String) -> Unit
 ) {
     val graph = navModel.graph
@@ -57,7 +58,8 @@ fun QuotesRoute(
     }
     QuoteBrowserScreen(
         onBack = onBack,
-        onQuoteClick = { item -> onOpenReader(item.book.id) },
+        onQuoteClick = { item -> onOpenReader(item.readerTarget) },
+        onOpenRelated = { onOpenReader(com.folio.reader.model.ReaderPassageTarget(it.bookId, it.spineIndex)) },
         onMangaNoteClick = { item -> onOpenMangaDetail(item.mangaId) },
         viewModel = remember {
             QuoteBrowserViewModel(
@@ -84,7 +86,7 @@ fun QuotesRoute(
 fun RevisitRoute(
     navModel: FolioNavModelImpl,
     onBack: () -> Unit,
-    onOpenReader: (String) -> Unit,
+    onOpenReader: (com.folio.reader.model.ReaderPassageTarget) -> Unit,
     onOpenMangaDetail: (String) -> Unit
 ) {
     val graph = navModel.graph
@@ -92,7 +94,7 @@ fun RevisitRoute(
         onBack = onBack,
         onItemClick = { item ->
             val manga = item.manga
-            if (manga != null) onOpenMangaDetail(manga.id) else item.book?.let { onOpenReader(it.id) }
+            if (manga != null) onOpenMangaDetail(manga.id) else item.readerTarget?.let(onOpenReader)
         },
         viewModel = remember {
             RevisitItemsViewModel(

@@ -2,6 +2,7 @@
 
 package com.folio.reader.ui.reader
 
+import com.folio.reader.ui.components.folioPaper
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +69,23 @@ import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.readerPanelVeilAlpha
+import com.folio.reader.ui.theme.readerPanelAlpha
+import com.folio.reader.ui.theme.readerVeilAlpha
+
+/** Shared reader preference resolution for the embedded-page overlay host. */
+@Composable
+internal fun readerOverlayColors(): com.folio.reader.ui.render.OverlayColors {
+    val colors = FolioTheme.colors
+    fun Color.hex(): String = "#" + this.toArgb().toUInt().toString(16).padStart(8, '0').drop(2)
+    return com.folio.reader.ui.render.OverlayColors(
+        bg = colors.surface.hex(), fg = colors.onSurface.hex(), accent = colors.primary.hex(),
+        surface = colors.surfaceVariant.hex(),
+        isDark = colors.background.red * .2126f + colors.background.green * .7152f + colors.background.blue * .0722f < .45f,
+        // CSS backdrop-filter can diffuse the embedded page itself.
+        veilAlpha = readerPanelAlpha(FolioTheme.readerVeilAlpha, canBlur = true),
+        sheen = com.folio.reader.ui.theme.folioSheenGain(),
+    )
+}
 
 private fun Int.argbHex(): String = "#" + toUInt().toString(16).padStart(8, '0').drop(2)
 
@@ -172,10 +191,9 @@ fun TOCSidebar(
     val accent = rememberLegibleAccent(FolioTheme.colors.primary)
     Column(
         modifier = Modifier
-            .fillMaxHeight()
-            .width(260.dp)
-            .folioVeil(tocShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
+            .readerPanelBody()
     ) {
+        if (!LocalReaderWorkspace.current) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -199,6 +217,7 @@ fun TOCSidebar(
             }
             HorizontalDivider(color = FolioTheme.colors.outlineVariant)
 
+        }
             // The row that contains a chapter. Navigation names only some of the spine
             // files, so the active row is the last one that starts at or before the
             // position on screen — for heading-less books several rows share one spine
@@ -209,7 +228,8 @@ fun TOCSidebar(
             // to the user — re-scrolling on chapter changes is what made it jump.
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
 
-            LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+            LazyColumn(state = listState, modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = readerImeBottomPadding())) {
                 itemsIndexed(entries, key = { _, row -> "${row.chapterIndex}:${row.paragraph}:${row.title}" }) { index, row ->
                     val isCurrent = index == activeRow
                     Row(
@@ -221,28 +241,16 @@ fun TOCSidebar(
                             .background(
                                 if (isCurrent) accent.copy(alpha = 0.12f) else Color.Transparent
                             )
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Current-chapter accent bar
-                        Box(
-                            Modifier
-                                .size(width = 3.dp, height = 18.dp)
-                                .background(
-                                    if (isCurrent) accent else Color.Transparent,
-                                    RoundedCornerShape(2.dp)
-                                )
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = row.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = FolioTheme.typography.bodySmall.copy(
-                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal
-                            ),
-                            color = if (isCurrent) accent else FolioTheme.colors.onSurface
-                        )
+                        ReaderLocationLabel("${index + 1}".padStart(2, '0'), Modifier.width(34.dp))
+                        Text(row.title, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            style = FolioTheme.typography.titleSmall,
+                            color = if (isCurrent) accent else FolioTheme.colors.onSurface,
+                            modifier = Modifier.weight(1f))
+                        if (isCurrent) Box(Modifier.padding(start = 8.dp).size(5.dp)
+                            .background(FolioTheme.colors.accentProgress, androidx.compose.foundation.shape.CircleShape))
                     }
                 }
             }
@@ -272,16 +280,10 @@ fun AnnotationsSidebar(
 
     Column(
         modifier = Modifier
-            .fillMaxHeight()
-            .width(300.dp)
-            .folioVeil(
-                rememberFolioSheetMorphShape(
-                    RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
-                ),
-                fillAlpha = FolioTheme.readerPanelVeilAlpha,
-            )
-            .padding(vertical = 16.dp)
+            .readerPanelBody()
+            .padding(vertical = 8.dp)
     ) {
+        if (!LocalReaderWorkspace.current) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -300,12 +302,14 @@ fun AnnotationsSidebar(
                 )
             }
         }
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        }
+        LazyColumn(modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = readerImeBottomPadding())) {
             if (bookmarks.isNotEmpty()) {
                 item { SectionHeader("Bookmarks (${bookmarks.size})", Icons.Filled.Bookmark) }
                 items(bookmarks, key = { "bm:${it.id}" }) { bookmark ->
                     AnnotationRow(
-                        title = bookmark.label ?: "Page ${bookmark.spineIndex + 1}",
+                        title = bookmark.label ?: "Saved place",
                         subtitle = chapterLabel(bookmark.spineIndex, bookmark.chapterId),
                         leadingIcon = Icons.Filled.Bookmark,
                         onClick = { onJump("bm", bookmark.id) },
@@ -313,12 +317,16 @@ fun AnnotationsSidebar(
                     )
                 }
             }
-            if (highlights.isNotEmpty()) {
-                item { SectionHeader("Highlights (${highlights.size})", Icons.Filled.Highlight) }
-                items(highlights.filter { !it.isDeleted }, key = { "hl:${it.id}" }) { highlight ->
+            val grouped = highlights.filter { !it.isDeleted }.sortedBy { it.spineIndex }
+                .groupBy { it.spineIndex to it.chapterId }
+            grouped.forEach { (chapter, passages) ->
+                item(key = "chapter:${chapter.first}:${chapter.second}") {
+                    SectionHeader(chapterLabel(chapter.first, chapter.second), Icons.Filled.Highlight)
+                }
+                items(passages, key = { "hl:${it.id}" }) { highlight ->
                     val linked = highlight.noteId?.let { noteById[it] }
                     AnnotationRow(
-                        title = highlight.selectedText.take(80).ifBlank { "(empty)" },
+                        title = highlight.selectedText.ifBlank { "Saved passage" },
                         subtitle = chapterLabel(highlight.spineIndex, highlight.chapterId),
                         accentColor = Color(highlight.effectiveColor),
                         note = linked?.content,
@@ -343,7 +351,7 @@ fun AnnotationsSidebar(
                 item { SectionHeader("Notes (${orphanNotes.size})", Icons.AutoMirrored.Filled.Notes) }
                 items(orphanNotes, key = { "nt:${it.id}" }) { note ->
                     AnnotationRow(
-                        title = note.content.take(80).ifBlank { "(empty)" },
+                        title = note.content.ifBlank { "Saved note" },
                         subtitle = chapterLabel(note.spineIndex, note.chapterId),
                         leadingIcon = Icons.AutoMirrored.Filled.Notes,
                         onClick = { onJump("nt", note.id) },
@@ -428,79 +436,29 @@ private fun AnnotationRow(
      */
     morphKey: Any? = null,
 ) {
-    val accent = rememberLegibleAccent(FolioTheme.colors.primary)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (morphKey != null) Modifier.sharedTextOrNoop(morphKey) else Modifier)
-            .clip(RoundedCornerShape(FolioTokens.radiusControl))
-            .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
-    ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (accentColor != null) {
-            Box(Modifier.width(3.dp).height(32.dp).background(accentColor, RoundedCornerShape(2.dp)))
-        } else if (leadingIcon != null) {
-            Icon(leadingIcon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+    val accent = FolioTheme.colors.accentAnnotation
+    Column(Modifier.fillMaxWidth()
+        .then(if (morphKey != null) Modifier.sharedTextOrNoop(morphKey) else Modifier)
+        .clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ReaderLocationLabel(subtitle)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            if (accentColor != null) Box(Modifier.width(2.dp).height(42.dp).background(accentColor))
+            else if (leadingIcon != null) Icon(leadingIcon, null, Modifier.size(18.dp), accent)
+            Text(title, style = FolioTheme.typography.bodyLarge, color = FolioTheme.colors.onSurface,
+                maxLines = 5, overflow = TextOverflow.Ellipsis)
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                style = FolioTheme.typography.bodySmall,
-                color = FolioTheme.colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(subtitle, style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant)
-        }
-        onNote?.let { action ->
-            TextButton(
-                onClick = action,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .size(width = 56.dp, height = 32.dp),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Text(
-                    text = if (note.isNullOrBlank()) "Note" else "Edit",
-                    style = FolioTheme.typography.labelSmall,
-                    color = accent
-                )
+        if (!note.isNullOrBlank()) Text(note, style = FolioTheme.typography.bodyMedium,
+            color = FolioTheme.colors.onSurfaceVariant, maxLines = 5, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (onNote != null) TextButton(onClick = onNote) {
+                Text(if (note.isNullOrBlank()) "Add note" else "Edit note", color = accent)
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, "Delete saved passage", Modifier.size(16.dp), FolioTheme.colors.onSurfaceVariant)
             }
         }
-        IconButton(onClick = onDelete) {
-            Icon(
-                Icons.Filled.Delete,
-                contentDescription = "Delete",
-                tint = FolioTheme.colors.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
-        if (!note.isNullOrBlank()) {
-            Row(
-                modifier = Modifier.padding(start = 13.dp, end = 12.dp, top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    Modifier
-                        .width(2.dp)
-                        .height(IntrinsicSize.Min)
-                        .background(accent, RoundedCornerShape(1.dp))
-                )
-                Text(
-                    text = note,
-                    style = FolioTheme.typography.bodySmall,
-                    color = FolioTheme.colors.onSurface,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+        HorizontalDivider(color = FolioTheme.colors.outlineVariant)
     }
 }

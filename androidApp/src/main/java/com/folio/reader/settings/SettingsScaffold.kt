@@ -1,11 +1,17 @@
 package com.folio.reader.settings
 
+import com.folio.reader.ui.components.FolioGlassPanel
+import com.folio.reader.ui.settings.FolioMaterialsPreview
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,18 +23,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
-import com.folio.reader.ui.components.folioVeil
-import com.folio.reader.ui.components.folioVeilPlane
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.settings.SettingsLivePreview
-import com.folio.reader.ui.theme.FolioShapes
-import com.folio.reader.ui.theme.FolioSurfaceContents
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.folioBarTopInset
 
 /** Route values for `settings/{category}` (§3.5 FOLIO_IMPLEMENTATION_SPEC). */
 object FolioSettingsCategory {
     const val THEMES = "themes"
+    const val DISCOVER = "discover"
 
     /**
      * Animations — how much the app and the living room move. Its own destination rather than a
@@ -77,7 +80,7 @@ object FolioSettingsCategory {
  * Shared shell for a pushed settings category screen: the masthead floats over
  * the panel, and the panel scrolls underneath it.
  *
- * The controls sit on a resting `folioPanel` so a category's settings read as a
+ * The controls sit on the shared diffuse glass panel so a category's settings read as a
  * grouped object rather than loose text floating on the wallpaper. An earlier
  * version dropped the surface entirely (the field showed straight through), which
  * left every control sitting on the direct background with nothing to belong to;
@@ -94,12 +97,50 @@ fun SettingsCategoryScaffold(
     title: String,
     onBack: () -> Unit,
     livePreviewSettings: ReaderSettings? = null,
-    content: @Composable () -> Unit
+    materialPreviewSettings: ReaderSettings? = null,
+    /**
+     * Optional plain-scrolling body, for a category whose content is one long surface rather than
+     * a handful of controls. Supplying this keeps [content]'s look exactly — one [FolioGlassPanel]
+     * of whatever height it needs — but scrolls it in a `Column` instead of a `LazyColumn`.
+     *
+     * Why: the default path puts the whole body in a single `item { FolioGlassPanel { content() } }`.
+     * A lazy item is measured with unbounded height, and once that child is taller than the
+     * viewport the rows past the fold are painted but stop answering touches. That is what made
+     * every Discover extension from Manhwa18 down unselectable at any scroll offset while the rows
+     * above it toggled. A `Column` inside `verticalScroll` places its children at full height and
+     * hit-tests through the scroll offset normally, so every row stays live — and, unlike emitting
+     * one lazy item per row, the surface still reads as one continuous panel.
+     */
+    scrollBody: (@Composable ColumnScope.() -> Unit)? = null,
+    content: @Composable () -> Unit = {},
 ) {
     val headerState = rememberFolioHeaderState()
     val topInset = folioBarTopInset()
 
     Box(modifier = Modifier.fillMaxSize()) {
+        if (scrollBody != null) {
+            // Same paddings, same arrangement, same backdrop wiring as the LazyColumn path below —
+            // only the scroller changes, so the surface looks identical and every row stays
+            // hit-testable however tall the body gets.
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(headerState.nestedScrollConnection)
+                    .folioBackdropSource()
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        start = FolioTokens.gutter,
+                        end = FolioTokens.gutter,
+                        top = topInset + FolioTokens.space2,
+                        bottom = FolioTokens.spaceMovement,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceMovement),
+            ) {
+                if (materialPreviewSettings != null) FolioMaterialsPreview(materialPreviewSettings)
+                if (livePreviewSettings != null) SettingsLivePreview(livePreviewSettings)
+                scrollBody()
+            }
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -117,39 +158,16 @@ fun SettingsCategoryScaffold(
             ),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceMovement)
         ) {
+            if (materialPreviewSettings != null) {
+                item { FolioMaterialsPreview(materialPreviewSettings) }
+            }
             if (livePreviewSettings != null) {
                 item { SettingsLivePreview(livePreviewSettings) }
             }
             // Controls read as a group on a resting panel rather than floating loose on the
             // wallpaper — the live preview above keeps its own surface and stays separate.
-            item {
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .folioVeil(
-                            FolioShapes.card,
-                            tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                        )
-                        .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space3),
-                    verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
-                ) {
-                    // This shell *is* a surface, so every control a category puts inside it
-                    // is nested by construction — which is why the category screens grew a
-                    // box-inside-a-box texture: a dropdown's panel, a theme tile's slab and a
-                    // colour editor's well each brought a full shadow and a full hairline to
-                    // draw a second and third rounded rect inside this one. Claiming the
-                    // content tells those materials where they are, so they keep their plane
-                    // and drop the depth cues that were describing a page that is not there.
-                    // One declaration here replaces the per-call-site fix that kept coming
-                    // undone (see SettingsPanelSync's own note). FolioSurfaceContents.
-                    //
-                    // §19: the shell also publishes the exact plane it is painted with
-                    // (folioVeilPlane mirrors folioVeil's own fill arithmetic), so a nested
-                    // surface is a floor of the shell's own material rather than a second
-                    // tier of fill — the division is the rim, not a plane change.
-                    FolioSurfaceContents(folioVeilPlane()) { content() }
-                }
-            }
+            item { FolioGlassPanel { content() } }
+        }
         }
 
         // Last, so it is on top: a bar with nothing behind it but the page's own

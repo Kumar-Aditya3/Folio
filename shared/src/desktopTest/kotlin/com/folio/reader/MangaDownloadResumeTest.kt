@@ -59,7 +59,7 @@ class MangaDownloadResumeTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-dl-resume-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-dl-resume-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         chapters = JdbcMangaChapterRepository(database)

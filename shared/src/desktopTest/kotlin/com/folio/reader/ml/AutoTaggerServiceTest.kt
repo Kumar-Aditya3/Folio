@@ -56,7 +56,7 @@ class AutoTaggerServiceTest {
 
     @BeforeEach
     fun setUp() = runBlocking {
-        tempRoot = createTempDir("folio-autotag-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-autotag-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         tagRepository = JdbcTagRepository(database)
         bookRepository = JdbcBookRepository(database)

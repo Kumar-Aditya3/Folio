@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import com.folio.reader.ui.theme.folioGuillocheQuiet
@@ -80,6 +81,7 @@ fun FolioEyebrow(
      * guard below measures the contrast the reader actually gets.
      */
     background: Color = FolioTheme.colors.surface,
+    signal: Boolean = false,
 ) {
     // The kicker floats on the bare field, so its ink is the lifted field-secondary tier
     // (see rememberFieldSecondaryInk), not the card-tier `onSurfaceVariant` that recedes
@@ -98,10 +100,14 @@ fun FolioEyebrow(
             legibleOn(accent, background, fieldInk, 4.5)
         }
     }
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+    if (signal) FolioSignalIndex(Modifier.height(14.dp), accent = ink)
     Text(
         text = text.uppercase(),
         style = FolioTheme.typography.labelSmall,
-        letterSpacing = 1.4.sp,
+        letterSpacing = 1.sp,
+        fontFamily = FontFamily.Monospace,
         color = ink,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -111,8 +117,9 @@ fun FolioEyebrow(
         // worst. Declaring it here rather than at 25 call sites means a new label cannot
         // be added without the protection. On the rare panel-hosted kicker this is a
         // harmless no-op: the panel is opaque and the plate is already invisible there.
-        modifier = modifier.folioGuillocheQuiet(),
+        modifier = Modifier.folioGuillocheQuiet(),
     )
+    }
 }
 
 /**
@@ -221,7 +228,7 @@ fun FolioFigure(
                 text = value,
                 // Tabular figures: the number is the point of a figure, and it must
                 // not re-width as digits change (count-ups, live streak/minutes).
-                style = valueStyle.copy(fontFeatureSettings = "tnum"),
+                style = valueStyle.copy(fontFeatureSettings = "tnum", fontFamily = FontFamily.Monospace),
                 color = tint,
                 maxLines = 1,
             )
@@ -303,14 +310,7 @@ fun folioDestinationAccent(
     key: String,
     fallback: Color = FolioTheme.colors.primary,
 ): Color {
-    val colors = FolioTheme.colors
-    return when (key.trim().lowercase()) {
-        "home", "books" -> colors.accentProgress
-        "library", "manga" -> colors.accentDiscovery
-        "stats", "documents" -> colors.accentStreak
-        "more", "settings" -> colors.accentAnnotation
-        else -> fallback
-    }
+    return fallback
 }
 
 /**

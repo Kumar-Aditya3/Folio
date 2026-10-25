@@ -17,8 +17,9 @@ data class OverlayColors(
     val accent: String,
     val surface: String,   // panel tint (#rrggbb)
     val isDark: Boolean,
-    /** Panel fill alpha, mirroring `FolioTheme.readerVeilAlpha` on the Compose side. */
-    val veilAlpha: Float = 1f
+    /** Panel fill alpha, mirroring `FolioTheme.readerPanelVeilAlpha` on the Compose side. */
+    val veilAlpha: Float = 1f,
+    val sheen: Float = 1f
 )
 
 object OverlayUi {
@@ -40,18 +41,19 @@ object OverlayUi {
         val alphaHex = ((c.veilAlpha.coerceIn(0f, 1f) * 255f).toInt()).toString(16)
             .padStart(2, '0')
         val fill = c.bg + alphaHex
-        val sheen = if (c.isDark)
-            "linear-gradient(rgba(255,255,255,0.14),rgba(255,255,255,0.04) 50%,rgba(255,255,255,0.08))"
+        val gain = c.sheen.coerceIn(0f, 1f)
+        val sheen = if (gain == 0f) "none" else if (c.isDark)
+            "linear-gradient(rgba(255,255,255,${.14f * gain}),rgba(255,255,255,${.04f * gain}) 50%,rgba(255,255,255,${.08f * gain}))"
         else
-            "linear-gradient(rgba(255,255,255,0.26),rgba(255,255,255,0.08) 50%,rgba(255,255,255,0.17))"
+            "linear-gradient(rgba(255,255,255,${.26f * gain}),rgba(255,255,255,${.08f * gain}) 50%,rgba(255,255,255,${.17f * gain}))"
         val hairline = if (c.isDark) "rgba(255,255,255,0.26)" else "rgba(0,0,0,0.16)"
-        val hi = if (c.isDark) "rgba(255,255,255,0.13)" else "rgba(255,255,255,0.60)"
-        // Near-opaque fill, no backdrop-filter blur: over an almost solid tint there
-        // is nothing left to blur, and the sheen + rim + shadow carry the glassy look.
+        val hi = "rgba(255,255,255,${(if (c.isDark) .13f else .60f) * gain})"
+        val diffusion = if (c.veilAlpha < .999f) "backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);" else ""
+        // The page host follows the same opacity and highlight preferences as native reader panels.
         return """
 <div data-act="close" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483500;"></div>
 <div data-kind="$kind" style="position:fixed;top:0;right:0;bottom:0;width:${width}px;max-width:88vw;z-index:2147483501;
- background-color:$fill;background-image:$sheen;
+ background-color:$fill;background-image:$sheen;$diffusion
  border-left:1px solid $hairline;color:${c.fg};font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;
  box-shadow:-18px 0 60px rgba(0,0,0,0.45), inset 1px 1px 0 $hi;
  display:flex;flex-direction:column;">

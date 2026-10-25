@@ -55,7 +55,8 @@ expect fun HtmlContentSurface(
      * plate on real paint, closing the blank-paper gap between the two. May fire
      * more than once (e.g. reloads); callers should treat it as idempotent.
      */
-    onContentReady: () -> Unit = {}
+    onContentReady: () -> Unit = {},
+    onSelectionBounds: ((ReaderSelectionBounds?) -> Unit)? = null,
 )
 
 /**

@@ -164,6 +164,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
                 stmt.executeBatch()
             }
         }
+        db.bumpBookData()
     }
 
     override suspend fun getChaptersForBook(bookId: String): List<Chapter> {
@@ -657,6 +658,7 @@ class JdbcHighlightRepository(private val db: Database) : HighlightRepository {
                 stmt.executeUpdate()
             }
         }
+        db.bumpAnnotationData()
         if (emitSyncEvent) db.getHighlight(highlightId)?.let { highlight ->
             db.onEntityChanged?.invoke("highlight", highlight.id, "UPSERT", repoJson.encodeToString(Highlight.serializer(), highlight))
         }
@@ -753,10 +755,12 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
 
     override suspend fun insertNote(note: Note, emitSyncEvent: Boolean) {
         db.withConnection { write(it, note) }
+        db.bumpAnnotationData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
     }
     override suspend fun updateNote(note: Note, emitSyncEvent: Boolean) {
         db.withConnection { write(it, note) }
+        db.bumpAnnotationData()
         if (emitSyncEvent) db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
     }
 
@@ -770,6 +774,7 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
                 stmt.executeUpdate()
             }
         }
+        db.bumpAnnotationData()
         if (emitSyncEvent) getNote(noteId)?.let { note ->
             db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
         }
@@ -785,6 +790,7 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
                 stmt.executeUpdate()
             }
         }
+        db.bumpAnnotationData()
         getNote(noteId)?.let { note ->
             db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
         }

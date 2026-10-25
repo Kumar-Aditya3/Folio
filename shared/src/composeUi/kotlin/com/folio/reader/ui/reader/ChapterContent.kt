@@ -78,6 +78,7 @@ fun ChapterContent(
     onWindowOpApplied: (nonce: Long) -> Unit = {},
     /** Fired on the browser surface's first real paint; drives the morph handoff. */
     onContentReady: () -> Unit = {},
+    onSelectionBounds: ((com.folio.reader.ui.render.ReaderSelectionBounds?) -> Unit)? = null,
 ) {
     val scrollState = rememberScrollState()
     val readerTheme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
@@ -285,7 +286,8 @@ fun ChapterContent(
                     onLinkClick = onLinkClick,
                     onResolveResource = onResolveResource,
                     onHighlightParagraph = onLongPress?.let { cb -> { chapterId, idx, text -> cb(chapterId, idx, text) } },
-                    onSelectionChanged = onSelectionChanged,
+                onSelectionChanged = onSelectionChanged,
+                onSelectionBounds = onSelectionBounds,
                     clearSelectionRequest = clearSelectionRequest,
                     seekRequest = seekRequest,
                     seekTargetRequest = seekTargetRequest,

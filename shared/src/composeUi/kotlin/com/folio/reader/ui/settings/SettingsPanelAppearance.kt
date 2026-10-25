@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
@@ -50,7 +51,12 @@ import com.folio.reader.ui.components.FolioSliderRow
 import com.folio.reader.ui.components.chromeBarFill
 import com.folio.reader.ui.components.chromeFill
 import com.folio.reader.ui.components.folioField
-import com.folio.reader.ui.components.folioPanel
+import com.folio.reader.ui.components.FolioMaterialShapes
+import com.folio.reader.ui.components.folioReadingDockGlass
+import com.folio.reader.ui.components.folioSettingsChoice
+import com.folio.reader.ui.components.FolioArtworkGlassScene
+import com.folio.reader.ui.components.folioRoomSource
+import com.folio.reader.ui.components.folioDataGlass
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassBlurred
 import com.folio.reader.ui.components.profile
@@ -105,12 +111,18 @@ fun AppearanceMockup(
     val shape = FolioShapes.card
     // The mockup is its own little app: nesting the theme means the miniature's
     // atmosphere is derived from the previewed palette, not the live one.
+    // The miniature illustrates materials at a canonical scale; the real settings remain accessible.
+    val illustrationDensity = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(illustrationDensity.density, 1f),
+    ) {
     FolioTheme.AppTheme(
         palette = if (isDark) AppPalette.DARK else AppPalette.LIGHT,
         colors = colors,
         isDark = isDark,
         opacity = opacity,
     ) {
+        FolioArtworkGlassScene(moving = false) {
         val atmos = FolioTheme.atmosphere
         Box(
             modifier = modifier
@@ -122,9 +134,10 @@ fun AppearanceMockup(
                 .clip(shape)
                 // The page. This is the gradient and its three accent pools, so a
                 // custom palette's background shows exactly as it will in the app.
-                .folioField()
                 .border(1.dp, atmos.hairline, shape)
         ) {
+            // An isolated, real ground source: the preview must never sample the settings page.
+            Box(Modifier.matchParentSize().folioRoomSource().folioField())
             // The page runs the miniature's full height and is deliberately *not*
             // inset for the bars — they are drawn over it, exactly as the real shell
             // overlays a scrolling library. This is the whole point: with nothing
@@ -166,6 +179,8 @@ fun AppearanceMockup(
                 focus = chromeFocus,
             )
         }
+        }
+    }
     }
 }
 
@@ -303,48 +318,21 @@ private fun MockTopBar(modifier: Modifier = Modifier, focus: Boolean) {
 @Composable
 private fun MockContentCard(modifier: Modifier = Modifier, focus: Boolean) {
     val colors = FolioTheme.colors
-    Column(
-        modifier = modifier
-            .folioVeil(
-                FolioShapes.inset,
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .focusRing(focus, FolioShapes.inset)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier.width(26.dp).height(38.dp)
-                    .background(colors.accentProgress, FolioShapes.plateSmall)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
-                    text = "Continue",
-                    style = FolioTheme.typography.labelMedium,
-                    color = colors.onSurface,
-                    maxLines = 1,
-                )
-                Box(Modifier.width(58.dp).height(5.dp).background(colors.outline, CircleShape))
-                Box(
-                    Modifier.width(46.dp).height(5.dp)
-                        .background(colors.accentStreak, CircleShape)
-                )
-            }
-        }
-        Box(
-            Modifier.fillMaxWidth().height(6.dp)
-                .background(colors.surfaceContainerHighest, CircleShape)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.fillMaxWidth().weight(1f)
+                .folioDataGlass(FolioShapes.inset)
+                .focusRing(focus, FolioShapes.inset).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Box(
-                Modifier.fillMaxWidth(0.62f).fillMaxHeight()
-                    .background(colors.primary, CircleShape)
-            )
+            Text("Glass", style = FolioTheme.typography.labelMedium, color = colors.onSurface, maxLines = 1)
+            Box(Modifier.fillMaxWidth().height(4.dp).background(colors.primary.copy(alpha = .45f), CircleShape))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            listOf(colors.accentDiscovery, colors.accentAnnotation, colors.primary).forEach {
-                Box(Modifier.size(width = 24.dp, height = 9.dp).background(it, FolioShapes.chip))
-            }
+        Box(Modifier.fillMaxWidth().height(72.dp)
+            .folioReadingDockGlass(FolioMaterialShapes.dock, colors.accentProgress)
+            .focusRing(focus, FolioMaterialShapes.dock), contentAlignment = Alignment.Center) {
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, "Reading glass preview",
+                tint = colors.onSurface, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -515,6 +503,72 @@ fun TransparencySettingsPanel(
             readerTheme = settings.customTheme ?: Theme.getPreset(settings.themeId),
             focus = focus,
         )
+        Text(
+            text = "Lower opacity lets the room show through. At 100%, surfaces are solid.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+
+        // One knob for the app's chrome, not two. The masthead and the floating capsule are
+        // the same surface at opposite ends of the window (FolioChromeMaterial), and two
+        // sliders for one material is where the split actually lived: the shipped defaults
+        // were 0.35 for the bar against 0.9 for the capsule, so a reader who never touched
+        // either still got a top bar with no surface on it over a clearly defined pill. The
+        // writes stay in lockstep across both persisted fields, so an old settings blob keeps
+        // loading and the pair can never disagree again.
+        OpacityRow(
+            label = "App bars",
+            value = settings.navBarOpacity,
+            accent = colors.accentDiscovery,
+            onFocus = { focus = if (it) MockupFocus.TOP_BAR else MockupFocus.NONE },
+            onChange = {
+                onSettingsChange(settings.copy(navBarOpacity = it, topBarOpacity = it))
+            },
+        )
+        OpacityRow(
+            label = "Panels & cards",
+            value = settings.panelOpacity,
+            accent = colors.primary,
+            onFocus = { focus = if (it) MockupFocus.PANEL else MockupFocus.NONE },
+            onChange = { onSettingsChange(settings.copy(panelOpacity = it)) },
+        )
+        Text(
+            "Changes More, settings sections, statistics, Library heroes and reading actions. " +
+                "100% makes these surfaces solid. Printed pages and quote paper stay matte.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        OpacityRow(
+            label = "In-reader controls",
+            value = settings.readerChromeOpacity,
+            accent = colors.accentStreak,
+            onFocus = { focus = if (it) MockupFocus.READER else MockupFocus.NONE },
+            onChange = { onSettingsChange(settings.copy(readerChromeOpacity = it)) },
+        )
+        Text(
+            text = "In-reader bars, the side rail and the reader's own sheets. 100% is " +
+                "fully solid. Sheets keep more body over book pages without blur; low values trade legibility " +
+                "for immersion.",
+            style = FolioTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+
+        TextButton(
+            onClick = {
+                onSettingsChange(
+                    settings.copy(
+                        // Both chrome fields to the one designed chrome point. Resetting the
+                        // bar to BAR_GLASS and the capsule to NAV_GLASS is what restored the
+                        // split the "App bars" slider exists to remove.
+                        topBarOpacity = FOLIO_CHROME_GLASS,
+                        navBarOpacity = FOLIO_CHROME_GLASS,
+                        panelOpacity = FolioSurfaceOpacity.PANEL_GLASS,
+                        readerChromeOpacity = 1f,
+                    )
+                )
+            }
+        ) { Text("Reset to designed values") }
+
         // §16: the liquid glass switch. It is a flag, not a fifth slider: the
         // fill alphas below govern the fills either way, and the effect stack
         // (blur, specular, grain) is one yes/no the device either can carry or
@@ -530,9 +584,8 @@ fun TransparencySettingsPanel(
                     color = colors.onSurface,
                 )
                 Text(
-                    text = "Blur, daylight sheen and grain on bars, the capsule " +
-                        "and sheets, on devices that can carry them. The sliders " +
-                        "below keep governing how solid each surface is.",
+                    text = "Optical glass on reading controls and soft diffusion on panels, " +
+                        "on supported devices. Opacity controls work with effects on or off.",
                     style = FolioTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )
@@ -694,68 +747,6 @@ fun TransparencySettingsPanel(
                 },
             )
         }
-        Text(
-            text = "Drag a slider to highlight the surface it controls in the preview. " +
-                "Each value is the surface's own opacity: 100% is solid and nothing " +
-                "behind it shows through, while the designed glass look sits partway " +
-                "along — which is where “Reset” puts it.",
-            style = FolioTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-        )
-
-        // One knob for the app's chrome, not two. The masthead and the floating capsule are
-        // the same surface at opposite ends of the window (FolioChromeMaterial), and two
-        // sliders for one material is where the split actually lived: the shipped defaults
-        // were 0.35 for the bar against 0.9 for the capsule, so a reader who never touched
-        // either still got a top bar with no surface on it over a clearly defined pill. The
-        // writes stay in lockstep across both persisted fields, so an old settings blob keeps
-        // loading and the pair can never disagree again.
-        OpacityRow(
-            label = "App bars",
-            value = settings.navBarOpacity,
-            accent = colors.accentDiscovery,
-            onFocus = { focus = if (it) MockupFocus.TOP_BAR else MockupFocus.NONE },
-            onChange = {
-                onSettingsChange(settings.copy(navBarOpacity = it, topBarOpacity = it))
-            },
-        )
-        OpacityRow(
-            label = "Cards and sheets",
-            value = settings.panelOpacity,
-            accent = colors.primary,
-            onFocus = { focus = if (it) MockupFocus.PANEL else MockupFocus.NONE },
-            onChange = { onSettingsChange(settings.copy(panelOpacity = it)) },
-        )
-        OpacityRow(
-            label = "In-reader controls",
-            value = settings.readerChromeOpacity,
-            accent = colors.accentStreak,
-            onFocus = { focus = if (it) MockupFocus.READER else MockupFocus.NONE },
-            onChange = { onSettingsChange(settings.copy(readerChromeOpacity = it)) },
-        )
-        Text(
-            text = "In-reader bars, the side rail and the reader's own sheets. 100% is " +
-                "fully solid so nothing bleeds through; low values trade legibility " +
-                "for immersion.",
-            style = FolioTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-        )
-
-        TextButton(
-            onClick = {
-                onSettingsChange(
-                    settings.copy(
-                        // Both chrome fields to the one designed chrome point. Resetting the
-                        // bar to BAR_GLASS and the capsule to NAV_GLASS is what restored the
-                        // split the "App bars" slider exists to remove.
-                        topBarOpacity = FOLIO_CHROME_GLASS,
-                        navBarOpacity = FOLIO_CHROME_GLASS,
-                        panelOpacity = FolioSurfaceOpacity.PANEL_GLASS,
-                        readerChromeOpacity = 1f,
-                    )
-                )
-            }
-        ) { Text("Reset to designed values") }
 
     }
 }
@@ -925,7 +916,7 @@ private fun RoleRow(role: ThemeRole, argb: Int, selected: Boolean, onClick: () -
         modifier = Modifier
             .fillMaxWidth()
             .clip(FolioShapes.inset)
-            .then(if (selected) Modifier.folioPanel(FolioShapes.inset, accent = colors.primary) else Modifier)
+            .then(if (selected) Modifier.folioSettingsChoice(true, FolioShapes.inset) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -979,7 +970,7 @@ private fun ColorEditor(argb: Int, onChange: (Int) -> Unit) {
     val colors = FolioTheme.colors
     val hsv = remember(argb) { argbToHsv(argb) }
     Column(
-        modifier = Modifier.fillMaxWidth().folioPanel(FolioShapes.inset).padding(12.dp),
+        modifier = Modifier.fillMaxWidth().folioSettingsChoice(false, FolioShapes.inset).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1034,7 +1025,7 @@ private fun SeedChip(palette: AppPalette, onClick: () -> Unit) {
             .width(74.dp)
             .clip(FolioShapes.inset)
             .clickable(onClick = onClick)
-            .folioPanel(FolioShapes.inset)
+            .folioSettingsChoice(false, FolioShapes.inset)
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {

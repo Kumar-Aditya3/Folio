@@ -2,6 +2,7 @@
 
 package com.folio.reader.ui.manga
 
+import com.folio.reader.ui.components.*
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -118,14 +119,7 @@ internal fun CollectionRow(
     }
 }
 
-/**
- * The featured manga entry: a wide, image-led composition where the cover sits at
- * `coverFeature` beside its own typography and throws a halo onto the page behind
- * it. Mirrors [FeaturedShelfEntry] for books so the manga shelf has the same
- * visual hierarchy — the one you're reading comes forward. Its rim carries the
- * same travelling light, but against `accentDiscovery` rather than the progress
- * hue, so the two shelves' heroes are told apart by their edges.
- */
+/** Featured reading jacket: a larger physical cover on a softly lit, defined surface. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FeaturedMangaShelfEntry(
@@ -147,30 +141,20 @@ fun FeaturedMangaShelfEntry(
     val interaction = rememberFolioInteraction()
     var menuOpen by remember { mutableStateOf(false) }
     val inProgress = progress > 0f && progress < 1f
-    val tileShape = rememberFolioShape(manga.id.hashCode(), FolioShapeClass.CARD)
+    FolioArtworkScene(FolioArtwork("manga:${manga.id}", manga.coverPath, manga.sourceId, manga.thumbnailUrl), Modifier.fillMaxWidth()) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .folioPressable(interaction, scaleTo = 0.985f)
-            .folioRaised(
-                shape = tileShape,
-                accent = accent,
-                fill = FolioTheme.atmosphere.paneFill(),
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .folioThemeRim(
-                shape = tileShape,
-                counterAccent = FolioTheme.colors.accentDiscovery,
-                velocity = LocalFolioScrollVelocity.current,
-                parkedAt = progress,
-            )
+            .folioShelfHero(accent)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
                 onLongClick = { if (isSelectionMode) onLongClick() else menuOpen = true },
             )
-            .folioRightClick { if (!isSelectionMode) menuOpen = true },
+            .folioRightClick { if (!isSelectionMode) menuOpen = true }
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MangaCoverPlate(
@@ -182,7 +166,7 @@ fun FeaturedMangaShelfEntry(
                 .sharedElementOrNoop(FolioSharedKeys.mangaCover(manga.id))
                 // The shelf's lamp sits behind its featured cover.
                 .folioLampSource(),
-            width = FolioTokens.coverFeature,
+            width = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) 80.dp else 124.dp,
             halo = accent,
             haloStrength = haloStrength,
             elevation = FolioTokens.elevationRaised,
@@ -218,7 +202,7 @@ fun FeaturedMangaShelfEntry(
         )
         Spacer(Modifier.width(FolioTokens.space4))
         Column(modifier = Modifier.weight(1f)) {
-            FolioEyebrow("Reading", accent = accent)
+            FolioEyebrow("Reading now", accent = accent)
             Spacer(Modifier.height(3.dp))
             Text(
                 text = manga.title,
@@ -235,21 +219,21 @@ fun FeaturedMangaShelfEntry(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(FolioTokens.space2))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
                     text = "${(progress * 100).toInt()}%",
-                    style = FolioTheme.typography.titleSmall,
-                    color = accent,
+                    style = FolioTheme.typography.titleMedium,
+                    color = FolioTheme.colors.onSurface,
                 )
                 if (unreadCount > 0) {
-                    Spacer(Modifier.width(FolioTokens.space2))
                     Text(
                         text = "$unreadCount unread",
                         style = FolioTheme.typography.bodySmall,
                         color = FolioTheme.colors.accentDiscovery,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -267,6 +251,7 @@ fun FeaturedMangaShelfEntry(
             onMarkRead = onMarkRead,
             onRemove = onRemove,
         )
+    }
     }
 }
 

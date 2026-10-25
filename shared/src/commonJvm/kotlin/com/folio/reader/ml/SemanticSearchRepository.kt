@@ -4,6 +4,9 @@ import com.folio.reader.database.ChunkMeta
 import com.folio.reader.database.ChunkRepository
 import com.folio.reader.database.SearchRepository
 import com.folio.reader.database.SearchResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -63,7 +66,7 @@ data class SemanticHit(
  *
  * The index is a preloaded flat matrix, not a per-query database read: the plan requires
  * the scan to be ready when the query arrives, not built when it does. [preload] is
- * therefore called when the search screen opens, and [release] when it closes.
+ * performed on an actual semantic query; opening an empty/title filter does no ML work.
  */
 class SemanticSearchRepository(
     private val searchRepository: SearchRepository,
@@ -159,12 +162,12 @@ class SemanticSearchRepository(
      * index is deliberately *not* released here — it is small and staying resident is what makes
      * a reopen fast — but the embedder session is large and must not outlive the interaction.
      */
-    suspend fun releaseEmbedder() = embedderMutex.withLock {
-        cachedEmbedder?.let { runCatching { it.close() } }
-        cachedEmbedder = null
-        // Drop the memoized query vector too: a model swap would otherwise reuse an embedding
-        // produced by the previous model for an identical query string.
-        lastQueryEmbed = null
+    suspend fun releaseEmbedder() = withContext(dispatcher) {
+        embedderMutex.withLock {
+            cachedEmbedder?.let { runCatching { it.close() } }
+            cachedEmbedder = null
+            lastQueryEmbed = null
+        }
     }
 
     /**
@@ -246,7 +249,11 @@ class SemanticSearchRepository(
                 val maxCharEnd = HashMap<String, Int>()
                 val bookKeys = HashMap<String, Int>()
                 var loaded = 0
+                val loadContext = coroutineContext
                 chunkRepository.forEachVectorMetadata(model.id, model.dims, bookId) { meta, vector ->
+                    // This callback runs while JDBC holds the same connection a book needs.
+                    // Cancellation must release it before decoding the rest of the library.
+                    loadContext.ensureActive()
                     built.add(meta.id, vector, bookKeys.getOrPut(meta.bookId) { bookKeys.size })
                     metaById[meta.id] = meta
                     val key = chapterKey(meta.bookId, meta.chapterId)
@@ -270,6 +277,7 @@ class SemanticSearchRepository(
                 loadedScope = bookId
                 true
             }.getOrElse {
+                if (it is CancellationException) throw it
                 // Leave the index unset so a later call can retry rather than caching the failure.
                 index = null
                 chunkById = emptyMap()

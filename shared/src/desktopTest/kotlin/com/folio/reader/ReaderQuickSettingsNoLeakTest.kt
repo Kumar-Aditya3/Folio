@@ -49,7 +49,7 @@ class ReaderQuickSettingsNoLeakTest {
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        tempRoot = createTempDir("folio-quick-settings-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-quick-settings-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         bookRepo = JdbcBookRepository(database)
         positionRepo = JdbcReadingPositionRepository(database)

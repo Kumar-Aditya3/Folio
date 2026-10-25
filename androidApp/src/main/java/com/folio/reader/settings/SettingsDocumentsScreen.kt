@@ -32,7 +32,7 @@ fun SettingsDocumentsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
                 navModel.updateSettings(navModel.globalSettings.copy(documentSettings = updated))
             },
             onPageModeChange = { mode ->
-                navModel.updateSettings(navModel.globalSettings.copy(documentReaderMode = mode))
+                navModel.updateSettings(navModel.globalSettings.withDocumentReaderMode(mode))
             },
             extraFonts = navModel.globalSettings.customFonts.map { it.name },
         )

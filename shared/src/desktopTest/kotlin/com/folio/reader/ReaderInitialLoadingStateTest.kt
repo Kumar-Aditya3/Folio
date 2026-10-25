@@ -53,7 +53,7 @@ class ReaderInitialLoadingStateTest {
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        tempRoot = createTempDir("folio-reader-loading-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-reader-loading-").toFile()
     }
 
     @AfterTest

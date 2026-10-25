@@ -27,6 +27,18 @@ import kotlin.test.assertTrue
  */
 class ReaderCssThemeTest {
 
+    @Test fun genericTypefaceChoicesReachThePageAndShadowChaptersAsCssKeywords() {
+        for ((choice, cssFamily) in listOf("Serif" to "serif", "Sans Serif" to "sans-serif", "Monospace" to "monospace")) {
+            val settings = ReaderSettings(fontFamily = choice, formattingMode = FormattingMode.HYBRID, useEmbeddedFonts = false)
+            val css = ReaderCss.styleSheet(settings = settings, pagedCols = 0,
+                fontStack = { ReaderCss.genericFontStack(it) ?: "'$it',serif" }, continuousCss = "")
+            assertTrue("font-family:$cssFamily" in css, "$choice did not reach the Android page")
+            assertTrue("font-family:$cssFamily" in ReaderCss.shadowStyleSheet(settings), "$choice did not reach continuous chapters")
+            assertEquals(cssFamily, ReaderCss.genericFontStack(choice))
+        }
+        assertEquals(null, ReaderCss.genericFontStack("My imported typeface"))
+    }
+
     private fun sheet(settings: ReaderSettings): String = ReaderCss.styleSheet(
         settings = settings,
         pagedCols = 0,
@@ -143,10 +155,11 @@ class ReaderCssThemeTest {
 
     @Test
     fun `original keeps publisher typography but still paints colours`() {
-        val css = sheet(ReaderSettings(themeId = "sepia", formattingMode = FormattingMode.ORIGINAL))
+        val theme = Theme.getPreset("paper")
+        val css = sheet(ReaderSettings(themeId = theme.id, formattingMode = FormattingMode.ORIGINAL))
         // Colours: yes.
-        assertTrue("background:${hex(0xFFF5E6C8.toInt())} !important" in css)
-        assertTrue("color:${hex(0xFF3E2810.toInt())} !important" in css)
+        assertTrue("background:${hex(theme.background)} !important" in css)
+        assertTrue("color:${hex(theme.primaryText)} !important" in css)
         // Typography/layout: no — the publisher owns those in ORIGINAL.
         assertTrue("font-size" !in css, "ORIGINAL must not force font-size")
         assertTrue("text-align" !in css, "ORIGINAL must not force text-align")

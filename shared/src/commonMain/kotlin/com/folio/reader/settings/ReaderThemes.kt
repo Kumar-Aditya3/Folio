@@ -1,204 +1,167 @@
 package com.folio.reader.settings
 
-/**
- * The built-in reader themes: 7 iconic packs, each with a light and dark variant.
- * These are carefully designed to differ across ALL attributes (background, ink, accents),
- * not just background hue. Each pack has distinct personality for how reading should feel.
- */
+/** Nine paired reading stocks. Stable existing IDs preserve saved preferences. */
 internal val ReaderThemePresets: Map<String, Theme> = mapOf(
-    // ── CLASSIC / CHARCOAL PACK (Default Clean) ───────────────────
     "classic" to Theme(
         id = "classic", name = "Classic",
-        background = 0xFFFFFFFF.toInt(), surface = 0xFFFAFAFA.toInt(),
-        primaryText = 0xFF1A1A1A.toInt(), secondaryText = 0xFF6B6B6B.toInt(),
-        headingText = 0xFF0A0A0A.toInt(), link = 0xFF2979FF.toInt(),
-        selection = 0xFFE3ECFF.toInt(), bookmark = 0xFF4285F4.toInt(),
-        highlightColors = listOf(
-            0xFFFFD700.toInt(), 0xFF00C853.toInt(), 0xFF935602.toInt(), 0xFFD50000.toInt(),
-            0xFFAA00FF.toInt(), 0xFFE8EAED.toInt(), 0xFF707070.toInt(), 0xFF1A73E8.toInt()
-        ),
-        progress = 0xFF2979FF.toInt(), divider = 0xFFE0E0E0.toInt(),
+        background = 0xFFF9F9F9.toInt(), surface = 0xFFFDFDFD.toInt(), primaryText = 0xFF171717.toInt(),
+        secondaryText = 0xFF555555.toInt(), headingText = 0xFF171717.toInt(), link = 0xFF252525.toInt(),
+        selection = 0xFFDBDBDB.toInt(), bookmark = 0xFF3D3D3D.toInt(), progress = 0xFF505050.toInt(),
+        divider = 0xFFC7C7C7.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "charcoal" to Theme(
         id = "charcoal", name = "Charcoal",
-        background = 0xFF0F0F0F.toInt(), surface = 0xFF1A1A1A.toInt(),
-        primaryText = 0xFFE8E6E4.toInt(), secondaryText = 0xFF9CA0A4.toInt(),
-        headingText = 0xFFF5F5F5.toInt(), link = 0xFF64B5FF.toInt(),
-        selection = 0xFF1A4F73.toInt(), bookmark = 0xFF1976D2.toInt(),
-        highlightColors = listOf(
-            0xFFFFEE00.toInt(), 0xFF00FF64.toInt(), 0xFFFFB74D.toInt(), 0xFFFF5252.toInt(),
-            0xFFD500F9.toInt(), 0xFFECEFF4.toInt(), 0xFF707070.toInt(), 0xFF4285F4.toInt()
-        ),
-        progress = 0xFF64B5FF.toInt(), divider = 0xFF333333.toInt(),
+        background = 0xFF121212.toInt(), surface = 0xFF1C1C1C.toInt(), primaryText = 0xFFF1F1F1.toInt(),
+        secondaryText = 0xFFBEBEBE.toInt(), headingText = 0xFFF1F1F1.toInt(), link = 0xFFE4E4E4.toInt(),
+        selection = 0xFF424242.toInt(), bookmark = 0xFFD8D8D8.toInt(), progress = 0xFFC8C8C8.toInt(),
+        divider = 0xFF505050.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── PAPER / EMBER PACK (Warm Analog) ─────────────────────────
     "paper" to Theme(
         id = "paper", name = "Paper",
-        background = 0xFFF9F4EB.toInt(), surface = 0xFFF0EBDF.toInt(),
-        primaryText = 0xFF2B2620.toInt(), secondaryText = 0xFF5D5850.toInt(),
-        headingText = 0xFF1C1814.toInt(), link = 0xFF8B4513.toInt(),
-        selection = 0xFFE8DECE.toInt(), bookmark = 0xFF8B5A3C.toInt(),
-        highlightColors = listOf(
-            0xFFE0C9A0.toInt(), 0xFF7CB342.toInt(), 0xFFBA6828.toInt(), 0xFFBF360C.toInt(),
-            0xFF9A72A4.toInt(), 0xFFF5EFDC.toInt(), 0xFF8B7D6B.toInt(), 0xFFA97142.toInt()
-        ),
-        progress = 0xFF8B5A3C.toInt(), divider = 0xFFDBD3C4.toInt(),
+        background = 0xFFF8F4E9.toInt(), surface = 0xFFFCF8ED.toInt(), primaryText = 0xFF27251F.toInt(),
+        secondaryText = 0xFF5A574E.toInt(), headingText = 0xFF27251F.toInt(), link = 0xFF87542E.toInt(),
+        selection = 0xFFE3DADA.toInt(), bookmark = 0xFF72548B.toInt(), progress = 0xFF775C13.toInt(),
+        divider = 0xFFC9BBA4.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "ember" to Theme(
         id = "ember", name = "Ember",
-        background = 0xFF1C1210.toInt(), surface = 0xFF2A1C18.toInt(),
-        primaryText = 0xFFF2E8D9.toInt(), secondaryText = 0xFFB8A896.toInt(),
-        headingText = 0xFFF8F0E4.toInt(), link = 0xFFFFB74D.toInt(),
-        selection = 0xFF4A3020.toInt(), bookmark = 0xFFE67E22.toInt(),
-        highlightColors = listOf(
-            0xFFF4D085.toInt(), 0xFF7CB342.toInt(), 0xFFFFA726.toInt(), 0xFFFF5722.toInt(),
-            0xFFAB47BC.toInt(), 0xFF5D4037.toInt(), 0xFFA1887F.toInt(), 0xFFD4A56A.toInt()
-        ),
-        progress = 0xFFE67E22.toInt(), divider = 0xFF4A3020.toInt(),
+        background = 0xFF201E18.toInt(), surface = 0xFF2C2920.toInt(), primaryText = 0xFFF1EADC.toInt(),
+        secondaryText = 0xFFC1B6A0.toInt(), headingText = 0xFFF1EADC.toInt(), link = 0xFFE4B17C.toInt(),
+        selection = 0xFF474147.toInt(), bookmark = 0xFFC4AEDC.toInt(), progress = 0xFFD5C27D.toInt(),
+        divider = 0xFF645B48.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── FOREST / MIDNIGHT PACK (Cool Natural) ─────────────────────
     "forest" to Theme(
         id = "forest", name = "Forest",
-        background = 0xFFF0F7EF.toInt(), surface = 0xFFE3EBDF.toInt(),
-        primaryText = 0xFF0A2F1E.toInt(), secondaryText = 0xFF3D6349.toInt(),
-        headingText = 0xFF051C14.toInt(), link = 0xFF2E7D32.toInt(),
-        selection = 0xFFC8DBC8.toInt(), bookmark = 0xFF43A047.toInt(),
-        highlightColors = listOf(
-            0xFF8BC34A.toInt(), 0xFF00E676.toInt(), 0xFFFFC107.toInt(), 0xFFFF1744.toInt(),
-            0xFFAA00FF.toInt(), 0xFFDEF0DD.toInt(), 0xFF5D7065.toInt(), 0xFF1B5E20.toInt()
-        ),
-        progress = 0xFF43A047.toInt(), divider = 0xFFC5DAC5.toInt(),
+        background = 0xFFEFF4ED.toInt(), surface = 0xFFF4F9F1.toInt(), primaryText = 0xFF172B28.toInt(),
+        secondaryText = 0xFF45625B.toInt(), headingText = 0xFF172B28.toInt(), link = 0xFF286453.toInt(),
+        selection = 0xFFDBDBDE.toInt(), bookmark = 0xFF72578D.toInt(), progress = 0xFF765B1C.toInt(),
+        divider = 0xFFADBCB1.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "midnight" to Theme(
         id = "midnight", name = "Midnight",
-        background = 0xFF020F0E.toInt(), surface = 0xFF0A1F1A.toInt(),
-        primaryText = 0xFFCCFFE8.toInt(), secondaryText = 0xFF88AAA0.toInt(),
-        headingText = 0xFFE8FFF4.toInt(), link = 0xFF69F0AE.toInt(),
-        selection = 0xFF1A4A40.toInt(), bookmark = 0xFF00C853.toInt(),
-        highlightColors = listOf(
-            0xFFB7FF60.toInt(), 0xFF00E5FF.toInt(), 0xFFFFDD00.toInt(), 0xFFFF4081.toInt(),
-            0xFFEA80FC.toInt(), 0xFF263238.toInt(), 0xFF667570.toInt(), 0xFF1B5E20.toInt()
-        ),
-        progress = 0xFF00C853.toInt(), divider = 0xFF1A2A26.toInt(),
+        background = 0xFF142424.toInt(), surface = 0xFF1C3030.toInt(), primaryText = 0xFFE2F1E5.toInt(),
+        secondaryText = 0xFFA3C1B5.toInt(), headingText = 0xFFE2F1E5.toInt(), link = 0xFFA0D9B6.toInt(),
+        selection = 0xFF404753.toInt(), bookmark = 0xFFCAB5E7.toInt(), progress = 0xFFD9C489.toInt(),
+        divider = 0xFF4A6563.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── OCEAN / ABYSS PACK (Deep Cool) ───────────────────────────
     "ocean" to Theme(
         id = "ocean", name = "Ocean",
-        background = 0xFFEAF7F9.toInt(), surface = 0xFFD7E8ED.toInt(),
-        primaryText = 0xFF0A1F3D.toInt(), secondaryText = 0xFF3D5C78.toInt(),
-        headingText = 0xFF051024.toInt(), link = 0xFF1565C0.toInt(),
-        selection = 0xFFB3D7ED.toInt(), bookmark = 0xFF0277BD.toInt(),
-        highlightColors = listOf(
-            0xFF448AFF.toInt(), 0xFF00E5FF.toInt(), 0xFFFFD54F.toInt(), 0xFFFF1744.toInt(),
-            0xFF651FFF.toInt(), 0xFFCFEAFE.toInt(), 0xFF7A9CAC.toInt(), 0xFF0D47A1.toInt()
-        ),
-        progress = 0xFF0277BD.toInt(), divider = 0xFFB3D7ED.toInt(),
+        background = 0xFFF0F6F9.toInt(), surface = 0xFFF6FAFC.toInt(), primaryText = 0xFF142C46.toInt(),
+        secondaryText = 0xFF49627C.toInt(), headingText = 0xFF142C46.toInt(), link = 0xFF285F9A.toInt(),
+        selection = 0xFFDCDCE7.toInt(), bookmark = 0xFF76558B.toInt(), progress = 0xFF825C24.toInt(),
+        divider = 0xFFAFBFCE.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "abyss" to Theme(
         id = "abyss", name = "Abyss",
-        background = 0xFF050814.toInt(), surface = 0xFF0D1426.toInt(),
-        primaryText = 0xFFD1E8F7.toInt(), secondaryText = 0xFF889BAD.toInt(),
-        headingText = 0xFFEFF7FB.toInt(), link = 0xFF4DD0E1.toInt(),
-        selection = 0xFF1A2A4A.toInt(), bookmark = 0xFF00B0FF.toInt(),
-        highlightColors = listOf(
-            0xFF2979FF.toInt(), 0xFF18FFFF.toInt(), 0xFFFFEB3B.toInt(), 0xFFFF5252.toInt(),
-            0xFFEA80FC.toInt(), 0xFF102A43.toInt(), 0xFF5A6E8A.toInt(), 0xFF0D47A1.toInt()
-        ),
-        progress = 0xFF00B0FF.toInt(), divider = 0xFF1A2A43.toInt(),
+        background = 0xFF121C2E.toInt(), surface = 0xFF1B2940.toInt(), primaryText = 0xFFE6F0FA.toInt(),
+        secondaryText = 0xFFA3B8D1.toInt(), headingText = 0xFFE6F0FA.toInt(), link = 0xFF90BFF3.toInt(),
+        selection = 0xFF3E405C.toInt(), bookmark = 0xFFC9B1ED.toInt(), progress = 0xFFE0BC7B.toInt(),
+        divider = 0xFF465C7B.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── EDITORIAL / CRIMSON PACK (Bold Statement) ────────────────
     "editorial" to Theme(
         id = "editorial", name = "Editorial",
-        background = 0xFFF8F5F0.toInt(), surface = 0xFFF0EBE0.toInt(),
-        primaryText = 0xFF2D2420.toInt(), secondaryText = 0xFF63584E.toInt(),
-        headingText = 0xFF1C1814.toInt(), link = 0xFF8B4513.toInt(),
-        selection = 0xFFE8DED0.toInt(), bookmark = 0xFFA0522D.toInt(),
-        highlightColors = listOf(
-            0xFFC68E12.toInt(), 0xFF2E7D32.toInt(), 0xFFE65100.toInt(), 0xFFC62828.toInt(),
-            0xFF7B1FA2.toInt(), 0xFFEFEFEF.toInt(), 0xFF8B7D6B.toInt(), 0xFF8D6E63.toInt()
-        ),
-        progress = 0xFFA0522D.toInt(), divider = 0xFFDBD3C4.toInt(),
+        background = 0xFFF6EFDE.toInt(), surface = 0xFFFFFAEB.toInt(), primaryText = 0xFF2A2428.toInt(),
+        secondaryText = 0xFF66535B.toInt(), headingText = 0xFF2A2428.toInt(), link = 0xFF963C50.toInt(),
+        selection = 0xFFDFD7D2.toInt(), bookmark = 0xFF685A95.toInt(), progress = 0xFF725C20.toInt(),
+        divider = 0xFFC6B7B3.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "crimson" to Theme(
         id = "crimson", name = "Crimson",
-        background = 0xFF1A050A.toInt(), surface = 0xFF2E0C14.toInt(),
-        primaryText = 0xFFF5DBC8.toInt(), secondaryText = 0xFFB88A7E.toInt(),
-        headingText = 0xFFFFF0E4.toInt(), link = 0xFFFF7043.toInt(),
-        selection = 0xFF4A1C24.toInt(), bookmark = 0xFFFF5722.toInt(),
-        highlightColors = listOf(
-            0xFFFFB74D.toInt(), 0xFF69F0AE.toInt(), 0xFFFF9800.toInt(), 0xFFFF5252.toInt(),
-            0xFFEA80FC.toInt(), 0xFF3E121C.toInt(), 0xFF8B5A52.toInt(), 0xFFA0522D.toInt()
-        ),
-        progress = 0xFFFF5722.toInt(), divider = 0xFF4A1C24.toInt(),
+        background = 0xFF241D26.toInt(), surface = 0xFF30252F.toInt(), primaryText = 0xFFF2E8DD.toInt(),
+        secondaryText = 0xFFC5B5B5.toInt(), headingText = 0xFFF2E8DD.toInt(), link = 0xFFED9AA9.toInt(),
+        selection = 0xFF494355.toInt(), bookmark = 0xFFBEBAEB.toInt(), progress = 0xFFD5C385.toInt(),
+        divider = 0xFF695361.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── BLUSH / VAPORWAVE PACK (Pink Future) ✨ NEW ───────────────
     "blush" to Theme(
         id = "blush", name = "Blush",
-        background = 0xFFffeaf2.toInt(), surface = 0xFFE8D9E8.toInt(),
-        primaryText = 0xFF8B4D66.toInt(), secondaryText = 0xFFAB6B85.toInt(),
-        headingText = 0xFF6B3E50.toInt(), link = 0xFFC44569.toInt(),
-        selection = 0xFFF5C9DB.toInt(), bookmark = 0xFFFF69B4.toInt(),
-        highlightColors = listOf(
-            0xFFFFB6C1.toInt(), 0xFF00CED1.toInt(), 0xFFFFD700.toInt(), 0xFFFF6347.toInt(),
-            0xFFBA55D3.toInt(), 0xFFE6E6FA.toInt(), 0xFFD8BFD8.toInt(), 0xFFC71585.toInt()
-        ),
-        progress = 0xFFE91E63.toInt(), divider = 0xFFD4BECD.toInt(),
+        background = 0xFFF8F0F6.toInt(), surface = 0xFFFCF6FA.toInt(), primaryText = 0xFF35263B.toInt(),
+        secondaryText = 0xFF6B536E.toInt(), headingText = 0xFF35263B.toInt(), link = 0xFF9A3C70.toInt(),
+        selection = 0xFFE1D7E7.toInt(), bookmark = 0xFF675297.toInt(), progress = 0xFF7D5B20.toInt(),
+        divider = 0xFFC8B6CB.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "vaporwave" to Theme(
         id = "vaporwave", name = "Vaporwave",
-        background = 0xFF2E0F26.toInt(), surface = 0xFF4A1C3B.toInt(),
-        primaryText = 0xFFE8C4F7.toInt(), secondaryText = 0xBB9FA5.toInt(),
-        headingText = 0xFFFFF2FF.toInt(), link = 0xFFFF80AB.toInt(),
-        selection = 0xFF5C2A4A.toInt(), bookmark = 0xFFFF00FF.toInt(),
-        highlightColors = listOf(
-            0xFFFF69B4.toInt(), 0xFF00FFFF.toInt(), 0xFFFFFF00.toInt(), 0xFFFF4500.toInt(),
-            0xFFD8BFD8.toInt(), 0xFF3D1C33.toInt(), 0xFF9A6B9A.toInt(), 0xFFC71585.toInt()
-        ),
-        progress = 0xFFE040FB.toInt(), divider = 0xFF5C2A4A.toInt(),
+        background = 0xFF2B2136.toInt(), surface = 0xFF352A43.toInt(), primaryText = 0xFFF6EAF3.toInt(),
+        secondaryText = 0xFFC6B2CF.toInt(), headingText = 0xFFF6EAF3.toInt(), link = 0xFFE9A3CF.toInt(),
+        selection = 0xFF504563.toInt(), bookmark = 0xFFC7B7F0.toInt(), progress = 0xFFE5C887.toInt(),
+        divider = 0xFF685374.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
     ),
-
-    // ── ACID RAVE / SYNTHWAVE PACK (Neon High-Energy) ⚡ NEW ─────
     "acid" to Theme(
         id = "acid", name = "Acid Rave",
-        background = 0xFFF0FCE8.toInt(), surface = 0xFFE3F9D9.toInt(),
-        primaryText = 0xFF1A2608.toInt(), secondaryText = 0xFF4A6342.toInt(),
-        headingText = 0xFF0D1604.toInt(), link = 0xFFCCFF00.toInt(),
-        selection = 0xFFD4F0C8.toInt(), bookmark = 0xFFA4D100.toInt(),
-        highlightColors = listOf(
-            0xFFCCFF00.toInt(), 0xFFFF00FF.toInt(), 0xFF00FFAA.toInt(), 0xFF3D8BFF.toInt(),
-            0xFFFFE600.toInt(), 0xFFFF5C1E.toInt(), 0xFFB04DFF.toInt(), 0xFF6BFF3D.toInt()
-        ),
-        progress = 0xFF00FFAA.toInt(), divider = 0xFFD4F0C8.toInt(),
+        background = 0xFFF4F6E5.toInt(), surface = 0xFFF9FBEF.toInt(), primaryText = 0xFF202919.toInt(),
+        secondaryText = 0xFF56634B.toInt(), headingText = 0xFF202919.toInt(), link = 0xFF53691A.toInt(),
+        selection = 0xFFE0DCD8.toInt(), bookmark = 0xFF785395.toInt(), progress = 0xFF845C17.toInt(),
+        divider = 0xFFB7C2A3.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = false
     ),
     "synthwave" to Theme(
         id = "synthwave", name = "Synthwave",
-        background = 0xFF0A0A0A.toInt(), surface = 0xFF141414.toInt(),
-        primaryText = 0xFFFF6FD8.toInt(), secondaryText = 0xFF9D8BC4.toInt(),
-        headingText = 0xFFFF7BE5.toInt(), link = 0xFF00E5FF.toInt(),
-        selection = 0xFF2A1A33.toInt(), bookmark = 0xFFFF2FD6.toInt(),
-        highlightColors = listOf(
-            0xFFFF2FD6.toInt(), 0xFF00E5FF.toInt(), 0xFF7C4DFF.toInt(), 0xFF00FF9F.toInt(),
-            0xFFFFE600.toInt(), 0xFFFF6B35.toInt(), 0xFF4D9DFF.toInt(), 0xFFFF8AE2.toInt()
-        ),
-        progress = 0xFFFF2FD6.toInt(), divider = 0xFF2A1A33.toInt(),
+        background = 0xFF1B221A.toInt(), surface = 0xFF253027.toInt(), primaryText = 0xFFEDF2DF.toInt(),
+        secondaryText = 0xFFB9C7A7.toInt(), headingText = 0xFFEDF2DF.toInt(), link = 0xFFCEE880.toInt(),
+        selection = 0xFF43444C.toInt(), bookmark = 0xFFC1B1EC.toInt(), progress = 0xFFE3BF73.toInt(),
+        divider = 0xFF536646.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
         isDark = true
-    )
+    ),
+    "porcelain" to Theme(
+        id = "porcelain", name = "Porcelain",
+        background = 0xFFEAEEF8.toInt(), surface = 0xFFF8F9FF.toInt(), primaryText = 0xFF202A3F.toInt(),
+        secondaryText = 0xFF52627C.toInt(), headingText = 0xFF202A3F.toInt(), link = 0xFF3557A0.toInt(),
+        selection = 0xFFD8D5E8.toInt(), bookmark = 0xFF795395.toInt(), progress = 0xFF95501F.toInt(),
+        divider = 0xFFB2BDD0.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
+        isDark = false
+    ),
+    "cobalt" to Theme(
+        id = "cobalt", name = "Cobalt",
+        background = 0xFF1E2634.toInt(), surface = 0xFF293446.toInt(), primaryText = 0xFFEDF1F9.toInt(),
+        secondaryText = 0xFFB5C1D4.toInt(), headingText = 0xFFEDF1F9.toInt(), link = 0xFFA5BFF4.toInt(),
+        selection = 0xFF494960.toInt(), bookmark = 0xFFD3B8EB.toInt(), progress = 0xFFF0BE8C.toInt(),
+        divider = 0xFF546784.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
+        isDark = true
+    ),
+    "linen" to Theme(
+        id = "linen", name = "Linen",
+        background = 0xFFF2EDE6.toInt(), surface = 0xFFFAF8F3.toInt(), primaryText = 0xFF2D292A.toInt(),
+        secondaryText = 0xFF635B5C.toInt(), headingText = 0xFF2D292A.toInt(), link = 0xFF955137.toInt(),
+        selection = 0xFFDED5D7.toInt(), bookmark = 0xFF78558A.toInt(), progress = 0xFF416879.toInt(),
+        divider = 0xFFBEB4AD.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
+        isDark = false
+    ),
+    "copper" to Theme(
+        id = "copper", name = "Copper",
+        background = 0xFF21282B.toInt(), surface = 0xFF2B3539.toInt(), primaryText = 0xFFF1EBE3.toInt(),
+        secondaryText = 0xFFC3BAB0.toInt(), headingText = 0xFFF1EBE3.toInt(), link = 0xFFE4B092.toInt(),
+        selection = 0xFF4C4B58.toInt(), bookmark = 0xFFD4B8E7.toInt(), progress = 0xFFA4CDD9.toInt(),
+        divider = 0xFF5D6869.toInt(),
+        highlightColors = listOf(0xFFE5C56A.toInt(),0xFF83B89C.toInt(),0xFFD3A16E.toInt(),0xFFDC8F8A.toInt(),0xFFB9A2D0.toInt(),0xFF99BACC.toInt(),0xFFA7BB79.toInt(),0xFFD4A7BE.toInt()),
+        isDark = true
+    ),
 )

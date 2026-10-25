@@ -69,4 +69,24 @@ class DocumentReaderCoreTest {
         assertEquals(200f, zoomedOffset.x)
         assertEquals(-100f, zoomedOffset.y)
     }
+
+    @Test fun fixedPageReturnOffsetsAreRelativeToThePageNotTheWindow() {
+        val viewport = IntSize(400, 600)
+        val page = IntSize(400, 400)
+        val offset = Offset(120f, -80f)
+        val locator = fixedPagePanLocator(4, offset, page, 2f)
+        val restored = fixedPagePanOffset(locator, viewport, page, 2f)
+        assertEquals(offset.x, restored.x, .001f)
+        assertEquals(offset.y, restored.y, .001f)
+    }
+
+    @Test fun controlsRespectFormatAndPreviewsCanReachTheEndOfCachedText() {
+        val pdf = documentReadingControls(com.folio.reader.model.DocumentFormat.PDF)
+        assertTrue(DocumentReadingControl.Zoom in pdf)
+        assertTrue(DocumentReadingControl.Typography !in pdf)
+        val html = "<body><p>${"Early text ".repeat(3000)}</p><p>Later passage at the end.</p></body>"
+        val excerpt = documentPreviewExcerpt(html, 1f).orEmpty()
+        assertTrue(excerpt.contains("Later passage"))
+        assertTrue(excerpt.length <= 640)
+    }
 }

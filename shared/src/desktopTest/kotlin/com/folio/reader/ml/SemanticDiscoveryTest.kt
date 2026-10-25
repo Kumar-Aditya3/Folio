@@ -42,7 +42,7 @@ class SemanticDiscoveryTest {
 
     @BeforeEach
     fun setUp() = runBlocking {
-        tempRoot = createTempDir("folio-discovery-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-discovery-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         chunkRepository = JdbcChunkRepository(database)
         bookRepository = JdbcBookRepository(database)

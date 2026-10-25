@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
@@ -64,11 +65,12 @@ class ExtensionManager(
 
     /**
      * Extensions that are installed but failed to load ("Name (pkg): reason"), from the
-     * last [initExtensions] pass. Without this they simply vanish from the Installed
+     * current load attempt. Without this they simply vanish from the Installed
      * list; the extensions screen renders these so the failure has a face.
      */
-    private val loadErrorsFlow = MutableStateFlow(emptyList<String>())
-    val loadErrors: StateFlow<List<String>> = loadErrorsFlow
+    private val loadErrorsFlow = MutableStateFlow(emptyMap<String, String>())
+    val loadErrors: StateFlow<List<String>> = loadErrorsFlow.map { it.values.toList() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         scope.launch(Dispatchers.IO) {
@@ -80,6 +82,11 @@ class ExtensionManager(
     suspend fun getInstalledExtensions(): List<Extension.Installed> {
         initialized.await()
         return installedExtensionMapFlow.value.values.toList()
+    }
+
+    suspend fun getUntrustedExtensions(): List<Extension.Untrusted> {
+        initialized.await()
+        return untrustedExtensionMapFlow.value.values.toList()
     }
 
     suspend fun getExtensionPackage(sourceId: Long): String? {
@@ -122,7 +129,8 @@ class ExtensionManager(
                 .filterIsInstance<LoadResult.Untrusted>()
                 .associate { it.extension.pkgName to it.extension }
 
-            loadErrorsFlow.value = extensions.filterIsInstance<LoadResult.Error>().map { it.reason }
+            loadErrorsFlow.value = extensions.filterIsInstance<LoadResult.Error>()
+                .associate { (it.pkgName ?: it.reason) to it.reason }
 
             initialized.complete(Unit)
         } catch (e: Throwable) {
@@ -248,11 +256,13 @@ class ExtensionManager(
 
         trustExtension.trust(extension.pkgName, extension.signatureHash)
 
-        untrustedExtensionMapFlow.value -= extension.pkgName
-
-        ExtensionLoader.loadExtensionFromPkgName(context, extension.pkgName)
-            .let { it as? LoadResult.Success }
-            ?.let { registerNewExtension(it.extension) }
+        // Keep the row actionable until loading succeeds; a failed write/load must not
+        // turn an installed extension into an invisible gap in Discover.
+        when (val result = ExtensionLoader.loadExtensionFromPkgName(context, extension.pkgName)) {
+            is LoadResult.Success -> registerNewExtension(result.extension)
+            is LoadResult.Untrusted -> untrustedExtensionMapFlow.update { it + result.extension }
+            is LoadResult.Error -> loadErrorsFlow.update { it + (extension.pkgName to result.reason) }
+        }
     }
 
     /**
@@ -261,11 +271,12 @@ class ExtensionManager(
      * @param extension The extension to be registered.
      */
     private fun registerNewExtension(extension: Extension.Installed) {
-        installedExtensionMapFlow.value += extension
+        loadErrorsFlow.update { it - extension.pkgName }
+        installedExtensionMapFlow.update { it + extension }
         // A package that loads is not untrusted. A stale entry can outlive the decision that
         // produced it — an update that *used* to land in the Untrusted tab left one behind —
         // and the tab would keep listing a package that is installed and running.
-        untrustedExtensionMapFlow.value -= extension.pkgName
+        untrustedExtensionMapFlow.update { it - extension.pkgName }
     }
 
     /**
@@ -275,10 +286,11 @@ class ExtensionManager(
      * @param extension The extension to be registered.
      */
     private fun registerUpdatedExtension(extension: Extension.Installed) {
-        installedExtensionMapFlow.value += extension
+        loadErrorsFlow.update { it - extension.pkgName }
+        installedExtensionMapFlow.update { it + extension }
         // Same reason as [registerNewExtension]: an update by the same signer stays trusted, so
         // whatever the Untrusted tab was showing for this package is now out of date.
-        untrustedExtensionMapFlow.value -= extension.pkgName
+        untrustedExtensionMapFlow.update { it - extension.pkgName }
     }
 
     /**
@@ -288,8 +300,9 @@ class ExtensionManager(
      * @param pkgName The package name of the uninstalled application.
      */
     private fun unregisterExtension(pkgName: String) {
-        installedExtensionMapFlow.value -= pkgName
-        untrustedExtensionMapFlow.value -= pkgName
+        loadErrorsFlow.update { it - pkgName }
+        installedExtensionMapFlow.update { it - pkgName }
+        untrustedExtensionMapFlow.update { it - pkgName }
     }
 
     /**
@@ -306,8 +319,9 @@ class ExtensionManager(
         }
 
         override fun onExtensionUntrusted(extension: Extension.Untrusted) {
-            installedExtensionMapFlow.value -= extension.pkgName
-            untrustedExtensionMapFlow.value += extension
+            loadErrorsFlow.update { it - extension.pkgName }
+            installedExtensionMapFlow.update { it - extension.pkgName }
+            untrustedExtensionMapFlow.update { it + extension }
         }
 
         override fun onPackageUninstalled(pkgName: String) {

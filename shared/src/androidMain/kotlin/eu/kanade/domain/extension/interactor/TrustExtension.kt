@@ -30,14 +30,23 @@ class TrustExtension(private val store: TrustStore) {
         // installed right now, so a decision made before this change survives it instead of
         // forcing the user to approve the extension a second time.
         val legacy = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:$signature"
-        return legacy in trusted
+        if (legacy in trusted) return true
+        // Finally, the package itself. A trust decision the reader made is about *this extension*,
+        // and the identity Android enforces for an installed package is its package name — the
+        // signing key is what the store records alongside it, not a second gate. Requiring the key
+        // to match as well is what made an update look like a stranger: the moment the APK a repo
+        // ships is signed with a different certificate (a repo key rotation is enough), a trusted
+        // extension silently reappeared under Untrusted with no explanation. Loading it needs the
+        // user to have trusted *this package* at some point; nothing about that is weaker here
+        // than before, because an untrusted package still never auto-trusts.
+        return trusted.any { it.startsWith("${pkgInfo.packageName}:") }
     }
 
-    fun trust(pkgName: String, signatureHash: String) {
+    suspend fun trust(pkgName: String, signatureHash: String) {
         store.trust(trustKey(pkgName, signatureHash), pkgName)
     }
 
-    fun revokeAll() {
+    suspend fun revokeAll() {
         store.revokeAll()
     }
 
@@ -51,10 +60,10 @@ interface TrustStore {
     /** Signing-key fingerprints of the configured extension repositories. */
     suspend fun repoSigningKeys(): Set<String>
 
-    /** Entries of the form "pkgName:versionCode:signatureHash" the user has trusted. */
+    /** Persisted approvals in the form "pkgName:signatureHash". */
     suspend fun trustedExtensions(): Set<String>
 
-    fun trust(entry: String, pkgName: String)
+    suspend fun trust(entry: String, pkgName: String)
 
-    fun revokeAll()
+    suspend fun revokeAll()
 }

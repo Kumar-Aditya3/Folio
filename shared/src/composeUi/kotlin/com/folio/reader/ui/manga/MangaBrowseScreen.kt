@@ -35,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -74,9 +75,11 @@ fun MangaBrowseScreen(
     onBack: () -> Unit,
 ) {
     val sources by viewModel.visibleSources.collectAsState()
+    val allSources by viewModel.sources.collectAsState()
     val availableLanguages by viewModel.availableLanguages.collectAsState()
     val enabledLanguages by viewModel.sourceLanguages.collectAsState()
     val extensions by viewModel.extensions.collectAsState()
+    val loadErrors by viewModel.extensionLoadErrors.collectAsState()
     val refreshing by viewModel.refreshingIndex.collectAsState()
     val globalQuery by viewModel.globalQuery.collectAsState()
     val globalResults by viewModel.globalResults.collectAsState()
@@ -220,14 +223,46 @@ fun MangaBrowseScreen(
                         }
                     }
                 }
-                if (remote.isNotEmpty() && availableLanguages.any { it !in enabledLanguages }) {
+                val hiddenCount = allSources.count { source ->
+                    !source.isLocal && sources.none { it.id == source.id }
+                }
+                if (hiddenCount > 0) {
                     item(key = "lang-hint") {
+                        TextButton(onClick = { viewModel.setSourceLanguages(availableLanguages.toSet()) }) {
+                            Text("Show $hiddenCount sources hidden by the language filter")
+                        }
+                    }
+                }
+                unavailableBrowseExtensions(extensions, allSources).forEach { entry ->
+                    item(key = "unavailable-${entry.pkgName}") {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .folioVeil(shape = RoundedCornerShape(FolioTokens.radiusControl))
+                                .clickable(onClick = onOpenExtensions)
+                                .padding(FolioTokens.space3),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Extension, contentDescription = null, tint = FolioTheme.colors.primary)
+                            Spacer(Modifier.width(FolioTokens.space2))
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.name, style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    if (entry.isUntrusted) "Trust in Extensions to enable its sources"
+                                    else "No usable sources. Open Extensions to check load errors or a conflicting copy.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = FolioTheme.colors.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                loadErrors.forEachIndexed { index, error ->
+                    item(key = "source-load-error-$index") {
                         Text(
-                            "Some sources are hidden by the language filter — open the " +
-                                "translate menu above to add languages.",
+                            "Extension could not load: $error",
                             style = MaterialTheme.typography.bodySmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                            modifier = Modifier.padding(top = FolioTokens.space2),
+                            color = FolioTheme.colors.error,
+                            modifier = Modifier.clickable(onClick = onOpenExtensions),
                         )
                     }
                 }
@@ -340,7 +375,7 @@ fun MangaBrowseScreen(
                 IconButton(onClick = { viewModel.toggleSearch() }) {
                     Icon(Icons.Filled.Search, contentDescription = "Search all sources")
                 }
-                if (availableLanguages.size > 1) {
+                if (availableLanguages.isNotEmpty()) {
                     // The language filter is what keeps one site from filling the list
                     // with a row per language it publishes.
                     Box {

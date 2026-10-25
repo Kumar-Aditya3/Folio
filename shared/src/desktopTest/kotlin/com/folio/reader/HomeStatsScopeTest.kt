@@ -230,17 +230,33 @@ class HomeStatsScopeTest {
         books: List<Book>,
         sessions: List<ReadingSession>,
         exclusions: FakeExclusionRepo? = null,
-        mangaUpdate: FakeMangaUpdateRepo? = null
+        mangaUpdate: FakeMangaUpdateRepo? = null,
+        settingsStore: com.folio.reader.settings.AppSettingsStore? = null,
     ): HomeViewModel = HomeViewModel(
         bookRepository = FakeBookRepo(books),
         sessionRepository = FakeSessionRepo(sessions),
         statsExclusionRepository = exclusions,
         tagRepository = EmptyTagRepo(),
         collectionRepository = EmptyCollectionRepo(),
-        mangaUpdateRepository = mangaUpdate
+        mangaUpdateRepository = mangaUpdate,
+        settingsStore = settingsStore,
     )
 
     // ── §12.9 acceptance ─────────────────────────────────────────────────────
+
+    @Test
+    fun `reading desk switches live on the same Home view model without changing the shelf`() = runBlocking {
+        val settings = com.folio.reader.settings.AppSettingsStore()
+        val vm = homeViewModel(listOf(book("desk")), emptyList(), settingsStore = settings)
+        val original = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded } }
+        settings.publish(settings.current.copy(homeReadingDesk = true))
+        val desk = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded && it.readingDesk } }
+        assertEquals(original.readingNow.map { it.id }, desk.readingNow.map { it.id })
+        assertEquals(original.goalMinutes, desk.goalMinutes)
+        settings.publish(settings.current.copy(homeReadingDesk = false))
+        val classic = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded && !it.readingDesk } }
+        assertEquals(desk.readingNow.map { it.id }, classic.readingNow.map { it.id })
+    }
 
     @Test
     fun `excluding the hero promotes the next passing in-progress book`() = runBlocking {

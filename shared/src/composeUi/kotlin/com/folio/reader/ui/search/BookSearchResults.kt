@@ -1,5 +1,13 @@
 package com.folio.reader.ui.search
 
+import com.folio.reader.ui.components.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,7 +61,7 @@ internal fun SnippetText(text: String, maxLines: Int) {
     // §12.3: a matched search term is a highlight on the text, so it borrows the
     // annotation/highlight hue rather than the app-wide primary.
     val highlight = FolioTheme.colors.accentAnnotation
-    val annotated = remember(text) {
+    val annotated = remember(text, highlight) {
         buildAnnotatedString {
             var i = 0
             while (i < text.length) {
@@ -118,6 +126,7 @@ fun BookSearchResultsList(
      */
     searching: Boolean = false,
 ) {
+    var expandedKey by rememberSaveable(query, scope) { mutableStateOf<String?>(null) }
     LazyColumn(
         state = listState,
         modifier = modifier,
@@ -152,12 +161,8 @@ fun BookSearchResultsList(
                         )
                     }
                     items(titleMatches, key = { "title:${it.id}" }) { book ->
-                        ListItem(
-                            headlineContent = { Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text(book.displayAuthor, maxLines = 1) },
-                            colors = searchRowColors,
-                            modifier = Modifier.fillMaxWidth().clickable { onOpenTitle(book) }
-                        )
+                        SearchSourceRow(book, onClick = { onOpenTitle(book) })
+
                     }
                 }
 
@@ -171,12 +176,11 @@ fun BookSearchResultsList(
                         )
                     }
                     items(results, key = { "hit:${it.book.id}:${it.spineIndex}:${it.context.hashCode()}" }) { hit ->
-                        ListItem(
-                            headlineContent = { Text("${hit.book.title} - ${hit.chapterTitle}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { SnippetText(hit.context, maxLines = 2) },
-                            colors = searchRowColors,
-                            modifier = Modifier.fillMaxWidth().clickable { onOpenHit(hit) }
-                        )
+                        val key = "hit:${hit.book.id}:${hit.spineIndex}:${hit.context.hashCode()}"
+                        SearchPassage(hit.book, hit.chapterTitle, hit.context, expandedKey == key,
+                            onExpand = { expandedKey = if (expandedKey == key) null else key },
+                            onOpen = { onOpenHit(hit) })
+
                     }
                 }
 
@@ -197,14 +201,11 @@ fun BookSearchResultsList(
                             sectionHits,
                             key = { "${it.scope}:${it.book.id}:${it.title.hashCode()}:${it.snippet.hashCode()}" }
                         ) { hit ->
-                            ListItem(
-                                headlineContent = { Text("${hit.book.title} · ${hit.title}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = { Text(hit.snippet, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                                colors = searchRowColors,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenHit(BookHit(hit.book, hit.spineIndex ?: -1, hit.scope.label, hit.snippet)) }
-                            )
+                            val key = "${hit.scope}:${hit.book.id}:${hit.title.hashCode()}:${hit.snippet.hashCode()}"
+                            SearchPassage(hit.book, "${hit.scope.label} · ${hit.title}", hit.snippet, expandedKey == key,
+                                onExpand = { expandedKey = if (expandedKey == key) null else key },
+                                onOpen = { onOpenHit(BookHit(hit.book, hit.spineIndex ?: -1, hit.scope.label, hit.snippet)) })
+
                         }
                     }
                 }
@@ -224,5 +225,50 @@ fun BookSearchResultsList(
             }
         }
         item(key = "tail") { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun SearchSourceRow(book: Book, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick)
+        .padding(horizontal = FolioTokens.gutter, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        FolioCoverPlate(book.coverPath, book.title, book.displayAuthor, width = 42.dp, small = true, suppressFallbackText = true)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(book.title, style = FolioTheme.typography.titleSmall,
+                color = FolioTheme.colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(book.displayAuthor, style = FolioTheme.typography.bodySmall,
+                color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+internal fun SearchPassage(book: Book, chapter: String, snippet: String, expanded: Boolean,
+    onExpand: () -> Unit, onOpen: () -> Unit) {
+    val accent = FolioTheme.colors.accentAnnotation
+    FolioPaperSheet(Modifier.padding(horizontal = FolioTokens.gutter, vertical = 6.dp), accent, layered = true) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onExpand),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FolioCoverPlate(book.coverPath, book.title, book.displayAuthor, width = 32.dp, small = true, suppressFallbackText = true)
+            Column(Modifier.weight(1f)) {
+                Text(book.title, style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(chapter, style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Box(Modifier.fillMaxWidth().clickable(onClick = onExpand)
+            .semantics { stateDescription = if (expanded) "Expanded passage" else "Collapsed passage" }) {
+            SnippetText(snippet, maxLines = if (expanded) Int.MAX_VALUE else 3)
+        }
+        TextButton(onClick = onExpand) { Text(if (expanded) "Show less" else "Read more") }
+        AnimatedVisibility(expanded) {
+            FolioArtworkScene(FolioArtwork("book:${book.id}", book.coverPath), Modifier.fillMaxWidth()) {
+                FolioActionDock("Open passage", chapter, onOpen, accent = accent,
+                    accessibilityLabel = "Open passage in ${book.title}")
+            }
+        }
     }
 }

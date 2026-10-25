@@ -1,5 +1,7 @@
 package com.folio.reader
 
+import com.folio.reader.ui.components.folioRoomSource
+import com.folio.reader.ui.components.folioField
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -523,6 +525,8 @@ private sealed interface Screen {
         val targetSpineIndex: Int? = null,
         /** Intra-chapter landing as a fraction of the chapter, or null for the top. */
         val targetFraction: Float? = null,
+        val targetHighlightId: String? = null,
+        val targetLocator: String? = null,
     ) : Screen
     data class DocumentReader(val documentId: String) : Screen
     data object Settings : Screen
@@ -727,7 +731,9 @@ fun main(args: Array<String>) {
                 bookRepository = deps.bookRepository,
                 sessionRepository = deps.sessionRepository,
                 quoteRepository = deps.quoteRepository,
-                highlightRepository = deps.highlightRepository
+                highlightRepository = deps.highlightRepository,
+                mangaRepository = deps.mangaRepository,
+                mangaCategoryRepository = deps.mangaCategoryRepository
             )
         }
         // Hoisted so Escape can close the stats tab and return to the shelf.
@@ -1155,6 +1161,7 @@ fun main(args: Array<String>) {
                 // and at the root closes the stats tab before giving up.
                 if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyUp && e.key == Key.Escape) {
                     when {
+                        com.folio.reader.ui.components.consumeFolioBack() -> true
                         navStack.size > 1 -> {
                             popScreen()
                             true
@@ -1188,10 +1195,19 @@ fun main(args: Array<String>) {
                 // foreground animation is shared code and must resolve identically.
                 motion = globalSettings.motion,
             ) {
+                com.folio.reader.ui.components.FolioGlassRoot(
+                    capabilities = com.folio.reader.ui.components.glassCapabilitiesFor(
+                        platformBlurSupported = true,
+                        lowRamDevice = false,
+                        liquidGlassEffects = globalSettings.liquidGlassEffects,
+                    ),
+                    inFlowGlass = !globalSettings.minimalLiquidGlass,
+                ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
                 ) {
+                    Box(Modifier.fillMaxSize().folioRoomSource().folioField())
                     // No remount key: every list re-queries on its repository's
                     // data revision, so imports and deletes update screens in place.
                     androidx.compose.animation.AnimatedContent(
@@ -1352,7 +1368,9 @@ fun main(args: Array<String>) {
                                                 onBookClick = { bookId -> pushScreen(Screen.BookDetail(bookId)) },
                                                 settingsRepository = deps.settingsRepository,
                                                 initialGoalMinutes = globalSettings.dailyGoalMinutes,
-                                                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database)
+                                                mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database),
+                                                mangaBackend = deps.mangaBackend,
+                                                onMangaClick = { pushScreen(Screen.MangaDetail(it)) },
                                             )
                                         }
                                         // Drawn last so it floats over the charts, and driven by their
@@ -1371,9 +1389,17 @@ fun main(args: Array<String>) {
                                     book = current.book,
                                     targetSpineIndex = current.targetSpineIndex,
                                     targetFraction = current.targetFraction,
+                                    targetHighlightId = current.targetHighlightId,
+                                    targetLocator = current.targetLocator,
                                     initialSettings = globalSettings,
                                     onBackPress = { popScreen() },
-                                    onSearchClick = { pushScreen(Screen.Search) },
+                                    // Seed the scope before pushing, the same way the Android
+                                    // reader does: search opened from a book should start on
+                                    // that book's content, not the whole library.
+                                    onSearchClick = {
+                                        searchUiState.openInBook(current.book.id)
+                                        pushScreen(Screen.Search)
+                                    },
                                     onSettingsClick = { pushScreen(Screen.Settings) },
                                     onSettingsChanged = { globalSettings = it }
                                 )
@@ -1627,10 +1653,11 @@ fun main(args: Array<String>) {
 
                                 is Screen.TagManager -> TagManagerScreen(
                                     onBack = { popScreen() },
-                                    onHighlightClick = { _, book ->
+                                    onHighlightClick = { highlight, book ->
                                         appScope.launch(Dispatchers.IO) {
                                             deps.bookRepository.getBook(book.id)?.let { b ->
-                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(b)) }
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(b, highlight.spineIndex,
+                                                    targetHighlightId = highlight.id, targetLocator = highlight.startLocator)) }
                                             }
                                         }
                                     },
@@ -1666,12 +1693,21 @@ fun main(args: Array<String>) {
                                     onQuoteClick = { item ->
                                         appScope.launch(Dispatchers.IO) {
                                             deps.bookRepository.getBook(item.book.id)?.let { book ->
-                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
+                                                val target = item.readerTarget
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book, target.spineIndex,
+                                                    targetHighlightId = target.highlightId, targetLocator = target.locator)) }
                                             }
                                         }
                                     },
                                     onMangaNoteClick = { item ->
                                         pushScreen(Screen.MangaDetail(item.mangaId))
+                                    },
+                                    onOpenRelated = { passage ->
+                                        appScope.launch(Dispatchers.IO) {
+                                            deps.bookRepository.getBook(passage.bookId)?.let { book ->
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book, passage.spineIndex)) }
+                                            }
+                                        }
                                     },
                                     viewModel = remember {
                                         QuoteBrowserViewModel(
@@ -1707,7 +1743,9 @@ fun main(args: Array<String>) {
                                         } else appScope.launch(Dispatchers.IO) {
                                             val bookId = item.book?.id ?: return@launch
                                             deps.bookRepository.getBook(bookId)?.let { book ->
-                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book)) }
+                                                val target = item.readerTarget
+                                                appScope.launch(Dispatchers.Main) { pushScreen(Screen.Reader(book, target?.spineIndex,
+                                                    targetHighlightId = target?.highlightId, targetLocator = target?.locator)) }
                                             }
                                         }
                                     },
@@ -1844,38 +1882,25 @@ fun main(args: Array<String>) {
                     // (Main pre-checked — that is where the imports already are),
                     // then open the first imported item.
                     pendingImportBooks?.let { books ->
-                        var shelfCollections by remember {
-                            mutableStateOf(emptyList<com.folio.reader.model.Collection>())
-                        }
-                        LaunchedEffect(Unit) {
-                            shelfCollections = runCatching {
-                                deps.collectionRepository.getAllCollections().first()
-                            }.getOrDefault(emptyList())
-                        }
+                        val shelfCollections by remember(deps) {
+                            deps.collectionRepository.getAllCollections()
+                        }.collectAsState(initial = emptyList())
                         if (shelfCollections.isNotEmpty()) {
                             com.folio.reader.ui.library.BookImportCollectionsDialog(
                                 bookCount = books.size,
                                 collections = shelfCollections,
                                 onCreate = { name ->
-                                    runCatching {
-                                        deps.collectionRepository.getCollectionByName(name)?.id
-                                            ?: deps.collectionRepository.createCollection(name).id
-                                    }.getOrNull()
+                                    deps.collectionRepository.getCollectionByName(name)?.id
+                                        ?: deps.collectionRepository.createCollection(name).id
                                 },
                                 onSave = { ids ->
-                                    appScope.launch(Dispatchers.IO) {
-                                        if (ids.isNotEmpty()) {
-                                            books.forEach { book ->
-                                                runCatching {
-                                                    deps.collectionRepository.assign(book.id, ids)
-                                                }
-                                            }
+                                    withContext(Dispatchers.IO) {
+                                        val target = ids.ifEmpty {
+                                            setOf(requireNotNull(deps.collectionRepository.defaultCollection()) {
+                                                "No default collection is available."
+                                            }.id)
                                         }
-                                        withContext(Dispatchers.Main) {
-                                            pendingImportBooks = null
-                                            pendingImportScreen?.let { pushScreen(it) }
-                                            pendingImportScreen = null
-                                        }
+                                        books.forEach { book -> deps.collectionRepository.assign(book.id, target) }
                                     }
                                 },
                                 onDismiss = {
@@ -1886,6 +1911,7 @@ fun main(args: Array<String>) {
                             )
                         }
                     }
+                }
                 }
             }
         }
@@ -1956,6 +1982,8 @@ private fun ReaderRoute(
     book: Book,
     targetSpineIndex: Int? = null,
     targetFraction: Float? = null,
+    targetHighlightId: String? = null,
+    targetLocator: String? = null,
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -2069,8 +2097,12 @@ private fun ReaderRoute(
         onBackPress = {
             viewModel.closeBook { onBackPress() }
         },
+        // Desktop keeps the full-screen search destination: this platform's embedded browser
+        // occludes Compose overlays, so the reader draws its panels as page-side HTML instead
+        // (`readerOverlayHtml`), and there is no search panel there yet. Android, where the
+        // WebView is a Compose child, opens the in-reader search sheet instead.
         onSearchClick = {
-            viewModel.closeBook { onSearchClick() }
+            onSearchClick()
         },
         onBookmarkClick = { viewModel.toggleBookmark() },
         onSettingsClick = {
@@ -2106,9 +2138,15 @@ private fun ReaderRoute(
             viewModel.addHighlight(
                 startLocator = "/$spine/$paragraphIndex:0",
                 endLocator = "/$spine/$paragraphIndex:end",
-                selectedText = snippet
+                selectedText = snippet,
+                chapterId = chapterId,
+                spineIndex = spine,
             )
             viewModel.showControlsFn()
+        },
+        onNoteSelection = { chapterId, paragraph, text, note ->
+            val spine = chapters.firstOrNull { it.id == chapterId }?.spineIndex ?: position?.spineIndex ?: 0
+            viewModel.addSelectionNote(chapterId, spine, paragraph, text, note)
         },
         onRetryChapter = { viewModel.reloadChapter() },
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
@@ -2127,7 +2165,10 @@ private fun ReaderRoute(
         onResolveImage = { chapterHref, src -> deps.contentProvider.resolveImage(book.id, chapterHref, src) },
         onResolveResource = { chapterHref, src -> deps.contentProvider.resolveResource(book.id, chapterHref, src) },
         syncState = syncState,
-        initialSeekFraction = targetFraction
+        initialSeekFraction = targetFraction,
+        onPreviewChapter = viewModel::previewChapter,
+        targetHighlightId = targetHighlightId,
+        initialLocator = targetLocator,
     )
 }
 

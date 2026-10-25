@@ -9,10 +9,13 @@ import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.manga.MangaPageRef
 import com.folio.reader.manga.MangaRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -67,6 +70,7 @@ class MangaReaderViewModel(
 
     val manga = MutableStateFlow<MangaEntry?>(null)
     val chapter = MutableStateFlow<MangaChapter?>(null)
+    val allChapters = MutableStateFlow<List<MangaChapter>>(emptyList())
     val pages = MutableStateFlow<List<MangaPageRef>>(emptyList())
     val currentIndex = MutableStateFlow(0)
     val mode = MutableStateFlow(MangaReaderMode.WEBTOON)
@@ -124,6 +128,10 @@ class MangaReaderViewModel(
     internal var isAtEndOfNav = false
     private var extendingBackward = false
     private var openJob: Job? = null
+    private var requestedPage: Int? = null
+    private var forwardJob: Job? = null
+    private var backwardJob: Job? = null
+    private var loadGeneration = 0
 
     /** Index (in [slots]) of the slot holding the current page; forward moves past a
      *  slot finalize that chapter as read. */
@@ -144,6 +152,7 @@ class MangaReaderViewModel(
     internal var imagePrefetchJob: Job? = null
     internal val pageBytes = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
     internal var pageBytesTotal = 0L
+    internal val pageCacheRevision = MutableStateFlow(0L)
     internal val inflightBytes = HashMap<String, kotlinx.coroutines.Deferred<ByteArray?>>()
 
     internal val progressQueue = Channel<ProgressSnapshot>(Channel.UNLIMITED)
@@ -166,7 +175,14 @@ class MangaReaderViewModel(
         }
     }
 
-    fun open(manga: MangaEntry, chapter: MangaChapter) {
+    fun open(manga: MangaEntry, chapter: MangaChapter, initialPage: Int? = null) {
+        if (!loading.value) enqueueProgress()
+        requestedPage = initialPage
+        val generation = ++loadGeneration
+        forwardJob?.cancel()
+        backwardJob?.cancel()
+        extendingForward.value = false
+        extendingBackward = false
         this.mangaId = manga.id
         this.sourceId = manga.sourceId
         this.manga.value = manga
@@ -181,7 +197,7 @@ class MangaReaderViewModel(
         updateRepo?.let { repo ->
             scope.launch { runCatching { repo.clearNewChapters(manga.id) } }
         }
-        startSession(manga, chapter)
+        if (activeSession == null) startSession(manga, chapter)
         openJob?.cancel()
         prefetchJob?.cancel()
         imagePrefetchJob?.cancel()
@@ -202,6 +218,9 @@ class MangaReaderViewModel(
             loading.value = true
             try {
                 val allChapters = chapterRepo.getChapters(manga.id)
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
+                this@MangaReaderViewModel.allChapters.value = allChapters
                 val savedFilterName = settingsRepo.getRaw("$KEY_CHAPTER_FILTER.${manga.id}")
                 val filter = ChapterFilter.entries.firstOrNull { it.name == savedFilterName } ?: ChapterFilter.ALL
                 // Navigation always runs in story order (chapter numbers, recovered
@@ -227,6 +246,8 @@ class MangaReaderViewModel(
                 val nextCh = navList.getOrNull(navIdx + 1)
 
                 val currentSlot = pageListGate.withPermit { fetchSlotCached(navList[navIdx]) }
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
                 if (currentSlot == null) {
                     // The chapter isn't downloaded (downloaded ones never fail here), so
                     // this is a live source fetch that died — usually no connection. Say
@@ -238,6 +259,8 @@ class MangaReaderViewModel(
                 val prevDeferred = prevCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
                 val nextDeferred = nextCh?.let { ch -> async { pageListGate.withPermit { fetchSlotCached(ch) } } }
                 val prevSlot = prevDeferred?.await()
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
 
                 var offset = 0
                 if (prevSlot != null) {
@@ -250,8 +273,20 @@ class MangaReaderViewModel(
                 withSlots { add(currentSlot.copy(startIndex = offset)) }
                 // Restore the saved page (offset by the prepended chapter) BEFORE publishing
                 // so the first composition already points at the resume position.
-                val resumeLocal =
-                    if (chapter.lastPageRead in 1 until currentSlot.pages.size) chapter.lastPageRead else 0
+                //
+                // A chapter that is already **read** opens at its first page. Its saved page is
+                // wherever it was finished — the last one — so resuming from it dropped the
+                // reader at the *end* of a chapter they had already read, which is what made
+                // reopening a read chapter look like it started backwards.
+                //
+                // The saved page is only a resume point for a chapter that is *not* finished:
+                // 0 is "never opened" and `pages.size - 1` is "finished", and neither is a
+                // position to return to. Anything in between is a genuine mid-chapter pause.
+                val resumeLocal = initialPage?.coerceIn(0, (currentSlot.pages.size - 1).coerceAtLeast(0)) ?: if (chapter.read) {
+                    0
+                } else {
+                    chapter.lastPageRead.takeIf { it in 1 until currentSlot.pages.size } ?: 0
+                }
                 currentIndex.value = offset + resumeLocal
                 seekChannel.trySend(offset + resumeLocal)
                 publishPages()
@@ -270,6 +305,8 @@ class MangaReaderViewModel(
 
                 launch {
                     val slot = nextDeferred?.await()
+                    currentCoroutineContext().ensureActive()
+                    if (generation != loadGeneration) return@launch
                     if (slot != null) {
                         appendSlot(slot)
                     } else if (nextCh == null) {
@@ -278,11 +315,21 @@ class MangaReaderViewModel(
                     scheduleChapterPrefetch()
                     scheduleImagePrefetch()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
-                error.value = e.message ?: "Failed to load pages"
-                loading.value = false
+                if (generation == loadGeneration) {
+                    error.value = e.message ?: "Failed to load pages"
+                    loading.value = false
+                }
             }
         }
+    }
+
+    fun retry() {
+        val currentManga = manga.value ?: return
+        val currentChapter = chapter.value ?: return
+        open(currentManga, currentChapter, initialPage = requestedPage)
     }
 
     private fun prependSlot(slot: ChapterSlot) {
@@ -334,8 +381,11 @@ class MangaReaderViewModel(
         return try {
             val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
             val pages = backend.fetchPageList(sourceId, ref)
+            currentCoroutineContext().ensureActive()
             cachePageList(chapter.id, pages)
             ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Throwable) {
             failedChapters.add(chapter.id)
             null
@@ -399,9 +449,10 @@ class MangaReaderViewModel(
     }
 
     fun extendForward() {
-        if (extendingForward.value || isAtEndOfNav) return
-        scope.launch {
-            extendingForward.value = true
+        if (loading.value || extendingForward.value || isAtEndOfNav) return
+        val generation = loadGeneration
+        extendingForward.value = true
+        forwardJob = scope.launch {
             try {
                 val lastSlot = withSlots { lastOrNull() } ?: return@launch
                 val lastNavIdx = navList.indexOfFirst { it.id == lastSlot.chapter.id }
@@ -411,6 +462,8 @@ class MangaReaderViewModel(
                     return@launch
                 }
                 val slot = fetchSlotCached(navList[nextNavIdx])
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
                 if (slot != null) {
                     appendSlot(slot)
                     scheduleChapterPrefetch()
@@ -419,24 +472,27 @@ class MangaReaderViewModel(
                     isAtEndOfNav = true
                 }
             } finally {
-                extendingForward.value = false
+                if (generation == loadGeneration) extendingForward.value = false
             }
         }
     }
 
     fun extendBackward() {
-        if (mode.value != MangaReaderMode.WEBTOON) return
+        if (loading.value || mode.value != MangaReaderMode.WEBTOON) return
         if (extendingBackward) return
         val firstSlot = withSlots { firstOrNull() } ?: return
         val firstNavIdx = navList.indexOfFirst { it.id == firstSlot.chapter.id }
         if (firstNavIdx <= 0) return
+        val generation = loadGeneration
         extendingBackward = true
-        scope.launch {
+        backwardJob = scope.launch {
             try {
                 val slot = fetchSlotCached(navList[firstNavIdx - 1]) ?: return@launch
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
                 prependSlot(slot)
             } finally {
-                extendingBackward = false
+                if (generation == loadGeneration) extendingBackward = false
             }
         }
     }

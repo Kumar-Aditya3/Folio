@@ -223,6 +223,28 @@ class DocumentLibraryViewModelTest {
     }
 
     @Test
+    fun confirmationUsesTheDocumentsCapturedWhenThePickerOpened() = runBlocking {
+        withFixture { documents, categories, settings ->
+            val one = document("One", "one.pdf", DocumentFormat.PDF)
+            val two = document("Two", "two.pdf", DocumentFormat.PDF)
+            documents.upsertDocument(one)
+            documents.upsertDocument(two)
+            categories.ensureSeeded()
+            val research = categories.create("Research")
+            val viewModel = DocumentLibraryViewModel(documents, categories, settings, Dispatchers.Unconfined)
+            try {
+                viewModel.toggleSelection(one.id)
+                viewModel.requestBulkCategories()
+                withTimeout(5_000) { viewModel.bulkPickerInitial.first { it != null } }
+                viewModel.selectedIds.value = setOf(two.id)
+                viewModel.applyBulkCategories(setOf(research.id))
+                assertEquals(setOf(research.id), categories.categoriesFor(one.id))
+                assertEquals(setOf(DocumentCategory.MAIN_ID), categories.categoriesFor(two.id))
+            } finally { viewModel.close() }
+        }
+    }
+
+    @Test
     fun documentsDisplayChoicesSurviveARelaunch() = runBlocking {
         withFixture { documents, categories, settings ->
             categories.ensureSeeded()
@@ -268,7 +290,7 @@ class DocumentLibraryViewModelTest {
 
     @Test
     fun rapidViewModeTogglesPersistTheLastChoiceThroughTheRealSettingsStore() = runBlocking {
-        val root = createTempDir("folio-document-library-jdbc-")
+        val root = kotlin.io.path.createTempDirectory("folio-document-library-jdbc-").toFile()
         val database = Database(DesktopPlatform(root).fileSystem.getDatabasePath())
         try {
             val documents = JdbcDocumentRepository(database)
@@ -344,7 +366,7 @@ class DocumentLibraryViewModelTest {
             FakeSettingsRepository
         ) -> Unit
     ) {
-        val root = createTempDir("folio-document-library-view-model-")
+        val root = kotlin.io.path.createTempDirectory("folio-document-library-view-model-").toFile()
         val database = Database(DesktopPlatform(root).fileSystem.getDatabasePath())
         try {
             block(

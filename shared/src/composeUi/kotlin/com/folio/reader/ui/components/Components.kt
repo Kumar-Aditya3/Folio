@@ -119,48 +119,10 @@ fun FolioSectionCard(
     accent: Color? = com.folio.reader.ui.theme.FolioTheme.sectionAccent,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            // Section cards are the dominant large surface on Settings, Home and
-            // Stats. They used to be flat `folioPanel` paper — a tint with a rim and
-            // nothing behind it — which is exactly the "glass that is just a tint
-            // sitting in front of the screen" complaint. Routed through [folioVeil]
-            // they become the real liquid-glass material: when the screen registers a
-            // backdrop and the device can blur, the moving field is frosted *through*
-            // the card (fill steps down to its 0.70 glass tier), and the sheen, edge
-            // bevel and AGSL film give it a lit, dimensional body. On a device that
-            // cannot blur it degrades to the same flat fill as before, so nothing
-            // regresses. The small per-row surfaces stay `folioPanel` on purpose — the
-            // blur/film pass is only worth paying on the big surfaces.
-            .folioVeil(
-                com.folio.reader.ui.theme.FolioShapes.card,
-                // A section card is an item in the page's own flow: nothing passes behind it
-                // but the ground plane, so it keeps the material and drops the refraction.
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .padding(com.folio.reader.ui.theme.FolioTokens.space3),
-        verticalArrangement = Arrangement.spacedBy(com.folio.reader.ui.theme.FolioTokens.space2)
-    ) {
-        if (title != null) {
-            FolioEyebrow(
-                text = title,
-                accent = accent ?: com.folio.reader.ui.theme.FolioTheme.colors.onSurfaceVariant,
-            )
-        }
-        // Everything this card contains is one surface deeper than the card — and P7 makes it one
-        // *material* too: the card publishes its own plane so a nested panel is painted from the
-        // same stuff and separated by its rim alone, instead of stepping to a different tier and
-        // reading as a box inside a box. The card is a veil at the in-flow tier, so the plane it
-        // publishes is `veilFill` at the panel knob — the alpha it is actually drawn with.
-        val scope = this
-        com.folio.reader.ui.theme.FolioSurfaceContents(
-            com.folio.reader.ui.theme.FolioTheme.atmosphere.veilFill.copy(
-                // The alpha the card is actually drawn with: it is a veil at the in-flow tier, so
-                // it never blurs and its fill sits at the panel knob.
-                alpha = com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelFill(canBlur = false),
-            ),
-        ) { scope.content() }
+    FolioReferencePanel(modifier) {
+        if (title != null) FolioEyebrow(title,
+            accent = accent ?: FolioTheme.colors.onSurfaceVariant)
+        content()
     }
 }
 
@@ -286,7 +248,7 @@ fun FolioChip(
     val interaction = rememberFolioInteraction()
     // Selection cross-fades rather than switching on one frame — the same idiom
     // the nav capsule and segmented control already use.
-    val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val motion = com.folio.reader.ui.theme.rememberMotionEnabled() && !com.folio.reader.ui.theme.LocalMotion.current.reduced
     val colorSpec = if (motion) tween<Color>(FolioTokens.motionFast.toInt()) else snap<Color>()
     // Chips/tabs are section chrome: a selected chip wears the section's signature
     // hue, not a universal primary, so the same control reads differently in
@@ -431,7 +393,7 @@ fun FolioProgressBar(
     track: Color? = null,
 ) {
     val colors = FolioTheme.colors
-    val motion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val motion = com.folio.reader.ui.theme.rememberMotionEnabled() && !com.folio.reader.ui.theme.LocalMotion.current.reduced
     val fraction by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
         animationSpec = if (motion) tween(FolioTokens.motionStandard.toInt()) else snap(),
@@ -452,7 +414,7 @@ fun FolioProgressBar(
             modifier = Modifier
                 .fillMaxWidth(fraction)
                 .height(3.dp)
-                .background(color, RoundedCornerShape(2.dp))
+                .background(Brush.horizontalGradient(listOf(color, androidx.compose.ui.graphics.lerp(color, colors.onSurface, .28f))), RoundedCornerShape(2.dp))
         )
     }
 }

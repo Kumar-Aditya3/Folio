@@ -386,6 +386,12 @@ internal fun maxChromaInGamut(l: Float, hueDeg: Float): Float {
  */
 internal fun tierColour(gammaLuma: Float, hueDeg: Float, chromaTarget: Float): Color {
     val target = gammaLuma.coerceIn(0.001f, 0.999f)
+    // A NaN hue means "no hue belongs here" — an achromatic room, or an achromatic role. The
+    // tier keeps its luminance and loses the colour entirely, rather than landing on whatever
+    // angle the hue arithmetic happened to produce.
+    if (hueDeg.isNaN()) {
+        return oklchToColor(srgbToLinear(target).pow(1f / 3f), 0f, 0f)
+    }
     fun affordable(l: Float) = minOf(chromaTarget, maxChromaInGamut(l, hueDeg) * GAMUT_SAFETY)
     fun solveL(chroma: Float): Float {
         var lo = 0f
@@ -494,9 +500,24 @@ private const val MAX_TIER_HUE_DEV = 12f
 internal fun tierHue(roomHue: Float, roleHue: Float, maxDev: Float = MAX_TIER_HUE_DEV): Float {
     // An achromatic room has no hue, so there is nothing for the role to clash with and the
     // correct bound is *none*. See [roomHue] for why this is not merely defensive.
+    // An achromatic *role* is the same story from the other end — `chromaHue` hands back NaN
+    // for one, and a NaN here means "this tier has no hue either", which [tierColour] turns
+    // into a neutral plane rather than a plane at whatever angle atan2 happened to produce.
+    if (roleHue.isNaN()) return Float.NaN
     if (roomHue.isNaN()) return roleHue
     return (roomHue + signedHueDelta(roleHue, roomHue).coerceIn(-maxDev, maxDev) + 360f) % 360f
 }
+
+/**
+ * The role's Oklab hue, or [Float.NaN] when the role is achromatic.
+ *
+ * `oklabHue` of a grey is `atan2(0, 0)` = **0° — pink-red** — which is not a colour the palette
+ * authored, it is an artefact of asking a neutral for a direction. Every tier that takes its hue
+ * from a role must go through this, or a monochrome face (gallery, whose accents are all grey)
+ * sprouts planes at hue 0° with real chroma behind them.
+ */
+internal fun chromaHue(c: Color): Float =
+    if (oklabChroma(c) < ROOM_HUE_MIN_CHROMA) Float.NaN else oklabHue(c)
 
 /**
  * The signed shortest arc from [from] to [to], in (−180°, 180°].
@@ -1619,7 +1640,7 @@ fun atmosphereFor(
     // An achromatic face (gallery, whose accents are all grey) falls back to the old
     // room-bounded placement so it stays neutral.
     val overlayHue = if (oklabChroma(colors.readerOverlayAccent) < ROOM_HUE_MIN_CHROMA) {
-        tierHue(planeHue, oklabHue(colors.primary))
+        tierHue(planeHue, chromaHue(colors.primary))
     } else {
         oklabHue(colors.readerOverlayAccent)
     }
@@ -1723,7 +1744,7 @@ fun atmosphereFor(
             // out on the glass*: a bright tight catch rather than a soft bloom.
             tierColour(
                 luminanceOf(lift(colors.surface, 0.72f)),
-                tierHue(planeHue, oklabHue(colors.secondary)),
+                tierHue(planeHue, chromaHue(colors.secondary)),
                 RIM_CHROMA_DARK,
             ).copy(alpha = 0.92f)
         } else {
@@ -1758,22 +1779,22 @@ fun atmosphereFor(
         // is not used here for the same reason: hitting a luminance by scaling RGB scales
         // chroma with it, so it cannot place a *colour*, only a brightness.
         // The raised tier carries the chrome hue too, at its own lightness and mixing share.
-        raisedFill = mixOklab(
+        raisedFill = matchLuma(mixOklab(
             card,
             cardGlassMaterial(colors.secondary, card, dark),
             if (dark) CARD_MATERIAL_SHARE_DARK else CARD_MATERIAL_SHARE,
-        ),
+        ), luminanceOf(card)),
         // The middle rung. The panel is the largest grouping surface in the app and the
         // tier that carried the *least* palette — on paper it was raw `surface`, the one
         // colour authored with its hue deliberately removed, and it read at chroma 0.012
         // against the well's 0.197. It leans on `primary` so the panel speaks in the
         // palette's own voice while the card, on `secondary`, stays a different place.
         // Two tiers, two hues, one ladder — and now two *colours* rather than two greys.
-        panelFill = mixOklab(
+        panelFill = matchLuma(mixOklab(
             panel,
             cardGlassMaterial(colors.primary, panel, dark),
             if (dark) CARD_MATERIAL_SHARE_DARK else CARD_MATERIAL_SHARE,
-        ),
+        ), luminanceOf(panel)),
         // The hero's pane: the room shows through it.
         //
         // This is now an *ambition*, not a calibration. A pane this transparent is
@@ -1916,7 +1937,7 @@ fun atmosphereFor(
         barScrim = if (dark) {
             tierColour(
                 luminanceOf(deepen(colors.background, 0.30f)),
-                tierHue(planeHue, oklabHue(colors.primary)),
+                tierHue(planeHue, chromaHue(colors.primary)),
                 SCRIM_CHROMA,
             ).copy(alpha = 0.46f)
         } else {
@@ -1925,7 +1946,7 @@ fun atmosphereFor(
             // the OS still has a light ground for the dark status icons it draws on paper.
             tierColour(
                 luminanceOf(deepenG(liftG(colors.surface, 0.72f), PAPER_CHROME_DROP)),
-                tierHue(planeHue, oklabHue(colors.primary)),
+                tierHue(planeHue, chromaHue(colors.primary)),
                 SCRIM_CHROMA,
             ).copy(alpha = 0.42f)
         },

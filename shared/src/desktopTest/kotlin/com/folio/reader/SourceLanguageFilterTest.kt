@@ -1,9 +1,11 @@
 package com.folio.reader
 
 import com.folio.reader.manga.MangaSourceInfo
+import com.folio.reader.manga.ExtensionEntry
 import com.folio.reader.ui.manga.defaultSourceLanguages
 import com.folio.reader.ui.manga.filterSourcesByLanguage
 import com.folio.reader.ui.manga.languageLabel
+import com.folio.reader.ui.manga.unavailableBrowseExtensions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -74,5 +76,41 @@ class SourceLanguageFilterTest {
         assertEquals("Thai", languageLabel("th"))
         assertEquals("All languages", languageLabel("all"))
         assertEquals("", languageLabel(""))
+    }
+
+    private fun extension(pkg: String, trusted: Boolean) = ExtensionEntry(
+        pkgName = pkg, name = pkg, versionName = "1.4.1", versionCode = 1,
+        libVersion = 1.4, lang = "en", isNsfw = false,
+        isInstalled = trusted, isUntrusted = !trusted,
+    )
+
+    @Test
+    fun `untrusted extensions remain actionable even when no remote source loaded`() {
+        val untrusted = extension("waiting.ext", trusted = false)
+        assertEquals(listOf(untrusted), unavailableBrowseExtensions(listOf(untrusted), listOf(local)))
+    }
+
+    @Test
+    fun `language filtering is not reported as an extension load failure`() {
+        val french = extension("french.ext", trusted = true)
+        val english = extension("english.ext", trusted = true)
+        val sources = listOf(local,
+            comickFr.copy(extensionPkg = french.pkgName),
+            webtoonsEn.copy(extensionPkg = english.pkgName))
+        assertEquals(listOf(0L, 1L), filterSourcesByLanguage(sources, setOf("en")).map { it.id })
+        assertTrue(unavailableBrowseExtensions(listOf(french, english), sources).isEmpty())
+    }
+
+    @Test
+    fun `source id conflicts expose the losing extension instead of silently dropping it`() {
+        val first = extension("first.ext", trusted = true)
+        val duplicate = extension("duplicate.ext", trusted = true)
+        val sources = listOf(local, webtoonsEn.copy(extensionPkg = first.pkgName))
+        assertEquals(listOf(duplicate), unavailableBrowseExtensions(listOf(first, duplicate), sources))
+    }
+
+    @Test
+    fun `uninitialized source flows do not report every extension as unavailable`() {
+        assertTrue(unavailableBrowseExtensions(listOf(extension("reader.ext", trusted = true)), emptyList()).isEmpty())
     }
 }

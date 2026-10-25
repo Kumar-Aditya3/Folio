@@ -438,23 +438,8 @@ fun LibraryScreen(
         enabled = mangaMode && mangaSearchActive
     ) { onMangaSearchActiveChange(false) }
 
-    // Warm the vector index when the book search rail opens so the first meaning/in-book query
-    // does not pay for the ~60 MB load on the keystroke, and release it when the rail closes.
-    // Mirrors the full-screen search's own preload/dispose. A no-op without a model or index.
-    LaunchedEffect(bookSearchActive, bookSearchController) {
-        val controller = bookSearchController ?: return@LaunchedEffect
-        // Warm on open, but do NOT release the index on close: the int8 index is small (~38 MB for
-        // the whole library, far less when scoped to a book) and releasing it on every close made
-        // the next search rebuild from SQLite — the "results took way longer than they should"
-        // report. Keeping it resident means only a scope change (book ↔ library) rebuilds.
-        //
-        // The embedder session IS released on close, though: it is 40-60 MB of native memory that
-        // would otherwise sit resident in the background (the multilingual model far more) — the
-        // footprint the lowmemorykiller targets. It reopens on the next query, cached for that
-        // search session. Index fast, session lean: the two have opposite lifetimes on purpose.
-        if (bookSearchActive) runCatching { controller.preload() }
-        else runCatching { controller.releaseEmbedder() }
-    }
+    // Opening a title filter must not load vectors or start an inference session.
+    com.folio.reader.ui.search.BookSearchSession(bookSearchController, bookSearchActive)
     // The masthead collapses off whatever the shelf below it consumed, so the grid
     // dissolves into the bar the way Home's hero does instead of sliding under a
     // fixed slab of chrome.
@@ -1672,216 +1657,44 @@ private fun DocumentCategoryRow(
 }
 
 @Composable
-private fun DocumentCategoryPickerDialog(
+internal fun DocumentCategoryPickerDialog(
     categories: List<DocumentCategory>,
     initialSelected: Set<String>,
     onCreate: suspend (String) -> String?,
-    onApply: (Set<String>) -> Unit,
+    onApply: suspend (Set<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
-    var newName by remember { mutableStateOf("") }
-
-    fun apply(next: Set<String>) {
-        selected = next
-        onApply(next)
-    }
-
-    // §16 P5: the app's own in-window pane rather than Material's `AlertDialog` (see FolioDialog).
-    com.folio.reader.ui.components.FolioDialog(
-        expanded = true,
-        onDismissRequest = onDismiss,
+    LibraryAssignmentDialog(
         title = "Categories",
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-                if (categories.isEmpty()) {
-                    Text(
-                        "No categories yet — create one below.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
-                }
-                categories.forEach { category ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                apply(
-                                    if (category.id in selected) {
-                                        selected - category.id
-                                    } else {
-                                        selected + category.id
-                                    }
-                                )
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = category.id in selected,
-                            onCheckedChange = { checked ->
-                                apply(
-                                    if (checked) selected + category.id
-                                    else selected - category.id
-                                )
-                            }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            category.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("New category") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            val name = newName.trim()
-                            if (name.isNotEmpty()) {
-                                scope.launch {
-                                    onCreate(name)?.let { apply(selected + it) }
-                                }
-                                newName = ""
-                            }
-                        },
-                        enabled = newName.trim().isNotEmpty()
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create category")
-                    }
-                }
-            }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onDismiss) { Text("Done") }
-        }
-    }
+        choices = categories.map { it.id to it.name },
+        initialSelected = initialSelected,
+        kind = "category",
+        onCreate = onCreate,
+        onConfirm = onApply,
+        onDismiss = onDismiss,
+    )
 }
 
 /**
- * Bulk collections for the selected books — the books counterpart of
- * [DocumentCategoryPickerDialog] and the manga picker, with the same contract:
- * taps apply immediately (no confirm step), the check set *is* each selected
- * book's membership after apply, and a collection can be created inline and
- * checked in one move so a brand-new shelf can be filled without leaving the
- * dialog.
+ * Bulk collections for the selected books, saved on confirmation.
  */
 @Composable
-private fun BookCollectionPickerDialog(
+internal fun BookCollectionPickerDialog(
     collections: List<FolioCollection>,
     initialSelected: Set<String>,
     onCreate: suspend (String) -> String?,
-    onApply: (Set<String>) -> Unit,
+    onApply: suspend (Set<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
-    var newName by remember { mutableStateOf("") }
-
-    fun apply(next: Set<String>) {
-        selected = next
-        onApply(next)
-    }
-
-    // §16 P5: the app's own in-window pane rather than Material's `AlertDialog` (see FolioDialog).
-    com.folio.reader.ui.components.FolioDialog(
-        expanded = true,
-        onDismissRequest = onDismiss,
+    LibraryAssignmentDialog(
         title = "Collections",
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-                if (collections.isEmpty()) {
-                    Text(
-                        "No collections yet — create one below.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
-                }
-                collections.forEach { collection ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                apply(
-                                    if (collection.id in selected) selected - collection.id
-                                    else selected + collection.id
-                                )
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = collection.id in selected,
-                            onCheckedChange = { checked ->
-                                apply(
-                                    if (checked) selected + collection.id
-                                    else selected - collection.id
-                                )
-                            }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            collection.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("New collection") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            val name = newName.trim()
-                            if (name.isNotEmpty()) {
-                                scope.launch {
-                                    onCreate(name)?.let { apply(selected + it) }
-                                }
-                                newName = ""
-                            }
-                        },
-                        enabled = newName.trim().isNotEmpty()
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create collection")
-                    }
-                }
-            }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onDismiss) { Text("Done") }
-        }
-    }
+        choices = collections.map { it.id to it.name },
+        initialSelected = initialSelected,
+        kind = "collection",
+        onCreate = onCreate,
+        onConfirm = onApply,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable

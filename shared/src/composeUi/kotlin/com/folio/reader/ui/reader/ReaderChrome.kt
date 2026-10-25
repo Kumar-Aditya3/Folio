@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
+
 package com.folio.reader.ui.reader
 
 import androidx.compose.animation.AnimatedContent
@@ -9,6 +11,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +56,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -59,12 +66,15 @@ import com.folio.reader.ui.components.FolioMenu
 import com.folio.reader.ui.components.FolioMenuItem
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.PageBlock
+import com.folio.reader.ui.components.folioReaderGlass
+import com.folio.reader.ui.components.folioDataGlass
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.rememberFolioChromeMaterial
 import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioSoftShape
+import com.folio.reader.ui.theme.readerPanelVeilAlpha
 import com.folio.reader.ui.theme.FolioTheme
-import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.rememberFolioHaptics
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.FolioTokens
@@ -83,56 +93,32 @@ import com.folio.reader.ui.theme.rememberMotionSpec
  */
 @Composable
 internal fun Modifier.readerIsland(
-    shape: Shape = RoundedCornerShape(FolioTokens.radiusReaderIsland),
+    shape: Shape = FolioSoftShape(FolioTokens.radiusReaderIsland),
 ): Modifier {
-    val chrome = rememberFolioChromeMaterial()
-    // The island's shadow is only honest while the island is a lid. Under that, the fill is
-    // thinner than the shadow behind it and `Modifier.shadow` starts painting *into* the
-    // pill instead of under it — see [folioVeil]'s `castShadow`. At the shipped 1f this is
-    // inert; it is the transparency slider that turns the shadow into a dark block.
-    val fillAlpha = FolioTheme.readerVeilAlpha
-    return this.folioVeil(
-        shape = shape,
-        elevation = FolioTokens.elevationVeil,
-        fillColor = chrome.plane,
-        fillAlpha = fillAlpha,
-        weight = chrome.weight,
-        castShadow = fillAlpha >= 1f,
-    )
+    return this.folioReaderGlass(shape, FolioTheme.readerVeilAlpha)
 }
 
-/**
- * The narrowest a title capsule may get before the chrome sheds an action rather than letting
- * the title ellipsize further. Under this the capsule is spending its width on an ellipsis
- * rather than on a name, which is the state this bar exists to avoid.
- */
-private val ReaderTitleCapsuleMin = 140.dp
+/** Same quiet material as Settings, controlled by the reader's own opacity preference. */
+@Composable
+internal fun Modifier.readerSettingsSheet(shape: Shape): Modifier =
+    this.folioReaderGlass(shape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
 
-/**
- * The capsule width at which the clock can ride beside the title without pushing the title under
- * [ReaderTitleCapsuleMin]. The clock is the one genuinely optional thing in the capsule, so where
- * there is not room for both, the clock is what goes.
- */
-private val ReaderClockCapsuleMin = 200.dp
+/** Paint a thin instrument strip inside the full-size action targets. */
+@Composable
+internal fun ReaderChromeGroup(
+    modifier: Modifier = Modifier,
+    single: Boolean = false,
+    verticalInset: Dp = 8.dp,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier) {
+        Box(Modifier.matchParentSize().padding(vertical = verticalInset, horizontal = if (single) 8.dp else 0.dp)
+            .readerIsland(FolioSoftShape(8.dp)))
+        content()
+    }
+}
 
-/** One reader island button — the Material touch target, and the unit the top bar budgets in. */
-private val ReaderIslandButton = 48.dp
-
-/**
- * The reader's top bar, redesigned as floating islands: a back capsule, a title capsule and an
- * action capsule, each hovering below the status bar with a uniform margin so the page breathes
- * through the gaps. The old full-width slab welded to the status band is gone. On occluding
- * platforms the rail is not drawn, so the action island carries the selection actions inline
- * while a selection is live, and folds Contents and Annotations into a single overflow menu.
- *
- * The bar **budgets its width before it draws**. The title capsule is this row's only weighted
- * child, so it is the only one that *can* yield: every island beside it is measured at its full
- * intrinsic width first, which means an unfixed bar lets the title absorb the entire shortfall
- * and ellipsize toward nothing. So the available width is measured here and the chrome is chosen
- * to fit the title rather than the other way round — Search rides in the left rail where there is
- * one and folds into the overflow where there is not, and the clock only rides when the capsule
- * can still give the title its floor.
- */
+/** A compact shared reading strip. Android opens the workspace; occluding hosts retain a menu. */
 @Composable
 internal fun ReaderTopBar(
     bookTitle: String,
@@ -150,215 +136,49 @@ internal fun ReaderTopBar(
     onOpenAnnotations: () -> Unit,
     onToggleReaderPanel: () -> Unit,
     echoesEnabled: Boolean = false,
-    onOpenEchoes: () -> Unit = {}
+    onOpenEchoes: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(
-                horizontal = FolioTokens.insetReaderIsland,
-                vertical = FolioTokens.insetReaderIsland,
-            ),
-    ) {
-        // Settle the row's width before drawing it — see the note on this composable. Every
-        // island here is measured at its intrinsic width first, so the title capsule's slot has
-        // to be worked out from the chrome that will sit beside it.
-        val islandGap = FolioTokens.insetReaderIsland
-        // The action island's resting set: Bookmark and Settings always, plus the overflow
-        // wherever the rail is not drawn — there it is the only way to reach Contents and
-        // Annotations.
-        val overflowButton = if (occludes) 1 else 0
-        // Search rides in the left rail on platforms that draw one, so the top bar only carries
-        // it where there is no rail, and there only while doing so still leaves the title its
-        // floor. It is deliberately *not* moved to the bottom block: that block is gated on
-        // `settings.showProgress`, and search must not be one display preference away from
-        // disappearing.
-        val searchInline = occludes && maxWidth >=
-            ReaderIslandButton * (3 + overflowButton) + islandGap * 2 + ReaderTitleCapsuleMin
-        val actionCount = 2 + overflowButton + if (searchInline) 1 else 0
-        val capsuleWidth =
-            maxWidth - ReaderIslandButton - islandGap * 2 - ReaderIslandButton * actionCount
-        // The clock is unweighted, so it is measured *before* the title: left to itself the
-        // supplement takes width from the content. It rides only when the capsule can afford
-        // both.
-        val clockRides = showClock && capsuleWidth >= ReaderClockCapsuleMin
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(islandGap),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Left island — back. A circular capsule: one glyph, so it reads as a button.
-            Box(Modifier.readerIsland(CircleShape)) {
+    Row(modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        ReaderChromeGroup(Modifier.fillMaxWidth(), verticalInset = 4.dp) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBackPress) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FolioTheme.colors.onSurface,
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", Modifier.size(20.dp), FolioTheme.colors.onSurface)
                 }
-            }
-
-            // Center island — title (+ clock). Stretches to fill the gap between the side
-            // islands; the margins to either end keep it reading as a floating pill rather
-            // than a bar.
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .readerIsland()
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = FolioTokens.space3),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = bookTitle,
-                    style = FolioTheme.typography.titleMedium,
-                    color = FolioTheme.colors.onSurface,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (clockRides) {
-                    Text(
-                        text = com.folio.reader.ui.components.rememberClockTime(),
-                        style = FolioTheme.typography.labelMedium,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 10.dp),
-                    )
+                Text(bookTitle, style = FolioTheme.typography.titleSmall,
+                    color = FolioTheme.colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                if (showClock) Text(com.folio.reader.ui.components.rememberClockTime(),
+                    style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp))
+                val haptics = rememberFolioHaptics()
+                IconButton(onClick = { haptics.play(FolioHaptic.Confirm); onBookmarkClick() }) {
+                    Icon(if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                        if (isBookmarked) "Remove bookmark" else "Bookmark this spot", Modifier.size(19.dp),
+                        if (isBookmarked) FolioTheme.colors.accentAnnotation else FolioTheme.colors.onSurface)
                 }
-            }
-
-            // Right island — actions. The frequent ones ride inline; the rest fold into one
-            // overflow so the island stays a few glyphs wide, not the old seven-icon bar.
-            Row(
-                modifier = Modifier.readerIsland(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (occludes) {
-                    // The rail is not drawn on occluding platforms, so the selection actions
-                    // live here — but only while there is a live selection, so the resting
-                    // island is small.
-                    val selected = pageSelection
-                    if (selected != null) {
-                        val highlightHaptics = rememberFolioHaptics()
-                        IconButton(onClick = {
-                            highlightHaptics.play(FolioHaptic.Confirm)
-                            onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
-                            onSelectionConsumed()
-                        }) {
-                            Icon(
-                                Icons.Filled.Highlight,
-                                contentDescription = "Highlight selection",
-                                tint = FolioTheme.colors.onSurface,
-                            )
-                        }
-                        if (echoesEnabled) {
-                            val echoesHaptics = rememberFolioHaptics()
-                            IconButton(onClick = {
-                                echoesHaptics.play(FolioHaptic.Confirm)
-                                onOpenEchoes()
-                            }) {
-                                Icon(
-                                    Icons.Filled.AutoAwesome,
-                                    contentDescription = "Find echoes of this passage",
-                                    tint = FolioTheme.colors.onSurface,
-                                )
-                            }
-                        }
+                // A single stable entry opens the shared workspace. All five tools are one tap away.
+                Box {
+                    IconButton(onClick = onOpenToc) {
+                        Icon(Icons.Filled.MoreVert, "Reader tools", Modifier.size(20.dp), FolioTheme.colors.onSurface)
                     }
-                }
-                // Where the rail carries Search the bar does not — the two would be a
-                // redundant pair, and the rail's is the one in the thumb zone. Where there is
-                // no rail, Search rides here while the width allows it and otherwise drops
-                // into the overflow below.
-                if (searchInline) {
-                    IconButton(onClick = onSearchClick) {
-                        Icon(
-                            imageVector = Icons.Filled.Search,
-                            contentDescription = "Search",
-                            tint = FolioTheme.colors.onSurface,
-                        )
-                    }
-                }
-                val bookmarkMotion = rememberMotionEnabled()
-                val bookmarkSpec = rememberMotionAnimation<Float>(MotionKey.BookmarkGlyphSwap)
-                val bookmarkHaptics = rememberFolioHaptics()
-                IconButton(onClick = {
-                    bookmarkHaptics.play(FolioHaptic.Confirm)
-                    onBookmarkClick()
-                }) {
-                    AnimatedContent(
-                        targetState = isBookmarked,
-                        transitionSpec = {
-                            if (bookmarkMotion) {
-                                fadeIn(bookmarkSpec) togetherWith fadeOut(bookmarkSpec)
-                            } else {
-                                EnterTransition.None togetherWith ExitTransition.None
-                            }
-                        },
-                        label = "bookmark-glyph",
-                    ) { bookmarked ->
-                        Icon(
-                            imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                            contentDescription = if (bookmarked) "Remove bookmark" else "Bookmark this spot",
-                            tint = if (bookmarked) bookmarkColor else FolioTheme.colors.onSurface,
-                        )
-                    }
-                }
-                IconButton(onClick = onToggleReaderPanel) {
-                    Icon(
-                        imageVector = Icons.Filled.Settings,
-                        contentDescription = "Settings",
-                        tint = FolioTheme.colors.onSurface,
-                    )
-                }
-                if (occludes) {
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.MoreVert,
-                                contentDescription = "More actions",
-                                tint = FolioTheme.colors.onSurface,
-                            )
-                        }
-                        FolioMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                            // Reader-owned menu, but a pop-up: pinned opaque, off the knobs.
-                            fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
-                        ) {
-                            if (!searchInline) {
-                                FolioMenuItem(
-                                    text = { Text("Search") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.Search, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        menuOpen = false
-                                        onSearchClick()
-                                    },
-                                )
-                            }
-                            FolioMenuItem(
-                                text = { Text("Contents") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Toc, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenToc()
-                                },
-                            )
-                            FolioMenuItem(
-                                text = { Text("Annotations") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenAnnotations()
-                                },
-                            )
+                    if (occludes) FolioMenu(menuOpen, { menuOpen = false },
+                        fillAlpha = FolioTheme.readerPanelVeilAlpha, readerMaterial = true) {
+                        FolioMenuItem(text = { Text("Contents") }, onClick = { menuOpen = false; onOpenToc() })
+                        FolioMenuItem(text = { Text("Search") }, onClick = { menuOpen = false; onSearchClick() })
+                        FolioMenuItem(text = { Text("Saved passages") }, onClick = { menuOpen = false; onOpenAnnotations() })
+                        FolioMenuItem(text = { Text("Reading settings") }, onClick = { menuOpen = false; onToggleReaderPanel() })
+                        pageSelection?.let { selected ->
+                            FolioMenuItem(text = { Text("Keep selection") }, onClick = {
+                                menuOpen = false
+                                onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
+                                onSelectionConsumed()
+                            })
+                            if (echoesEnabled) FolioMenuItem(text = { Text("Find echoes") }, onClick = {
+                                menuOpen = false; onOpenEchoes()
+                            })
                         }
                     }
                 }
@@ -388,29 +208,14 @@ internal fun ReaderFloatingRail(
     echoesEnabled: Boolean = false,
     onOpenEchoes: () -> Unit = {}
 ) {
-    val chrome = rememberFolioChromeMaterial()
-    // Same rule as [readerIsland]: the rail is chrome over the page, so its shadow may only
-    // be cast while its own fill is a lid. See [folioVeil]'s `castShadow`.
-    val railAlpha = FolioTheme.readerVeilAlpha
     Box(
-        modifier = Modifier
-            .padding(start = 12.dp)
-            .width(56.dp)
-            // The chrome material at the reader's own alpha, like the reader's two bars —
-            // the rail is chrome too, so it cannot be made of the card plane while the bar
-            // above it is made of the chrome one. See FolioChromeMaterial.
-            .folioVeil(
-                FolioShapes.card,
-                fillColor = chrome.plane,
-                fillAlpha = railAlpha,
-                weight = chrome.weight,
-                castShadow = railAlpha >= 1f,
-            )
-            .padding(vertical = 12.dp)
+        modifier = Modifier.padding(start = 8.dp).width(48.dp),
+        contentAlignment = Alignment.TopCenter,
     ) {
+        Box(Modifier.matchParentSize().padding(horizontal = 8.dp).readerIsland(FolioSoftShape(10.dp)))
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
             // The rail is the reader's whole action set, and it grows as the reader's settings do
             // (Echoes) — on a short viewport, which is any phone held sideways, the stack can
             // outrun the screen. Scrolling rather than clipping means the last action is still
@@ -419,67 +224,73 @@ internal fun ReaderFloatingRail(
             // untouched.
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(vertical = 4.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Highlight lives here rather than floating by the selection: the
-            // OS selection toolbar covers anything drawn near the text. Dull
-            // until there is a selection, then it brightens to invite the tap.
+            // Selection actions join the rail only while there is a passage to act on.
+            // Keeping two disabled cells on screen made the resting reader unnecessarily tall.
             val selected = pageSelection
             val highlightHaptics = rememberFolioHaptics()
-            IconButton(
-                enabled = selected != null,
+            if (selected != null) {
+            ReaderRailButton(
                 onClick = {
-                    if (selected != null) {
-                        highlightHaptics.play(FolioHaptic.Confirm)
-                        onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
-                        onSelectionConsumed()
-                    }
+                    highlightHaptics.play(FolioHaptic.Confirm)
+                    onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
+                    onSelectionConsumed()
                 }
             ) {
                 Icon(
                     imageVector = Icons.Filled.Highlight,
-                    contentDescription = if (selected != null) "Highlight selection" else "Select text to highlight",
-                    tint = if (selected != null) FolioTheme.colors.onSurface
-                    else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                    modifier = Modifier.size(20.dp),
+                    contentDescription = "Highlight selection",
+                    tint = FolioTheme.colors.onSurface
                 )
             }
             if (echoesEnabled) {
                 val echoesHaptics = rememberFolioHaptics()
-                IconButton(
-                    enabled = selected != null,
+                ReaderRailButton(
                     onClick = {
-                        if (selected != null) {
-                            echoesHaptics.play(FolioHaptic.Confirm)
-                            onOpenEchoes()
-                        }
+                        echoesHaptics.play(FolioHaptic.Confirm)
+                        onOpenEchoes()
                     }
                 ) {
                     Icon(
                         imageVector = Icons.Filled.AutoAwesome,
-                        contentDescription = if (selected != null) "Find echoes of this passage" else "Select text to find echoes",
-                        tint = if (selected != null) FolioTheme.colors.onSurface
-                        else FolioTheme.colors.onSurface.copy(alpha = 0.32f)
+                        modifier = Modifier.size(20.dp),
+                        contentDescription = "Find echoes of this passage",
+                        tint = FolioTheme.colors.onSurface
                     )
                 }
             }
-            FolioRule(modifier = Modifier.width(32.dp))
+            Box(Modifier.fillMaxWidth().height(8.dp), contentAlignment = Alignment.Center) {
+                FolioRule(modifier = Modifier.width(18.dp))
+            }
+            }
             // Search lives here rather than in the top bar. The rail is the reader's action rail
             // and is gated only on the chrome being shown, so Search keeps a home in the thumb
             // zone while the top bar spends its width on the book's name instead of a fourth
             // glyph. The top bar falls back to carrying it wherever no rail is drawn.
-            IconButton(onClick = onSearchClick) {
-                Icon(Icons.Filled.Search, contentDescription = "Search", tint = FolioTheme.colors.onSurface)
+            ReaderRailButton(onClick = onSearchClick) {
+                Icon(Icons.Filled.Search, modifier = Modifier.size(20.dp), contentDescription = "Search", tint = FolioTheme.colors.onSurface)
             }
-            IconButton(onClick = onOpenToc) {
-                Icon(Icons.AutoMirrored.Filled.Toc, contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
+            ReaderRailButton(onClick = onOpenToc) {
+                Icon(Icons.AutoMirrored.Filled.Toc, modifier = Modifier.size(20.dp), contentDescription = "Contents", tint = FolioTheme.colors.onSurface)
             }
-            IconButton(onClick = onOpenAnnotations) {
-                Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
+            ReaderRailButton(onClick = onOpenAnnotations) {
+                Icon(Icons.AutoMirrored.Filled.Notes, modifier = Modifier.size(20.dp), contentDescription = "Annotations", tint = FolioTheme.colors.onSurface)
             }
             // Bookmark intentionally omitted from the left rail — it lives in the top
             // bar; a second copy here was redundant.
         }
     }
+}
+
+/** Fixed rail cell: the hit target and visual center share one coordinate space. */
+@Composable
+private fun ReaderRailButton(enabled: Boolean = true, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(48.dp)
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center) { content() }
 }
 
 /**
@@ -547,11 +358,27 @@ fun BottomPageBlock(
      * no accent colour; when true it restores the accent-tinted "forward motion" pill (Rule 14).
      */
     editorial: Boolean = false,
-    onSeek: ((Float) -> Unit)? = null
+    readingTrace: com.folio.reader.model.ReadingTrace? = null,
+    readingTraceId: String? = null,
+    onSeek: ((Float) -> Unit)? = null,
+    onPreview: ((Float?) -> Unit)? = null,
+    onOpenMap: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onOpenMap == null) Modifier else Modifier.pointerInput(onOpenMap) {
+                var dragged = 0f
+                var opened = false
+                detectVerticalDragGestures(onDragStart = { dragged = 0f; opened = false }) { change, amount ->
+                    dragged += amount
+                    if (!opened && dragged < -24.dp.toPx()) {
+                        opened = true
+                        change.consume()
+                        onOpenMap()
+                    }
+                }
+            })
             // The redesigned bottom chrome is a floating island, not a welded bar: it sits above
             // the nav bar and insets from both side edges and the bottom by one [insetReaderIsland],
             // so the page shows through a uniform margin on every side. The old "fill to the
@@ -568,18 +395,25 @@ fun BottomPageBlock(
                             end = FolioTokens.insetReaderIsland,
                             bottom = FolioTokens.insetReaderIsland,
                         )
-                        .readerIsland(RoundedCornerShape(FolioTokens.radiusReaderIsland))
+                        .readerIsland(FolioSoftShape(FolioTokens.radiusReaderIsland))
                 }
             )
             .padding(
                 horizontal = FolioTokens.space3,
-                vertical = if (bare) 0.dp else 10.dp,
+                vertical = if (bare) 0.dp else 4.dp,
             )
     ) {
-        PageBlock(
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (readingTrace != null) com.folio.reader.ui.components.ReadingTraceLine(
+            readingTrace,
+            Modifier.weight(1f).height(pageBlockChromeHeight),
+            onSeek = onSeek,
+            sharedId = readingTraceId,
+            onPreview = onPreview,
+        ) else PageBlock(
             fraction = fraction,
             modifier = Modifier
-                .fillMaxWidth()
+                .weight(1f)
                 .height(pageBlockChromeHeight),
             paper = paper,
             ink = ink,
@@ -590,13 +424,18 @@ fun BottomPageBlock(
             pageCountHint = pageCountHint,
             chapterStops = chapterStops,
             stateLabel = stateLabel,
-            onSeek = onSeek
+            onSeek = onSeek,
+            onPreview = onPreview
         )
+        if (onOpenMap != null) IconButton(onClick = onOpenMap) {
+            Icon(Icons.AutoMirrored.Filled.Toc, "Open reading map", Modifier.size(19.dp), FolioTheme.colors.onSurfaceVariant)
+        }
+        }
         if (chapterTitle.isNotBlank() || pagesLeftLabel != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 6.dp),
+                    .padding(bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -618,13 +457,7 @@ fun BottomPageBlock(
                         color = if (editorial) FolioTheme.colors.accentProgress else FolioTheme.colors.onSurfaceVariant,
                         maxLines = 1,
                         modifier = Modifier
-                            .padding(start = 12.dp)
-                            .background(
-                                if (editorial) FolioTheme.colors.accentProgress.copy(alpha = 0.14f)
-                                else FolioTheme.colors.onSurface.copy(alpha = 0.06f),
-                                RoundedCornerShape(percent = 50),
-                            )
-                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                            .padding(start = 12.dp),
                     )
                 }
             }

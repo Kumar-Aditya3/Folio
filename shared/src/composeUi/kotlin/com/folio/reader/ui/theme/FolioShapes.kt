@@ -46,11 +46,11 @@ object FolioShapes {
         bottomStart = 0.dp,
     )
 
-    /** Standard grouped content. Slightly tighter than the old 20dp. */
-    val card: Shape = RoundedCornerShape(18.dp)
+    /** Grouped content with a soft 20dp shoulder. */
+    val card: Shape = RoundedCornerShape(20.dp)
 
     /** Embedded/sunken panels inside another surface. */
-    val inset: Shape = RoundedCornerShape(12.dp)
+    val inset: Shape = RoundedCornerShape(14.dp)
 
     /** A printed object: book and manga covers. */
     val plate: Shape = RoundedCornerShape(

@@ -61,7 +61,7 @@ import com.folio.reader.ui.theme.atmosphere
  * the only extra ink it costs.
  */
 @Composable
-internal fun FolioSearchField(
+fun FolioSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
     placeholder: String,

@@ -42,7 +42,7 @@ class MangaUpdateBadgeTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-manga-badges-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-manga-badges-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         repo = JdbcMangaUpdateRepository(

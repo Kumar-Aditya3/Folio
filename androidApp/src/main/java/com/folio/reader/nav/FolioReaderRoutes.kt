@@ -44,6 +44,7 @@ fun ReaderRoute(
     targetSpineIndex: Int?,
     targetFraction: Float? = null,
     targetHighlightId: String? = null,
+    targetLocator: String? = null,
     onBack: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -81,6 +82,7 @@ fun ReaderRoute(
         targetSpineIndex = targetSpineIndex,
         targetFraction = targetFraction,
         targetHighlightId = targetHighlightId,
+        targetLocator = targetLocator,
         initialSettings = navModel.globalSettings,
         onBackPress = onBack,
         onSearchClick = onOpenSearch,
@@ -113,6 +115,7 @@ private fun ReaderRouteContent(
     targetSpineIndex: Int? = null,
     targetFraction: Float? = null,
     targetHighlightId: String? = null,
+    targetLocator: String? = null,
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
     onSearchClick: () -> Unit,
@@ -139,7 +142,8 @@ private fun ReaderRouteContent(
             syncEngine = graph.syncEngine,
             quoteRepository = graph.quoteRepository,
             revisitRepository = graph.revisitRepository,
-            discoveryRepository = graph.semanticDiscoveryRepository
+            discoveryRepository = graph.semanticDiscoveryRepository,
+            searchRepository = graph.searchRepository
         )
     }
 
@@ -163,6 +167,10 @@ private fun ReaderRouteContent(
     val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
     val showEchoes by viewModel.showEchoes.collectAsState(initial = false)
     val echoesState by viewModel.echoes.collectAsState(initial = com.folio.reader.ui.reader.EchoesState.Idle)
+    val showSearch by viewModel.showSearch.collectAsState(initial = false)
+    val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
+    val searchResults by viewModel.searchResults.collectAsState(initial = emptyList())
+    val searching by viewModel.isSearching.collectAsState(initial = false)
     // Whether there is an index to echo against. Resolved once; the action stays dark until it is
     // true, so the reader is never offered a feature that can only answer "nothing".
     val canEcho = remember { mutableStateOf(false) }
@@ -271,6 +279,7 @@ private fun ReaderRouteContent(
         bookmarks = bookmarks,
         highlights = highlights,
         notes = notes,
+        onPreviewChapter = viewModel::previewChapter,
         targetHighlightId = targetHighlightId,
         showControls = showControls,
         showToc = showToc,
@@ -281,10 +290,20 @@ private fun ReaderRouteContent(
         onOpenEchoes = { selectedText -> viewModel.openEchoes(selectedText) },
         onCloseEchoes = { viewModel.closeEchoes() },
         onPrewarmEchoes = { viewModel.prewarmEchoes() },
+        showSearch = showSearch,
+        searchQuery = searchQuery,
+        searchResults = searchResults,
+        searching = searching,
+        onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+        onCloseSearch = { viewModel.closeSearch() },
         onOpenEcho = { echoBookId, spine, frac -> viewModel.closeBook { onOpenEcho(echoBookId, spine, frac) } },
         onChapterChange = { viewModel.goToChapter(it) },
         onBackPress = onReaderBack,
-        onSearchClick = { viewModel.closeBook { onSearchClick() } },
+        // The magnifier opens the search **sheet**, not a destination. It used to
+        // `closeBook { navigate(SEARCH_FROM_READER) }`: that ended the session, ran four blocking
+        // JDBC writes on the main thread before the navigation, and then rebuilt the reader from
+        // scratch on the way back. Searching mid-chapter now leaves the page exactly where it is.
+        onSearchClick = { viewModel.toggleSearch() },
         onBookmarkClick = { viewModel.toggleBookmark() },
         onSettingsClick = { viewModel.closeBook { onSettingsClick() } },
         onSettingsChange = { updated ->
@@ -321,9 +340,14 @@ private fun ReaderRouteContent(
             viewModel.addHighlight(
                 startLocator = "/$spine/$paragraphIndex:0",
                 endLocator = "/$spine/$paragraphIndex:end",
-                selectedText = snippet
+                selectedText = snippet,
+                chapterId = chapterId,
+                spineIndex = spine
             )
-            viewModel.showControlsFn()
+        },
+        onNoteSelection = { chapterId, paragraph, text, note ->
+            val spine = chapters.firstOrNull { it.id == chapterId }?.spineIndex ?: position?.spineIndex ?: 0
+            viewModel.addSelectionNote(chapterId, spine, paragraph, text, note)
         },
         onRetryChapter = { viewModel.reloadChapter() },
         onLinkClick = { href -> viewModel.handleLinkClick(href) },
@@ -344,7 +368,8 @@ private fun ReaderRouteContent(
         // which is this book's effective copy: it is a device-confidence flag, not a
         // reading preference, so it must not vary per book.
         morphBookId = book.id.takeIf { morphIntoReader },
-        initialSeekFraction = targetFraction
+        initialSeekFraction = targetFraction,
+        initialLocator = targetLocator,
     )
 }
 
@@ -406,9 +431,23 @@ fun DocumentReaderRoute(
 }
 
 @Composable
-fun SearchRoute(navModel: FolioNavModelImpl, onBack: () -> Unit, onOpenReader: (String, Int?, Float?) -> Unit) {
+fun SearchRoute(
+    navModel: FolioNavModelImpl,
+    onBack: () -> Unit,
+    onOpenReader: (String, Int?, Float?) -> Unit,
+    contentBookId: String? = null,
+) {
     val graph = navModel.graph
     val books by remember { graph.bookRepository.getAllBooks() }.collectAsState(initial = emptyList())
+    // Seed the scope before the screen reads it. `remember` rather than a `LaunchedEffect` on
+    // purpose: the effect runs *after* the first composition, so the screen would open on
+    // "Titles" and then flip to "Content" a frame later — and, worse, its
+    // `DisposableEffect(contentBookId)` would already have started the library-wide index build
+    // this exists to avoid. `openInBook` is a no-op once a query is on screen, so returning to
+    // search from an opened result keeps the results and the scope that produced them.
+    remember(contentBookId) {
+        contentBookId?.let { navModel.searchUiState.openInBook(it) }
+    }
     SearchScreen(
         books = books,
         searchRepository = graph.searchRepository,

@@ -27,7 +27,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -193,7 +192,10 @@ fun BookCover(
      */
     dimmed: Boolean = false,
 ) {
-    var bitmap by remember(coverPath) { mutableStateOf<ImageBitmap?>(null) }
+    // A returning shelf cell already has its image. Seed synchronously so it never
+    // paints a skeleton while waiting for LaunchedEffect to run.
+    val initialBitmap = remember(coverPath) { coverPath?.let(::cacheGet) }
+    var bitmap by remember(coverPath) { mutableStateOf(initialBitmap) }
     var failed by remember(coverPath) { mutableStateOf(false) }
 
     LaunchedEffect(coverPath) {
@@ -236,7 +238,7 @@ fun BookCover(
                 // Home→Library morph composes a dozen covers at once, and every one
                 // of them used to recompose per frame for 260ms — right through the
                 // part of the morph the reader is watching.
-                val reveal = rememberEntryState(coverPath)
+                val reveal = if (initialBitmap == null) rememberEntryState(coverPath) else null
                 Image(
                     bitmap = current,
                     contentDescription = title,
@@ -249,7 +251,7 @@ fun BookCover(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(8.dp))
-                        .graphicsLayer { alpha = reveal.value }
+                        .graphicsLayer { alpha = reveal?.value ?: 1f }
                 )
             }
             failed -> FallbackCover(title, author, small, suppressText = suppressFallbackText)
@@ -278,35 +280,15 @@ fun FallbackCover(
     small: Boolean = false,
     suppressText: Boolean = false,
 ) {
-    val palettes = listOf(
-        Color(0xFF4F46E5) to Color(0xFF818CF8),
-        Color(0xFF0F766E) to Color(0xFF2DD4BF),
-        Color(0xFFB45309) to Color(0xFFF59E0B),
-        Color(0xFFBE185D) to Color(0xFFF472B6),
-        Color(0xFF1D4ED8) to Color(0xFF60A5FA),
-        Color(0xFF6D28D9) to Color(0xFFA78BFA)
-    )
-    val (base, accent) = palettes[
-        title.hashCode().let { if (it < 0) -it else it } % palettes.size
-    ]
-
-    // White washes out on the light end of these gradients (measured
-    // 1.86-2.98:1 against the accent stop). Route it through the shared
-    // legibleOn guard against the lightest stop (accent): white is kept where
-    // the gradient is dark enough and darkened toward ink only where it would
-    // be unreadable. The black title shadow still carries the darker end.
-    val titleInk = legibleOn(Color.White, accent, Color.Black)
+    val binding = remember(title) { bindingPalette(title) }
+    val titleInk = Color(0xFFFFF2D8)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                    colors = listOf(base, accent)
-                ),
-                shape = RoundedCornerShape(8.dp)
-            )
-            .padding(if (small) 6.dp else 14.dp),
+            .clip(RoundedCornerShape(8.dp))
+            .folioBinding(binding)
+            .padding(horizontal = if (small) 8.dp else 18.dp, vertical = if (small) 6.dp else 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -314,9 +296,8 @@ fun FallbackCover(
         ) {
             if (suppressText) return@Column
             Text(
-                text = title.take(24),
-                style = (if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium)
-                    .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
+                text = title,
+                style = if (small) FolioTheme.typography.labelSmall else FolioTheme.typography.titleMedium,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                 color = titleInk,
                 textAlign = TextAlign.Center,
@@ -325,9 +306,8 @@ fun FallbackCover(
             )
             if (!small && author.isNotBlank()) {
                 Text(
-                    text = author.take(24),
-                    style = FolioTheme.typography.labelSmall
-                        .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.55f), blurRadius = 6f)),
+                    text = author,
+                    style = FolioTheme.typography.labelSmall,
                     color = titleInk.copy(alpha = 0.85f),
                     textAlign = TextAlign.Center,
                     maxLines = 1,

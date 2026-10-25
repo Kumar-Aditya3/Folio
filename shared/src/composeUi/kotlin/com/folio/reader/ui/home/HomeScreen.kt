@@ -2,6 +2,7 @@
 
 package com.folio.reader.ui.home
 
+import com.folio.reader.ui.components.*
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -16,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -48,8 +50,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -131,8 +136,10 @@ import com.folio.reader.ui.theme.rememberFolioPressFocal
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.coroutines.launch
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.ui.theme.rememberMotionSpec
 
 /**
  * Home, recomposed as a reading room rather than a dashboard.
@@ -171,6 +178,11 @@ fun HomeScreen(
     topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
 ) {
     val motion = rememberMotionEnabled()
+    val deskEntryMotion = rememberMotionSpec(MotionKey.ChartEntry)
+    val deskMotion = motion && deskEntryMotion.durationMs > 0 && deskEntryMotion.intensity > 0f
+    val bottomInset = LocalFolioBarInset.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val deskMinimumHeight = (maxHeight - topInset - bottomInset - 16.dp).coerceIn(420.dp, 760.dp)
     // §13.5: the geometry-matched skeleton dissolves into the loaded content
     // rather than hard-cutting to it. Keyed on the loaded flag and motion-gated,
     // so reduce-motion still swaps instantly.
@@ -190,7 +202,8 @@ fun HomeScreen(
                 )
             }
         else -> {
-            val listState = rememberLazyListState()
+            val listState = key(state.readingDesk) { rememberLazyListState() }
+            val homeScope = rememberCoroutineScope()
             // Re-tap on the Home nav item scrolls back to the anchor. Animated
             // when there is distance to cover; an instant hop when the list is
             // still composing (firstVisibleItemIndex unknown).
@@ -207,8 +220,10 @@ fun HomeScreen(
             // no settle — over the first 160dp; reduce-motion keeps the hero full
             // size and simply scrolling away.
             val density = LocalDensity.current
-            val collapseRange = with(density) { 160.dp.toPx() }
-            val collapse = remember(motion, collapseRange) {
+            val collapseRange = with(density) {
+                (if (state.readingDesk) deskMinimumHeight * 0.7f else 160.dp).toPx()
+            }
+            val collapse = remember(motion, collapseRange, listState) {
                 derivedStateOf {
                     when {
                         !motion -> 0f
@@ -225,7 +240,15 @@ fun HomeScreen(
             } else {
                 state.readingNow
             }
-            val anchorItem = readingNow.firstOrNull()
+            // The base emission now carries the last-opened manga, so the ranking is already
+            // correct on the first frame and the hero never has to be withheld or swapped.
+            val deskItems = remember(readingNow) { revolvingShelfItems(readingNow) }
+            var deskSelectedKey by rememberSaveable(readingNow.firstOrNull()?.shelfKey()) {
+                mutableStateOf<String?>(null)
+            }
+            val anchorItem = if (state.readingDesk) {
+                deskItems.firstOrNull { it.shelfKey() == deskSelectedKey } ?: deskItems.firstOrNull()
+            } else readingNow.firstOrNull()
             // The reading weather, computed once for the whole page: it lights
             // the anchor, marks the ledger and phrases the week well's forecast.
             val climate = readingClimate(
@@ -238,18 +261,20 @@ fun HomeScreen(
             // same colour upward (§13.9); the hero itself re-derives it cheaply
             // from the accent cache. A manga with only a network thumbnail has no
             // local file to sample, so it lands on the fallback accent.
-            val heroTint = if (state.coverTint && anchorItem != null) {
-                rememberCoverAccent(anchorItem.coverPath, FolioTheme.colors.accentProgress)
+            val sampledTint = if ((state.coverTint || state.ambientColor) && anchorItem != null) {
+                if (state.readingDesk && anchorItem.kind == HomeItemKind.MANGA) {
+                    com.folio.reader.ui.manga.rememberMangaCoverAccent(anchorItem.sourceId,
+                        anchorItem.thumbnailUrl, anchorItem.coverPath, FolioTheme.colors.accentProgress)
+                } else rememberCoverAccent(anchorItem.coverPath, FolioTheme.colors.accentProgress)
             } else null
+            val heroTint = sampledTint.takeIf { state.coverTint }
             val fallbackTint = FolioTheme.colors.accentProgress
             // The room is lit by the same cover, on its own switch: turning off
             // Home's *surface* tint need not turn off the environment, and vice
             // versa. Same cache key the hero above already samples, so this costs
             // no extra pixel work — the accent cache is keyed by cover path and
             // lives for the process.
-            val ambientTint = if (state.ambientColor && anchorItem != null) {
-                rememberCoverAccent(anchorItem.coverPath, fallbackTint)
-            } else null
+            val ambientTint = sampledTint.takeIf { state.ambientColor }
             FolioAmbientSource(ambientTint)
             // And the same colour as the room's standing tint, so the shell can reset
             // to it on every route change: a detail screen's preview must not outlive
@@ -270,7 +295,7 @@ fun HomeScreen(
             // end. The bar cross-fades "Folio" out and the book's title in over the
             // same 160dp the hero recedes across, so the two halves of the effect
             // move together instead of the title snapping in after the fact.
-            LaunchedEffect(anchorItem?.id, heroTint, fallbackTint) {
+            LaunchedEffect(anchorItem?.id, heroTint, fallbackTint, collapse) {
                 snapshotFlow { collapse.value }.collect { fraction ->
                     onHeroCollapse(fraction, anchorItem?.title, heroTint ?: fallbackTint)
                 }
@@ -320,14 +345,39 @@ fun HomeScreen(
                 contentPadding = PaddingValues(top = topInset),
             ) {
                 // ── Movement I — what am I reading right now ────────────────
-                item {
-                    ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, climate, openItem, onOpenLibrary)
+                item(key = "home-anchor") {
+                    if (state.readingDesk) {
+                        ReadingDeskHero(
+                            items = deskItems,
+                            item = anchorItem,
+                            backend = mangaBackend,
+                            minimumHeight = deskMinimumHeight,
+                            tint = heroTint,
+                            ambientColor = state.ambientColor,
+                            onSelected = { deskSelectedKey = it.shelfKey() },
+                            onOpenDetails = {
+                                if (it.kind == HomeItemKind.BOOK) onOpenBookDetail(it.id)
+                                else onOpenMangaDetail(it.id)
+                            },
+                            onContinue = {
+                                if (it.kind == HomeItemKind.BOOK) onOpenBook(it.id) else openItem(it)
+                            },
+                            onExplore = { homeScope.launch {
+                                if (deskMotion) listState.animateScrollToItem(1) else listState.scrollToItem(1)
+                            } },
+                            onOpenLibrary = onOpenLibrary,
+                        )
+                    } else {
+                        ReadingNowAnchor(anchorItem, mangaBackend, collapse, heroTint, climate, openItem, onOpenLibrary)
+                    }
                     Spacer(Modifier.height(FolioTokens.spaceBeat))
                 }
-                item {
-                    HomeGlassCard(accent = FolioTheme.colors.accentStreak) { LedgerStrip(state, climate, onOpenStats, onOpenExclusions) }
+                item(key = "home-ledger") {
+                    ReadingDeskSection(listState, "home-ledger", state.readingDesk, bottomInset) {
+                    HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentStreak) { LedgerStrip(state, climate, onOpenStats, onOpenExclusions) }
                     // Movement I closes.
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    }
                 }
                 // ── Movement II — pick up where you left off ───────────────
                 // The shelf and "new chapters" answer one question between them
@@ -348,14 +398,15 @@ fun HomeScreen(
                 //
                 // The shelf is the rest of the same ranked list — books and manga
                 // interleaved by when they were last read, not grouped by format.
-                val shelf = readingNow.drop(1)
+                val shelf = homeContinueItems(readingNow, state.readingDesk, anchorItem?.shelfKey())
                 val hasNewChapters = state.newChapters.isNotEmpty() && mangaBackend != null
                 val hasDiscover = state.discover.isNotEmpty() && mangaBackend != null
                 val finishedTitle = state.becauseFinishedTitle
                 val hasBecauseFinished = finishedTitle != null && state.candidates.size >= 2
                 if (shelf.isNotEmpty()) {
-                    item {
-                        HomeGlassCard(accent = FolioTheme.colors.accentProgress) { ContinueShelf(shelf, mangaBackend, openItem, onOpenSourceWeb) }
+                    item(key = "home-continue") {
+                        ReadingDeskSection(listState, "home-continue", state.readingDesk, bottomInset) {
+                        HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentProgress) { ContinueShelf(shelf, mangaBackend, openItem, onOpenSourceWeb) }
                         Spacer(
                             Modifier.height(
                                 // New chapters continues this movement; without it
@@ -364,23 +415,27 @@ fun HomeScreen(
                                 else FolioTokens.spaceMovement
                             )
                         )
+                        }
                     }
                 }
                 // §11.4: "New chapters" sits after the books shelf; hidden at zero.
                 if (hasNewChapters) {
-                    item {
-                        HomeGlassCard(accent = FolioTheme.colors.accentDiscovery) {
+                    item(key = "home-new-chapters") {
+                        ReadingDeskSection(listState, "home-new-chapters", state.readingDesk, bottomInset) {
+                        HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentDiscovery) {
                             NewChaptersCard(state.newChapters, mangaBackend!!, onOpenMangaDetail)
                         }
                         // Movement II closes: resuming ends, discovery begins.
                         Spacer(Modifier.height(FolioTokens.spaceMovement))
+                        }
                     }
                 }
                 // ── Movement III — find something new ──────────────────────
                 // §11.4: Discover — LATEST from the most recently read manga's source.
                 if (hasDiscover) {
-                    item {
-                        HomeGlassCard(accent = FolioTheme.colors.accentDiscovery) {
+                    item(key = "home-discover") {
+                        ReadingDeskSection(listState, "home-discover", state.readingDesk, bottomInset) {
+                        HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentDiscovery) {
                             DiscoverCard(state.discover, mangaBackend!!, onOpenDiscover)
                         }
                         Spacer(
@@ -391,21 +446,29 @@ fun HomeScreen(
                                 else FolioTokens.spaceMovement
                             )
                         )
+                        }
                     }
                 }
                 if (finishedTitle != null && state.candidates.size >= 2) {
-                    item {
-                        HomeGlassCard(accent = FolioTheme.colors.accentAnnotation) {
-                            BecauseYouFinishedShelf(finishedTitle, state.candidates, onOpenBookDetail)
+                    item(key = "home-finished") {
+                        ReadingDeskSection(listState, "home-finished", state.readingDesk, bottomInset) {
+                        HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentAnnotation) {
+                            BecauseYouFinishedShelf(finishedTitle, state.candidates, onOpenBookDetail, state.becauseFinishedBook, state.recommendationReasons)
                         }
                         // Movement III closes. The well is the closing rest.
                         Spacer(Modifier.height(FolioTokens.spaceMovement))
+                        }
                     }
                 }
                 // ── Movement IV — the closing rest ─────────────────────────
-                item { ThisWeekWell(state, climate, onOpenStats, LocalFolioBarInset.current) }
+                item(key = "home-week") {
+                    ReadingDeskSection(listState, "home-week", state.readingDesk, bottomInset) {
+                        ThisWeekWell(state, climate, onOpenStats, bottomInset)
+                    }
+                }
             }
         }
+    }
     }
     }
 }
@@ -422,6 +485,14 @@ fun HomeScreen(
  * clips to its shape, so an edge-running rail is cleanly contained by the card
  * instead of bleeding off the page.
  */
+@Composable
+private fun HomeContentSection(desk: Boolean, accent: Color,
+    content: @Composable ColumnScope.() -> Unit) {
+    if (desk) Column(Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter,
+        vertical = FolioTokens.space2), content = content)
+    else HomeGlassCard(accent = accent, content = content)
+}
+
 @Composable
 internal fun HomeGlassCard(
     modifier: Modifier = Modifier,
@@ -746,7 +817,7 @@ private fun ReadingNowAnchor(
                             // artwork the size of the box around it.
                             modifier = Modifier.sharedElementOrNoop(
                                 FolioSharedKeys.bookCover(item.id),
-                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                                placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                             ),
                             // The title beside it is paired, so the fallback must not
                             // repeat it.
@@ -1052,6 +1123,8 @@ private fun ContinueShelf(
     Column(modifier = Modifier.fillMaxWidth()) {
         FolioSectionHead(
             title = "Continue reading",
+            trailing = { Text("${items.size} titles", style = FolioTheme.typography.labelSmall,
+                color = FolioTheme.colors.onSurfaceVariant) },
         )
         Spacer(Modifier.height(FolioTokens.space3))
         LazyRow(
@@ -1065,7 +1138,7 @@ private fun ContinueShelf(
                 var menuOpen by remember { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
-                        .width(FolioTokens.coverShelf)
+                        .width(112.dp)
                         .folioPressable(interaction)
                         .clickable(
                             interactionSource = interaction,
@@ -1078,7 +1151,7 @@ private fun ContinueShelf(
                             sourceId = entry.sourceId,
                             thumbnailUrl = entry.thumbnailUrl,
                             coverPath = entry.coverPath,
-                            width = FolioTokens.coverShelf,
+                            width = 112.dp,
                             overlay = { ProgressSeam(entry.progress) },
                         )
                     } else {
@@ -1086,7 +1159,7 @@ private fun ContinueShelf(
                             coverPath = entry.coverPath,
                             title = entry.title,
                             author = entry.subtitle,
-                            width = FolioTokens.coverShelf,
+                            width = 112.dp,
                             small = true,
                             // `contentSize` for the same reason the anchor above
                             // uses it: `coverShelf` is 84dp and the detail header's
@@ -1095,7 +1168,7 @@ private fun ContinueShelf(
                             // rather than after it.
                             modifier = Modifier.sharedElementOrNoop(
                                 FolioSharedKeys.bookCover(entry.id),
-                                placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                                placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                             ),
                             suppressFallbackText = true,
                             overlay = { ProgressSeam(entry.progress) },
@@ -1216,7 +1289,9 @@ private fun BoxScope.ProgressSeam(progress: Float) {
 private fun BecauseYouFinishedShelf(
     finishedTitle: String,
     candidates: List<Book>,
-    onOpenBookDetail: (String) -> Unit
+    onOpenBookDetail: (String) -> Unit,
+    finishedBook: Book? = null,
+    reasons: Map<String, String> = emptyMap(),
 ) {
     val discovery = FolioTheme.colors.accentDiscovery
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1232,6 +1307,16 @@ private fun BecauseYouFinishedShelf(
             )
         }
         Spacer(Modifier.height(FolioTokens.space3))
+        finishedBook?.let { source ->
+            Row(Modifier.fillMaxWidth().padding(vertical = FolioTokens.space2),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                FolioCoverPlate(source.coverPath, source.title, source.displayAuthor,
+                    width = 32.dp, small = true, suppressFallbackText = true, elevation = FolioTokens.elevationPanel)
+                Text("Your next chapter", style = FolioTheme.typography.bodySmall,
+                    color = FolioTheme.colors.onSurfaceVariant)
+            }
+        }
         LazyRow(
             contentPadding = PaddingValues(0.dp),
             horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)
@@ -1241,7 +1326,7 @@ private fun BecauseYouFinishedShelf(
                 val interaction = rememberFolioInteraction()
                 Column(
                     modifier = Modifier
-                        .width(FolioTokens.coverInline * 1.25f)
+                        .width(112.dp)
                         .folioPressable(interaction)
                         .clickable(
                             interactionSource = interaction,
@@ -1252,7 +1337,7 @@ private fun BecauseYouFinishedShelf(
                         coverPath = book.coverPath,
                         title = book.title,
                         author = book.displayAuthor,
-                        width = FolioTokens.coverInline * 1.25f,
+                        width = 112.dp,
                         shape = FolioShapes.plateSmall,
                         elevation = FolioTokens.elevationPanel,
                         small = true,
@@ -1262,10 +1347,15 @@ private fun BecauseYouFinishedShelf(
                         // `coverFeature`, so this pair crosses a size change.
                         modifier = Modifier.sharedElementOrNoop(
                             FolioSharedKeys.bookCover(book.id),
-                            placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
+                            placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                         ),
                         suppressFallbackText = true,
                     )
+                    reasons[book.id]?.let { reason ->
+                        Text(reason, style = FolioTheme.typography.labelSmall,
+                            color = discovery, modifier = Modifier.padding(top = 8.dp),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                     Spacer(Modifier.height(FolioTokens.space1))
                     Text(
                         book.title,
@@ -1302,3 +1392,8 @@ private fun lastActivityLabel(instant: Instant): String? {
         else -> "Read over a year ago"
     }
 }
+
+/** Only the active centre owns a transition source; side previews stay in the full queue. */
+internal fun homeContinueItems(items: List<ReadingNowItem>, desk: Boolean,
+    activeKey: String? = items.firstOrNull()?.shelfKey()): List<ReadingNowItem> =
+    if (desk) items.filterNot { it.shelfKey() == activeKey } else items.drop(1)

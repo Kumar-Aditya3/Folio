@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LibraryAddCheck
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -48,6 +49,7 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
@@ -88,6 +90,7 @@ fun MangaLibraryRail(
     val newChapters by viewModel.lastNewChapters.collectAsState()
     val updatedSeriesCount by viewModel.recentlyUpdated.collectAsState()
     var manageCollectionsOpen by remember { mutableStateOf(false) }
+    var categoryToDelete by remember { mutableStateOf<MangaCategory?>(null) }
     val railScope = rememberCoroutineScope()
 
     // The periodic library update is otherwise invisible; when it lands new
@@ -266,7 +269,7 @@ fun MangaLibraryRail(
                                 canDelete = category.id != MangaCategory.MAIN_ID ||
                                     categories.size > 1,
                                 onRename = { newName -> viewModel.renameCategory(category.id, newName) },
-                                onDelete = { viewModel.deleteCategory(category.id) },
+                                onDelete = { categoryToDelete = category },
                             )
                         }
                     }
@@ -278,6 +281,58 @@ fun MangaLibraryRail(
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = { manageCollectionsOpen = false }) { Text("Done") }
+            }
+        }
+    }
+
+    categoryToDelete?.let { category ->
+        var deleting by remember(category.id) { mutableStateOf(false) }
+        var deleteError by remember(category.id) { mutableStateOf<String?>(null) }
+        com.folio.reader.ui.components.FolioDialog(
+            expanded = true,
+            onDismissRequest = { if (!deleting) categoryToDelete = null },
+            title = "Delete category",
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    "Delete '${category.name}'? Manga belonging only to this category will be removed from your library. " +
+                        "Manga also in another category will stay there. Reading progress, notes, and downloaded pages will be kept.",
+                    style = FolioTheme.typography.bodyMedium,
+                    color = FolioTheme.colors.onSurface,
+                )
+                deleteError?.let { Text(it, color = FolioTheme.colors.error, style = FolioTheme.typography.bodySmall) }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { categoryToDelete = null }, enabled = !deleting) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    enabled = !deleting,
+                    colors = ButtonDefaults.textButtonColors(contentColor = FolioTheme.colors.error),
+                    onClick = {
+                        if (!deleting) {
+                            deleting = true
+                            deleteError = null
+                            railScope.launch {
+                                try {
+                                    check(viewModel.deleteCategory(category.id)) { "This category can no longer be deleted." }
+                                    categoryToDelete = null
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    deleteError = e.message ?: "Could not delete this category. Try again."
+                                } finally {
+                                    deleting = false
+                                }
+                            }
+                        }
+                    },
+                ) { Text(if (deleting) "Deleting..." else "Delete") }
             }
         }
     }

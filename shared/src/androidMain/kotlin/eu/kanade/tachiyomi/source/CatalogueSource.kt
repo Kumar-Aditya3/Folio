@@ -18,6 +18,12 @@ interface CatalogueSource : Source {
      */
     override val lang: String
 
+    /** True when the source can list related titles itself rather than by title search. */
+    val supportsRelatedMangas: Boolean get() = false
+
+    /** Related titles for [manga]; empty when the source does not provide them. */
+    suspend fun fetchRelatedMangaList(manga: SManga): List<SManga> = emptyList()
+
     @Suppress("DEPRECATION")
     override suspend fun getPopularManga(page: Int): MangasPage = fetchPopularManga(page).awaitSingle()
 

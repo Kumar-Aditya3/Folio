@@ -36,7 +36,7 @@ class MangaCascadeDeleteTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-manga-cascade-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-manga-cascade-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         database.onEntityChanged = { type, id, op, payload -> events += SyncEvent(type, id, op, payload) }
     }

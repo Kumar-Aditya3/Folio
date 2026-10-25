@@ -33,7 +33,7 @@ class MergeGlobalSettingsStaleSnapshotTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-merge-settings-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-merge-settings-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         repo = JdbcSettingsRepository(database)
         database.onEntityChanged = { type, id, op, payload -> events += SyncEvent(type, id, op, payload) }

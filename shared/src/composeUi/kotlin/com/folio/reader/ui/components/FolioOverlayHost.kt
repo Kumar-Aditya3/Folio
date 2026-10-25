@@ -1,18 +1,18 @@
 package com.folio.reader.ui.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenuItem
@@ -32,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -48,6 +52,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import com.folio.reader.ui.theme.FolioGlassTier
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioSurfaceContents
@@ -57,6 +62,8 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioSectionAccent
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.rememberMotionEnabled
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
@@ -122,12 +129,12 @@ enum class FolioOverlayKind {
 }
 
 /**
- * The open-pane state, owned by the host and reached through [LocalFolioOverlay].
+ * One open pane in the host's stack.
  *
- * Deliberately a plain state holder rather than a `CompositionLocal` of the *pane*: the host has
- * to be the one that decides placement, scrim and dismissal, and it can only do that if it owns
- * the state. Callers publish intent (`showMenu`/`showDialog`/`showSheet`) and are told when the
- * pane is dismissed.
+ * Deliberately a plain data holder rather than a `CompositionLocal` of the *pane*: the host has
+ * to decide placement, scrim and dismissal, and it can only do that if it owns the state.
+ * Callers publish intent (`showMenu`/`showDialog`/`showSheet`) and are told when the pane is
+ * dismissed.
  *
  * `content` composes in the **host's** scope, not the caller's, so a pane that reads a
  * caller-scoped composition local (a section accent, a preview override) will not see it — pass
@@ -135,35 +142,45 @@ enum class FolioOverlayKind {
  * Material equivalents expect.
  */
 @Stable
+internal class FolioOverlayEntry(
+    val token: Int,
+    val kind: FolioOverlayKind,
+    // Mutable: a live menu's trigger can move (state changes above it re-measure the
+    // bar) and the menu must follow it — see [FolioOverlayController.updateAnchor].
+    var anchor: Rect?,
+    val title: String?,
+    fillAlpha: Float?,
+    blurEnabled: Boolean,
+    val onDismiss: (() -> Unit)?,
+    val pane: @Composable ColumnScope.() -> Unit,
+    val readerMaterial: Boolean = false,
+) {
+    var fillAlpha by mutableStateOf(fillAlpha)
+    var blurEnabled by mutableStateOf(blurEnabled)
+}
+
+@Stable
 class FolioOverlayController internal constructor() {
-    internal var kind by mutableStateOf<FolioOverlayKind?>(null)
+    // A **stack**, not a slot. It used to hold exactly one pane, and that made every
+    // pane a replacement: the source-browse Filters dialog is one hosted pane, and the
+    // `Select` filter inside it is a hosted *menu* — opening it called `showMenu`, which
+    // clobbered the dialog, and choosing a value left the reader staring at a dropdown
+    // with the sheet (and its Apply button) gone — "the filter popup abruptly closes
+    // without applying filters". The token-ownership guard only ever stopped a *stale
+    // dismiss* from closing a newer pane; it did nothing for a newer *show*. Panes
+    // layer in real UIs, so the host holds a stack: a menu pushed over a dialog dims
+    // the dialog and closes back into it; dismissing the dialog takes everything above
+    // it with it, because its context is gone.
+    internal var entries by mutableStateOf(emptyList<FolioOverlayEntry>())
         private set
-    internal var anchor by mutableStateOf<Rect?>(null)
-        private set
-    internal var onDismiss: (() -> Unit)? = null
-    internal var pane: (@Composable ColumnScope.() -> Unit)? = null
-    internal var title: String? = null
-    // An explicit pane fill alpha. Null keeps the app's panel knob (the default). The reader
-    // passes its own in-reader-controls veil here so a reader-owned menu/dialog tracks the
-    // "In-reader controls" slider rather than the global panel one — the host composes the pane
-    // in its own scope, so the knob cannot be inherited and has to be carried as a value.
-    internal var fillAlpha: Float? = null
 
-    // Pane ownership. The host shows exactly one pane, but a single tap can both close the
-    // current pane and open the next one — a menu item that opens a confirm dialog or a
-    // category picker is the common case. Those two effects (the closing menu's
-    // `expanded=false` and the opening dialog's `expanded=true`) land in the same
-    // recomposition in an unspecified order, so the menu's `dismiss()` used to clobber the
-    // dialog the dialog had *just* shown, and the action read as "nothing happened".
-    //
-    // Each `show()` mints a fresh token and records it as the owner. A caller dismisses with
-    // the token it was given, and a dismiss whose token is no longer the owner is a no-op —
-    // so a stale menu can never close a newer pane, regardless of effect ordering.
+    // Each `show()` mints a fresh token. A caller dismisses with the token it was
+    // given; a dismiss whose token is no longer in the stack is a no-op — so a stale
+    // menu can never close a newer pane, regardless of effect ordering.
     private var serial = 0
-    private var owner = 0
 
-    /** True while a pane is showing. The host's back handler is gated on this. */
-    val isOpen: Boolean get() = kind != null
+    /** True while any pane is showing. The host's back handler is gated on this. */
+    val isOpen: Boolean get() = entries.isNotEmpty()
 
     /**
      * Show a menu anchored to [anchor] — the trigger's bounds **in window coordinates**
@@ -173,70 +190,95 @@ class FolioOverlayController internal constructor() {
         anchor: Rect,
         title: String? = null,
         fillAlpha: Float? = null,
+        blurEnabled: Boolean = true,
         onDismiss: () -> Unit,
+        readerMaterial: Boolean = false,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Menu, anchor, title, fillAlpha, onDismiss, content)
+    ) = show(FolioOverlayKind.Menu, anchor, title, fillAlpha, blurEnabled, onDismiss, content, readerMaterial)
 
     /** Show a centred dialog. */
     fun showDialog(
         title: String? = null,
         fillAlpha: Float? = null,
+        blurEnabled: Boolean = true,
         onDismiss: () -> Unit,
+        readerMaterial: Boolean = false,
+        anchor: Rect? = null,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Dialog, null, title, fillAlpha, onDismiss, content)
+    ) = show(FolioOverlayKind.Dialog, anchor, title, fillAlpha, blurEnabled, onDismiss, content, readerMaterial)
 
     /** Show a bottom sheet. */
     fun showSheet(
         title: String? = null,
         fillAlpha: Float? = null,
+        blurEnabled: Boolean = true,
         onDismiss: () -> Unit,
+        readerMaterial: Boolean = false,
         content: @Composable ColumnScope.() -> Unit,
-    ) = show(FolioOverlayKind.Sheet, null, title, fillAlpha, onDismiss, content)
+    ) = show(FolioOverlayKind.Sheet, null, title, fillAlpha, blurEnabled, onDismiss, content, readerMaterial)
 
     private fun show(
         kind: FolioOverlayKind,
         anchor: Rect?,
         title: String?,
         fillAlpha: Float?,
+        blurEnabled: Boolean,
         onDismiss: () -> Unit,
         content: @Composable ColumnScope.() -> Unit,
+        readerMaterial: Boolean,
     ): Int {
-        this.kind = kind
-        this.anchor = anchor
-        this.title = title
-        this.fillAlpha = fillAlpha
-        this.onDismiss = onDismiss
-        this.pane = content
         serial += 1
-        owner = serial
-        return owner
+        entries = entries + FolioOverlayEntry(serial, kind, anchor, title, fillAlpha, blurEnabled, onDismiss, content, readerMaterial)
+        return serial
     }
 
     /**
-     * Close the pane and tell the caller. Idempotent: the scrim tap, the back gesture and an
-     * explicit `dismiss()` can all land in the same frame, and only the first should notify.
+     * Move a live anchored pane's anchor. `FolioMenu` re-fires its effect whenever its
+     * trigger re-measures (any state change above it), and under the one-slot host a
+     * re-`show` was an idempotent replacement; under the stack it would stack a second,
+     * identical menu. A re-show is now an anchor update: same pane, same token, new
+     * position. Unknown token: no-op.
+     */
+    fun updateAnchor(token: Int, anchor: Rect) {
+        val index = entries.indexOfFirst { it.token == token }
+        if (index < 0) return
+        entries[index].anchor = anchor
+        // Bump the state so the host's pane re-reads the new anchor this frame.
+        entries = entries.toList()
+    }
+
+    /** Change a live pane's material without replacing it or disturbing its nested menus. */
+    internal fun updateFillAlpha(token: Int, fillAlpha: Float?) {
+        entries.firstOrNull { it.token == token }?.fillAlpha = fillAlpha
+    }
+
+    internal fun updateBlurEnabled(token: Int, blurEnabled: Boolean) {
+        entries.firstOrNull { it.token == token }?.blurEnabled = blurEnabled
+    }
+
+    /**
+     * Close the topmost pane and tell its caller. Idempotent: the scrim tap, the back
+     * gesture and an explicit `dismiss()` can all land in the same frame, and only the
+     * first should notify — after the first, there is nothing left to notify.
      */
     fun dismiss() {
-        val notify = onDismiss ?: return
-        kind = null
-        anchor = null
-        title = null
-        fillAlpha = null
-        onDismiss = null
-        pane = null
-        owner = 0
-        notify()
+        entries.lastOrNull()?.let { dismiss(it.token) }
     }
 
     /**
-     * Close the pane only if [token] still owns it — the token returned by the matching
-     * `show*` call. A dismiss from a pane that has already been replaced is dropped, which is
-     * what lets a menu item open a dialog without the closing menu tearing it back down. A
-     * token of 0 (never shown / already superseded) is always a no-op.
+     * Close the pane owned by [token] — the value returned by the matching `show*` call —
+     * **and everything stacked above it**. A dialog dismissed while a menu is open over
+     * it takes the menu with it: the menu's whole context is that dialog. A token that
+     * is no longer in the stack (already dismissed, or superseded) is a no-op, which is
+     * what lets a menu item open a dialog without the closing menu tearing that dialog
+     * straight back down.
      */
     fun dismiss(token: Int) {
-        if (token == 0 || token != owner) return
-        dismiss()
+        val index = entries.indexOfFirst { it.token == token }
+        if (index < 0) return
+        val removed = entries.subList(index, entries.size).toList()
+        entries = entries.subList(0, index)
+        removed.forEach { it.onDismiss?.invoke() }
     }
 }
 
@@ -266,73 +308,143 @@ fun rememberFolioOverlayController(): FolioOverlayController = remember { FolioO
 fun FolioOverlayHost(modifier: Modifier = Modifier) {
     val controller = LocalFolioOverlay.current ?: return
 
-    // ── the enter/exit transition ──
+    // ── the exit ──
     //
     // The pane used to appear and vanish as a raw composition add/remove, because this
     // function early-returned on `controller.kind == null`. That return is also why no
     // exit could ever play: by the time the pane should be animating out, the state it
     // would animate is already gone. So the last live pane is *held* — in a plain holder,
     // not in snapshot state, because nothing may recompose off it; it exists only so the
-    // exit transition has something to draw after the controller has cleared itself.
-    val kindNow = controller.kind
-    val paneNow = controller.pane
-    val open = kindNow != null && paneNow != null
-    val motion = rememberMotionEnabled()
-    val transition = updateTransition(open, label = "folioOverlay")
+    // exit has something to draw after the controller has cleared itself.
+    //
+    // The held frame is the stack's top. Popping a pane *into* another pane — a menu
+    // closing back into the dialog it was pushed over — plays no exit here: the revealed
+    // pane is already composed beneath the one leaving, so the menu simply leaves the
+    // stack and the dialog is there. Only the last pane out needs the animation.
+    val live = controller.entries
+    val open = live.isNotEmpty()
+    val exitSpec = rememberMotionAnimation<Float>(MotionKey.OverlayExit)
+    val held = remember { FolioOverlayFrame() }
+    if (open) held.hold(live.last())
+    val exit = remember { Animatable(1f) }
+    LaunchedEffect(open) {
+        if (open) {
+            exit.snapTo(1f)
+        } else if (held.kind != null) {
+            exit.snapTo(1f)
+            exit.animateTo(0f, exitSpec)
+        }
+    }
+    // Closed *and* settled: nothing to draw — and a settled exit must stop composing,
+    // because a zero-alpha scrim would still be a full-screen tap target.
+    if (!open && !exit.isRunning) return
+
+    // Back closes the topmost pane, and only while one is open — the handler lives inside
+    // the host, so it sits above the shell's own walk in the handler stack and cannot
+    // swallow a back that was meant to pop a route. Disabled during the exit so a second
+    // back reaches the route rather than being eaten by a pane that is already leaving.
+    FolioBackHandler(enabled = open, onBack = { controller.dismiss() })
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // The stack, drawn bottom-up. Each pane owns a scrim and a tap shield. A pane
+        // pushed over another pane — the source-browse Filters dialog's Select menu is
+        // the case that forced the stack — dims the pane under it only lightly (the
+        // under-pane already carries the full scrim against the page), and its shield
+        // swallows the tap, so an outside tap closes the menu first and *reveals* the
+        // dialog instead of punching through to it.
+        live.forEachIndexed { index, entry ->
+            key(entry.token) {
+                val frame = rememberEntryFrame(entry)
+                // Refresh the paint state every composition — the entry's anchor can move
+                // under a live menu (updateAnchor), and the held-exit path relies on the
+                // same copy happening while the entry is still live. The `remember` inside
+                // rememberEntryFrame only pins the instance identity, which is what keeps
+                // the layout-written `originY` across frames.
+                frame.hold(entry)
+                OverlayPaneFrame(
+                    frame = frame,
+                    scrimAlpha = if (index == 0) {
+                        FOLIO_OVERLAY_SCRIM_ALPHA
+                    } else {
+                        FOLIO_OVERLAY_STACKED_SCRIM_ALPHA
+                    },
+                    onScrimTap = { controller.dismiss(entry.token) },
+                    animateIn = true,
+                )
+            }
+        }
+
+        // The held pane, animating out over whatever is beneath it (usually nothing).
+        if (!open) {
+            OverlayPaneFrame(
+                frame = held,
+                scrimAlpha = FOLIO_OVERLAY_SCRIM_ALPHA,
+                onScrimTap = {},
+                animateIn = false,
+                fade = exit.value,
+                grow = FOLIO_OVERLAY_MENU_ENTER_SCALE +
+                    (1f - FOLIO_OVERLAY_MENU_ENTER_SCALE) * exit.value,
+            )
+        }
+    }
+}
+
+/**
+ * One pane of the overlay stack: its scrim, its tap shield, and the veil-drawn pane itself.
+ *
+ * [animateIn] runs the pane's own entrance (fade + grow out of its kind's transform origin);
+ * the exit path passes `false` and drives [fade]/[grow] from the host's exit animator
+ * instead, because the exiting pane's composition is already detached from the controller.
+ */
+@Composable
+private fun BoxScope.OverlayPaneFrame(
+    frame: FolioOverlayFrame,
+    scrimAlpha: Float,
+    onScrimTap: () -> Unit,
+    animateIn: Boolean,
+    fade: Float = 1f,
+    grow: Float = 1f,
+) {
+    val kind = frame.kind ?: return
+    val pane = frame.pane ?: return
+    val title = frame.title
+    val anchor = frame.anchor
+    val paneFillAlpha = frame.fillAlpha
+
     // Asymmetric on purpose, and this is the lean: opening is the acknowledgement of a
     // tap, so it may take the time to arrive from the trigger; closing is the user having
     // already decided, so it gets out of the way. A menu that fades out as slowly as it
     // faded in feels like latency.
-    // The pane's arrival and departure come from the motion table, where the two durations that
-    // used to be private constants here (160 in, 110 out) are one row each alongside every other
-    // animation in the app. The asymmetry is the table's too: entering decelerates, leaving
-    // accelerates, and reduce-motion shortens both rather than snapping them.
+    // The pane's arrival comes from the motion table, where the duration that used to be a
+    // private constant (160 in) is one row alongside every other animation in the app, and
+    // reduce-motion shortens it rather than snapping it. (The exit runs on the host's own
+    // animator above, on the table's `OverlayExit` row.)
     val enterSpec = rememberMotionAnimation<Float>(MotionKey.OverlayEnter)
-    val exitSpec = rememberMotionAnimation<Float>(MotionKey.OverlayExit)
     val growEnterSpec = rememberMotionAnimation<Float>(MotionKey.SheetEnter)
-    val fade by transition.animateFloat(
-        transitionSpec = { if (targetState) enterSpec else exitSpec },
-        label = "folioOverlayFade",
-    ) { if (it) 1f else 0f }
-    val grow by transition.animateFloat(
-        transitionSpec = { if (targetState) growEnterSpec else exitSpec },
-        label = "folioOverlayGrow",
-    ) { if (it) 1f else FOLIO_OVERLAY_MENU_ENTER_SCALE }
-
-    val held = remember { FolioOverlayFrame() }
-    if (open) {
-        held.kind = kindNow
-        held.pane = paneNow
-        held.title = controller.title
-        held.anchor = controller.anchor
-        held.fillAlpha = controller.fillAlpha
+    val fadeAnim = remember(frame.token) { Animatable(if (animateIn) 0f else 1f) }
+    val growAnim = remember(frame.token) {
+        Animatable(if (animateIn) FOLIO_OVERLAY_MENU_ENTER_SCALE else 1f)
     }
-    // Closed *and* settled: nothing to draw and nothing left to finish.
-    if (!open && !transition.isRunning) return
-    val kind = held.kind ?: return
-    val pane = held.pane ?: return
-    val title = held.title
-    val anchor = held.anchor
-    val paneFillAlpha = held.fillAlpha
+    if (animateIn) {
+        LaunchedEffect(frame.token) {
+            coroutineScope {
+                launch { fadeAnim.animateTo(1f, enterSpec) }
+                launch { growAnim.animateTo(1f, growEnterSpec) }
+            }
+        }
+    }
+    val paneAlpha = if (animateIn) fadeAnim.value else fade
+    val paneScale = if (animateIn) growAnim.value else grow
 
-    val scrim = FolioTheme.atmosphere.shadowAmbient.copy(alpha = FOLIO_OVERLAY_SCRIM_ALPHA)
-    // The pane must not blur while the chrome is occluding a swap: the backdrop would be the
-    // outgoing tab, and a menu blurring the previous screen is worse than a solid menu.
     val occlude = LocalChromeOccludeSwap.current
     val scrimInteraction = remember { MutableInteractionSource() }
     val paneInteraction = remember { MutableInteractionSource() }
 
-    // Back closes the pane, and only while one is open — the handler lives inside the host, so it
-    // sits above the shell's own walk in the handler stack and cannot swallow a back that was
-    // meant to pop a route. Disabled during the exit so a second back reaches the route rather
-    // than being eaten by a pane that is already leaving.
-    FolioBackHandler(enabled = open, onBack = { controller.dismiss() })
-
     BoxWithConstraints(
-        modifier = modifier.fillMaxSize(),
+        modifier = Modifier.matchParentSize(),
         contentAlignment = when (kind) {
             FolioOverlayKind.Menu -> Alignment.TopStart
-            FolioOverlayKind.Dialog -> Alignment.Center
+            FolioOverlayKind.Dialog -> if (anchor == null) Alignment.Center else Alignment.TopStart
             FolioOverlayKind.Sheet -> Alignment.BottomCenter
         },
     ) {
@@ -351,12 +463,12 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
         Box(
             Modifier
                 .matchParentSize()
-                .graphicsLayer { alpha = fade }
-                .background(scrim)
+                .graphicsLayer { this.alpha = paneAlpha }
+                .background(FolioTheme.atmosphere.shadowAmbient.copy(alpha = scrimAlpha))
                 .clickable(
                     interactionSource = scrimInteraction,
                     indication = null,
-                    onClick = { controller.dismiss() },
+                    onClick = onScrimTap,
                 )
         )
 
@@ -407,7 +519,7 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                                 // away from the finger that opened it. Written in layout,
                                 // read in draw — the phases are already in that order, so
                                 // no extra frame and no recomposition.
-                                held.originY = if (y < top) 1f else 0f
+                                frame.originY = if (y < top) 1f else 0f
                                 layout(placeable.width, placeable.height) {
                                     placeable.place(x, y)
                                 }
@@ -423,8 +535,21 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                     // pinned to the bottom edge, the content lands directly on top of it. A menu
                     // is left out on purpose: it is placed by an absolute `offset` from its
                     // trigger, so bottom padding would only pad it, not lift it.
-                    FolioOverlayKind.Dialog ->
-                        Modifier
+                    FolioOverlayKind.Dialog -> if (anchor != null) {
+                        val keyboard = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+                        val available = (maxHeight - keyboard).coerceAtLeast(0.dp)
+                        val maxW = with(density) { maxWidth.toPx().roundToInt() }
+                        val maxH = with(density) { available.toPx().roundToInt() }
+                        val margin = with(density) { 12.dp.toPx().roundToInt() }
+                        Modifier.widthIn(max = FOLIO_OVERLAY_DIALOG_MAX_WIDTH)
+                            .heightIn(max = available)
+                            .layout { measurable, constraints ->
+                                val pane = measurable.measure(constraints)
+                                val point = folioContextDialogPosition(anchor, pane.width, pane.height, maxW, maxH, margin)
+                                frame.originY = if (point.y < anchor.top) 1f else 0f
+                                layout(pane.width, pane.height) { pane.place(point.x, point.y) }
+                            }.padding(FolioTokens.space4)
+                    } else Modifier
                             .imePadding()
                             .padding(FolioTokens.space4)
                             .widthIn(max = FOLIO_OVERLAY_DIALOG_MAX_WIDTH)
@@ -448,12 +573,12 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
             // cross-faded over the screen. A dialog and a sheet scale about their own middle
             // and foot respectively, matching where each one enters from.
             .graphicsLayer {
-                alpha = fade
-                scaleX = grow
-                scaleY = grow
+                this.alpha = paneAlpha
+                scaleX = paneScale
+                scaleY = paneScale
                 transformOrigin = when (kind) {
-                    FolioOverlayKind.Menu -> TransformOrigin(0f, held.originY)
-                    FolioOverlayKind.Dialog -> TransformOrigin(0.5f, 0.5f)
+                    FolioOverlayKind.Menu -> TransformOrigin(0f, frame.originY)
+                    FolioOverlayKind.Dialog -> TransformOrigin(0.5f, if (anchor == null) 0.5f else frame.originY)
                     FolioOverlayKind.Sheet -> TransformOrigin(0.5f, 1f)
                 }
             }
@@ -463,27 +588,26 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                 indication = null,
                 onClick = {},
             )
-            .folioVeil(
+            .then(if (frame.readerMaterial) {
+                Modifier.folioReaderGlass(FolioShapes.card, paneFillAlpha ?: FolioSurfaceOpacity.POPUP_GLASS,
+                    blurEnabled = !occlude && frame.blurEnabled)
+            } else Modifier.folioDataGlass(
                 shape = when (kind) {
                     FolioOverlayKind.Sheet -> FolioShapes.sheet
                     else -> FolioShapes.card
                 },
                 // Every hosted pop-up (dialog, menu, sheet) is detached from the user
-                // opacity knobs and pinned to the highest opacity its own glass material
-                // allows, so a pop-up is never see-through however transparent the room's
-                // chrome is set. A caller may still pin an explicit alpha, but no caller
-                // falls back to the global panel knob any more.
-                fillAlpha = paneFillAlpha ?: FolioSurfaceOpacity.POPUP_OPAQUE,
-                accent = LocalFolioSectionAccent.current,
-                // §16 cost model: an anchored menu is small, high-attention chrome under the
-                // reader's finger, so it takes the finer `control` budget; a dialog or a
-                // sheet is a pane and takes the pane budget. See FolioGlassCost.
-                glass = when (kind) {
-                    FolioOverlayKind.Menu -> GlassSpec.Control
-                    else -> GlassSpec.Default
-                }.copy(blurEnabled = !occlude),
-                tier = FolioGlassTier.Overlay,
-            )
+                // opacity knobs — a pop-up must not go see-through however transparent the
+                // room's chrome is set — but it is glass, not the lid it shipped as: it
+                // paints at its own designed glass point, just above the panel's blurred
+                // tier, so it reads as the same material as the chrome around it. A caller
+                // may still pin an explicit alpha (the reader's in-reader-controls veil).
+                fillAlpha = paneFillAlpha ?: FolioSurfaceOpacity.POPUP_GLASS,
+                // Shared data-glass diffusion keeps pop-ups in the same material family.
+                // Reader hosts can suppress backdrop capture when it would include an occluded view.
+                overlay = true,
+                blurEnabled = !occlude && frame.blurEnabled,
+            ))
             .then(
                 if (title != null) {
                     Modifier.semantics { paneTitle = title }
@@ -495,11 +619,12 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
         // Nested panels inside the pane are quieted — a card inside the glass must not ring a
         // second full-strength rim a few pixels inside the pane's own (see FolioSurfaceDepth).
         // The pane scrolls so a long menu or dialog is usable rather than clipped. §19: the
-        // pane publishes the exact plane it is painted with (folioVeilPlane — same accent,
-        // same blur gating as its own folioVeil call above), so nested surfaces are a floor
+        // pane publishes the exact data-glass plane it is painted with (same alpha and
+        // blur gating as above), so nested surfaces are a floor
         // of this pane's material plus a rim: one object with structure in it.
         FolioSurfaceContents(
-            folioVeilPlane(accent = LocalFolioSectionAccent.current, blurEnabled = !occlude)
+            folioDataGlassPlane(paneFillAlpha ?: FolioSurfaceOpacity.POPUP_GLASS,
+                blurEnabled = !occlude && frame.blurEnabled)
         ) {
             // Dialog panes carry the content inset themselves. Their callers compose
             // bare rows and texts (`PageActionsDialog`, the confirm dialogs, the reader
@@ -541,11 +666,16 @@ fun FolioOverlayHost(modifier: Modifier = Modifier) {
                         ),
                     )
                 }
-                pane()
+                FolioSuppressibleBackdrop(suppress = !frame.blurEnabled) { pane() }
             }
         }
     }
 }
+
+/** The frame for one live stack entry, remembered per token so its layout-written state persists. */
+@Composable
+private fun rememberEntryFrame(entry: FolioOverlayEntry): FolioOverlayFrame =
+    remember(entry.token) { FolioOverlayFrame().apply { hold(entry) } }
 
 /**
  * A menu that uses the in-window host when one is mounted and Material's own `DropdownMenu`
@@ -570,9 +700,11 @@ fun FolioMenu(
     title: String? = null,
     anchor: Rect? = null,
     fillAlpha: Float? = null,
+    readerMaterial: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val controller = LocalFolioOverlay.current
+    val blurEnabled = LocalGlassBackdrop.current != null
     if (controller == null) {
         androidx.compose.material3.DropdownMenu(
             expanded = expanded,
@@ -599,13 +731,22 @@ fun FolioMenu(
     val currentContent by rememberUpdatedState(content)
     val currentDismiss by rememberUpdatedState(onDismissRequest)
     // Ownership: only the menu that actually opened the pane may close it. `showMenu` returns a
-    // token; dismissing with it is a no-op once a newer pane (e.g. a dialog this menu's own item
-    // opened) has taken over, so the closing menu can't tear that newer pane straight back down.
+    // token; dismissing with it is a no-op once that pane has left the stack — which is what
+    // lets a menu item open a dialog (the dialog stacks *above* the menu) without the closing
+    // menu tearing the newer pane straight back down.
     var token by remember { mutableStateOf(0) }
     LaunchedEffect(expanded, rect) {
         if (expanded) {
-            token = controller.showMenu(rect, title = title, fillAlpha = fillAlpha, onDismiss = { currentDismiss() }) {
-                currentContent()
+            // The effect re-fires whenever the trigger re-measures (any state change above
+            // it — a count in the label, the bar's own recomposition). Under the stack a
+            // second `showMenu` would stack a second identical menu, so a live menu moves
+            // by anchor update; only the first fire opens the pane.
+            if (token != 0) {
+                controller.updateAnchor(token, rect)
+            } else {
+                token = controller.showMenu(rect, title = title, fillAlpha = fillAlpha, blurEnabled = blurEnabled, readerMaterial = readerMaterial, onDismiss = { currentDismiss() }) {
+                    currentContent()
+                }
             }
         } else if (token != 0) {
             controller.dismiss(token)
@@ -616,6 +757,12 @@ fun FolioMenu(
     // composition without ever seeing `expanded` go false, so the pane has to be closed on dispose
     // or it would outlive its trigger. The token guard keeps this from closing a pane another
     // menu or dialog now owns.
+    LaunchedEffect(token, fillAlpha, blurEnabled) {
+        if (token != 0) {
+            controller.updateFillAlpha(token, fillAlpha)
+            controller.updateBlurEnabled(token, blurEnabled)
+        }
+    }
     DisposableEffect(Unit) {
         onDispose { if (token != 0) controller.dismiss(token) }
     }
@@ -624,20 +771,37 @@ fun FolioMenu(
 /**
  * The last live pane, held across its own exit.
  *
- * Deliberately **not** snapshot state. Nothing may recompose off these: they are written
- * during composition while the controller still has a pane and read in the same pass, and
- * they exist for exactly one reason — [FolioOverlayHost] early-returns the moment the
- * controller clears, which left no way to draw an exit. [originY] is the one field written
- * from a later phase (layout) and read from a later one still (draw), which is safe in that
- * direction and in that direction only.
+ * Ownership and placement are retained data, copied while the controller has a pane so
+ * its exit can still draw after the controller clears. The material properties are
+ * snapshot state: their live updates must invalidate the renderer even when this frame
+ * retains its identity. [originY] is written from layout and read later from draw; that
+ * forward phase ordering does not need recomposition. The other retained fields are
+ * copied and consumed in the same composition pass.
  */
 private class FolioOverlayFrame {
+    var token: Int = 0
     var kind: FolioOverlayKind? = null
     var pane: (@Composable ColumnScope.() -> Unit)? = null
     var title: String? = null
     var anchor: Rect? = null
-    var fillAlpha: Float? = null
+    // The frame keeps its identity while a pane is open. Snapshot properties let the
+    // renderer observe live material changes even when Compose skips the parent call.
+    var fillAlpha by mutableStateOf<Float?>(null)
+    var blurEnabled by mutableStateOf(true)
+    var readerMaterial: Boolean = false
     var originY: Float = 0f
+
+    /** Copy a stack entry's paint state in; called while the entry is still live. */
+    fun hold(entry: FolioOverlayEntry) {
+        token = entry.token
+        kind = entry.kind
+        pane = entry.pane
+        title = entry.title
+        anchor = entry.anchor
+        fillAlpha = entry.fillAlpha
+        blurEnabled = entry.blurEnabled
+        readerMaterial = entry.readerMaterial
+    }
 }
 
 /**
@@ -691,9 +855,12 @@ fun FolioDialog(
     modifier: Modifier = Modifier,
     title: String? = null,
     fillAlpha: Float? = null,
+    readerMaterial: Boolean = false,
+    anchor: Rect? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val controller = LocalFolioOverlay.current
+    val blurEnabled = LocalGlassBackdrop.current != null
     if (controller == null) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = onDismissRequest,
@@ -711,7 +878,8 @@ fun FolioDialog(
     var token by remember { mutableStateOf(0) }
     LaunchedEffect(expanded) {
         if (expanded) {
-            token = controller.showDialog(title = title, fillAlpha = fillAlpha, onDismiss = { currentDismiss() }) {
+            token = controller.showDialog(title = title, fillAlpha = fillAlpha, blurEnabled = blurEnabled, readerMaterial = readerMaterial,
+                anchor = anchor, onDismiss = { currentDismiss() }) {
                 currentContent()
             }
         } else if (token != 0) {
@@ -720,6 +888,13 @@ fun FolioDialog(
         }
     }
     // See FolioMenu: a dialog composed conditionally must close its pane when it leaves.
+    LaunchedEffect(token, fillAlpha, blurEnabled, anchor) {
+        if (token != 0) {
+            if (anchor != null) controller.updateAnchor(token, anchor)
+            controller.updateFillAlpha(token, fillAlpha)
+            controller.updateBlurEnabled(token, blurEnabled)
+        }
+    }
     DisposableEffect(Unit) {
         onDispose { if (token != 0) controller.dismiss(token) }
     }
@@ -737,6 +912,15 @@ fun FolioDialog(
  * from the page.
  */
 private const val FOLIO_OVERLAY_SCRIM_ALPHA = 0.32f
+
+/**
+ * The scrim a pane **stacked over another pane** wears. The under-pane already carries
+ * [FOLIO_OVERLAY_SCRIM_ALPHA] against the page, so a second full-strength scrim would stack
+ * to ~0.40 over the dialog the reader is still working in. A stacked pane only needs enough
+ * of a dim to separate it from the pane beneath — the menu over the Filters dialog reads as
+ * lifted, not as a second modal.
+ */
+private const val FOLIO_OVERLAY_STACKED_SCRIM_ALPHA = 0.10f
 
 /** A menu pane's width ceiling — a menu is a list of short labels, not a panel. */
 private val FOLIO_OVERLAY_MENU_MAX_WIDTH = 268.dp
@@ -783,3 +967,15 @@ private const val FOLIO_OVERLAY_MENU_ENTER_SCALE = 0.96f
 
 /** The dialog pane's width ceiling, so a small confirm does not become a full-width slab. */
 private val FOLIO_OVERLAY_DIALOG_MAX_WIDTH = 420.dp
+
+internal fun folioContextDialogPosition(anchor: Rect, paneWidth: Int, paneHeight: Int,
+    viewportWidth: Int, viewportHeight: Int, margin: Int): IntOffset {
+    val maxX = (viewportWidth - paneWidth - margin).coerceAtLeast(0)
+    val maxY = (viewportHeight - paneHeight - margin).coerceAtLeast(0)
+    val x = ((anchor.left + anchor.right - paneWidth) / 2).roundToInt().coerceIn(margin.coerceAtMost(maxX), maxX)
+    val below = (anchor.bottom + margin).roundToInt()
+    val above = (anchor.top - paneHeight - margin).roundToInt()
+    val y = when { below <= maxY -> below; above >= margin -> above; else -> maxY }
+        .coerceIn(margin.coerceAtMost(maxY), maxY)
+    return IntOffset(x, y)
+}

@@ -10,19 +10,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.folio.reader.ui.components.FolioDialog
 import com.folio.reader.ui.components.sharedTextOrNoop
+import com.folio.reader.ui.theme.readerPanelVeilAlpha
 import com.folio.reader.ui.theme.FolioTheme
-import com.folio.reader.ui.theme.FolioSurfaceOpacity
 
 /**
  * Glass composer for a highlight's note. A dismissed (not cancelled) dialog
@@ -44,6 +52,8 @@ internal fun NoteComposerDialog(
     onDismiss: () -> Unit,
     onCancel: () -> Unit,
     morphKey: Any? = null,
+    anchor: Rect? = null,
+    autoFocus: Boolean = false,
 ) {
     // §16 issue 3: the app's own in-window pane, not Material's `AlertDialog`. An `AlertDialog`
     // is a separate window, so it paints `colorScheme.surfaceContainerHigh` with no backdrop to
@@ -54,11 +64,21 @@ internal fun NoteComposerDialog(
         expanded = true,
         onDismissRequest = onDismiss,
         title = "Note",
-        // §16: a reader-owned pop-up, but pop-ups are detached from the opacity knobs
-        // and pinned to the highest opacity their own glass allows, so the note is
-        // always legible over the page it is about regardless of the chrome slider.
-        fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
+        // This editor belongs to the reader and follows its controls preference.
+        fillAlpha = FolioTheme.readerPanelVeilAlpha,
+        readerMaterial = true,
+        anchor = anchor,
     ) {
+        ReaderNoteEditor(passage, noteContent, onNoteChange, onSave, onCancel, morphKey = morphKey, autoFocus = autoFocus)
+    }
+}
+
+@Composable
+internal fun ReaderNoteEditor(passage: String, noteContent: String, onNoteChange: (String) -> Unit,
+    onSave: () -> Unit, onCancel: () -> Unit, morphKey: Any? = null, embedded: Boolean = false, autoFocus: Boolean = false) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(autoFocus) { if (autoFocus) focus.requestFocus() }
+    Column(if (embedded) Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp) else Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (passage.isNotBlank()) {
                 Text(
@@ -77,7 +97,8 @@ internal fun NoteComposerDialog(
                 onValueChange = onNoteChange,
                 label = { Text("Your note") },
                 minLines = 3,
-                modifier = Modifier.fillMaxWidth()
+                maxLines = 8,
+                modifier = Modifier.fillMaxWidth().focusRequester(focus)
             )
         }
         // The confirm/dismiss slots an `AlertDialog` supplied, as the pane's own last row: the

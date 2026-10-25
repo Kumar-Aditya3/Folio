@@ -2,6 +2,9 @@
 
 package com.folio.reader.ui.book
 
+import com.folio.reader.ui.components.*
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
@@ -100,185 +103,62 @@ internal fun BookHeaderSection(
      */
     sessions: List<ReadingSession> = emptyList(),
 ) {
-    val accent = rememberCoverAccent(book.coverPath, FolioTheme.colors.accentProgress)
-    // Opening a book brings its colour with it. The detail page is the step between
-    // the shelf and the reader, so this is where the room starts wearing the book:
-    // the morph into the reader leaves the shelf in this hue and the way back finds
-    // it again. Ungated here because the app root withholds the holder outright when
-    // the appearance switch is off.
+    val colors = FolioTheme.colors
+    val accent = rememberCoverAccent(book.coverPath, colors.accentProgress)
     FolioAmbientSource(accent)
     FolioCoverLightSource(rememberCoverLight(book.coverPath))
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)
-    ) {
-        // The hero is a glass title-plate, the same material Home gives its "Reading
-        // now" anchor: a translucent raised pane washed in the cover's own hue and
-        // ringed by the theme rim. Before this, the detail header sat on bare field and
-        // read as a different app; the pane + rim is the shared visual language that
-        // ties it to Home/Library/Stats. The cover plate deliberately overhangs the
-        // pane's top edge (negative offset via heroBleed spacing) for the editorial
-        // "cover lifted off the page" look.
-        val heroShape = rememberFolioShape(book.id.hashCode(), FolioShapeFamily.hero)
-        val heroWash = accent
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = FolioTokens.gutter)
-                // Pane fill (translucent) so the field atmosphere shows through the
-                // glass; the rim and the cover's light give it depth, not an opaque slab.
-                .folioRaised(
-                    shape = heroShape,
-                    fill = FolioTheme.colors.surface.copy(alpha = 0.55f),
-                    accent = accent,
-                    tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                )
-                // The cover's hue, poured from the top-leading corner and tapering to
-                // nothing — the same eased falloff Home's anchor uses so no Mach-band
-                // rectangle edge is drawn inside the pane.
-                .background(
-                    Brush.linearGradient(
-                        0f to heroWash.copy(alpha = 0.22f),
-                        0.4f to heroWash.copy(alpha = 0.08f),
-                        0.75f to heroWash.copy(alpha = 0.02f),
-                        1f to Color.Transparent,
-                    ),
-                    heroShape,
-                )
-                // The themed rim: the palette's own travelling light on the pane's
-                // silhouette, against the discovery counter-hue — identical call to the
-                // Home anchor's rim.
-                .folioThemeRim(
-                    shape = heroShape,
-                    counterAccent = FolioTheme.colors.accentDiscovery,
-                    parkedAt = book.normalizedProgress.toFloat(),
-                )
-                .padding(FolioTokens.space4),
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space4),
-                verticalAlignment = Alignment.Top
-            ) {
-            FolioCoverPlate(
-                coverPath = book.coverPath,
-                title = book.title,
-                author = book.displayAuthor,
-                width = FolioTokens.coverFeature,
-                halo = accent,
-                elevation = FolioTokens.elevationRaised,
-                // The title and author beside this plate carry the paired keys and
-                // fly in with it, so the fallback must not draw its own copies —
-                // they would sit at a fourth size in the same row.
-                suppressFallbackText = true,
-                modifier = Modifier
-                    // §17: the same plate the shelf handed over — matching key,
-                    // so the cover flies from the grid cell into this page.
-                    //
-                    // `contentSize` because this is a *destination across two
-                    // different tokens*: Home's anchor is `coverAnchor` (148dp) and
-                    // this header's plate is `coverFeature` (112dp). Under the API
-                    // default the placeholder follows the interpolated bounds while
-                    // the cover drawn inside keeps its own size, so the two agree
-                    // only on the final frame and the cover visibly jumps into place
-                    // as the flight ends. `contentSize` makes the artwork the size
-                    // of the box around it for the whole morph. From the library
-                    // grid, whose source plate is also `coverFeature`, there is no
-                    // size change and either mode is identical.
-                    .sharedElementOrNoop(
-                        FolioSharedKeys.bookCover(book.id),
-                        placeHolderSize = SharedTransitionScope.PlaceHolderSize.contentSize,
-                    )
-                    .clickable { onCoverClick() },
-            )
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceHair)
-            ) {
-                // Editorial kicker labelling the hero, read against the pane rather
-                // than the page — so FolioEyebrow guards contrast on the right ground.
-                FolioEyebrow(
-                    text = if (book.normalizedProgress > 0.0) "Reading" else "In your library",
-                    accent = accent,
-                    background = FolioTheme.colors.surface,
-                )
-                Text(
-                    text = book.title,
-                    style = FolioTheme.typography.headlineMedium,
-                    color = FolioTheme.colors.onSurface,
-                    // Paired with the shelf's title: the run of text travels with
-                    // its cover instead of the cover arriving and the words
-                    // appearing separately.
-                    modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id))
-                )
-
-                book.subtitle?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        text = it,
-                        style = FolioTheme.typography.bodyMedium,
-                        color = FolioTheme.colors.onSurfaceVariant
-                    )
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)) {
+        FolioArtworkScene(FolioArtwork("book:${book.id}", book.coverPath), Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
+                verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val coverWidth = (maxWidth * .36f).coerceAtMost(136.dp)
+                    val stack = maxWidth < 310.dp || LocalDensity.current.fontScale > 1.3f
+                    val cover: @Composable () -> Unit = {
+                        FolioCoverPlate(book.coverPath, book.title, book.displayAuthor,
+                            width = coverWidth, halo = accent, haloStrength = .08f,
+                            elevation = FolioTokens.elevationRaised, suppressFallbackText = true,
+                            modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.bookCover(book.id),
+                                placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize)
+                                .clickable(onClick = onCoverClick),
+                            overlay = { com.folio.reader.ui.components.FolioTraceSpine(book.id,
+                                book.normalizedProgress.toFloat(), Modifier.align(Alignment.CenterEnd)) })
+                    }
+                    val identity: @Composable () -> Unit = {
+                        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            FolioEyebrow(if (book.normalizedProgress > 0.0) "Reading" else "In your library", accent = colors.primary)
+                            Text(book.title, style = FolioTheme.typography.headlineMedium, color = colors.onSurface,
+                                modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookTitle(book.id)))
+                            book.subtitle?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = FolioTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                            }
+                            Text(book.displayAuthor, style = FolioTheme.typography.titleSmall, color = colors.onSurfaceVariant,
+                                modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookAuthor(book.id)))
+                        }
+                    }
+                    if (stack) Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+                        cover(); identity()
+                    } else Row(horizontalArrangement = Arrangement.spacedBy(FolioTokens.space4),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        cover(); Box(Modifier.weight(1f)) { identity() }
+                    }
                 }
-
-                Text(
-                    text = book.displayAuthor,
-                    style = FolioTheme.typography.titleSmall,
-                    color = accent,
-                    modifier = Modifier.sharedTextOrNoop(FolioSharedKeys.bookAuthor(book.id))
-                )
-
-            }
-            }
-
-            Spacer(Modifier.height(FolioTokens.space2))
-
-            // Progress as a figure with the estimate as its caption. Held inside the
-            // text column it began at the cover's trailing edge and left the strip
-            // beneath the thumbnail empty — the "0 %" read as a stranded fragment with
-            // the row's length going to waste. Lifted out to span the pane's full
-            // width (like the seam below it), the numeral sits under the thumbnail and
-            // the caption runs the whole line. §2.6 holds — one progress form here.
-            FolioFigure(
-                value = book.progressPercent.toString(),
-                unit = "%",
-                caption = remainingTimeCaption(book, wordsRead, sessions),
-                accent = accent,
-                emphasis = FigureScale.Quiet,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(FolioTokens.space2))
-
-            // The seam spans the pane's *full* width, so it runs under the cover plate as
-            // well as under the text. Held inside the text column it began at the plate's
-            // trailing edge and left a bare strip beneath the thumbnail — the one place on
-            // this screen where the progress read stopped short of the object it describes.
-            // §2.6 still holds: one progress form here.
-            FolioProgressBar(
-                progress = book.normalizedProgress.toFloat(),
-                color = accent,
-            )
+                val progress = book.normalizedProgress.toFloat().coerceIn(0f, 1f)
+                com.folio.reader.ui.components.FolioReadingTrace(book.id, book.title, progress)
+                val caption = remainingTimeCaption(book, wordsRead, sessions)
+                FolioActionDock(if (progress <= 0f) "Start reading" else "Continue reading",
+                    if (caption == "Finished" && progress < .999f) "${book.progressPercent}% complete" else caption,
+                    onClick = onCoverClick, accent = colors.primary, progress = progress,
+                    accessibilityLabel = "Read ${book.title}")
             }
         }
-
         BookMetadataGrid(book = book, accent = accent)
-
-        Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-            BookChipsRow(
-                series = series,
-                collections = collections,
-                tags = tags,
-                onTagClick = onTagClick,
-                onSeriesClick = onSeriesClick,
-                onCollectionClick = onCollectionClick,
-                onAddTags = onAddTags,
-                onSuggestTags = onSuggestTags
-            )
+        Box(Modifier.padding(horizontal = FolioTokens.gutter)) {
+            BookChipsRow(series, collections, tags, onTagClick, onSeriesClick, onCollectionClick,
+                onAddTags, onSuggestTags)
         }
-
         book.description?.takeIf { it.isNotBlank() }?.let {
-            Box(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
+            Box(Modifier.padding(horizontal = FolioTokens.gutter).folioPaper(accent).padding(FolioTokens.space3)) {
                 BookDescription(description = it)
             }
         }
@@ -287,28 +167,12 @@ internal fun BookHeaderSection(
 
 @Composable
 private fun BookMetadataGrid(book: Book, accent: Color) {
-    // This book's own well: the edgeStart family varies its trailing corners while
-    // the leading edge stays square against the screen edge. One shape governs the
-    // fill, the clip and the border, because folioSunken takes it once.
-    // §20: with minimal liquid glass off, the metadata well becomes real glass — the
-    // publisher/language/ISBN block sits between two glass sections (the hero above,
-    // the charts below) and read as the one dull slab in the middle. The gate keeps
-    // the shipped well under minimal glass or on a no-blur device.
-    val wellShape = rememberFolioShape(book.id.hashCode(), FolioShapeFamily.edgeStart)
+    // Metadata rests on the same diffuse reference material used by settings.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (com.folio.reader.ui.components.inFlowGlassActive()) {
-                    Modifier.folioVeil(
-                        wellShape,
-                        accent = accent,
-                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                    )
-                } else {
-                    Modifier.folioSunken(wellShape, accent = accent)
-                }
-            )
+            .padding(horizontal = FolioTokens.gutter)
+            .folioReference()
             .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
     ) {
         MetadataRow("Publisher", book.publisher ?: "—")

@@ -16,14 +16,14 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.folio.reader"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 147
-        versionName = "1.2.93"
+        versionCode = 171
+        versionName = "1.2.117"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -124,7 +124,34 @@ val mirageMappingFile = layout.buildDirectory
 tasks.matching { it.name.startsWith("minify") && it.name.endsWith("WithR8") }.configureEach {
     doLast {
         if (!mirageMappingFile.exists()) return@doLast
-        val renamed = mirageMappingFile.readLines().mapNotNull { line ->
+        val mappingLines = mirageMappingFile.readLines()
+        // Room, WorkManager and ML Kit instantiate these classes reflectively.
+        // Older consumer rules kept the classes but omitted their constructors.
+        val startupClasses = listOf(
+            "androidx.work.impl.WorkDatabase_Impl",
+            "androidx.work.ArrayCreatingInputMerger",
+            "androidx.work.OverwritingInputMerger",
+            "com.google.mlkit.common.internal.CommonComponentRegistrar",
+            "com.google.mlkit.nl.translate.NaturalLanguageTranslateRegistrar",
+            "com.google.mlkit.vision.common.internal.VisionCommonRegistrar",
+            "com.google.mlkit.vision.text.internal.TextRegistrar",
+        )
+        // Unchanged constructors can be absent from mapping.txt; seeds.txt records
+        // the explicitly kept constructor even when it needs no retrace mapping.
+        val seedsFile = mirageMappingFile.resolveSibling("seeds.txt")
+        val keptMembers = if (seedsFile.exists()) {
+            seedsFile.useLines { lines -> lines.map { it.trim() }.toSet() }
+        } else emptySet()
+        val missingStartupClasses = startupClasses.filter { className ->
+            "$className -> $className:" !in mappingLines ||
+                "$className: ${className.substringAfterLast('.')}()" !in keptMembers
+        }
+        check(missingStartupClasses.isEmpty()) {
+            "R8 removed or renamed startup classes or their no-argument constructors: " +
+                missingStartupClasses.joinToString() +
+                ". Check the RoomDatabase and ComponentRegistrar keep rules."
+        }
+        val renamed = mappingLines.mapNotNull { line ->
             Regex("""^io\.androidpoet\.mirage\.(\w+Kt) -> (\S+):$""")
                 .find(line)
                 // `R8$$REMOVED$$CLASS$$x` marks a class R8 stripped as dead code (an unused

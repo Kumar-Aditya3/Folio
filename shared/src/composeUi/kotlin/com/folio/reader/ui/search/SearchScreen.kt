@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,9 @@ import com.folio.reader.ui.components.chromeBarFill
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.surfaceOpacity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -140,6 +144,26 @@ class SearchUiState {
         semanticUnavailableState.value = false
         noStrongMatchState.value = false
     }
+
+    /**
+     * Opens the next visit on [bookId]'s own content rather than the whole library.
+     *
+     * Called by the reader before it pushes search. A reader who taps the magnifier while
+     * reading wants the book in their hands, not the library behind it — and the scope is not
+     * cosmetic: `contentBookId` is what `executeBookSearch` uses to fan out one FTS query
+     * instead of one per book, and what `SemanticSearchRepository.preload` uses to size the
+     * resident vector index. Left null, opening search from the reader built the *whole
+     * library* index on entry, which is the stutter the reader felt on the tap.
+     *
+     * Only a **fresh** visit is seeded. If a search is already on screen — a reader who opened
+     * a result and came back — the query and its results belong to the scope that produced
+     * them, so changing the scope underneath them would mislabel the list without re-running it.
+     */
+    fun openInBook(bookId: String) {
+        if (queryState.value.isNotBlank()) return
+        scopeState.value = SearchScope.CONTENT
+        contentBookIdState.value = bookId
+    }
 }
 
 /**
@@ -210,38 +234,14 @@ fun SearchScreen(
     // The rule still stands for screens that own transient state the nav stack cannot see
     // (a bulk selection, an open lens); search has no such level, so it has nothing to claim.
 
-    // The vector matrix is loaded when the screen opens, not when the query arrives: the
-    // plan requires the scan to be ready, and building it on the first keystroke would put
-    // a 60 MB read on the critical path. Released on dispose so the memory does not
-    // outlive the screen.
-    DisposableEffect(semanticSearchRepository, contentBookId) {
-        val repository = semanticSearchRepository
-        if (repository != null) {
-            // Warm the index for the scope this screen will actually query: the open book for
-            // in-book search, the whole library otherwise. Scoping keeps in-book memory tiny and
-            // matches what `semanticRank` will request, so the first query does not rebuild.
-            // runCatching because this runs on the composition scope, where an uncaught throw is
-            // an app crash rather than a failed load. `preload` already swallows its own failures;
-            // this is the backstop for anything the launch itself could surface.
-            coroutineScope.launch {
-                runCatching { repository.preload(contentBookId) }
-                // Also open the embedder session now, off the critical path, so the first query
-                // pays neither the index build nor the ~100-300ms ONNX/XNNPACK session construction.
-                runCatching { repository.warm() }
-            }
-        }
-        onDispose {
-            // Intentionally not releasing the index here. It is int8 and small, and rebuilding it
-            // from SQLite on every reopen was the source of the slow first query. It stays resident
-            // and only rebuilds when the queried scope changes (see SemanticSearchRepository.preload).
-            //
-            // The embedder session IS released, though: it is 40-60 MB of native memory (the
-            // multilingual model far more) — the resident footprint that gets the app killed in
-            // the background — so it must not outlive the screen. The next visit reopens it on the
-            // first query, cached again for that visit's subsequent queries.
-            if (repository != null) {
-                coroutineScope.launch { runCatching { repository.releaseEmbedder() } }
-            }
+    // The actual content query loads its scoped index. Title/annotation searches and an
+    // empty field must not monopolize SQLite or initialize ONNX ahead of a book opening.
+    LaunchedEffect(semanticSearchRepository, contentBookId) {
+        try {
+            awaitCancellation()
+        } finally {
+            searchJob?.cancel()
+            withContext(NonCancellable) { semanticSearchRepository?.releaseEmbedder() }
         }
     }
 
@@ -308,7 +308,7 @@ fun SearchScreen(
         // Scope-aware debounce. The 250 ms pause protects the *lexical* path, which fans one
         // FTS query out across every book and is genuinely expensive to fire per keystroke. The
         // warm semantic path is not that: the index is already resident and the session already
-        // open (both warmed on screen open), so a query is one off-main embed plus a parallel
+        // open after the first content query, so a query is one off-main embed plus a parallel
         // scan, and a superseded one is cancelled at the next suspension. Making it wait a full
         // quarter-second before starting is most of the "still kinda slow" the reader feels, so
         // the warm semantic path debounces briefly and the lexical path keeps its longer guard.
@@ -368,7 +368,7 @@ fun SearchScreen(
                             mode = mode,
                             bookId = contentBookId,
                         )
-                    }.getOrElse { emptyList() }
+                    }.getOrElse { if (it is CancellationException) throw it else emptyList() }
                     if (hits.isNotEmpty()) {
                         return@withContext SemanticAnswer.Cleared(hits)
                     }

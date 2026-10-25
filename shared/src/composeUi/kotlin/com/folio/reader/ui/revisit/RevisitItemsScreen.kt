@@ -87,7 +87,8 @@ data class RevisitDisplayItem(
     val manga: MangaEntry? = null,
     val chapter: Chapter?,
     val sourceSnippet: String,
-    val note: String?
+    val note: String?,
+    val readerTarget: com.folio.reader.model.ReaderPassageTarget? = null,
 )
 
 class RevisitItemsViewModel(
@@ -116,14 +117,18 @@ class RevisitItemsViewModel(
                     if (book == null && manga == null) return@mapNotNull null
                     val chapters = if (book != null) getChaptersForBook(item.bookId) else emptyList()
                     val chapter = chapters.find { it.id == item.chapterId }
+                    var target = book?.let { com.folio.reader.model.ReaderPassageTarget(it.id, chapter?.spineIndex) }
                     val result = when (item.type) {
                         RevisitType.HIGHLIGHT -> {
                             val hl = getHighlight(item.sourceId)
+                            if (book != null && hl != null) target = com.folio.reader.model.ReaderPassageTarget(book.id,
+                                hl.spineIndex, hl.startLocator, hl.id)
                             Pair(hl?.selectedText.orEmpty(), hl?.noteId?.let { getNote(it)?.content } ?: item.note)
                         }
                         RevisitType.BOOKMARK -> {
                             if (book != null) {
                                 val bm = getBookmark(item.sourceId)
+                                if (bm != null) target = com.folio.reader.model.ReaderPassageTarget(book.id, bm.spineIndex, bm.locator)
                                 Pair(bm?.label ?: chapter?.title ?: "Bookmark", item.note)
                             } else {
                                 val mc = getMangaChapters?.invoke(item.bookId).orEmpty().find { it.id == item.sourceId }
@@ -133,6 +138,7 @@ class RevisitItemsViewModel(
                         RevisitType.NOTE -> {
                             if (book != null) {
                                 val n = getNote(item.sourceId)
+                                if (n != null) target = com.folio.reader.model.ReaderPassageTarget(book.id, n.spineIndex, n.locator)
                                 Pair(n?.content.orEmpty(), item.note)
                             } else {
                                 Pair(getMangaNote?.invoke(item.sourceId)?.content.orEmpty(), item.note)
@@ -144,7 +150,7 @@ class RevisitItemsViewModel(
                     }
                     val snippet = result.first
                     val note = result.second
-                    RevisitDisplayItem(item, book, manga, chapter, snippet, note)
+                    RevisitDisplayItem(item, book, manga, chapter, snippet, note, target)
                 }
             }
             .flowOn(Dispatchers.IO)

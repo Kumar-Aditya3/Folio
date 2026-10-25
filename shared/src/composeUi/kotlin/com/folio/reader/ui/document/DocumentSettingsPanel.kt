@@ -27,8 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
@@ -47,29 +45,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.folio.reader.settings.DocumentSettings
 import com.folio.reader.settings.LayoutMode
 import com.folio.reader.settings.normalized
 import com.folio.reader.ui.components.FolioEyebrow
-import com.folio.reader.ui.components.FolioMenu
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.FolioSegmented
 import com.folio.reader.ui.components.FolioSlider
-import com.folio.reader.ui.components.folioVeil
-import com.folio.reader.ui.components.glassPanel
+import com.folio.reader.ui.reader.ReaderTypefacePicker
+import com.folio.reader.ui.reader.readerSettingsSheet
+import com.folio.reader.ui.components.folioSettingsChoice
 import com.folio.reader.ui.components.rememberFolioSheetMorphShape
 import com.folio.reader.ui.components.rememberLegibleAccent
 import com.folio.reader.ui.reader.ThemePreviewCard
 import com.folio.reader.ui.reader.platformBaseReaderFonts
 import com.folio.reader.ui.theme.FolioShapes
-import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.readerPanelVeilAlpha
 
 /** Smallest document text size in sp, mirroring the reader panel. */
 private const val MIN_FONT_SIZE_SP = 12f
@@ -96,26 +89,27 @@ fun DocumentSettingsPanel(
     onDismiss: () -> Unit,
     onOpenFullSettings: () -> Unit,
     /** Imported font names from the global row, so documents can use them too. */
-    extraFonts: List<String> = emptyList()
+    extraFonts: List<String> = emptyList(),
+    customFonts: List<com.folio.reader.settings.CustomFont> = emptyList(),
 ) {
-    var fontMenuOpen by remember { mutableStateOf(false) }
-    val fonts = (platformBaseReaderFonts() + extraFonts).distinct()
+    val fonts = (platformBaseReaderFonts() + extraFonts + customFonts.map { it.name }).distinct()
     val quickThemes = com.folio.reader.settings.Theme.PICKER.map { it.id }
     val panelShape = rememberFolioSheetMorphShape(
         RoundedCornerShape(topStart = FolioTokens.radiusSheetSweep, bottomStart = FolioTokens.radiusSheetSweep)
     )
     val accentText = rememberLegibleAccent(FolioTheme.colors.primary)
+    val embedded = com.folio.reader.ui.reader.LocalReaderWorkspace.current
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
-            .width(280.dp)
-            .folioVeil(panelShape, fillAlpha = FolioTheme.readerPanelVeilAlpha)
+            .then(if (embedded) Modifier.fillMaxWidth() else Modifier.width(280.dp).readerSettingsSheet(panelShape))
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.spaceBeat),
+            .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.spaceBeat)
+            .padding(bottom = if (embedded) com.folio.reader.ui.reader.readerImeBottomPadding() else 0.dp),
         verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)
     ) {
-        Row(
+        if (!embedded) Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -146,7 +140,7 @@ fun DocumentSettingsPanel(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
                     IconButton(
                         onClick = { onSettingsChange(settings.copy(fontSize = (settings.fontSize - 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
-                        modifier = Modifier.background(FolioTheme.colors.surfaceVariant, FolioShapes.chip)
+                        modifier = Modifier.folioSettingsChoice(false, FolioShapes.chip)
                     ) {
                         Text("A−", style = FolioTheme.typography.titleSmall, color = FolioTheme.colors.onSurface)
                     }
@@ -158,7 +152,7 @@ fun DocumentSettingsPanel(
                     )
                     IconButton(
                         onClick = { onSettingsChange(settings.copy(fontSize = (settings.fontSize + 1f).coerceIn(MIN_FONT_SIZE_SP, MAX_FONT_SIZE_SP))) },
-                        modifier = Modifier.background(FolioTheme.colors.surfaceVariant, FolioShapes.chip)
+                        modifier = Modifier.folioSettingsChoice(false, FolioShapes.chip)
                     ) {
                         Text("A+", style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface)
                     }
@@ -168,67 +162,13 @@ fun DocumentSettingsPanel(
             // Typeface dropdown — same set the reader offers (platform-resolvable faces).
             Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space1)) {
                 Text("Typeface", style = FolioTheme.typography.labelLarge, color = FolioTheme.colors.onSurfaceVariant)
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { fontMenuOpen = true }
-                            .background(FolioTheme.colors.surfaceVariant, FolioShapes.inset)
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            settings.fontFamily,
-                            style = FolioTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurface,
-                            fontFamily = com.folio.reader.ui.components.systemFontFamily(settings.fontFamily)
-                        )
-                        Icon(
-                            Icons.Filled.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = FolioTheme.colors.onSurfaceVariant
-                        )
-                    }
-                    FolioMenu(
-                        expanded = fontMenuOpen,
-                        onDismissRequest = { fontMenuOpen = false },
-                        modifier = Modifier.width(248.dp),
-                        fillAlpha = FolioSurfaceOpacity.POPUP_OPAQUE,
-                    ) {
-                        fonts.distinct().forEach { font ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
-                                    ) {
-                                        Text(
-                                            font,
-                                            style = FolioTheme.typography.bodyMedium,
-                                            fontWeight = if (font == settings.fontFamily) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = if (font == settings.fontFamily) accentText else FolioTheme.colors.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            "Ag",
-                                            fontFamily = com.folio.reader.ui.components.systemFontFamily(font),
-                                            fontSize = 18.sp,
-                                            lineHeight = 22.sp,
-                                            color = FolioTheme.colors.onSurfaceVariant,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.width(34.dp)
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    onSettingsChange(settings.copy(fontFamily = font))
-                                    fontMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
+                ReaderTypefacePicker(
+                    selectedFont = settings.fontFamily,
+                    fonts = fonts,
+                    customFonts = customFonts,
+                    displayName = { key -> customFonts.firstOrNull { it.name == key }?.familyName ?: key },
+                    onSelect = { onSettingsChange(settings.copy(fontFamily = it)) },
+                )
             }
 
             SegmentedRow(
@@ -376,11 +316,11 @@ fun DocumentSettingsPanel(
             )
         }
 
-        // All settings — frosted glass pill
+        // Same embedded choice treatment as the other settings actions.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .glassPanel(FolioShapes.inset)
+                .folioSettingsChoice(false, FolioShapes.inset)
                 .clickable { onOpenFullSettings() }
                 .padding(vertical = FolioTokens.space1),
             horizontalArrangement = Arrangement.Center,

@@ -18,17 +18,23 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +48,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.manga.zoomScrollDelta
 import com.folio.reader.ui.theme.FolioShapes
@@ -51,9 +59,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.folio.reader.model.DocumentLocator
 
 private const val PDF_CACHE_BYTES = 96L * 1024L * 1024L
 private const val MAX_RENDER_DIMENSION = 8192
@@ -79,7 +92,10 @@ internal fun FixedPageSurfaceImpl(
     onDocumentOpened: (Int) -> Unit,
     onCurrentPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
-    onError: (DocumentReaderError) -> Unit
+    onError: (DocumentReaderError) -> Unit,
+    navigationRequest: FixedPageNavigationRequest? = null,
+    onNavigationApplied: (Long) -> Unit = {},
+    onViewportPosition: (DocumentLocator.FixedPage, Float) -> Unit = { _, _ -> },
 ) {
     var document by remember(path) { mutableStateOf<FixedPageDocument?>(null) }
     val cache = remember(path) {
@@ -121,18 +137,19 @@ internal fun FixedPageSurfaceImpl(
     }
 
     when (mode) {
-        DocumentReaderMode.SINGLE_PAGE -> RenderedPdfPage(
+        DocumentReaderMode.SINGLE_PAGE -> PagedPdfPages(
             document = opened,
             documentId = documentId,
             pageIndex = pageIndex.coerceIn(0, opened.pageCount - 1),
-            mode = mode,
             rotationDegrees = rotationDegrees,
             resetZoomKey = resetZoomKey,
             cache = cache,
             modifier = modifier.fillMaxSize(),
             onCurrentPageChanged = onCurrentPageChanged,
             onTap = onTap,
-            onError = onError
+            onError = onError,
+            navigationRequest = navigationRequest, onNavigationApplied = onNavigationApplied,
+            onViewportPosition = onViewportPosition,
         )
         DocumentReaderMode.CONTINUOUS -> {
             val listState = rememberLazyListState()
@@ -166,7 +183,39 @@ internal fun FixedPageSurfaceImpl(
             // The scrollers' shared viewport frame: pinch centroids arrive in
             // window space (per-page handlers sit inside the list) and map back here.
             var viewportCoords by remember(mode, opened) { mutableStateOf<LayoutCoordinates?>(null) }
+            var viewportSize by remember(mode, opened) { mutableStateOf(IntSize.Zero) }
             val hState = rememberScrollState()
+            val currentRequest by rememberUpdatedState(navigationRequest)
+            val reportViewport by rememberUpdatedState(onViewportPosition)
+            val acknowledge by rememberUpdatedState(onNavigationApplied)
+            LaunchedEffect(navigationRequest?.nonce, opened, mode) {
+                val request = navigationRequest ?: return@LaunchedEffect
+                val targetPage = request.locator.pageIndex.coerceIn(0, opened.pageCount - 1)
+                continuousZoom = request.zoom.coerceIn(1f, 2.5f)
+                programmaticScrollTarget = targetPage
+                // Resolve only the target page's geometry, not another PDF or an eager page scan.
+                opened.pageAspectRatio(targetPage)
+                listState.scrollToItem(targetPage)
+                withFrameNanos { }
+                withFrameNanos { }
+                val item = snapshotFlow { listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetPage } }
+                    .filterNotNull().first { it.size > 0 }
+                val y = (-request.locator.normalizedY * item.size).roundToInt().coerceIn(0, (item.size - 1).coerceAtLeast(0))
+                listState.scrollToItem(targetPage, y)
+                hState.scrollTo((-request.locator.normalizedX * viewportSize.width * continuousZoom).roundToInt()
+                    .coerceIn(0, hState.maxValue))
+                acknowledge(request.nonce)
+            }
+            LaunchedEffect(opened, mode, listState, hState) {
+                snapshotFlow {
+                    val visible = listState.firstVisibleItemIndex
+                    val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == visible }
+                    if (currentRequest != null || viewportSize.width <= 0 || item == null || item.size <= 0) null
+                    else DocumentLocator.FixedPage(pageIndex = visible,
+                        normalizedX = -hState.value.toDouble() / (viewportSize.width * continuousZoom),
+                        normalizedY = -listState.firstVisibleItemScrollOffset.toDouble() / item.size) to continuousZoom
+                }.distinctUntilChanged().collect { point -> point?.let { reportViewport(it.first, it.second) } }
+            }
 
             // Strip zoom is a layout change: the column width (and with it every
             // item height, via the fixed aspect ratios) scales with zoom, and the
@@ -239,12 +288,12 @@ internal fun FixedPageSurfaceImpl(
                 modifier = modifier
                     .fillMaxSize()
                     .clip(FolioShapes.inset)
-                    .onGloballyPositioned { viewportCoords = it }
+                    .onGloballyPositioned { viewportCoords = it; viewportSize = it.size }
                     .then(continuousGestureModifier)
                     .horizontalScroll(hState)
             ) {
                 val density = androidx.compose.ui.platform.LocalDensity.current
-                val viewportWidthPx = viewportCoords?.size?.width ?: 0
+                val viewportWidthPx = viewportSize.width
                 val columnWidth = with(density) {
                     (viewportWidthPx * continuousZoom).toDp()
                 }
@@ -277,24 +326,118 @@ internal fun FixedPageSurfaceImpl(
 }
 
 @Composable
-private fun RenderedPdfPage(
+internal fun PagedPdfPages(
     document: FixedPageDocument,
     documentId: String,
     pageIndex: Int,
-    mode: DocumentReaderMode,
     rotationDegrees: Int,
     resetZoomKey: Int,
     cache: PixelBudgetLruCache<FixedPageCacheKey, ImageBitmap>,
     modifier: Modifier,
     onCurrentPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
-    onError: (DocumentReaderError) -> Unit
+    onError: (DocumentReaderError) -> Unit,
+    navigationRequest: FixedPageNavigationRequest? = null,
+    onNavigationApplied: (Long) -> Unit = {},
+    onViewportPosition: (DocumentLocator.FixedPage, Float) -> Unit = { _, _ -> },
+) {
+    val target = pageIndex.coerceIn(0, document.pageCount - 1)
+    val pager = rememberPagerState(initialPage = target, pageCount = { document.pageCount })
+    val scope = rememberCoroutineScope()
+    val systemMotion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val motion = systemMotion && !com.folio.reader.ui.theme.LocalMotion.current.reduced
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val commit by rememberUpdatedState(onCurrentPageChanged)
+    var committedPage by remember(document) { mutableIntStateOf(target) }
+    var seekTarget by remember(document) { mutableStateOf<Int?>(null) }
+    var pagingBlocked by remember(document, resetZoomKey) { mutableStateOf(false) }
+
+    LaunchedEffect(target) {
+        // The view-model echo of a settled turn is not another scroll request.
+        if (target != committedPage) {
+            seekTarget = target
+            pager.scrollToPage(target)
+        }
+    }
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.settledPage to pager.isScrollInProgress }
+            .distinctUntilChanged().collect { (page, moving) ->
+                if (!moving && (seekTarget == null || seekTarget == page)) {
+                    val wasSeek = seekTarget != null
+                    seekTarget = null
+                    if (committedPage != page) {
+                        pagingBlocked = false
+                        committedPage = page
+                        if (!wasSeek) commit(page)
+                    }
+                }
+            }
+    }
+
+    fun turn(delta: Int) {
+        if (pagingBlocked || pager.isScrollInProgress) return
+        val next = (pager.currentPage + delta).coerceIn(0, document.pageCount - 1)
+        if (next == pager.currentPage) return
+        scope.launch {
+            if (motion) pager.animateScrollToPage(next) else pager.scrollToPage(next)
+        }
+    }
+
+    HorizontalPager(state = pager, modifier = modifier, beyondViewportPageCount = 1,
+        userScrollEnabled = !pagingBlocked) { page ->
+        RenderedPdfPage(
+            document, documentId, page, rotationDegrees, resetZoomKey, cache,
+            modifier = Modifier.fillMaxSize(), active = page == pager.settledPage,
+            onTurn = { turn(if (rtl) -it else it) },
+            onPagingBlocked = { if (page == pager.currentPage) pagingBlocked = it },
+            onTap = onTap, onError = onError,
+            navigationRequest = navigationRequest?.takeIf { it.locator.pageIndex == page },
+            onNavigationApplied = onNavigationApplied, onViewportPosition = onViewportPosition,
+        )
+    }
+}
+
+@Composable
+private fun RenderedPdfPage(
+    document: FixedPageDocument,
+    documentId: String,
+    pageIndex: Int,
+    rotationDegrees: Int,
+    resetZoomKey: Int,
+    cache: PixelBudgetLruCache<FixedPageCacheKey, ImageBitmap>,
+    modifier: Modifier,
+    active: Boolean,
+    onTurn: (Int) -> Unit,
+    onPagingBlocked: (Boolean) -> Unit,
+    onTap: () -> Unit,
+    onError: (DocumentReaderError) -> Unit,
+    navigationRequest: FixedPageNavigationRequest? = null,
+    onNavigationApplied: (Long) -> Unit = {},
+    onViewportPosition: (DocumentLocator.FixedPage, Float) -> Unit = { _, _ -> },
 ) {
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var pageSize by remember(documentId, pageIndex, rotationDegrees) { mutableStateOf(IntSize.Zero) }
     var image by remember(documentId, pageIndex, rotationDegrees) { mutableStateOf<ImageBitmap?>(null) }
-    var zoom by remember(mode, pageIndex, resetZoomKey) { mutableFloatStateOf(1f) }
-    var offset by remember(mode, pageIndex, resetZoomKey) { mutableStateOf(Offset.Zero) }
+    var zoom by remember(pageIndex, resetZoomKey, active) { mutableFloatStateOf(1f) }
+    var offset by remember(pageIndex, resetZoomKey, active) { mutableStateOf(Offset.Zero) }
+    val blockPaging by rememberUpdatedState(onPagingBlocked)
+    val turn by rememberUpdatedState(onTurn)
+    val tap by rememberUpdatedState(onTap)
+    val reportViewport by rememberUpdatedState(onViewportPosition)
+    val acknowledge by rememberUpdatedState(onNavigationApplied)
+    LaunchedEffect(navigationRequest?.nonce, active, viewportSize, pageSize) {
+        val request = navigationRequest ?: return@LaunchedEffect
+        if (!active || viewportSize == IntSize.Zero || pageSize == IntSize.Zero) return@LaunchedEffect
+        withFrameNanos { }
+        zoom = request.zoom.coerceIn(1f, 4f)
+        offset = fixedPagePanOffset(request.locator, viewportSize, pageSize, zoom)
+        blockPaging(zoom > 1f)
+        acknowledge(request.nonce)
+    }
+    LaunchedEffect(active, navigationRequest, zoom, offset, pageSize) {
+        if (active && navigationRequest == null && pageSize != IntSize.Zero)
+            reportViewport(fixedPagePanLocator(pageIndex, offset, pageSize, zoom), zoom)
+    }
     val width = viewportSize.width.coerceIn(1, MAX_RENDER_DIMENSION)
     val height = viewportSize.height.coerceIn(1, MAX_RENDER_DIMENSION)
     val bounded = boundPixels(width, height)
@@ -302,6 +445,7 @@ private fun RenderedPdfPage(
     val key = fixedPageRasterKey(documentId, pageIndex, rasterSize, rotationDegrees)
 
     LaunchedEffect(document, key) {
+        if (viewportSize == IntSize.Zero) return@LaunchedEffect
         cache[key]?.let {
             image = it
             return@LaunchedEffect
@@ -320,12 +464,12 @@ private fun RenderedPdfPage(
         }
     }
 
-    val gestureModifier = if (mode == DocumentReaderMode.SINGLE_PAGE) {
-        Modifier.pointerInput(pageIndex, viewportSize, pageSize) {
+    val gestureModifier = Modifier.pointerInput(pageIndex, viewportSize, pageSize, resetZoomKey, active) {
             awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
+                val down = awaitFirstDown(requireUnconsumed = false)
                 var totalPan = Offset.Zero
                 var transformed = false
+                var consumedByPager = false
                 do {
                     val event = awaitPointerEvent()
                     val gestureZoom = event.calculateZoom()
@@ -333,36 +477,29 @@ private fun RenderedPdfPage(
                     if (event.changes.size > 1 || abs(gestureZoom - 1f) > 0.01f) transformed = true
                     val nextZoom = (zoom * gestureZoom).coerceIn(1f, 4f)
                     if (transformed || zoom > 1f || nextZoom > 1f) {
+                        blockPaging(true)
                         zoom = nextZoom
                         offset = clampPageOffset(offset + pan, viewportSize, pageSize, zoom)
                         if (zoom == 1f) offset = Offset.Zero
                         event.changes.forEach { it.consume() }
                     } else {
                         totalPan += pan
+                        consumedByPager = consumedByPager || event.changes.any { it.isConsumed }
                     }
                 } while (event.changes.any { it.pressed })
+                blockPaging(zoom > 1f)
 
-                if (!transformed && zoom == 1f) {
-                    when (singlePageGesture(totalPan.x, totalPan.y, size.width.toFloat())) {
-                        FixedPageGesture.NEXT_PAGE -> onCurrentPageChanged((pageIndex + 1).coerceAtMost(document.pageCount - 1))
-                        FixedPageGesture.PREVIOUS_PAGE -> onCurrentPageChanged((pageIndex - 1).coerceAtLeast(0))
-                        FixedPageGesture.TAP -> onTap()
-                        FixedPageGesture.NONE -> Unit
+                if (!transformed && !consumedByPager && zoom == 1f) {
+                    if (singlePageGesture(totalPan.x, totalPan.y, size.width.toFloat()) == FixedPageGesture.TAP) {
+                        when {
+                            down.position.x < size.width * .25f -> turn(-1)
+                            down.position.x > size.width * .75f -> turn(1)
+                            else -> tap()
+                        }
                     }
                 }
             }
         }
-    } else Modifier.pointerInput(pageIndex) {
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            var pan = Offset.Zero
-            do {
-                val event = awaitPointerEvent()
-                pan += event.calculatePan()
-            } while (event.changes.any { it.pressed })
-            if (singlePageGesture(pan.x, pan.y, size.width.toFloat()) == FixedPageGesture.TAP) onTap()
-        }
-    }
 
     Box(
         modifier = modifier

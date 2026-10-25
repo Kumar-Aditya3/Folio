@@ -173,24 +173,9 @@ internal fun ActivityHeatmap(
         HeatmapMode.MANGA -> mangaDays
     }
 
-    // §12.5: the year heatmap is Stats' one raised surface (Rule 13). It earns it
-    // by being the only genuinely *visual* artefact on the screen — 365 cells of
-    // the reader's own year. The asymmetric hero silhouette and the accent-lit rim
-    // separate it from every ruled list around it.
+    // Calendar marks belong to the open field, like Home's weekly trace.
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = FolioTokens.gutter)
-            .folioRaised(
-                shape = FolioShapes.hero,
-                accent = FolioTheme.colors.accentProgress,
-                // The same pane every other hero is made of. Left on the default
-                // opaque raisedFill this was the one slab in the app that the room
-                // could not show through, and it read as pasted onto the page.
-                fill = FolioTheme.atmosphere.paneFill(),
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .padding(FolioTokens.space3)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter)
     ) {
         Column {
             FolioSectionHead(title = "Your year", eyebrow = "Activity")
@@ -218,8 +203,8 @@ internal fun ActivityHeatmap(
                 return@Column
             }
             val peak = remember(days) { (days.maxOfOrNull { it.minutes } ?: 0L).coerceAtLeast(1L) }
-            // Guarded against the grid's own material, not the page behind it.
-            val cellRamp = heatmapAccentRamp(FolioTheme.atmosphere.raisedFill)
+            // A stable time-role scale, independent of cover artwork.
+            val cellRamp = heatmapAccentRamp(FolioTheme.colors.background)
             // Up to 365 cells → 52 week sublists; memoize so a mode toggle / entry animation / parent
             // scroll doesn't re-scan and re-chunk the whole year every recomposition.
             val weeks = remember(days) { days.chunked(7) }
@@ -287,8 +272,8 @@ internal fun ActivityHeatmap(
                         modifier = Modifier
                             .graphicsLayer {
                                 val p = gridEntry.value
-                                scaleX = p
-                                scaleY = p
+                                alpha = p
+                                translationY = (1f - p) * 8.dp.toPx()
                             }
                             .semantics(mergeDescendants = true) {
                                 contentDescription = heatmapSummary
@@ -498,12 +483,11 @@ internal fun ReadingFingerprint(
             )
             if (chronotype.isNotBlank()) {
                 Text(
-                    text = chronotype,
-                    style = FolioTheme.typography.labelMedium,
+                    text = "24h",
+                    style = FolioTheme.typography.labelSmall,
                     color = colors.onSurface,
                     textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1,
                     modifier = Modifier.fillMaxWidth(0.42f),
                 )
             }
@@ -581,7 +565,7 @@ private const val HEATMAP_TOP_BAND_MIN_CONTRAST = 1.5
 private fun heatmapAccentRamp(container: Color): List<Color> {
     val colors = FolioTheme.colors
     val from = colors.accentProgress
-    val to = legibleOn(rememberFolioAmbientColor(colors.accentStreak), container, colors.accentStreak, HEATMAP_TOP_BAND_MIN_CONTRAST)
+    val to = legibleOn(colors.accentStreak, container, colors.accentProgress, HEATMAP_TOP_BAND_MIN_CONTRAST)
     return remember(from, to) { HEATMAP_BAND_STOPS.map { lerp(from, to, it) } }
 }
 
@@ -594,16 +578,27 @@ private fun heatmapAccentRamp(container: Color): List<Color> {
  */
 @Composable
 private fun HeatmapDayCell(day: StatDay?, peak: Long, size: Dp, ramp: List<Color>) {
-    val ladder = HEATMAP_LADDER
+    val idle = FolioTheme.colors.onSurfaceVariant.copy(alpha = .22f)
     val fill = when {
-        day == null -> Color.Transparent
-        day.minutes <= 0L -> FolioTheme.colors.outline.copy(alpha = HEATMAP_EMPTY_ALPHA)
+        day == null || day.minutes <= 0L -> Color.Transparent
         else -> {
-            val band = (intensityFor(day.minutes, peak) - 1).coerceIn(0, ladder.lastIndex)
-            ramp[band].copy(alpha = ladder[band])
+            val band = (intensityFor(day.minutes, peak) - 1).coerceIn(0, ramp.lastIndex)
+            ramp[band].copy(alpha = HEATMAP_LADDER[band])
         }
     }
-    Box(Modifier.size(size).background(fill, HEATMAP_CELL_SHAPE))
+    Box(Modifier.size(size).drawWithCache {
+        val inset = .65.dp.toPx()
+        val radius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+        val origin = Offset(inset, inset)
+        val cellSize = androidx.compose.ui.geometry.Size(this.size.width - inset * 2, this.size.height - inset * 2)
+        onDrawBehind {
+            if (day != null) {
+                drawRoundRect(fill, origin, cellSize, radius)
+                drawRoundRect(if (day.minutes > 0L) fill.copy(alpha = .7f) else idle,
+                    origin, cellSize, radius, style = androidx.compose.ui.graphics.drawscope.Stroke(.7.dp.toPx()))
+            }
+        }
+    })
 }
 
 /**

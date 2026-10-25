@@ -15,7 +15,7 @@ fun SettingsThemesScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     LaunchedEffect(Unit) {
         runCatching { navModel.globalSettings = navModel.graph.settingsRepository.getGlobalSettings() }
     }
-    SettingsCategoryScaffold(title = "Themes", onBack = onBack) {
+    SettingsCategoryScaffold(title = "Themes", onBack = onBack, materialPreviewSettings = navModel.globalSettings) {
         GeneralSettingsPanel(
             settings = navModel.globalSettings,
             onSettingsChange = { navModel.updateSettings(it) },

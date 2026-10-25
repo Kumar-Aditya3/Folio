@@ -142,13 +142,8 @@ fun SourceBrowseScreen(
                         Button(onClick = { viewModel.reload(state.mode, state.query, state.filters) }) {
                             Text("Retry")
                         }
-                        // A bot check is not a network error: it needs a browser the
-                        // reader can touch, and the reload happens by itself once the
-                        // site hands over its clearance cookie.
                         Spacer(Modifier.height(FolioTokens.space2))
-                        MangaChallengePrompt(
-                            onCleared = { viewModel.reload(state.mode, state.query, state.filters) },
-                        )
+                        MangaChallengePrompt(sourceId = viewModel.source.id)
                     }
                 }
             else -> LazyVerticalGrid(
@@ -315,8 +310,7 @@ private fun BrowseGridItem(
                             viewModel.removeFromLibrary(item)
                             inLibrary = false
                         } else {
-                            val entry = viewModel.addToLibrary(item)
-                            inLibrary = true
+                            val entry = viewModel.ensureEntry(item)
                             pickInitial = viewModel.categoriesFor(entry.id)
                             pickMangaId = entry.id
                         }
@@ -369,14 +363,18 @@ private fun BrowseGridItem(
         }
     }
 
-    pickMangaId?.let { mangaId ->
+    if (pickMangaId != null) {
         val categories by viewModel.allCategories.collectAsState()
         CategoryPickerDialog(
             categories = categories,
             initialSelected = pickInitial,
             onCreate = { viewModel.createCategoryNamed(it) },
-            onApply = { viewModel.setCategoriesFor(mangaId, it) },
+            onApply = {
+                viewModel.addToLibrary(item, it)
+                inLibrary = true
+            },
             onDismiss = { pickMangaId = null },
+            title = "Add to library",
         )
     }
 }

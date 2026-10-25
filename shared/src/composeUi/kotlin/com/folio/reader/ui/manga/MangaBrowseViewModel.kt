@@ -11,6 +11,7 @@ import com.folio.reader.manga.MangaRepoInfo
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.manga.mangaId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +56,18 @@ internal fun filterSourcesByLanguage(
     val remoteKept = kept.any { !it.isLocal }
     val remoteExists = sources.any { !it.isLocal }
     return if (remoteKept || !remoteExists) kept else sources
+}
+
+/** Language-filtered and not-yet-initialized rows are not load failures. */
+internal fun unavailableBrowseExtensions(
+    extensions: List<ExtensionEntry>,
+    allSources: List<MangaSourceInfo>,
+): List<ExtensionEntry> {
+    if (allSources.isEmpty()) return emptyList()
+    val usablePackages = allSources.filterNot { it.isLocal }.mapNotNull { it.extensionPkg }.toSet()
+    return extensions.filter {
+        it.isUntrusted || (it.isInstalled && it.pkgName !in usablePackages)
+    }.distinctBy { it.pkgName }
 }
 
 /**
@@ -132,6 +145,7 @@ class BrowseViewModel(
     val refreshingIndex = MutableStateFlow(false)
     val installStates = MutableStateFlow<Map<String, ExtensionInstallStep>>(emptyMap())
     val nsfw = MutableStateFlow(false)
+    val trustError = MutableStateFlow<String?>(null)
 
     // ---------- Global search across all sources ----------
 
@@ -375,7 +389,16 @@ class BrowseViewModel(
     }
 
     fun trust(entry: ExtensionEntry) {
-        scope.launch { backend.trustExtension(entry.pkgName, entry.versionCode, entry.signatureHash) }
+        scope.launch {
+            trustError.value = null
+            try {
+                backend.trustExtension(entry.pkgName, entry.versionCode, entry.signatureHash)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                trustError.value = "Could not trust ${entry.name}: ${error.message ?: "approval was not saved"}"
+            }
+        }
     }
 }
 
@@ -461,7 +484,9 @@ class SourceBrowseViewModel(
                 if (filters == null) {
                     putCached(cacheKey, newState)
                 }
-            } catch (e: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 state.value = state.value.copy(loading = false, error = e.message ?: "Failed to load")
             }
         }
@@ -487,7 +512,9 @@ class SourceBrowseViewModel(
                     loadingNext = false,
                     error = null,
                 )
-            } catch (e: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 state.value = state.value.copy(loadingNext = false, error = e.message ?: "Failed to load")
             }
         }
@@ -515,29 +542,14 @@ class SourceBrowseViewModel(
     }
 
     /** Adds a browse result to the library (long-press / explicit add). */
-    suspend fun addToLibrary(item: MangaBrowseItem): MangaEntry {
-        val existing = mangaRepo.findBySourceUrl(source.id, item.url)
-        if (existing != null) {
-            mangaRepo.setInLibrary(existing.id, true)
-            categoryRepo.ensureMembership(existing.id)
-            notifyAddedToLibrary(existing.id)
-            return existing
+    suspend fun addToLibrary(item: MangaBrowseItem, categoryIds: Set<String>): MangaEntry {
+        val entry = ensureEntry(item)
+        val target = categoryIds.ifEmpty {
+            setOf(requireNotNull(categoryRepo.defaultCategory()) { "No default category is available." }.id)
         }
-        val entry = MangaEntry(
-            id = mangaId(source.id, item.url),
-            sourceId = source.id,
-            sourceName = source.name,
-            url = item.url,
-            title = item.title,
-            thumbnailUrl = item.thumbnailUrl,
-            inLibrary = true,
-            addedAt = Clock.System.now(),
-            updatedAt = Clock.System.now(),
-        )
-        mangaRepo.upsert(entry)
-        categoryRepo.ensureMembership(entry.id)
+        categoryRepo.assign(entry.id, target, addToLibrary = true)
         notifyAddedToLibrary(entry.id)
-        return entry
+        return requireNotNull(mangaRepo.get(entry.id))
     }
 
     private fun notifyAddedToLibrary(mangaId: String) {
@@ -557,15 +569,5 @@ class SourceBrowseViewModel(
     suspend fun categoriesFor(mangaId: String): Set<String> = categoryRepo.categoriesFor(mangaId)
 
     suspend fun createCategoryNamed(name: String): String? =
-        runCatching { categoryRepo.create(name).id }.getOrNull()
-
-    /** Replaces the shelf set for a manga; an empty set lands on the default shelf. */
-    fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
-        scope.launch {
-            val target = categoryIds.ifEmpty {
-                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
-            }
-            categoryRepo.assign(mangaId, target)
-        }
-    }
+        categoryRepo.getCategoryByName(name)?.id ?: categoryRepo.create(name).id
 }

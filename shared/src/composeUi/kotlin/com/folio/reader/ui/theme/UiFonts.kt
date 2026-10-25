@@ -12,7 +12,11 @@ enum class FontTheme(
     val textFile: String,
 ) {
     CLASSIC(
-        "classic", "Classic",
+        "classic", "Signal",
+        "spacegrotesk_variable.ttf", null, "manrope_variable.ttf"
+    ),
+    LITERARY(
+        "literary", "Literary",
         "fraunces_variable.ttf", "fraunces_italic_variable.ttf", "manrope_variable.ttf"
     ),
     EDITORIAL(

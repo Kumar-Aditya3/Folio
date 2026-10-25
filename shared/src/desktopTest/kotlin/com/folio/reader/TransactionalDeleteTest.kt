@@ -32,7 +32,7 @@ class TransactionalDeleteTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-transactional-delete-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-transactional-delete-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
     }
 

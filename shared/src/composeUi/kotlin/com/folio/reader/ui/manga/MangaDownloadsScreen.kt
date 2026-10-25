@@ -1,5 +1,6 @@
 package com.folio.reader.ui.manga
 
+import com.folio.reader.ui.components.folioReference
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -90,20 +91,26 @@ internal fun ChapterRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onRead, onLongClick = onLongClick)
-            .folioVeil(
-                shape = RoundedCornerShape(FolioTokens.radiusControl),
-                fillColor = if (selected) FolioTheme.colors.primaryContainer else null,
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
+            .folioReference()
+            .then(if (selected) Modifier.background(FolioTheme.colors.primaryContainer) else Modifier)
             .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
+            // Read chapters recede as a whole line, not just as a weight change. Swapping
+            // `onSurface` for `onSurfaceVariant` was the only cue, and in the palettes where
+            // those two sit close together a read chapter was indistinguishable from an unread
+            // one at list distance — the "read chapters aren't darkened enough" report. An alpha
+            // step works on every face, including the monochrome ones, because it does not
+            // depend on how far apart those two roles happen to be. The row keeps its plane and
+            // its actions, so the list still lines up and nothing becomes untappable.
+            val readDim = if (chapter.read) 0.62f else 1f
             Text(
                 chapter.name,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (chapter.read) FontWeight.Normal else FontWeight.SemiBold,
-                color = if (chapter.read) colors.onSurfaceVariant else colors.onSurface,
+                color = (if (chapter.read) colors.onSurfaceVariant else colors.onSurface)
+                    .copy(alpha = readDim),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -123,7 +130,11 @@ internal fun ChapterRow(
                 },
             ).joinToString(" • ")
             if (sub.isNotBlank()) {
-                Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                Text(
+                    sub,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant.copy(alpha = readDim),
+                )
             }
             if (status == com.folio.reader.manga.MangaDownloadStatus.DOWNLOADING && dlTotal > 0) {
                 LinearProgressIndicator(

@@ -128,15 +128,18 @@ internal class ReaderAnnotations(
         endLocator: String,
         selectedText: String,
         color: com.folio.reader.model.HighlightColor = com.folio.reader.model.HighlightColor.YELLOW,
-        customColor: Int? = defaultHighlightColor()
+        customColor: Int? = defaultHighlightColor(),
+        chapterId: String? = null,
+        spineIndex: Int? = null,
+        onSaved: ((String) -> Unit)? = null
     ) {
         val position = positionState.value ?: return
         val bookId = currentBookId() ?: return
         val highlight = Highlight(
             id = java.util.UUID.randomUUID().toString(),
             bookId = bookId,
-            chapterId = position.chapterId,
-            spineIndex = position.spineIndex,
+            chapterId = chapterId ?: position.chapterId,
+            spineIndex = spineIndex ?: position.spineIndex,
             startLocator = startLocator,
             endLocator = endLocator,
             selectedText = selectedText,
@@ -156,7 +159,8 @@ internal class ReaderAnnotations(
             }
             if (saved) {
                 // #9: reflect the highlight in memory only once the write actually persisted.
-                _highlights.value = _highlights.value + highlight
+                _highlights.value = _highlights.value.filterNot { it.id == highlight.id } + highlight
+                onSaved?.invoke(highlight.id)
                 runCatching {
                     quoteRepository?.insertQuote(
                         Quote(
@@ -231,7 +235,7 @@ internal class ReaderAnnotations(
             val saved = runCatching { noteRepository.insertNote(note) }.isSuccess
             if (saved) {
                 // #9: reflect the note in memory only once the write actually persisted.
-                _notes.value = _notes.value + note
+                _notes.value = _notes.value.filterNot { it.id == note.id } + note
                 if (highlight != null) linkNoteToHighlight(highlight.id, note.id)
                 runCatching {
                     revisitRepository?.insertRevisitItem(

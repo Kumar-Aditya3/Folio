@@ -283,28 +283,29 @@ class MangaLibraryViewModel(
     }
 
     suspend fun createCategory(name: String): String? =
-        runCatching { categoryRepo.create(name).id }.getOrNull()
+        categoryRepo.getCategoryByName(name)?.id ?: categoryRepo.create(name).id
 
     fun renameCategory(id: String, name: String) {
         scope.launch { categoryRepo.rename(id, name) }
     }
 
-    fun deleteCategory(id: String) {
-        scope.launch {
-            if (categoryRepo.delete(id) && selectedCategoryId.value == id) selectDefaultCategory()
+    suspend fun deleteCategory(id: String): Boolean {
+        val deleted = categoryRepo.delete(id, removeExclusiveManga = true)
+        if (deleted) {
+            if (selectedCategoryId.value == id) selectDefaultCategory()
+            clearSelection()
         }
+        return deleted
     }
 
     suspend fun categoriesFor(mangaId: String): Set<String> = categoryRepo.categoriesFor(mangaId)
 
     /** Picker apply for one manga (library item overflow menu); empty keeps the default shelf. */
-    fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
-        scope.launch {
-            val target = categoryIds.ifEmpty {
-                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
-            }
-            categoryRepo.assign(mangaId, target)
+    suspend fun setCategoriesFor(mangaId: String, categoryIds: Set<String>) {
+        val target = categoryIds.ifEmpty {
+            setOf(requireNotNull(categoryRepo.defaultCategory()) { "No default category is available." }.id)
         }
+        categoryRepo.assign(mangaId, target)
     }
 
     /**
@@ -312,33 +313,35 @@ class MangaLibraryViewModel(
      * the categories shared by every selected manga; saving replaces each one's set.
      */
     val bulkPickerInitial = MutableStateFlow<Set<String>?>(null)
+    private var bulkPickerMangaIds: Set<String>? = null
 
     fun requestBulkCategories() {
         val ids = selectedIds.value
         if (ids.isEmpty()) return
+        bulkPickerMangaIds = ids
         scope.launch {
             val lists = ids.map { categoryRepo.categoriesFor(it) }
-            bulkPickerInitial.value = lists.reduceOrNull { a, b -> a.intersect(b) } ?: emptySet()
+            if (bulkPickerMangaIds == ids) {
+                bulkPickerInitial.value = lists.reduceOrNull { a, b -> a.intersect(b) } ?: emptySet()
+            }
         }
     }
 
     fun closeBulkPicker() {
         bulkPickerInitial.value = null
+        bulkPickerMangaIds = null
         // The picked manga have been re-categorised and may no longer be on the current
         // category; drop the selection so stale off-screen selections don't linger.
         clearSelection()
     }
 
-    /** Live-applies the picker's current set to every selected manga; selection stays. */
-    fun applyBulkCategories(categoryIds: Set<String>) {
-        val ids = selectedIds.value
-        if (ids.isEmpty()) return
-        scope.launch {
-            val target = categoryIds.ifEmpty {
-                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: return@launch
-            }
-            ids.forEach { categoryRepo.assign(it, target) }
+    /** Commits the manga captured when this picker was opened. */
+    suspend fun applyBulkCategories(categoryIds: Set<String>) {
+        val ids = checkNotNull(bulkPickerMangaIds) { "No manga are selected." }
+        val target = categoryIds.ifEmpty {
+            setOf(requireNotNull(categoryRepo.defaultCategory()) { "No default category is available." }.id)
         }
+        ids.forEach { categoryRepo.assign(it, target) }
     }
 
     fun toggleSelection(mangaId: String) {

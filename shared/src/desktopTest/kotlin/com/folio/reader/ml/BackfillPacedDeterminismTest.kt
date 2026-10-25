@@ -52,7 +52,7 @@ class BackfillPacedDeterminismTest {
      * hold [pace] takes into [pauses].
      */
     private suspend fun seedAndSweep(pace: SweepPace, pauses: MutableList<Long>): Run {
-        val root = createTempDir("folio-paced-")
+        val root = kotlin.io.path.createTempDirectory("folio-paced-").toFile()
         val database = Database(File(root, "folio.db").absolutePath)
         try {
             // 3 books x 20 chapters of 60 words. The fake model's 64-token ceiling gives a window of

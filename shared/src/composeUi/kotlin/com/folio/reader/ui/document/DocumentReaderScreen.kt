@@ -14,6 +14,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,17 +31,20 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateRight
+import androidx.compose.material.icons.automirrored.filled.Toc
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -53,10 +61,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +76,9 @@ import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.normalized
 import com.folio.reader.settings.toReaderSettings
 import com.folio.reader.ui.components.EmptyState
+import com.folio.reader.ui.reader.ReaderTool
+import com.folio.reader.ui.reader.ReaderNavigationPreview
+import com.folio.reader.ui.reader.readerWorkspaceLayout
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.LoadingPlaceholder
 import com.folio.reader.ui.components.folioBackdropSource
@@ -77,6 +90,7 @@ import com.folio.reader.ui.library.DocumentThumbnail
 import com.folio.reader.ui.reader.readerIsland
 import com.folio.reader.ui.render.HtmlContentSurface
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.FolioSoftShape
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
@@ -117,15 +131,28 @@ fun DocumentReaderScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var resetZoomKey by remember { mutableIntStateOf(0) }
-    var seekNonce by remember { mutableIntStateOf(0) }
     var seekRequest by remember { mutableStateOf<Pair<Float, Long>?>(null) }
-    var showSettingsPanel by remember { mutableStateOf(false) }
+    var activeTool by remember(state.document?.id) { mutableStateOf<ReaderTool?>(null) }
+    var workspaceOrigin by remember(state.document?.id) { mutableStateOf<DocumentNavigationPoint?>(null) }
     val occludes = com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()
     val isPdf = state.document?.format == com.folio.reader.model.DocumentFormat.PDF
-    // A PDF never shows the document panel — it has no typography or page settings to
-    // apply. Guarding the flag itself (not only the island) also closes a panel that was
-    // open when the reader lands on a PDF, e.g. after a re-open.
-    val settingsPanelVisible = showSettingsPanel && !isPdf
+    fun openWorkspace(tool: ReaderTool) {
+        if (state.loadState !is DocumentReaderLoadState.Ready) return
+        if (workspaceOrigin == null) workspaceOrigin = state.navigationPoint()
+        if (tool == ReaderTool.Settings) { viewModel.cancelPreview(); workspaceOrigin = null }
+        activeTool = tool
+    }
+    fun closeWorkspace() { activeTool = null; workspaceOrigin = null; viewModel.cancelPreview() }
+    fun readPreview() { viewModel.commitPreview(); activeTool = null; workspaceOrigin = null }
+    com.folio.reader.ui.components.FolioBackHandler(activeTool != null || state.preview != null) { closeWorkspace() }
+    val modelSeek = state.reflowableSeekRequest
+    LaunchedEffect(modelSeek) {
+        val request = modelSeek ?: return@LaunchedEffect
+        val useWindow = !occludes && state.reflowableWindow.isNotEmpty() &&
+            settings.toReaderSettings(globalSettings).layoutMode.normalized == com.folio.reader.settings.LayoutMode.CONTINUOUS
+        val fraction = if (useWindow) viewModel.windowSeekFraction(request.first) else request.first
+        seekRequest = fraction to request.second
+    }
 
     // The rendering surfaces speak `ReaderSettings`; the document row supplies the
     // document-owned half and the global book row the app-level half.
@@ -212,12 +239,25 @@ fun DocumentReaderScreen(
     // per-vsync clock stops, instead of animating a full-screen shader behind an opaque page.
     com.folio.reader.ui.theme.FolioFieldOccluder()
 
-    Box(modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+    // Only fixed Compose pages can supply this reader's glass. Reflowable WebViews
+    // keep real page transparency through the painted fallback, including their panels.
+    com.folio.reader.ui.components.FolioSuppressibleBackdrop(suppress = occludes || !isPdf) {
+    BoxWithConstraints(modifier.fillMaxSize().background(FolioTheme.colors.background)) {
+        val workspaceLayout = readerWorkspaceLayout(maxWidth, maxHeight, LocalDensity.current.fontScale)
+        val workspaceOpen = activeTool != null
+        val reservedEnd = if (workspaceOpen && workspaceLayout.docked) workspaceLayout.dockWidth else 0.dp
+        val nativePaneBottom = if (occludes && !isPdf && workspaceOpen && !workspaceLayout.docked)
+            workspaceLayout.sheetHeight + 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(PaddingValues(top = topInset, bottom = bottomInset))
+                .padding(PaddingValues(top = topInset, bottom = maxOf(bottomInset, nativePaneBottom), end = reservedEnd))
                 .then(pageGlassSource)
+                .pointerInput(isPdf && state.preview != null) {
+                    if (isPdf && state.preview != null) awaitPointerEventScope {
+                        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                    }
+                }
         ) {
             when (val load = state.loadState) {
                 // The loading UI (placeholder + morph plate) is drawn by the
@@ -239,9 +279,12 @@ fun DocumentReaderScreen(
                         FixedPageContentSurface(
                             content.path, state.document!!.id, state.currentPage, state.mode,
                             state.rotationDegrees, resetZoomKey, Modifier.fillMaxSize(), viewModel::onPdfOpened,
-                            viewModel::setCurrentPage,
+                            viewModel::onFixedPageChanged,
                             onTap = { viewModel.setControlsVisible(!state.controlsVisible) },
-                            onError = viewModel::reportError
+                            onError = viewModel::reportError,
+                            navigationRequest = state.fixedPageNavigationRequest,
+                            onNavigationApplied = viewModel::onFixedPageNavigationApplied,
+                            onViewportPosition = viewModel::updateFixedPageViewport,
                         )
                     }
                     is DocumentReaderContent.Reflowable -> {
@@ -286,7 +329,7 @@ fun DocumentReaderScreen(
                                     scrollOffset = state.reflowableScrollOffset.toDouble().coerceIn(0.0, 1.0),
                                 ),
                                 highlights = emptyList<Highlight>(),
-                                enabled = true,
+                                enabled = state.preview == null,
                                 modifier = Modifier.fillMaxSize(),
                                 onProgress = viewModel::updateReflowableProgress,
                                 onPageChange = viewModel::updateReflowablePage,
@@ -324,7 +367,7 @@ fun DocumentReaderScreen(
                             settings = effective,
                             position = state.reflowableLocator?.toSurfacePosition(state.document!!.id, state.normalizedProgress),
                             highlights = emptyList<Highlight>(),
-                            enabled = true,
+                                enabled = state.preview == null,
                             modifier = Modifier.fillMaxSize(),
                             // Single-section: the surface reports whole-document
                             // progress, so store it directly (no section-local
@@ -427,7 +470,7 @@ fun DocumentReaderScreen(
 
         AnimatedVisibility(
             visible = state.controlsVisible,
-            modifier = Modifier.align(Alignment.TopCenter),
+            modifier = Modifier.align(Alignment.TopCenter).padding(end = reservedEnd),
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it }
         ) {
@@ -436,16 +479,14 @@ fun DocumentReaderScreen(
                 onBack,
                 viewModel::toggleBookmark,
                 morphDocumentId,
-                // Null for a PDF: a fixed page has no typography or page settings to
-                // offer, so the island is not drawn at all rather than opening a panel
-                // of controls that cannot move.
-                onOpenSettings = if (isPdf) null else ({ showSettingsPanel = true }),
+                onOpenSettings = { openWorkspace(ReaderTool.Settings) },
+                onOpenPages = { openWorkspace(ReaderTool.Pages) },
             )
         }
 
         AnimatedVisibility(
-            visible = showBottom,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            visible = showBottom && !workspaceOpen,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(end = reservedEnd),
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it }
         ) {
@@ -454,10 +495,6 @@ fun DocumentReaderScreen(
             // hovers above the nav bar with the page showing through the margin on every side.
             val onSeekProgress: (Float) -> Unit = { fraction ->
                 viewModel.seekToProgress(fraction)
-                if (!isPdf) {
-                    seekNonce++
-                    seekRequest = fraction to seekNonce.toLong()
-                }
             }
             Column(Modifier.fillMaxWidth()) {
                 if (isPdf) {
@@ -477,8 +514,8 @@ fun DocumentReaderScreen(
                                 end = FolioTokens.insetReaderIsland,
                                 bottom = FolioTokens.insetReaderIsland,
                             )
-                            .readerIsland(RoundedCornerShape(FolioTokens.radiusReaderIsland))
-                            .padding(vertical = 6.dp)
+                            .readerIsland(FolioSoftShape(FolioTokens.radiusReaderIsland))
+                            .padding(vertical = 0.dp)
                     ) {
                         DocumentReaderControls(
                             state = state,
@@ -493,17 +530,13 @@ fun DocumentReaderScreen(
                             },
                             onRotate = viewModel::rotateClockwise,
                             onResetZoom = { resetZoomKey++ },
+                            showProgress = showBlock,
+                            paper = paper,
+                            ink = ink,
+                            onSeek = onSeekProgress,
+                            onPreview = { it?.let { value -> viewModel.previewProgress(value) } ?: viewModel.cancelPreview() },
+                            onOpenMap = { openWorkspace(ReaderTool.Pages) },
                         )
-                        if (showBlock) {
-                            DocumentPageBlock(
-                                state = state,
-                                isPdf = isPdf,
-                                paper = paper,
-                                ink = ink,
-                                bare = true,
-                                onSeek = onSeekProgress,
-                            )
-                        }
                     }
                 } else if (showBlock) {
                     DocumentPageBlock(
@@ -512,53 +545,33 @@ fun DocumentReaderScreen(
                         paper = paper,
                         ink = ink,
                         onSeek = onSeekProgress,
+                        onPreview = { it?.let { value -> viewModel.previewProgress(value) } ?: viewModel.cancelPreview() },
+                        onOpenMap = { openWorkspace(ReaderTool.Pages) },
                     )
                 }
             }
         }
 
-        // In-reader document settings — a scrim plus the end-edge sheet, mirroring the
-        // EPUB reader's quick-settings panel. Composed last so it sits over both the page
-        // and the reader chrome. The panel writes the *document* defaults; "All settings"
-        // hands off to the Settings hub.
-        AnimatedVisibility(
-            visible = settingsPanelVisible,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    // The palette's own ambient shadow, not pure black, so the scrim
-                    // reads as depth on light themes instead of a hole.
-                    .background(FolioTheme.atmosphere.shadowAmbient.copy(alpha = 0.35f))
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { showSettingsPanel = false })
-                    }
-            )
-        }
-        AnimatedVisibility(
-            visible = settingsPanelVisible,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .statusBarsPadding()
-                .navigationBarsPadding(),
-            enter = slideInHorizontally { it } + fadeIn(),
-            exit = slideOutHorizontally { it } + fadeOut()
-        ) {
-            Box(Modifier.folioSheetDragToDismiss { showSettingsPanel = false }) {
-                DocumentSettingsPanel(
-                    settings = settings,
-                    onSettingsChange = onSettingsChange,
-                    onDismiss = { showSettingsPanel = false },
-                    onOpenFullSettings = {
-                        showSettingsPanel = false
-                        onOpenFullSettings()
-                    },
-                    extraFonts = globalSettings.customFonts.map { it.name },
-                )
+        if (activeTool == null) {
+            state.preview?.let { preview ->
+                ReaderNavigationPreview(preview.label, "Preview only. Release to read here.",
+                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 112.dp),
+                    passage = preview.excerpt, loading = preview.loading)
+            }
+            if (state.preview == null && state.controlsVisible) state.returnPoint?.let { point ->
+                DocumentReturnBar(point, viewModel::returnToOrigin, viewModel::clearReturnPoint,
+                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (isPdf) 120.dp else 76.dp))
             }
         }
+        DocumentReaderWorkspace(activeTool, state, ::openWorkspace, ::closeWorkspace,
+            onPreviewProgress = { viewModel.previewProgress(it, workspaceOrigin) },
+            onPreviewBookmark = { viewModel.previewBookmark(it, workspaceOrigin) },
+            onCancelPreview = viewModel::cancelPreview, onReadHere = ::readPreview,
+            onRemoveBookmark = viewModel::removeBookmark, settings = settings, onSettingsChange = onSettingsChange,
+            onOpenFullSettings = { closeWorkspace(); onOpenFullSettings() }, globalSettings = globalSettings,
+            onMode = viewModel::setMode, onRotate = viewModel::rotateClockwise,
+            onResetZoom = { resetZoomKey++ }, layout = workspaceLayout)
+    }
     }
 }
 
@@ -568,28 +581,38 @@ private fun DocumentReaderControls(
     onMode: () -> Unit,
     onRotate: () -> Unit,
     onResetZoom: () -> Unit,
+    showProgress: Boolean,
+    paper: Color,
+    ink: Color,
+    onSeek: (Float) -> Unit,
+    onPreview: ((Float?) -> Unit)? = null,
+    onOpenMap: (() -> Unit)? = null,
 ) {
     Row(
         // No glass or inset here: the controls are drawn inside the shared chrome sheet (see the
         // caller), which supplies the single continuous plane and the nav-bar inset. The row only
         // insets its content horizontally so it lines up with the progress block beneath it.
         Modifier.fillMaxWidth()
-            .padding(horizontal = FolioTokens.space3),
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        TextButton(onClick = onMode) {
+        IconButton(onClick = onMode) {
             Icon(
                 if (state.mode == DocumentReaderMode.SINGLE_PAGE) Icons.Default.ViewAgenda else Icons.Default.GridView,
-                contentDescription = null
+                contentDescription = if (state.mode == DocumentReaderMode.SINGLE_PAGE) "Switch to continuous pages" else "Switch to single page",
+                modifier = Modifier.size(20.dp),
             )
-            Text(if (state.mode == DocumentReaderMode.SINGLE_PAGE) "Continuous" else "Single page")
+        }
+        Box(Modifier.weight(1f)) {
+            if (showProgress) DocumentPageBlock(state, true, paper, ink, bare = true, onSeek = onSeek,
+                onPreview = onPreview, onOpenMap = onOpenMap)
         }
         IconButton(onClick = onRotate) {
-            Icon(Icons.AutoMirrored.Filled.RotateRight, "Rotate pages")
+            Icon(Icons.AutoMirrored.Filled.RotateRight, "Rotate pages", modifier = Modifier.size(20.dp))
         }
         if (state.mode == DocumentReaderMode.SINGLE_PAGE) {
-            TextButton(onClick = onResetZoom) { Text("Reset zoom") }
+            IconButton(onClick = onResetZoom) { Icon(Icons.Default.ZoomOutMap, "Reset zoom", modifier = Modifier.size(20.dp)) }
         }
     }
 }
@@ -609,7 +632,9 @@ private fun DocumentPageBlock(
     paper: Color,
     ink: Color,
     bare: Boolean = false,
-    onSeek: (Float) -> Unit
+    onSeek: (Float) -> Unit,
+    onPreview: ((Float?) -> Unit)? = null,
+    onOpenMap: (() -> Unit)? = null,
 ) {
     val pageCount = state.pageCount.coerceAtLeast(1)
     val currentPage = (if (isPdf) state.currentPage + 1 else state.currentPage).coerceIn(1, pageCount)
@@ -629,17 +654,34 @@ private fun DocumentPageBlock(
         stateLabel = label,
         pageCountHint = pageCount,
         bare = bare,
-        onSeek = onSeek
+        onSeek = onSeek, onPreview = onPreview, onOpenMap = onOpenMap,
     )
 }
 
 @Composable
-private fun DocumentReaderBar(
+private fun DocumentChromeGroup(
+    modifier: Modifier = Modifier,
+    single: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier.heightIn(min = 48.dp)) {
+        // An explicitly sized paint sibling avoids match-parent padding being
+        // deducted twice. Actions keep their full 48dp targets above this surface.
+        Box(Modifier.fillMaxWidth().height(40.dp).align(Alignment.Center)
+            .padding(horizontal = if (single) 8.dp else 0.dp)
+            .readerIsland(FolioSoftShape(8.dp)))
+        content()
+    }
+}
+
+@Composable
+internal fun DocumentReaderBar(
     state: DocumentReaderState,
     onBack: () -> Unit,
     onBookmark: () -> Unit,
     morphDocumentId: String? = null,
-    onOpenSettings: (() -> Unit)? = null
+    onOpenSettings: (() -> Unit)? = null,
+    onOpenPages: (() -> Unit)? = null,
 ) {
     // Floating islands, like the EPUB reader: a back capsule, a title capsule and a bookmark
     // capsule hovering below the status bar with a uniform margin, so the page breathes through
@@ -654,18 +696,18 @@ private fun DocumentReaderBar(
                 horizontal = FolioTokens.insetReaderIsland,
                 vertical = FolioTokens.insetReaderIsland,
             ),
-        horizontalArrangement = Arrangement.spacedBy(FolioTokens.insetReaderIsland),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.readerIsland(CircleShape)) {
-            IconButton(onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = FolioTheme.colors.onSurface)
+        DocumentChromeGroup(Modifier.size(48.dp), single = true) {
+            IconButton(onBack, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = FolioTheme.colors.onSurface, modifier = Modifier.size(20.dp))
             }
         }
+        DocumentChromeGroup(Modifier.weight(1f)) {
         Row(
             modifier = Modifier
-                .weight(1f)
-                .readerIsland()
+                .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .padding(horizontal = FolioTokens.space3),
             verticalAlignment = Alignment.CenterVertically,
@@ -673,7 +715,7 @@ private fun DocumentReaderBar(
         ) {
             Text(
                 state.document?.title.orEmpty(),
-                style = FolioTheme.typography.titleMedium,
+                style = FolioTheme.typography.titleSmall,
                 color = FolioTheme.colors.onSurface,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
@@ -694,21 +736,29 @@ private fun DocumentReaderBar(
                     )
             )
         }
-        Box(Modifier.readerIsland(CircleShape)) {
-            IconButton(onBookmark) {
+        }
+        DocumentChromeGroup(Modifier.size(48.dp), single = true) {
+            IconButton(onBookmark, modifier = Modifier.size(48.dp)) {
                 Icon(
                     if (state.isCurrentPositionBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                     "Toggle bookmark",
+                    modifier = Modifier.size(20.dp),
                     tint = FolioTheme.colors.onSurface
                 )
             }
         }
+        if (onOpenPages != null) DocumentChromeGroup(Modifier.size(48.dp), single = true) {
+            IconButton(onOpenPages, Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.Toc, "Document map and bookmarks", Modifier.size(20.dp), FolioTheme.colors.onSurface)
+            }
+        }
         if (onOpenSettings != null) {
-            Box(Modifier.readerIsland(CircleShape)) {
-                IconButton(onOpenSettings) {
+            DocumentChromeGroup(Modifier.size(48.dp), single = true) {
+                IconButton(onOpenSettings, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Default.Settings,
                         "Document settings",
+                        modifier = Modifier.size(20.dp),
                         tint = FolioTheme.colors.onSurface
                     )
                 }

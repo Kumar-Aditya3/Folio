@@ -7,6 +7,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.translate
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.heroMeshBorrow
@@ -71,8 +72,18 @@ internal fun Modifier.heroMesh(
     }
     return drawWithCache {
         val radii = listOf(0.8f, 1.1f, 1.4f).map { it * min(size.width, size.height) }
+        val brushes = layers.mapIndexed { index, color ->
+            Brush.radialGradient(
+                colors = listOf(
+                    color.copy(alpha = if (index == 0 && cover != null) coverAlpha else MESH_POOL_ALPHA),
+                    Color.Transparent,
+                ),
+                center = Offset.Zero,
+                radius = radii[index % radii.size].coerceAtLeast(0.01f),
+            )
+        }
         onDrawBehind {
-            layers.forEachIndexed { index, color ->
+            layers.indices.forEach { index ->
                 // Each layer keeps its own starting angle — the offsets are what
                 // stop the three pools from drifting as one blob.
                 val phase = index * 2.1f + (phases?.value?.getOrNull(index) ?: 0f)
@@ -84,20 +95,9 @@ internal fun Modifier.heroMesh(
                     y = size.height * (0.5f + 0.9f * sin(phase + index * 1.7f)),
                 )
                 val radius = radii[index % radii.size]
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            color.copy(
-                                alpha = if (index == 0 && cover != null) coverAlpha else MESH_POOL_ALPHA,
-                            ),
-                            Color.Transparent,
-                        ),
-                        center = center,
-                        radius = radius,
-                    ),
-                    radius = radius,
-                    center = center,
-                )
+                translate(left = center.x, top = center.y) {
+                    drawCircle(brushes[index], radius = radius, center = Offset.Zero)
+                }
             }
         }
     }

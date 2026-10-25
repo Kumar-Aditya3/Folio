@@ -1,20 +1,20 @@
 package com.folio.reader.ui.home
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -30,37 +30,17 @@ import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.ReadingClimate
-import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.phrase
 import com.folio.reader.ui.components.rememberEntryState
 import com.folio.reader.ui.components.tint
 import com.folio.reader.ui.components.weekForecast
 import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.theme.FolioHaptic
-import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.atmosphere
-import com.folio.reader.ui.theme.paneFill
 import com.folio.reader.ui.theme.rememberFolioHaptics
 
-/**
- * **The week well.** Extracted from HomeScreen so the weather additions here
- * did not push that file further over Rule 9's budget. Content unchanged
- * apart from the forecast line and climate-tinted figure — see HomeScreen's
- * block comments for the composition rationale.
- */
-
-/**
- * **The week.** The only chart on Home, and the only *sunken* surface — cut into
- * the page while the anchor floats above it, so the screen reads as having a
- * genuine top and bottom rather than one plane of cards.
- *
- * Edge-to-edge on purpose: the well spans the full width with only the type inset,
- * which gives the sparkline room and keeps the bottom of the screen from becoming
- * a fourth card. Rule 16 still holds — this is Home's own sparkline, not the Stats
- * week chart.
- */
+/** An open weekly summary on Home's own field, aligned with the surrounding sections. */
 @Composable
 internal fun ThisWeekWell(
     state: HomeUiState,
@@ -77,56 +57,27 @@ internal fun ThisWeekWell(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .folioRaised(
-                shape = FolioShapes.edgeStart,
-                accent = climate?.tint() ?: colors.accentProgress,
-                elevation = FolioTokens.elevationRaised,
-                fill = FolioTheme.atmosphere.paneFill(),
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .clickable {
+            .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)
+            .clickable(role = Role.Button, onClickLabel = "View reading statistics") {
                 haptics.play(FolioHaptic.Commit)
                 onOpenStats()
-            }
-            .padding(
-                start = FolioTokens.gutter,
-                end = FolioTokens.gutter,
-                top = FolioTokens.space3,
-                bottom = FolioTokens.space3,
-            )
+            },
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            FolioFigure(
-                value = formatMinutes(state.week.sumOf { it.minutes }),
-                label = "This week",
-                emphasis = FigureScale.Quiet,
-                accent = climate?.tint() ?: colors.accentProgress,
-            )
-            Spacer(Modifier.weight(1f))
-            if (forecast != null) {
-                Text(
-                    forecast.phrase(),
-                    style = FolioTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = FolioTokens.spaceHair),
-                )
-                Spacer(Modifier.width(FolioTokens.space3))
-            }
-            Text(
-                "${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
+        Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+            FolioFigure(value = formatMinutes(state.week.sumOf { it.minutes }), label = "This week",
+                emphasis = FigureScale.Quiet, accent = climate?.tint() ?: colors.accentProgress)
+            forecast?.let { Text(it.phrase(), style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant) }
+            Text("${state.startedThisWeek} started · ${state.finishedThisWeek} finished",
                 style = FolioTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                color = colors.onSurfaceVariant,
-                maxLines = 1,
-            )
+                color = colors.onSurfaceVariant)
         }
         Spacer(Modifier.height(FolioTokens.space3))
         WeekSparkline(
             week = state.week,
-            modifier = Modifier.fillMaxWidth().height(FolioTokens.sparkHeight * 1.4f)
+            modifier = Modifier.fillMaxWidth().height(72.dp)
         )
-        // The floating capsule's clearance, held *inside* the well. The page therefore
-        // ends on a surface rather than on dead scroll, and the leaf sits in the band
-        // to the leading side of the capsule as a closing mark.
+        // Keep the final graph and closing mark clear of the floating navigation.
         if (bottomInset > 0.dp) {
             Box(
                 modifier = Modifier.fillMaxWidth().height(bottomInset),
@@ -153,9 +104,12 @@ private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
         modifier = modifier.drawWithCache {
             if (week.size < 2) return@drawWithCache onDrawBehind { }
             val max = week.maxOf { it.minutes }.coerceAtLeast(1L)
-            val stepX = size.width / (week.size - 1)
+            val dotRadius = 3.dp.toPx()
+            val plotWidth = (size.width - dotRadius * 2f).coerceAtLeast(0f)
+            val plotHeight = (size.height - dotRadius * 2f).coerceAtLeast(0f)
+            val stepX = plotWidth / (week.size - 1)
             val points = week.mapIndexed { index, day ->
-                Offset(index * stepX, size.height * (1f - day.minutes.toFloat() / max))
+                Offset(dotRadius + index * stepX, dotRadius + plotHeight * (1f - day.minutes.toFloat() / max))
             }
             val areaPath = Path().apply {
                 moveTo(0f, size.height)
@@ -168,9 +122,8 @@ private fun WeekSparkline(week: List<StatDay>, modifier: Modifier = Modifier) {
                     if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
                 }
             }
-            val areaBrush = Brush.verticalGradient(listOf(color.copy(alpha = 0.25f), Color.Transparent))
+            val areaBrush = Brush.verticalGradient(listOf(color.copy(alpha = 0.12f), Color.Transparent))
             val strokePx = 2.dp.toPx()
-            val dotRadius = 3.dp.toPx()
             onDrawBehind {
                 val progress = entry.value
                 clipRect(right = size.width * progress) {

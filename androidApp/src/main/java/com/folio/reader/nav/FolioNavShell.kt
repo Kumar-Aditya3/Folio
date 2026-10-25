@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
@@ -76,8 +77,6 @@ import com.folio.reader.ui.components.GlassSpec
 import com.folio.reader.ui.components.chromeFill
 import com.folio.reader.ui.components.folioVeil
 import com.folio.reader.ui.components.glassBlurred
-import com.folio.reader.ui.components.navSweepAlpha
-import com.folio.reader.ui.components.navSweepBand
 import com.folio.reader.ui.components.rememberFolioChromeMaterial
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.components.rememberLegibleAccent
@@ -241,45 +240,15 @@ fun FolioNavShell(
             // two ends of the window cannot be given different alphas by anyone editing one
             // end. See FolioChromeMaterial.
             val capsuleFill = FolioTheme.surfaceOpacity.chromeFill(glassBlurred() && !suppressBlur)
-            // §17 liquid selection: the tab the reader lands on sends one
-            // specular band across the capsule's glass in the direction of
-            // travel — the selection's own motion, caught by the material it
-            // moves through. Drawn under the items (drawWithCache before the
-            // Row's children), read in the draw phase only; skipped entirely
-            // under reduce-motion and on the very first composition.
-            val motion = rememberMotionEnabled()
             val selectedIndex = folioNavBarItems.indexOfFirst { item ->
                 currentRoute == item.route ||
                     (item.route == FolioRoutes.MORE && currentRoute.startsWith("settings/"))
-            }
-            val sweep = remember { Animatable(1f) }
-            var sweepDirection by remember { mutableFloatStateOf(1f) }
-            var lastSelected by remember { mutableStateOf(selectedIndex) }
-            LaunchedEffect(selectedIndex, motion) {
-                if (selectedIndex != lastSelected) {
-                    if (motion) {
-                        sweepDirection = if (selectedIndex > lastSelected) 1f else -1f
-                        sweep.snapTo(0f)
-                        sweep.animateTo(
-                            1f,
-                            tween(FolioTokens.motionLiquidSweep.toInt(), easing = FastOutSlowInEasing),
-                        )
-                    } else {
-                        sweep.snapTo(1f)
-                    }
-                    lastSelected = selectedIndex
-                }
             }
             val atmos = FolioTheme.atmosphere
             // The same material the masthead is made of — one definition for both ends of the
             // window, see FolioChromeMaterial. The capsule keeps its own geometry (the pill, the
             // insets, the selection band) and its own wash mechanism; it takes only the colour.
             val chrome = rememberFolioChromeMaterial()
-            val sweepLight = chrome.sheen
-            // The metallic-sheen knob: the selection sweep is the capsule's light
-            // answer, so it dims with every other catch. The capsule's fill, edge and
-            // blur are its material and stay untouched.
-            val sheenGain = folioSheenGain()
             // The glass this capsule is made of *in the room the reader is standing
             // in*: the palette's own chrome plane with the colour of the book being read
             // folded into its hue by the field model, at the atmosphere's own strength.
@@ -409,28 +378,6 @@ fun FolioNavShell(
                                 }
                             }
                         )
-                        // §17 liquid selection: the travelling specular band, over
-                        // the veil's own material and under the items.
-                        .drawWithCache {
-                            onDrawBehind {
-                                val progress = sweep.value
-                                if (progress < 1f) {
-                                    val band = size.width * 0.45f
-                                    val x = navSweepBand(progress, size.width, band, sweepDirection)
-                                    drawRect(
-                                        brush = Brush.horizontalGradient(
-                                            0f to Color.Transparent,
-                                            0.5f to sweepLight.copy(
-                                                alpha = sweepLight.alpha * 0.38f * navSweepAlpha(progress) * sheenGain,
-                                            ),
-                                            1f to Color.Transparent,
-                                            startX = x,
-                                            endX = x + band,
-                                        ),
-                                    )
-                                }
-                            }
-                        }
                         .height(FolioTokens.navFloatHeight)
                         .padding(horizontal = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -635,7 +582,19 @@ private fun FolioNavItem(
                 .height(42.dp)
                 .clip(FolioShapes.pill)
                 .folioSoftFill(FolioShapes.pill, pillFill, FolioEdgeRole.Tile)
-                .folioGlassPress(interaction, FolioShapes.pill, focal),
+                .folioGlassPress(interaction, FolioShapes.pill, focal)
+                .drawWithCache {
+                    onDrawWithContent {
+                        drawContent()
+                        if (selected) {
+                            val y = size.height - 3.dp.toPx()
+                            drawLine(iconTint.copy(alpha = .82f), Offset(size.width * .37f, y),
+                                Offset(size.width * .63f, y), 1.4.dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(iconTint.copy(alpha = .34f), Offset(size.width * .44f, y - 3.dp.toPx()),
+                                Offset(size.width * .63f, y - 3.dp.toPx()), .7.dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {

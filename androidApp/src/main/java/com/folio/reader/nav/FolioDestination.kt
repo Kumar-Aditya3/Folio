@@ -15,7 +15,7 @@ object FolioRoutes {
     const val MORE = "more"
 
     // Pushed routes (bar hidden, §3.3).
-    const val READER = "reader/{bookId}?spine={spine}&frac={frac}&hl={hl}"
+    const val READER = "reader/{bookId}?spine={spine}&frac={frac}&hl={hl}&loc={loc}"
     const val DOCUMENT_READER = "document/{documentId}"
     const val BOOK_DETAIL = "book/{bookId}"
     const val MANGA_DETAIL = "manga/{mangaId}"
@@ -35,8 +35,13 @@ object FolioRoutes {
      *
      * This destination exists so the pair (reader, search) can be popped together and land on
      * a named tab. See `FolioNavHost`'s `pairReturn`.
+     *
+     * Carries the book it was opened from, so search starts on that book's content instead of
+     * the whole library. On the route rather than in a shared holder because it is a property
+     * of *this* visit: it survives process death with the back stack, and a library search
+     * cannot inherit it.
      */
-    const val SEARCH_FROM_READER = "search/reader"
+    const val SEARCH_FROM_READER = "search/reader/{bookId}"
     const val SETTINGS = "settings/{category}"
     const val EXTENSIONS = "extensions"
     const val MANGA_BROWSE = "mangaBrowse"
@@ -62,13 +67,19 @@ object FolioDestination {
      *   (0..1000), or null for "chapter top". Per-mille keeps it an [Int] nav arg like [spine]
      *   rather than encoding a float into the route.
      */
-    fun reader(bookId: String, spine: Int? = null, fractionMille: Int? = null, highlightId: String? = null): String =
-        "reader/${enc(bookId)}?spine=${spine ?: -1}&frac=${fractionMille ?: -1}&hl=${enc(highlightId ?: "")}"
+    fun reader(bookId: String, spine: Int? = null, fractionMille: Int? = null, highlightId: String? = null, locator: String? = null): String =
+        "reader/${enc(bookId)}?spine=${spine ?: -1}&frac=${fractionMille ?: -1}&hl=${enc(highlightId ?: "")}&loc=${enc(locator ?: "")}"
+
+    fun reader(target: com.folio.reader.model.ReaderPassageTarget): String =
+        reader(target.bookId, target.spineIndex, highlightId = target.highlightId, locator = target.locator)
 
     fun documentReader(documentId: String): String =
         "document/${enc(documentId)}"
 
     fun bookDetail(bookId: String): String = "book/${enc(bookId)}"
+
+    /** Search opened from [bookId]'s reader; see [FolioRoutes.SEARCH_FROM_READER]. */
+    fun searchFromReader(bookId: String): String = "search/reader/${enc(bookId)}"
 
     fun mangaDetail(mangaId: String): String = "manga/${enc(mangaId)}"
 
@@ -88,6 +99,7 @@ object FolioNavArgs {
     const val SPINE = "spine"
     const val FRAC = "frac"
     const val HL = "hl"
+    const val LOC = "loc"
     const val MANGA_ID = "mangaId"
     const val CHAPTER_ID = "chapterId"
     const val SOURCE_ID = "sourceId"

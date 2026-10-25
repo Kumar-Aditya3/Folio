@@ -15,5 +15,8 @@ expect fun FixedPageContentSurface(
     onDocumentOpened: (Int) -> Unit,
     onCurrentPageChanged: (Int) -> Unit,
     onTap: () -> Unit,
-    onError: (DocumentReaderError) -> Unit
+    onError: (DocumentReaderError) -> Unit,
+    navigationRequest: FixedPageNavigationRequest? = null,
+    onNavigationApplied: (Long) -> Unit = {},
+    onViewportPosition: (com.folio.reader.model.DocumentLocator.FixedPage, Float) -> Unit = { _, _ -> },
 )

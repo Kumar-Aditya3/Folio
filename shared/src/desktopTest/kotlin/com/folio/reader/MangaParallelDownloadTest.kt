@@ -60,7 +60,7 @@ class MangaParallelDownloadTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-parallel-dl-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-parallel-dl-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         chapters = JdbcMangaChapterRepository(database)

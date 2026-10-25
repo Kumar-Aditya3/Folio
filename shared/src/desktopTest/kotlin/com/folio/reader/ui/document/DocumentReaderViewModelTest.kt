@@ -17,6 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -249,6 +250,70 @@ class DocumentReaderViewModelTest {
         assertIs<DocumentReaderContent.Reflowable>(
             assertIs<DocumentReaderLoadState.Ready>(state.loadState).content
         ).html
+
+    @Test fun pdfPreviewCancelAndReturnPreserveTheRealPageViewport() = runBlocking {
+        val original = File(platform.fileSystem.getDocumentDir("preview-pdf"), "original.pdf")
+            .apply { parentFile.mkdirs(); writeBytes(byteArrayOf(1)) }
+        repository.upsertDocument(document("preview-pdf", DocumentFormat.PDF, original))
+        val reader = reader().also { it.open("preview-pdf") }
+        awaitReady(reader)
+        reader.onPdfOpened(12)
+        reader.state.value.fixedPageNavigationRequest?.let { reader.onFixedPageNavigationApplied(it.nonce) }
+        reader.setCurrentPage(3)
+        val locator = DocumentLocator.FixedPage(pageIndex = 3, normalizedX = -.08, normalizedY = .12)
+        reader.updateFixedPageViewport(locator, 2f)
+        val origin = assertNotNull(reader.state.value.navigationPoint())
+        withTimeout(2_000) { repository.observePosition("preview-pdf").first { it?.locator == locator } }
+
+        reader.previewProgress(.8f)
+        assertEquals(3, reader.state.value.currentPage)
+        assertEquals(locator, repository.observePosition("preview-pdf").first()?.locator)
+        reader.cancelPreview()
+        assertNull(reader.state.value.preview)
+        assertEquals(origin, reader.state.value.navigationPoint())
+
+        reader.previewProgress(.8f)
+        reader.commitPreview()
+        assertEquals(9, reader.state.value.currentPage)
+        assertEquals(origin, reader.state.value.returnPoint)
+        reader.state.value.fixedPageNavigationRequest?.let { reader.onFixedPageNavigationApplied(it.nonce) }
+        reader.rotateClockwise()
+        reader.setMode(DocumentReaderMode.CONTINUOUS)
+        reader.returnToOrigin()
+        assertEquals(origin, reader.state.value.navigationPoint())
+        assertEquals(locator, reader.state.value.fixedPageNavigationRequest?.locator)
+        assertEquals(2f, reader.state.value.fixedPageNavigationRequest?.zoom)
+        assertNull(reader.state.value.returnPoint)
+    }
+
+    @Test fun reflowablePeekDoesNotPersistUntilCommitAndRestoresItsOrigin() = runBlocking {
+        val original = File(platform.fileSystem.getDocumentDir("preview-html"), "original.html")
+            .apply { parentFile.mkdirs(); writeText("source") }
+        File(platform.fileSystem.getDocumentGeneratedIndexPath("preview-html"))
+            .writeText("<body>" + (0..30).joinToString("") { "<p>Paragraph $it has a real reading passage.</p>" } + "</body>")
+        repository.upsertDocument(document("preview-html", DocumentFormat.HTML, original))
+        val reader = reader().also { it.open("preview-html") }
+        awaitReady(reader)
+        reader.updateReflowableProgress(.25f, 20)
+        val origin = assertNotNull(reader.state.value.navigationPoint())
+        withTimeout(2_000) { repository.observePosition("preview-html").first { it?.normalizedProgress == origin.normalizedProgress } }
+        reader.previewProgress(.8f)
+        val preview = withTimeout(2_000) { reader.state.first { it.preview?.loading == false } }.preview
+        assertTrue(assertNotNull(preview?.excerpt).contains("Paragraph"))
+        assertEquals(origin.normalizedProgress, reader.state.value.normalizedProgress)
+        assertEquals(origin.normalizedProgress, repository.observePosition("preview-html").first()?.normalizedProgress)
+        reader.cancelPreview()
+        assertEquals(origin, reader.state.value.navigationPoint())
+        reader.previewProgress(.8f)
+        reader.commitPreview()
+        assertEquals(.8f.toDouble(), reader.state.value.normalizedProgress)
+        assertEquals(origin, reader.state.value.returnPoint)
+        reader.returnToOrigin()
+        assertEquals(origin.normalizedProgress, reader.state.value.normalizedProgress)
+        assertEquals<DocumentLocator?>(origin.locator, reader.state.value.reflowableLocator)
+        assertNotNull(reader.state.value.reflowableSeekRequest)
+        Unit
+    }
 
     private fun reader() = DocumentReaderViewModel(
         repository = repository,

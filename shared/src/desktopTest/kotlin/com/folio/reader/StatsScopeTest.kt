@@ -145,7 +145,7 @@ class StatsScopeTest {
 
     @Test
     fun `stats exclusion repository add observe remove roundtrip persists across reopen`() = runBlocking {
-        val tempRoot = createTempDir("folio-stats-exclusions-")
+        val tempRoot = kotlin.io.path.createTempDirectory("folio-stats-exclusions-").toFile()
         try {
             val platform = DesktopPlatform(tempRoot)
             val path = platform.fileSystem.getDatabasePath()
@@ -194,7 +194,7 @@ class StatsScopeTest {
     fun `observeExclusions re-emits to a live collector after add and remove`() = runBlocking {
         // The exclusions screen collects ONE flow instance while writing through
         // the same repository — the tick must appear without re-subscribing.
-        val tempRoot = createTempDir("folio-stats-exclusions-live-")
+        val tempRoot = kotlin.io.path.createTempDirectory("folio-stats-exclusions-live-").toFile()
         try {
             val platform = DesktopPlatform(tempRoot)
             val repo = JdbcStatsExclusionRepository(Database(platform.fileSystem.getDatabasePath()))

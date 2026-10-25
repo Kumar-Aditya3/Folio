@@ -40,6 +40,8 @@ import com.folio.reader.ui.manga.MangaDetailViewModel
 import com.folio.reader.ui.manga.MangaLibraryViewModel
 import com.folio.reader.ui.manga.MangaReaderViewModel
 import com.folio.reader.ui.manga.MangaSearchRanker
+import com.folio.reader.ui.manga.openNote
+import com.folio.reader.ui.manga.pageKey
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -55,6 +57,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -117,8 +120,10 @@ class MangaReaderProgressTest {
         val entries = LinkedHashMap<String, MangaEntry>()
         var lastReadTouched: String? = null
 
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean) {
-            entries[manga.id] = manga
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) {
+            entries[manga.id] = if (preserveLibraryState) {
+                manga.copy(inLibrary = entries[manga.id]?.inLibrary ?: manga.inLibrary)
+            } else manga
         }
 
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) {
@@ -132,7 +137,9 @@ class MangaReaderProgressTest {
 
         override fun observeLibrary(): Flow<List<MangaEntry>> = flowOf(entries.values.toList())
         override fun observeAll(): Flow<List<MangaEntry>> = flowOf(entries.values.toList())
-        override suspend fun setInLibrary(mangaId: String, inLibrary: Boolean) {}
+        override suspend fun setInLibrary(mangaId: String, inLibrary: Boolean) {
+            entries[mangaId]?.let { entries[mangaId] = it.copy(inLibrary = inLibrary) }
+        }
         override suspend fun setCoverPath(mangaId: String, coverPath: String?) {}
         override suspend fun touchLastRead(mangaId: String) {
             lastReadTouched = mangaId
@@ -169,6 +176,8 @@ class MangaReaderProgressTest {
         override suspend fun get(noteId: String): MangaNote? = null
         override suspend fun notesForChapter(chapterId: String): List<MangaNote> = emptyList()
         override fun observeNotesForChapter(chapterId: String): Flow<List<MangaNote>> = flowOf(emptyList())
+        override suspend fun notesForManga(mangaId: String): List<MangaNote> = emptyList()
+        override fun observeNotesForManga(mangaId: String): Flow<List<MangaNote>> = flowOf(emptyList())
         override fun observeAllNotes(): Flow<List<MangaNote>> = flowOf(emptyList())
     }
 
@@ -179,9 +188,9 @@ class MangaReaderProgressTest {
             MangaCategory(id = name, name = name)
 
         override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) {}
-        override suspend fun delete(id: String, emitSyncEvent: Boolean): Boolean = true
+        override suspend fun delete(id: String, emitSyncEvent: Boolean, removeExclusiveManga: Boolean): Boolean = true
         override fun observeCategories(): Flow<List<MangaCategory>> = flowOf(categoriesList)
-        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean) {}
+        override suspend fun assign(mangaId: String, categoryIds: Set<String>, emitSyncEvent: Boolean, addToLibrary: Boolean) {}
         override suspend fun categoriesFor(mangaId: String): Set<String> = emptySet()
         override suspend fun get(id: String): MangaCategory? = null
         override suspend fun getCategoryByName(name: String): MangaCategory? =
@@ -283,7 +292,7 @@ class MangaReaderProgressTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-manga-reader-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-manga-reader-").toFile()
         chapterRepo = FakeChapterRepo()
         mangaRepo = FakeMangaRepo()
         historyRepo = FakeHistoryRepo()
@@ -414,6 +423,81 @@ class MangaReaderProgressTest {
     }
 
     // ---------- Position-aware loading ----------
+
+    @Test
+    fun switchingNotesCancelsTheOldLoadWithoutBlacklistingItsChapter() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 4, "/c2" to 4, "/c3" to 4, "/c4" to 4))
+        val gate = CompletableDeferred<Unit>()
+        val backend = FakeBackend(pageListsFor(chapters), mapOf(chapters[1].url to gate))
+        val vm = newReaderVm(backend)
+        try {
+            vm.open(manga, chapters[1], initialPage = 1)
+            awaitCondition(message = "first note starts fetching") { chapters[1].url in backend.pageListFetches }
+            vm.open(manga, chapters[2], initialPage = 2)
+            awaitCondition(message = "second note takes over") { chapters[2].url in backend.pageListFetches }
+            gate.complete(Unit)
+            awaitCondition(message = "second note opens with its previous chapter still available") {
+                !vm.loading.value && vm.chapter.value?.id == chapters[2].id && vm.localPage.value == 2
+            }
+            assertEquals(6, vm.currentIndex.value)
+            assertEquals("${chapters[2].id}:2", vm.pageKey(vm.currentIndex.value))
+            assertNull(vm.error.value)
+        } finally { gate.complete(Unit); vm.close() }
+    }
+
+    @Test
+    fun explicitNotePageOverridesBothSavedResumeAndFinishedChapterRules() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 6, "/c3" to 4))
+        val target = chapters[1].copy(read = true, lastPageRead = 5)
+        chapterRepo.chapters[target.id] = target
+        val vm = newReaderVm(FakeBackend(pageListsFor(chapters)))
+        try {
+            vm.open(manga, target, initialPage = 4)
+            awaitCondition(message = "explicit note page wins over completed chapter resume") {
+                !vm.loading.value && vm.localPage.value == 4
+            }
+            assertEquals(7, vm.currentIndex.value)
+            assertEquals("${target.id}:4", vm.pageKey(vm.currentIndex.value))
+        } finally { vm.close() }
+    }
+
+    @Test
+    fun noteJumpLoadsItsChapterOutsideTheCurrentFilterAndKeepsItsExactPage() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 4, "/c2" to 5, "/c3" to 6, "/c4" to 7, "/c5" to 4))
+        val first = chapters.first().copy(downloadedPages = 4)
+        chapterRepo.chapters[first.id] = first
+        val target = chapters[3].copy(read = true, lastPageRead = 6)
+        chapterRepo.chapters[target.id] = target
+        settingsRepo.values["manga.chapter.filter.$mId"] = ChapterFilter.DOWNLOADED.name
+        val gate = CompletableDeferred<Unit>()
+        val vm = newReaderVm(FakeBackend(pageListsFor(chapters), mapOf(target.url to gate)))
+        try {
+            vm.open(manga, first)
+            awaitCondition(message = "filtered starting chapter loads") { !vm.loading.value && vm.pages.value.size == 4 }
+            vm.onPageChanged(1)
+            vm.openNote(MangaNote("note", mId, target.id, 2, "Return here"))
+            awaitCondition(message = "note requests its own chapter") { vm.loading.value && vm.chapter.value?.id == target.id }
+            gate.complete(Unit)
+            awaitCondition(message = "note page resolves after fetching and prepending its previous chapter") {
+                !vm.loading.value && vm.chapter.value?.id == target.id && vm.localPage.value == 2
+            }
+            assertEquals("${target.id}:2", vm.pageKey(vm.currentIndex.value))
+            assertEquals(8, vm.currentIndex.value)
+            assertFalse(chapterRepo.readMarks.any { it.first == first.id && it.second }, "A note jump must not finish the skipped chapter")
+            assertTrue(chapterRepo.progressWrites.any { it.first == first.id && it.second == 1 })
+        } finally { gate.complete(Unit); vm.close() }
+    }
+
+    @Test
+    fun notePagesAreClampedWithinTheirOwnChapter() = runBlocking {
+        val chapters = seedChapters(linkedMapOf("/c1" to 3, "/c2" to 4))
+        val vm = newReaderVm(FakeBackend(pageListsFor(chapters)))
+        try {
+            vm.open(manga, chapters.last(), initialPage = 99)
+            awaitCondition(message = "stale note page is clamped to its chapter") { !vm.loading.value && vm.localPage.value == 3 }
+            assertEquals("${chapters.last().id}:3", vm.pageKey(vm.currentIndex.value))
+        } finally { vm.close() }
+    }
 
     @Test
     fun openPublishesCurrentChapterBeforeNeighbours() = runBlocking {

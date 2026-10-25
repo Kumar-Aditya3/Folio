@@ -22,7 +22,7 @@ class EpubParserEdgeCasesTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-epub-edge-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-epub-edge-").toFile()
     }
 
     @AfterTest

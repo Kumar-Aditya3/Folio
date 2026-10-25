@@ -20,6 +20,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.ui.theme.LocalMotion
+import com.folio.reader.ui.theme.MotionKey
 import java.awt.BorderLayout
 import java.awt.EventQueue
 import java.awt.Panel
@@ -77,11 +79,15 @@ actual fun HtmlContentSurface(
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
     seekTargetRequest: Pair<String, Long>?,
-    onContentReady: () -> Unit
+    onContentReady: () -> Unit,
+    onSelectionBounds: ((ReaderSelectionBounds?) -> Unit)?,
 ) {
     val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val backgroundColor = Color(theme.background)
     val progressColor = Color(theme.progress)
+    val resolvedMotion = LocalMotion.current
+    val selectionMotion = resolvedMotion[MotionKey.SelectionToolbar]
+    val selectionMotionJs = "window.__folioSelectionMotion={duration:${if (resolvedMotion.reduced) 0L else selectionMotion.durationMs},scale:${if (resolvedMotion.reduced) 1f else 1f - .04f * selectionMotion.intensity}};"
 
     // Latest-callback holder: effects stay keyed on content only, so progress
     // updates (which recompose the reader constantly) never restart them.
@@ -97,6 +103,7 @@ actual fun HtmlContentSurface(
     callbacks.onLinkClick = onLinkClick
     callbacks.onHighlightParagraph = onHighlightParagraph
     callbacks.onSelectionChanged = onSelectionChanged
+    callbacks.onSelectionBounds = onSelectionBounds
     callbacks.onContentReady = onContentReady
 
     val resolver by rememberUpdatedState(onResolveResource)
@@ -115,6 +122,7 @@ actual fun HtmlContentSurface(
     callbacks.onOverlayAction = LocalOverlayAction.current
 
     var session by remember { mutableStateOf<JcefSession?>(null) }
+    LaunchedEffect(session, selectionMotionJs) { session?.execute(selectionMotionJs) }
     var fatalError by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(true) }
     // The title handler resolves sel2 spines against the current window.
@@ -253,7 +261,7 @@ actual fun HtmlContentSurface(
 
                 else -> readerBridgeJs(fraction)
             }
-            current.load(url, js)
+            current.load(url, selectionMotionJs + "window.__folioNativeSelectionTools=${onHighlightParagraph != null && onSelectionChanged != null};" + js)
             loadedChapter = loadKey
             appliedSettings = s
             hasLoadedOnce = true
@@ -382,6 +390,7 @@ private class SurfaceCallbacks {
     @Volatile var onOverlayAction: ((String) -> Unit)? = null
     @Volatile var onHighlightParagraph: ((String, Int, String) -> Unit)? = null
     @Volatile var onSelectionChanged: ((String, Int, String?) -> Unit)? = null
+    @Volatile var onSelectionBounds: ((ReaderSelectionBounds?) -> Unit)? = null
     @Volatile var onLoadError: (String) -> Unit = {}
     /** Fired on the main frame's first onLoadEnd — the chapter's real first paint. */
     @Volatile var onContentReady: () -> Unit = {}
@@ -472,9 +481,22 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-edge:start:") -> callbacks.onChapterStart()
 
-                    t.startsWith("folio-selclear:") -> callbacks.onSelectionChanged?.invoke("", 0, null)
+                    t.startsWith("folio-sel3:") -> {
+                        parseReaderSelectionMessage(t)?.let { message ->
+                            val text = runCatching { URLDecoder.decode(message.encodedText, "UTF-8") }.getOrNull()
+                            val chapterId = sectionsForCallbacks.firstOrNull { it.spineIndex == message.spine }?.chapterId
+                                ?: sectionsForCallbacks.firstOrNull()?.chapterId.orEmpty()
+                            callbacks.onSelectionBounds?.invoke(message.bounds)
+                            callbacks.onSelectionChanged?.invoke(chapterId, message.paragraph, text?.takeIf { it.isNotBlank() })
+                        }
+                    }
+                    t.startsWith("folio-selclear:") -> {
+                        callbacks.onSelectionBounds?.invoke(null)
+                        callbacks.onSelectionChanged?.invoke("", 0, null)
+                    }
 
                     t.startsWith("folio-sel2:") -> {
+                        callbacks.onSelectionBounds?.invoke(null)
                         val rest = t.removePrefix("folio-sel2:")
                         val spine = rest.substringBefore(':').toIntOrNull() ?: -1
                         val afterSpine = rest.substringAfter(':')
@@ -490,6 +512,7 @@ private class JcefSession private constructor(
                     }
 
                     t.startsWith("folio-sel:") -> {
+                        callbacks.onSelectionBounds?.invoke(null)
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')

@@ -37,7 +37,7 @@ class BackfillProgressTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-progress-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-progress-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         repository = JdbcChunkRepository(database)
     }

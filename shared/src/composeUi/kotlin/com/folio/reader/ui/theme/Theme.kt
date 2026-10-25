@@ -248,6 +248,11 @@ val MagentaFolioColors = folioArtDirection("blush", light = false)
 val LimeFolioColors = folioArtDirection("acid", light = true)
 val NeonFolioColors = folioArtDirection("acid", light = false)
 
+val PorcelainFolioColors = folioArtDirection("ceramic", light = true)
+val CobaltFolioColors = folioArtDirection("ceramic", light = false)
+val LinenFolioColors = folioArtDirection("copper", light = true)
+val CopperFolioColors = folioArtDirection("copper", light = false)
+
 
 enum class AppPalette(
     val id: String,
@@ -268,7 +273,11 @@ enum class AppPalette(
     DEEPSEA("deepsea", "Abyss", true, DeepSeaFolioColors),
     BROWN("brown", "Crimson", true, BrownFolioColors),
     MAGENTA("magenta", "Vaporwave", true, MagentaFolioColors),
-    NEON("neon", "Synthwave", true, NeonFolioColors);
+    NEON("neon", "Synthwave", true, NeonFolioColors),
+    PORCELAIN("porcelain", "Porcelain", false, PorcelainFolioColors),
+    COBALT("cobalt", "Cobalt", true, CobaltFolioColors),
+    LINEN("linen", "Linen", false, LinenFolioColors),
+    COPPER("copper", "Copper", true, CopperFolioColors);
 
 
     companion object {
@@ -280,7 +289,7 @@ enum class AppPalette(
          */
         /**
          * Palettes that no longer exist, each landing on the surviving pack face that
-         * carries its character. The set is the seven iconic packs plus every id that was
+         * carries its character. The set is the nine paired packs plus every id that was
          * ever persisted — the curation's own names, the old reader-theme ids, and the
          * code-editor themes that were dropped for having no atmospheric intent. A
          * persisted `appThemeId` naming any of them resolves to a real room instead of
@@ -373,6 +382,19 @@ data class ThemePack(
     fun appPaletteId(dark: Boolean): String = if (dark) darkAppPaletteId else lightAppPaletteId
     fun readerThemeId(dark: Boolean): String = if (dark) darkReaderThemeId else lightReaderThemeId
 
+    val material: String get() = when (id) {
+        "classic" -> "Silver · etched glass"
+        "paper" -> "Vellum · amber light"
+        "forest" -> "Mineral · smoked glass"
+        "ocean" -> "Sea glass · blue enamel"
+        "editorial" -> "Garnet · verdigris"
+        "blush" -> "Opal · rose light"
+        "acid" -> "Graphite · electric lime"
+        "ceramic" -> "Porcelain · cobalt glaze"
+        "copper" -> "Linen · brushed copper"
+        else -> "Custom material"
+    }
+
     companion object {
         val ALL = listOf(
             // Classic / Charcoal - Default Clean
@@ -395,6 +417,8 @@ data class ThemePack(
             
             // Acid Rave / Synthwave - Neon High-Energy ⚡
             ThemePack("acid", "Acid Rave", "Synthwave", "lime", "neon", "acid", "synthwave"),
+            ThemePack("ceramic", "Porcelain", "Cobalt", "porcelain", "cobalt", "porcelain", "cobalt"),
+            ThemePack("copper", "Linen", "Copper", "linen", "copper", "linen", "copper"),
         )
     }
 }
@@ -531,7 +555,7 @@ data class FolioTypography(val fontTheme: FontTheme = FontTheme.CLASSIC) {
         letterSpacing = 0.5.sp
     )
     val quote: TextStyle = TextStyle(
-        fontFamily = UiFonts.display(fontTheme, weight = 400, italic = true, opticalSize = 24f),
+        fontFamily = UiFonts.display(if (fontTheme == FontTheme.CLASSIC) FontTheme.LITERARY else fontTheme, weight = 400, italic = true, opticalSize = 24f),
         fontWeight = FontWeight.Normal,
         fontSize = 18.sp,
         lineHeight = 28.sp,
@@ -778,14 +802,14 @@ object FolioTokens {
      * [insetReaderIsland] margin on every side, letting the page show through the gaps. A strong
      * pill radius is what reads them as discrete floating objects rather than cut-down bars.
      */
-    val radiusReaderIsland = 12.dp
+    val radiusReaderIsland = 8.dp
 
     /**
      * The uniform margin the floating reader islands keep from the screen edges and from each
      * other. One value for all four sides and the inter-island gaps, so the chrome reads as a
      * single family of objects sharing one rhythm rather than ad-hoc insets.
      */
-    val insetReaderIsland = 12.dp
+    val insetReaderIsland = 8.dp
 }
 
 object FolioTheme {

@@ -10,6 +10,7 @@ import com.folio.reader.manga.MangaHistoryRepository
 import com.folio.reader.manga.MangaRepository
 import com.folio.reader.manga.MangaStatus
 import com.folio.reader.manga.chapterId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -122,20 +123,20 @@ class MangaDetailViewModel(
 
     val allCategories = categoryRepo.observeCategories()
         .stateIn(scope, SharingStarted.Lazily, emptyList())
-    val myCategoryIds = MutableStateFlow<Set<String>>(emptySet())
+    val myCategoryIds = MutableStateFlow<Set<String>?>(null)
 
-    fun setCategories(ids: Set<String>) {
-        val id = manga.value?.id ?: return
-        scope.launch {
-            val target = ids.ifEmpty {
-                categoryRepo.defaultCategory()?.let { setOf(it.id) } ?: emptySet()
-            }
-            if (target.isNotEmpty()) categoryRepo.assign(id, target)
+    suspend fun setCategories(ids: Set<String>, addToLibrary: Boolean = false) {
+        val id = requireNotNull(manga.value) { "Manga is not loaded." }.id
+        val target = ids.ifEmpty {
+            setOf(requireNotNull(categoryRepo.defaultCategory()) { "No default category is available." }.id)
         }
+        categoryRepo.assign(id, target, addToLibrary = addToLibrary)
+        manga.value = mangaRepo.get(id)
+        myCategoryIds.value = categoryRepo.categoriesFor(id)
     }
 
     suspend fun createCategory(name: String): String? =
-        runCatching { categoryRepo.create(name).id }.getOrNull()
+        categoryRepo.getCategoryByName(name)?.id ?: categoryRepo.create(name).id
 
     /** Diffs the picker's selection against current links, mirroring the book detail flow. */
     fun updateMangaTags(selected: Set<String>) {
@@ -185,28 +186,31 @@ class MangaDetailViewModel(
                     initialized = true,
                     updatedAt = Clock.System.now(),
                 )
-                mangaRepo.upsert(updated)
-                manga.value = updated
+                mangaRepo.upsert(updated, preserveLibraryState = true)
+                manga.value = mangaRepo.get(m.id)
                 chapters.value = chapterRepo.getChapters(m.id)
                 val newCount = chapters.value.count { it.id !in oldIds }
                 refreshNotice.value = if (newCount > 0) "$newCount new chapters" else "Already up to date"
-            } catch (e: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 println("MangaDetail refresh failed: " + e.stackTraceToString())
                 if (chapters.value.isEmpty()) {
                     error.value = e.message ?: "Failed to load manga"
                 } else {
-                    refreshNotice.value = "Offline — showing saved chapters"
+                    refreshNotice.value = "Could not refresh: ${e.message ?: "source unavailable"}. Showing saved chapters."
                 }
+            } finally {
+                refreshing.value = false
             }
-            refreshing.value = false
         }
     }
 
     fun toggleInLibrary() {
         scope.launch {
             val m = manga.value ?: return@launch
-            val updated = m.copy(inLibrary = !m.inLibrary, updatedAt = Clock.System.now())
-            mangaRepo.upsert(updated)
+            mangaRepo.setInLibrary(m.id, !m.inLibrary)
+            val updated = mangaRepo.get(m.id) ?: return@launch
             manga.value = updated
             // Adding to the library always lands on a real shelf (Main by default).
             if (updated.inLibrary) categoryRepo.ensureMembership(updated.id)

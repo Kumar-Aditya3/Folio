@@ -51,6 +51,7 @@ internal fun MangaReaderViewModel.pageBytesPut(key: String, bytes: ByteArray) {
         synchronized(pageBytes) {
             pageBytes[key]?.let { pageBytesTotal -= it.size }
             pageBytes[key] = bytes
+            pageCacheRevision.value++
             pageBytesTotal += bytes.size
             while (pageBytesTotal > PAGE_BYTES_CACHE_MAX && pageBytes.isNotEmpty()) {
                 val eldest = pageBytes.entries.firstOrNull() ?: break

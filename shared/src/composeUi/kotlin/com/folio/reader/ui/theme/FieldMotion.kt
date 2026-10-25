@@ -53,7 +53,7 @@ internal object FieldMotion {
     const val rimPeriodMs: Long = 24_000L
     const val rimTickMs: Long = 33L
 
-    /** The one period that drives the clockless families' parameters (Waves and DotGrid). */
+    /** The period driving DotGrid's parameter clock; Waves owns a travelling phase now. */
     const val clocklessPeriodMs: Long = 41_000L
     const val clocklessTickMs: Long = SLOW_MOTION_TICK_MS
 
@@ -90,12 +90,10 @@ data class FieldAmplitude(val dark: Float, val light: Float) {
 /**
  * Whether this family's shader has no time uniform at all, so **no** speed can animate it.
  *
- * Verified against the Mirage 0.1.0 artifact's own uniform sets. `HalftoneDots` and the two
- * `Static*` families are honestly static and are hosted with the clock switched off; `Waves` and
- * `DotGrid` are the two that were sold as motion and are not.
+ * DotGrid still needs a parameter clock. The redesigned Waves field has a real time uniform;
+ * HalftoneDots and the two Static families remain intentionally still.
  */
 internal fun FolioFieldKind.isClockless(): Boolean = when (this) {
-    FolioFieldKind.Waves,
     FolioFieldKind.DotGrid,
     FolioFieldKind.HalftoneDots,
     FolioFieldKind.StaticMeshGradient,
@@ -107,41 +105,39 @@ internal fun FolioFieldKind.isClockless(): Boolean = when (this) {
 /**
  * This family's authored rate, or `null` when the family cannot move ([isClockless]).
  *
- * The values are the ones the dispatch already shipped, moved verbatim — so adopting the table is
- * behaviour-preserving, and `MotionSchemaTest` pins them against the literals they came from. The
- * spread (0.3 for the slowest drift to 0.9 for petals on the wind) is deliberate: each family's rate
- * was chosen for its motif, and the user-facing lever multiplies all of them together rather than
- * flattening them to one number.
+ * Redesigned fields own their geometric displacement as well as this tempo. `MotionSchemaTest`
+ * pins the rates; each is chosen for its motif before the reader's speed lever multiplies it.
+ * Dot Orbit's original 0.9 rate stays unchanged.
  */
 internal fun FolioFieldKind.fieldSpeed(): Float? = when (this) {
     // The quiet end: things that read as a room's air rather than as an effect.
     FolioFieldKind.GrainGradient -> 0.3f
     FolioFieldKind.Swirl -> 0.3f
-    FolioFieldKind.PerlinNoise -> 0.3f
+    FolioFieldKind.PerlinNoise -> 0.8f
     FolioFieldKind.SimplexNoise -> 0.3f
+    FolioFieldKind.Voronoi -> 0.8f
 
     // The middle: recognisable drift.
-    FolioFieldKind.Warp -> 0.35f
-    FolioFieldKind.Voronoi -> 0.35f
-    FolioFieldKind.SmokeRing -> 0.4f
-    FolioFieldKind.ColorPanels -> 0.4f
+    FolioFieldKind.Warp -> 0.85f
+    FolioFieldKind.SmokeRing -> 0.9f
+    FolioFieldKind.ColorPanels -> 0.9f
     FolioFieldKind.Dithering -> 0.5f
     FolioFieldKind.GodRays -> 0.5f
     FolioFieldKind.NeuroNoise -> 0.5f
-    FolioFieldKind.Spiral -> 0.5f
+    FolioFieldKind.Spiral -> 0.8f
+    FolioFieldKind.Waves -> 0.85f
     FolioFieldKind.GemSmoke -> 0.5f
-    FolioFieldKind.Metaballs -> 0.6f
-    FolioFieldKind.LiquidMetal -> 0.6f
-    FolioFieldKind.Heatmap -> 0.6f
+    FolioFieldKind.Metaballs -> 0.9f
+    FolioFieldKind.LiquidMetal -> 0.95f
+    FolioFieldKind.Heatmap -> 0.85f
 
     // The loud end: the families whose motif *is* movement.
-    FolioFieldKind.MeshGradient -> 0.7f
+    FolioFieldKind.MeshGradient -> 0.9f
     FolioFieldKind.PulsingBorder -> 0.7f
-    FolioFieldKind.Water -> 0.8f
+    FolioFieldKind.Water -> 0.9f
     FolioFieldKind.DotOrbit -> 0.9f
 
     // Clockless — see [isClockless].
-    FolioFieldKind.Waves,
     FolioFieldKind.DotGrid,
     FolioFieldKind.HalftoneDots,
     FolioFieldKind.StaticMeshGradient,

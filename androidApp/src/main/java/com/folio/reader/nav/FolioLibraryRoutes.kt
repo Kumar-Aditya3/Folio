@@ -443,6 +443,9 @@ fun StatsRoute(
     navModel: FolioNavModelImpl,
     onOpenBookDetail: (String) -> Unit,
 ) {
+    val mangaStatsRepository = remember(navModel.graph.database) {
+        com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database)
+    }
     val navController = navModel.navController ?: return
     // Same scroll-linked masthead as Library and Home: the charts dissolve into the
     // bar's glass instead of sliding under a fixed slab.
@@ -472,9 +475,11 @@ fun StatsRoute(
                 StatisticsTabContent(
                     viewModel = navModel.statisticsVM,
                     onBookClick = onOpenBookDetail,
+                    mangaBackend = navModel.graph.mangaBackend,
+                    onMangaClick = { navController.navigate(FolioDestination.mangaDetail(it)) },
                     settingsRepository = navModel.graph.settingsRepository,
                     initialGoalMinutes = navModel.globalSettings.dailyGoalMinutes,
-                    mangaStatsRepo = com.folio.reader.database.JdbcMangaStatisticsRepository(navModel.graph.database),
+                    mangaStatsRepo = mangaStatsRepository,
                     onOpenExclusions = {
                         navController.navigate(FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.STATS))
                     },
@@ -523,6 +528,9 @@ fun MoreRoute(
 @Composable
 fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> Unit) {
     when (category) {
+        com.folio.reader.settings.FolioSettingsCategory.DISCOVER ->
+            com.folio.reader.settings.SettingsDiscoverScreen(navModel, onBack)
+
         com.folio.reader.settings.FolioSettingsCategory.DEFAULTS ->
             com.folio.reader.settings.SettingsReaderDefaultsScreen(navModel, onBack)
 

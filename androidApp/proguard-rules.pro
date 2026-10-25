@@ -17,6 +17,27 @@
 -keep class org.sqldroid.** { *; }
 -keep class org.sqlite.** { *; }
 
+# WorkManager 2.9.1 brings Room 2.5.0, whose consumer rule keeps database
+# classes but omits their reflectively invoked no-argument constructors.
+# New R8 removes WorkDatabase_Impl.<init>(), crashing InitializationProvider
+# before Application.onCreate. Keep the constructor explicitly (Room's newer rule).
+-keep class * extends androidx.room.RoomDatabase {
+    <init>();
+}
+
+# Firebase's older component discovery rule also keeps only the class. ML Kit
+# discovers these registrars from manifest metadata, then invokes <init>() via
+# reflection. Without it, OCR and translation lose their registered components.
+-keep class * implements com.google.firebase.components.ComponentRegistrar {
+    <init>();
+}
+
+# WorkManager also creates its input mergers by class name when work executes.
+# Its older consumer rule has the same class-only constructor omission.
+-keep class * extends androidx.work.InputMerger {
+    <init>();
+}
+
 # Coroutines / datetime metadata used by the serialization runtime.
 -keep class kotlinx.coroutines.** { *; }
 -keep class kotlinx.datetime.** { *; }

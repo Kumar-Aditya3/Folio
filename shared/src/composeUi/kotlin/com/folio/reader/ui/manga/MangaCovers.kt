@@ -69,6 +69,19 @@ private fun coverBytesOf(bmp: ImageBitmap): Long = bmp.width.toLong() * bmp.heig
 
 private fun cachedCover(key: String): ImageBitmap? = synchronized(mangaCoverCache) { mangaCoverCache[key] }
 
+/** Observes the existing loader. Artwork effects must never fetch or decode their own copy. */
+internal suspend fun awaitMangaCoverBitmap(
+    sourceId: Long, thumbnailUrl: String?, coverPath: String?,
+): ImageBitmap? = withContext(Dispatchers.IO) {
+    val local = coverPath?.let { java.io.File(it) }?.takeIf { it.isFile }
+    val key = if (local != null) "local:$coverPath:${local.lastModified()}" else "$sourceId:$thumbnailUrl"
+    repeat(60) {
+        cachedCover(key)?.let { return@withContext it }
+        kotlinx.coroutines.delay(100)
+    }
+    cachedCover(key)
+}
+
 private fun cacheCover(key: String, bmp: ImageBitmap) {
     synchronized(mangaCoverCache) {
         val prev = mangaCoverCache.put(key, bmp)
@@ -82,6 +95,30 @@ private fun cacheCover(key: String, bmp: ImageBitmap) {
             it.remove()
         }
     }
+}
+
+/** Samples the plate's already-loaded bitmap; this observer never fetches or decodes a cover. */
+@Composable
+internal fun rememberMangaCoverAccent(
+    sourceId: Long, thumbnailUrl: String?, coverPath: String?, fallback: Color,
+): Color {
+    val key = "manga-accent:$sourceId:$thumbnailUrl:$coverPath"
+    val surface = FolioTheme.colors.surface
+    var sampled by remember(key) {
+        mutableStateOf(com.folio.reader.ui.components.accentCache[key])
+    }
+    LaunchedEffect(key) {
+        if (sampled != null) return@LaunchedEffect
+        val bitmap = awaitMangaCoverBitmap(sourceId, thumbnailUrl, coverPath) ?: return@LaunchedEffect
+        sampled = com.folio.reader.ui.components.coverSampleGate.withPermit {
+            withContext(Dispatchers.Default) {
+                com.folio.reader.ui.components.cachedOrSampledAccent(key) {
+                    com.folio.reader.ui.components.sampleFromBitmap(bitmap)
+                }
+            }
+        }
+    }
+    return sampled?.let { com.folio.reader.ui.components.guardCoverContrast(it, surface, fallback) } ?: fallback
 }
 
 private suspend fun loadMangaCover(

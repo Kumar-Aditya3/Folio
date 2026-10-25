@@ -31,7 +31,7 @@ enum class FolioFieldKind {
     DotOrbit,
     /** Honey/Ember — viscous drops coalescing. */
     Metaballs,
-    /** Moss/Peacock — a cellular colony of lichen spreading over stone. */
+    /** Quiet colour facets with fine seams and gentle drift. */
     Voronoi,
     /** Dawn/Dusk — volumetric sun-shafts from a low, off-screen source. */
     GodRays,
@@ -45,7 +45,7 @@ enum class FolioFieldKind {
     // these is selectable per theme through the Settings animation picker, so the user can give any
     // theme any Mirage animation. Each is fed that theme's own palette in the Android dispatch.
 
-    /** Angular panels of colour sliding past one another, like gallery light through blinds. */
+    /** Vertical panels of colour revolving past one another, like gallery light through blinds. */
     ColorPanels,
     /** A breathing grid of dots — quiet, technical, editorial. */
     DotGrid,
@@ -127,25 +127,25 @@ fun FolioFieldKind.displayName(): String = when (this) {
 /** A one-line description of each family's motion/character for the detailed picker rows. */
 fun FolioFieldKind.describe(): String = when (this) {
     FolioFieldKind.GrainGradient -> "Soft light drifting under canvas grain"
-    FolioFieldKind.Warp -> "Ruled lines pulled out of true"
+    FolioFieldKind.Warp -> "Silk folds bending through flowing colour"
     FolioFieldKind.Dithering -> "Darkroom silver-halide dither"
     FolioFieldKind.Swirl -> "Aurora curtains over ice strata"
     FolioFieldKind.DotOrbit -> "Petals orbiting on the wind"
-    FolioFieldKind.Metaballs -> "Viscous drops coalescing"
-    FolioFieldKind.Voronoi -> "A cellular colony over stone"
+    FolioFieldKind.Metaballs -> "Glazed droplets merging and separating"
+    FolioFieldKind.Voronoi -> "Drifting stained-glass facets with fine seams"
     FolioFieldKind.GodRays -> "Volumetric sun-shafts, low source"
-    FolioFieldKind.MeshGradient -> "Colour drifting through water"
-    FolioFieldKind.SmokeRing -> "A turbulent ring in one spotlight"
-    FolioFieldKind.ColorPanels -> "Angular panels sliding past"
+    FolioFieldKind.MeshGradient -> "Rich colour pools weaving through one another"
+    FolioFieldKind.SmokeRing -> "A lit smoke torus curling and breathing"
+    FolioFieldKind.ColorPanels -> "Crisp matte colour panes gliding across the screen"
     FolioFieldKind.DotGrid -> "A quiet breathing dot grid"
     FolioFieldKind.NeuroNoise -> "Neural filaments branching"
-    FolioFieldKind.PerlinNoise -> "Slow Perlin cloud drift"
+    FolioFieldKind.PerlinNoise -> "Soft billowing clouds carried by a slow wind"
     FolioFieldKind.SimplexNoise -> "Banded simplex noise steps"
-    FolioFieldKind.Spiral -> "A rotating spiral of fine strokes"
-    FolioFieldKind.Waves -> "Wave bands rolling across"
-    FolioFieldKind.Water -> "Caustic water with drifting highlights"
-    FolioFieldKind.LiquidMetal -> "Chromatic liquid-metal sheen"
-    FolioFieldKind.Heatmap -> "Glowing thermal contours"
+    FolioFieldKind.Spiral -> "Pearlescent ribbons winding into a quiet vortex"
+    FolioFieldKind.Waves -> "Layered wave ribbons with travelling crests"
+    FolioFieldKind.Water -> "Refracted colour under crossing caustic light"
+    FolioFieldKind.LiquidMetal -> "Deforming mercury with polished light reflections"
+    FolioFieldKind.Heatmap -> "Moving thermal pools with luminous contour lines"
     FolioFieldKind.GemSmoke -> "Faceted gemstone smoke"
     FolioFieldKind.HalftoneDots -> "Printed halftone dot screen"
     FolioFieldKind.PulsingBorder -> "Bloom breathing at the edges"
@@ -157,14 +157,14 @@ fun FolioFieldKind.describe(): String = when (this) {
  * The one animation family every theme wears. The background motion is now a single
  * unified field across every pack — switching themes re-colours the field (the colours
  * fed to it still come from each theme's atmosphere) but never changes the *style* of the
- * animation. [FolioFieldKind.MeshGradient] is the calmest full-chroma field (colour drifting
- * through water) and never climbs toward white, so it reads well under every palette.
+ * animation. [FolioFieldKind.DotOrbit] remains the default; alternatives do not change its
+ * geometry, palette or motion.
  *
  * A user can still pick a specific family per theme through the appearance picker
  * ([folioFieldChoiceFor] + `ReaderSettings.fieldOverrides`); this function is only the
  * default, which is deliberately uniform so the theme choice no longer drags the motion with it.
  */
-val FOLIO_FIELD_UNIFIED: FolioFieldKind = FolioFieldKind.MeshGradient
+val FOLIO_FIELD_UNIFIED: FolioFieldKind = FolioFieldKind.DotOrbit
 
 /**
  * Maps a **theme pack id** to its animation family. Unified: every theme returns the same

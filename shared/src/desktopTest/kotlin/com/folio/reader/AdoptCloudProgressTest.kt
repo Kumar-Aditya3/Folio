@@ -118,7 +118,7 @@ class AdoptCloudProgressTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-adopt-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-adopt-").toFile()
         val platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         bookRepo = JdbcBookRepository(database)

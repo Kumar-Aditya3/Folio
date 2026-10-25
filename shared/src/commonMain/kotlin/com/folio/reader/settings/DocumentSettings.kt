@@ -117,3 +117,11 @@ fun DocumentSettings.withFrom(reader: ReaderSettings): DocumentSettings = copy(
     showClock = reader.showClock,
     highlightColorIndex = reader.highlightColorIndex
 )
+
+/** An explicit shared Page mode choice updates both document renderers in one write. */
+fun ReaderSettings.withDocumentReaderMode(mode: String): ReaderSettings = copy(
+    documentReaderMode = mode,
+    documentSettings = documentSettings.copy(
+        layoutMode = if (mode == "CONTINUOUS") LayoutMode.CONTINUOUS else LayoutMode.PAGINATED,
+    ),
+)

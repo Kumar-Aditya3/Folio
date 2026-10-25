@@ -1,0 +1,272 @@
+// Dot Orbit reference from io.github.androidpoet:mirage:0.1.0 (Apache-2.0).
+// Verbatim shader constant from DotOrbitKt; not used by the app renderer.
+
+uniform vec2 u_resolution;
+uniform float u_pixelRatio;
+uniform float u_imageAspectRatio;
+uniform float u_originX;
+uniform float u_originY;
+uniform float u_worldWidth;
+uniform float u_worldHeight;
+uniform float u_fit;
+uniform float u_scale;
+uniform float u_rotation;
+uniform float u_offsetX;
+uniform float u_offsetY;
+
+const float SIZING_PI = 3.14159265358979323846;
+
+vec3 getBoxSize(float boxRatio, vec2 givenBoxSize) {
+  vec2 box = vec2(0.);
+  box.x = boxRatio * min(givenBoxSize.x / boxRatio, givenBoxSize.y);
+  float noFitBoxWidth = box.x;
+  if (u_fit == 1.) {
+    box.x = boxRatio * min(u_resolution.x / boxRatio, u_resolution.y);
+  } else if (u_fit == 2.) {
+    box.x = boxRatio * max(u_resolution.x / boxRatio, u_resolution.y);
+  }
+  box.y = box.x / boxRatio;
+  return vec3(box, noFitBoxWidth);
+}
+
+vec2 sizingBaseUV(vec2 fragCoord) {
+  vec2 uv = fragCoord / u_resolution - .5;
+  uv.y = -uv.y;
+  return uv;
+}
+
+vec2 getObjectBoxSize() {
+  vec2 givenBoxSize = max(vec2(u_worldWidth, u_worldHeight), vec2(1.)) * u_pixelRatio;
+  vec2 fixedRatioBoxGivenSize = vec2(
+    (u_worldWidth == 0.) ? u_resolution.x : givenBoxSize.x,
+    (u_worldHeight == 0.) ? u_resolution.y : givenBoxSize.y);
+  return getBoxSize(1., fixedRatioBoxGivenSize).xy;
+}
+
+vec2 getObjectUV(vec2 fragCoord) {
+  vec2 uv = sizingBaseUV(fragCoord);
+  vec2 boxOrigin = vec2(.5 - u_originX, u_originY - .5);
+  float r = u_rotation * SIZING_PI / 180.;
+  mat2 graphicRotation = mat2(cos(r), sin(r), -sin(r), cos(r));
+  vec2 graphicOffset = vec2(-u_offsetX, u_offsetY);
+  vec2 objectBoxSize = getObjectBoxSize();
+  vec2 objectWorldScale = u_resolution.xy / objectBoxSize;
+  uv *= objectWorldScale;
+  uv += boxOrigin * (objectWorldScale - 1.);
+  uv += graphicOffset;
+  uv /= u_scale;
+  uv = graphicRotation * uv;
+  return uv;
+}
+
+vec2 getResponsiveUV(vec2 fragCoord) {
+  vec2 uv = sizingBaseUV(fragCoord);
+  vec2 boxOrigin = vec2(.5 - u_originX, u_originY - .5);
+  vec2 givenBoxSize = max(vec2(u_worldWidth, u_worldHeight), vec2(1.)) * u_pixelRatio;
+  float r = u_rotation * SIZING_PI / 180.;
+  mat2 graphicRotation = mat2(cos(r), sin(r), -sin(r), cos(r));
+  vec2 graphicOffset = vec2(-u_offsetX, u_offsetY);
+  vec2 responsiveBoxGivenSize = vec2(
+    (u_worldWidth == 0.) ? u_resolution.x : givenBoxSize.x,
+    (u_worldHeight == 0.) ? u_resolution.y : givenBoxSize.y);
+  float responsiveRatio = responsiveBoxGivenSize.x / responsiveBoxGivenSize.y;
+  vec2 responsiveBoxSize = getBoxSize(responsiveRatio, responsiveBoxGivenSize).xy;
+  vec2 responsiveBoxScale = u_resolution.xy / responsiveBoxSize;
+  uv *= responsiveBoxScale;
+  uv += boxOrigin * (responsiveBoxScale - 1.);
+  uv += graphicOffset;
+  uv /= u_scale;
+  uv.x *= responsiveRatio;
+  uv = graphicRotation * uv;
+  uv.x /= responsiveRatio;
+  return uv;
+}
+
+vec2 getPatternBoxSize() {
+  vec2 givenBoxSize = max(vec2(u_worldWidth, u_worldHeight), vec2(1.)) * u_pixelRatio;
+  vec2 patternBoxGivenSize = vec2(
+    (u_worldWidth == 0.) ? u_resolution.x : givenBoxSize.x,
+    (u_worldHeight == 0.) ? u_resolution.y : givenBoxSize.y);
+  float patternBoxRatio = patternBoxGivenSize.x / patternBoxGivenSize.y;
+  return getBoxSize(patternBoxRatio, patternBoxGivenSize).xy;
+}
+
+vec2 getPatternUV(vec2 fragCoord) {
+  vec2 uv = sizingBaseUV(fragCoord);
+  vec2 boxOrigin = vec2(.5 - u_originX, u_originY - .5);
+  vec2 givenBoxSize = max(vec2(u_worldWidth, u_worldHeight), vec2(1.)) * u_pixelRatio;
+  float r = u_rotation * SIZING_PI / 180.;
+  mat2 graphicRotation = mat2(cos(r), sin(r), -sin(r), cos(r));
+  vec2 graphicOffset = vec2(-u_offsetX, u_offsetY);
+  vec2 patternBoxGivenSize = vec2(
+    (u_worldWidth == 0.) ? u_resolution.x : givenBoxSize.x,
+    (u_worldHeight == 0.) ? u_resolution.y : givenBoxSize.y);
+  float patternBoxRatio = patternBoxGivenSize.x / patternBoxGivenSize.y;
+  vec3 boxSizeData = getBoxSize(patternBoxRatio, patternBoxGivenSize);
+  vec2 patternBoxSize = boxSizeData.xy;
+  float patternBoxNoFitBoxWidth = boxSizeData.z;
+  vec2 patternBoxScale = u_resolution.xy / patternBoxSize;
+
+  uv += graphicOffset / patternBoxScale;
+  uv += boxOrigin;
+  uv -= boxOrigin / patternBoxScale;
+  uv *= u_resolution.xy;
+  uv /= u_pixelRatio;
+  if (u_fit > 0.) {
+    uv *= (patternBoxNoFitBoxWidth / patternBoxSize.x);
+  }
+  uv /= u_scale;
+  uv = graphicRotation * uv;
+  uv += boxOrigin / patternBoxScale;
+  uv -= boxOrigin;
+  uv *= .01;
+  return uv;
+}
+
+vec2 getImageUV(vec2 fragCoord) {
+  vec2 uv = sizingBaseUV(fragCoord);
+  vec2 boxOrigin = vec2(.5 - u_originX, u_originY - .5);
+  float r = u_rotation * SIZING_PI / 180.;
+  mat2 graphicRotation = mat2(cos(r), sin(r), -sin(r), cos(r));
+  vec2 graphicOffset = vec2(-u_offsetX, u_offsetY);
+  vec2 imageBoxSize;
+  if (u_fit == 1.) {
+    imageBoxSize.x = min(u_resolution.x / u_imageAspectRatio, u_resolution.y) * u_imageAspectRatio;
+  } else if (u_fit == 2.) {
+    imageBoxSize.x = max(u_resolution.x / u_imageAspectRatio, u_resolution.y) * u_imageAspectRatio;
+  } else {
+    imageBoxSize.x = min(10.0, 10.0 / u_imageAspectRatio * u_imageAspectRatio);
+  }
+  imageBoxSize.y = imageBoxSize.x / u_imageAspectRatio;
+  vec2 imageBoxScale = u_resolution.xy / imageBoxSize;
+  uv *= imageBoxScale;
+  uv += boxOrigin * (imageBoxScale - 1.);
+  uv += graphicOffset;
+  uv /= u_scale;
+  uv.x *= u_imageAspectRatio;
+  uv = graphicRotation * uv;
+  uv.x /= u_imageAspectRatio;
+  uv += .5;
+  uv.y = 1. - uv.y;
+  return uv;
+}
+
+uniform float u_time;
+
+uniform vec4 u_colorBack;
+uniform vec4 u_colors[10];
+uniform float u_colorsCount;
+uniform float u_stepsPerColor;
+uniform float u_size;
+uniform float u_sizeRange;
+uniform float u_spreading;
+
+const float PI = 3.14159265358979323846;
+const float TWO_PI = 6.28318530718;
+
+vec2 rotate(vec2 uv, float th) {
+  return mat2(cos(th), sin(th), -sin(th), cos(th)) * uv;
+}
+
+float randomR(vec2 p) {
+  vec2 q = fract(floor(p) * vec2(0.3183099, 0.3678794)) + 0.1;
+  q += dot(q, q + 19.19);
+  return fract(q.x * q.y);
+}
+
+vec2 randomGB(vec2 p) {
+  vec2 q = fract((floor(p) + 47.13) * vec2(0.3183099, 0.3678794)) + 0.1;
+  q += dot(q, q.yx + 19.19);
+  return fract(vec2(q.x * q.y, q.x + q.y));
+}
+
+vec3 voronoiShape(vec2 uv, float time) {
+  vec2 i_uv = floor(uv);
+  vec2 f_uv = fract(uv);
+
+  float spreading = .25 * clamp(u_spreading, 0., 1.);
+
+  float minDist = 1.;
+  vec2 randomizer = vec2(0.);
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 tileOffset = vec2(float(x), float(y));
+      vec2 rand = randomGB(i_uv + tileOffset);
+      vec2 cellCenter = vec2(.5 + 1e-4);
+      cellCenter += spreading * cos(time + TWO_PI * rand);
+      cellCenter -= .5;
+      cellCenter = rotate(cellCenter, randomR(vec2(rand.x, rand.y)) + .1 * time);
+      cellCenter += .5;
+      float dist = length(tileOffset + cellCenter - f_uv);
+      if (dist < minDist) {
+        minDist = dist;
+        randomizer = rand;
+      }
+    }
+  }
+
+  return vec3(minDist, randomizer);
+}
+
+half4 main(vec2 fragCoord) {
+  vec2 patternUV = getPatternUV(fragCoord);
+  vec2 shape_uv = patternUV;
+  shape_uv *= 1.5;
+
+  const float firstFrameOffset = -10.;
+  float t = u_time + firstFrameOffset;
+
+  vec3 voronoi = voronoiShape(shape_uv, t) + 1e-4;
+
+  float radius = .25 * clamp(u_size, 0., 1.) - .5 * clamp(u_sizeRange, 0., 1.) * voronoi[2];
+  float dist = voronoi[0];
+  // AGSL has no derivative functions: dist is a unit-gradient distance field,
+  // so its screen-space derivative is the per-pixel step of the pattern UV.
+  float edgeWidth = 1.5 * length(getPatternUV(fragCoord + vec2(1., 0.)) - patternUV);
+  float dots = 1. - smoothstep(radius - edgeWidth, radius + edgeWidth, dist);
+
+  float shape = voronoi[1];
+
+  float mixer = shape * (u_colorsCount - 1.);
+  mixer = (shape - .5 / u_colorsCount) * u_colorsCount;
+  float steps = max(1., u_stepsPerColor);
+
+  vec4 gradient = u_colors[0];
+  gradient.rgb *= gradient.a;
+  for (int i = 1; i < 10; i++) {
+    if (i < int(u_colorsCount)) {
+      float localT = clamp(mixer - float(i - 1), 0.0, 1.0);
+      localT = floor(localT * steps + .5) / steps;
+      vec4 c = u_colors[i];
+      c.rgb *= c.a;
+      gradient = mix(gradient, c, localT);
+    }
+  }
+
+  if ((mixer < 0.) || (mixer > (u_colorsCount - 1.))) {
+    float localT = mixer + 1.;
+    if (mixer > (u_colorsCount - 1.)) {
+      localT = mixer - (u_colorsCount - 1.);
+    }
+    localT = floor(localT * steps + .5) / steps;
+    vec4 cFst = u_colors[0];
+    cFst.rgb *= cFst.a;
+    vec4 cLast = u_colors[0];
+    for (int i = 0; i < 10; i++) {
+      if (i == int(u_colorsCount - 1.)) {
+        cLast = u_colors[i];
+      }
+    }
+    cLast.rgb *= cLast.a;
+    gradient = mix(cLast, cFst, localT);
+  }
+
+  vec3 color = gradient.rgb * dots;
+  float opacity = gradient.a * dots;
+
+  vec3 bgColor = u_colorBack.rgb * u_colorBack.a;
+  color = color + bgColor * (1. - opacity);
+  opacity = opacity + u_colorBack.a * (1. - opacity);
+
+  return half4(color, opacity);
+}

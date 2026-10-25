@@ -46,9 +46,16 @@ data class DocumentReaderState(
     val mode: DocumentReaderMode = DocumentReaderMode.SINGLE_PAGE,
     val currentPage: Int = 0,
     val pageCount: Int = 0,
+    val fixedPageLocator: DocumentLocator.FixedPage = DocumentLocator.FixedPage(pageIndex = 0),
+    val fixedPageZoom: Float = 1f,
+    val fixedPageNavigationRequest: FixedPageNavigationRequest? = null,
     val rotationDegrees: Int = 0,
     val normalizedProgress: Double = 0.0,
     val reflowableLocator: DocumentLocator.Reflowable? = null,
+    val reflowableLocationCount: Int = 0,
+    val reflowableSeekRequest: Pair<Float, Long>? = null,
+    val preview: DocumentNavigationPreview? = null,
+    val returnPoint: DocumentNavigationPoint? = null,
     /**
      * Reflowable windowing (continuous layout only), mirroring the EPUB reader's
      * chapter window. [reflowableWindow] is the STABLE window "as loaded" fed to
@@ -69,7 +76,10 @@ data class DocumentReaderState(
             when (val locator = bookmark.locator) {
                 is DocumentLocator.FixedPage -> locator.pageIndex == currentPage
                 is DocumentLocator.Reflowable ->
-                    reflowableLocator?.let { it.sectionId == locator.sectionId && it.characterOffset == locator.characterOffset } == true
+                    reflowableLocator?.let {
+                        it.sectionId == locator.sectionId && it.characterOffset == locator.characterOffset &&
+                            it.domLocator == locator.domLocator
+                    } == true
             }
         }
 }

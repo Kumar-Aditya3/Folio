@@ -40,9 +40,17 @@ internal fun BoxScope.ReaderSidePanels(
     showAnnotations: Boolean,
     showReaderPanel: Boolean,
     showEchoes: Boolean = false,
+    echoesEnabled: Boolean = false,
     echoesState: EchoesState = EchoesState.Idle,
     onCloseEchoes: () -> Unit = {},
     onOpenEcho: (bookId: String, spineIndex: Int?, fraction: Float?) -> Unit = { _, _, _ -> },
+    showSearch: Boolean = false,
+    searchQuery: String = "",
+    searchResults: List<com.folio.reader.database.SearchResult> = emptyList(),
+    searching: Boolean = false,
+    onSearchQueryChange: (String) -> Unit = {},
+    onSearchResultClick: (com.folio.reader.database.SearchResult) -> Unit = {},
+    onCloseSearch: () -> Unit = {},
     tocEntries: List<BookTocRow>,
     currentChapterIndex: Int,
     currentFraction: Float,
@@ -65,155 +73,50 @@ internal fun BoxScope.ReaderSidePanels(
     scopeControlEnabled: Boolean = false,
     overriddenFields: Set<String> = emptySet(),
     onWriteGlobal: ((ReaderSettings) -> Unit)? = null,
-    onResetBook: (() -> Unit)? = null
+    onResetBook: (() -> Unit)? = null,
+    onSelectTool: (ReaderTool) -> Unit,
+    layout: ReaderWorkspaceLayout? = null,
+    contents: (@Composable () -> Unit)? = null,
+    noteEditor: (@Composable () -> Unit)? = null,
 ) {
-    if (occludes) return
-
-    // Panels sit in reserved space on occluding platforms; a horizontal slide
-    // into that strip reads as janky, so fade there and slide elsewhere.
-    // The panels' own row in the motion table: they travel further than the rail, so they take
-    // slightly longer than it, and both now honour reduce-motion (they previously ignored it).
-    val panelSpec = rememberMotionAnimation<Float>(MotionKey.ReaderSidePanels)
-    val panelSlide = rememberMotionAnimation<IntOffset>(MotionKey.ReaderSidePanels)
-    val panelEnter = androidx.compose.animation.slideInHorizontally(
-        initialOffsetX = { it },
-        animationSpec = panelSlide
-    ) + androidx.compose.animation.fadeIn(animationSpec = panelSpec)
-    val panelExit = androidx.compose.animation.slideOutHorizontally(
-        targetOffsetX = { it },
-        animationSpec = panelSlide
-    ) + androidx.compose.animation.fadeOut(animationSpec = panelSpec)
-
-    // Global scrim for sidebar sheets: only fades in/out statically, does not slide!
-    androidx.compose.animation.AnimatedVisibility(
-        visible = showToc || showAnnotations || showReaderPanel || showEchoes,
-        enter = androidx.compose.animation.fadeIn(),
-        exit = androidx.compose.animation.fadeOut()
-    ) {
-        val atmosphere = FolioTheme.atmosphere
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                // The palette's own ambient shadow, not pure black, so the scrim
-                // reads as depth on light themes instead of a hole.
-                .background(atmosphere.shadowAmbient.copy(alpha = 0.35f))
-                // The reader parks the global field (FolioFieldOccluder), and the page
-                // itself is a native WebView Haze cannot sample — so without this the
-                // end-edge panels have nothing Compose behind them to blur and fall back
-                // to a flat lid. Paint the theme's own ambient pools into the strip the
-                // panels cover, then register it as a backdrop source: the panels' veil
-                // frosts real, themed colour and reads as glass instead of an opaque slab.
-                .drawBehind {
-                    val pools = atmosphere.pools
-                    if (pools.isNotEmpty()) {
-                        val radius = size.minDimension * 0.6f
-                        pools.forEachIndexed { i, pool ->
-                            val center = Offset(
-                                x = size.width * (0.98f - i * 0.12f),
-                                y = size.height * (0.2f + i * 0.3f),
-                            )
-                            drawRect(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        pool.copy(alpha = atmosphere.poolAlpha),
-                                        Color.Transparent,
-                                    ),
-                                    center = center,
-                                    radius = radius,
-                                ),
-                            )
-                        }
-                    }
-                }
-                .folioBackdropSource()
-                .pointerInput(Unit) {
-                    detectTapGestures(onTap = {
-                        if (showToc) onToggleToc()
-                        if (showAnnotations) onToggleAnnotations()
-                        if (showEchoes) onCloseEchoes()
-                        onDismissReaderPanel()
-                    })
-                }
-        )
+    val active = when {
+        showReaderPanel -> ReaderTool.Settings
+        showSearch -> ReaderTool.Search
+        showEchoes -> ReaderTool.Echoes
+        showAnnotations -> ReaderTool.Saved
+        showToc -> ReaderTool.Contents
+        else -> null
     }
-
-    // TOC sidebar: slide in from the end edge
-    androidx.compose.animation.AnimatedVisibility(
-        visible = showToc,
-        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
-        enter = panelEnter,
-        exit = panelExit
-    ) {
-        Box(Modifier.folioSheetDragToDismiss(onToggleToc)) {
-            TOCSidebar(
-                entries = tocEntries,
-                currentIndex = currentChapterIndex,
-                currentFraction = currentFraction,
-                onChapterClick = { row ->
-                    onTocRowClick(row)
-                },
-                onDismiss = onToggleToc
-            )
-        }
+    fun close() {
+        if (showToc) onToggleToc()
+        if (showAnnotations) onToggleAnnotations()
+        if (showSearch) onCloseSearch()
+        if (showEchoes) onCloseEchoes()
+        onDismissReaderPanel()
     }
-
-    // Annotations sidebar: slide in from the end edge
-    androidx.compose.animation.AnimatedVisibility(
-        visible = showAnnotations,
-        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
-        enter = panelEnter,
-        exit = panelExit
-    ) {
-        Box(Modifier.folioSheetDragToDismiss(onToggleAnnotations)) {
-            AnnotationsSidebar(
-                bookmarks = bookmarks,
-                highlights = highlights,
-                notes = notes,
-                onDismiss = onToggleAnnotations,
-                onRemoveBookmark = onRemoveBookmark,
-                onRemoveHighlight = onRemoveHighlight,
-                onRemoveNote = onRemoveNote,
-                onSetHighlightNote = onSetHighlightNote,
-                chapterLabel = chapterLabel,
-                onJump = onJumpToAnnotation
-            )
-        }
-    }
-
-    // Echoes: cross-book resonant passages.
-    androidx.compose.animation.AnimatedVisibility(
-        visible = showEchoes,
-        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding().navigationBarsPadding(),
-        enter = panelEnter,
-        exit = panelExit
-    ) {
-        Box(Modifier.folioSheetDragToDismiss(onCloseEchoes)) {
-            EchoesPanel(
-                state = echoesState,
-                onDismiss = onCloseEchoes,
-                onOpenEcho = onOpenEcho,
-            )
-        }
-    }
-
-    // Thorium-style reading settings panel: slides in from the right edge
-    androidx.compose.animation.AnimatedVisibility(
-        visible = showReaderPanel,
-        modifier = Modifier.align(Alignment.CenterEnd).statusBarsPadding(),
-        enter = panelEnter,
-        exit = panelExit
-    ) {
-        Box(Modifier.folioSheetDragToDismiss(onDismissReaderPanel)) {
-            ReaderSettingsPanel(
-                settings = settings,
-                onSettingsChange = onSettingsChange,
-                onDismiss = onDismissReaderPanel,
-                onOpenFullSettings = onOpenFullSettings,
-                scopeControlEnabled = scopeControlEnabled,
-                overriddenFields = overriddenFields,
-                onWriteGlobal = onWriteGlobal,
-                onResetBook = onResetBook
-            )
+    ReaderWorkspace(
+        active = active,
+        tools = listOfNotNull(ReaderTool.Contents, ReaderTool.Search, ReaderTool.Saved,
+            ReaderTool.Echoes.takeIf { echoesEnabled }, ReaderTool.Settings),
+        location = chapterLabel(currentChapterIndex, null),
+        onSelect = onSelectTool,
+        onDismiss = ::close,
+        layout = layout,
+    ) { tool ->
+        when (tool) {
+            ReaderTool.Contents -> if (contents != null) contents() else
+                TOCSidebar(tocEntries, currentChapterIndex, currentFraction, onChapterClick = onTocRowClick, onDismiss = ::close)
+            ReaderTool.Saved -> if (noteEditor != null) noteEditor() else
+                AnnotationsSidebar(bookmarks, highlights, notes, onDismiss = ::close,
+                    onRemoveBookmark = onRemoveBookmark, onRemoveHighlight = onRemoveHighlight,
+                    onRemoveNote = onRemoveNote, onSetHighlightNote = onSetHighlightNote,
+                    chapterLabel = chapterLabel, onJump = onJumpToAnnotation)
+            ReaderTool.Search -> ReaderSearchPanel(searchQuery, onSearchQueryChange, searchResults,
+                searching, currentChapterIndex, onSearchResultClick, ::close)
+            ReaderTool.Echoes -> EchoesPanel(echoesState, ::close, onOpenEcho)
+            ReaderTool.Settings -> ReaderSettingsPanel(settings, onSettingsChange, ::close,
+                onOpenFullSettings, scopeControlEnabled, overriddenFields, onWriteGlobal, onResetBook)
+            ReaderTool.Pages -> Unit
         }
     }
 }

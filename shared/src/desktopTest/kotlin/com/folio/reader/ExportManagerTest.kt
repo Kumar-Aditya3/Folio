@@ -68,8 +68,8 @@ class ExportManagerTest {
 
     @BeforeTest
     fun setUp() {
-        tempRootA = createTempDir("folio-exp-a-")
-        tempRootB = createTempDir("folio-exp-b-")
+        tempRootA = kotlin.io.path.createTempDirectory("folio-exp-a-").toFile()
+        tempRootB = kotlin.io.path.createTempDirectory("folio-exp-b-").toFile()
         platformA = DesktopPlatform(tempRootA)
         platformB = DesktopPlatform(tempRootB)
         dbA = Database(platformA.fileSystem.getDatabasePath())

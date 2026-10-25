@@ -49,7 +49,7 @@ abstract class WebViewInterceptor(
     abstract fun intercept(chain: Interceptor.Chain, request: Request, response: Response): Response
 
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
+        val request = prepareRequest(chain.request())
         val response = chain.proceed(request)
         if (!shouldIntercept(response)) {
             return response
@@ -65,6 +65,8 @@ abstract class WebViewInterceptor(
 
         return intercept(chain, request, response)
     }
+
+    protected open fun prepareRequest(request: Request): Request = request
 
     fun parseHeaders(headers: Headers): Map<String, String> {
         return headers

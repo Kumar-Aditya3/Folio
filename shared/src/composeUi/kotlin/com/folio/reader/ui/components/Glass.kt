@@ -1,3 +1,5 @@
+@file:OptIn(dev.chrisbanes.haze.ExperimentalHazeApi::class)
+
 package com.folio.reader.ui.components
 
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -6,66 +8,49 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.isSpecified
-import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.unit.Dp
 import com.folio.reader.ui.theme.FolioTokens
-import dev.chrisbanes.haze.HazeArea
-import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
+import dev.chrisbanes.haze.HazeSourceRetention
+import dev.chrisbanes.haze.HazeSourceSelection
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.glass.GlassStyle
+import dev.chrisbanes.haze.glass.GlassReducedMotionPolicy
+import dev.chrisbanes.haze.glass.hazeGlass
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import com.folio.reader.ui.theme.rememberMotionEnabled
+import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.ui.theme.folioSheenGain
+import com.folio.reader.ui.theme.panelKnobScale
+import com.folio.reader.ui.theme.panelFill
+import com.folio.reader.ui.theme.LocalFolioSurfaceDepth
+import com.folio.reader.ui.theme.LocalFolioSurfaceFill
 import dev.chrisbanes.haze.hazeSource
 
 /**
- * §16 Liquid Glass — the capability model and the **one Haze seam**.
- *
- * Glass is the material of the overlay layer only: surfaces that sit *over*
- * content (bars, the nav capsule, sheets, the status banner) may be glass;
- * in-flow content (cards, wells, cover plates, chips, the reader page block)
- * stays paper or sunken. The material itself is upgraded once, in
- * [folioVeil] and the masthead, so every eligible surface inherits it — never
- * forked per screen (Rule 3).
- *
- * What a surface actually gets is decided by a pure degradation ladder
- * ([glassCapabilitiesFor] + the caller's backdrop), so the fallback is a
- * contract rather than an accident:
- *
- * | Condition | Result |
- * |---|---|
- * | Blur supported, pref on, low-RAM off, Compose backdrop present | Blur + tint + noise + specular |
- * | Pref on, no backdrop (any API) — e.g. reader chrome over the WebView | Specular + grain only; fill alpha still governed by the reader chrome knob |
- * | Pref off | Today's look: rim + sheen + hairline + fill |
- * | Desktop (capabilities never provided) | Today's look, byte-for-byte — Rule 1 |
- *
- * The blur floor is API 32: Haze disables API 31 by default for observed
- * RenderNode invalidation issues, and a stale blur frame is worse than the
- * clean fallback, so 31 renders the ladder's second row.
- *
- * **The seam.** This is the only file in the repository that imports
- * `dev.chrisbanes.haze` (FOLIO_DEPENDENCY_PLAN §14.3). Everything else —
- * [folioVeil], the masthead, the readers — reaches blur through
- * [LocalGlassBackdrop], [folioBackdropSource] and [folioGlassEffect], none of
- * which expose a Haze type in source. `Select-String 'dev\.chrisbanes\.haze'`
- * must return this file (plus the two Gradle files that declare the dependency)
- * and nothing else.
- */
-
-/**
- * What the current platform and preferences allow the glass to do. Provided
- * once at the app root (Android); the default is [GlassCapabilities.None] so
- * an un-provided tree — desktop, previews, unit tests — renders exactly the
- * pre-glass material. Blur is a material, not motion: it is *not* gated on
- * reduce-motion (§14.3.2), only on platform support, memory class and the
- * user's preference.
+ * Folio's only Haze import seam. Hosts provide capabilities and one source registry;
+ * the material builders select diffusion or rounded optical glass without exposing
+ * renderer APIs to screens. Unprovided preview trees retain the painted fallback.
+ * Android keeps its API-32 blur floor and low-memory policy. Desktop opts in at its
+ * app root; Haze owns its portable renderer and graceful optical fallback.
  */
 @Immutable
 data class GlassCapabilities(
@@ -75,32 +60,7 @@ data class GlassCapabilities(
     val noise: Boolean,
     /** Daylight-directional specular and edge bevel. */
     val specular: Boolean,
-    /**
-     * Device-class multiplier on every surface's blur-resolution budget — the one
-     * *degradation* lever that is not a switch.
-     *
-     * The ladder above only ever said yes or no to blur, and the only "no" it had was
-     * `ActivityManager.isLowRamDevice`, which is a 512MB-class flag that essentially no
-     * device the app actually runs on reports. So in practice there was **no**
-     * device-class degradation at all: a 2GB phone and a flagship both paid the same
-     * full-resolution capture-and-blur per surface per frame, which is the whole of the
-     * "extremely laggy when liquid glass is on" report on the slow half of the fleet.
-     *
-     * A multiplier rather than a second boolean, because the honest trade here is
-     * resolution and not presence: Haze's cost falls with the *square* of the input
-     * scale (it records the sampled backdrop into a scratch layer sized
-     * `bounds × scale`), so 0.5 here is a further quarter of the fill cost on top of
-     * whatever class budget the surface already asked for — and the blur radius is
-     * scaled with it, so the *visual* radius is unchanged. The surface keeps its frost,
-     * its tint, its body and its edge; it simply resolves them coarser. Turning glass
-     * off outright on a mid-range device would have been the cheaper code and the worse
-     * product.
-     *
-     * 1f (the default, and every un-provided tree) is byte-for-byte the per-class
-     * budget. Applied where the capability is already read — [folioVeil], [folioRaised]
-     * and the masthead — because [folioGlassEffect] is a plain `Modifier` extension and
-     * cannot read a composition local.
-     */
+    /** Device-class multiplier on Folio's surface quality budget. */
     val budget: Float = 1f,
 ) {
     companion object {
@@ -162,95 +122,17 @@ fun glassCapabilitiesFor(
 const val FOLIO_GLASS_MEMORY_CLASS_FLOOR = 192
 
 /**
- * §16 — **the blur cost model**: what fraction of its own resolution a class of surface
- * is allowed to blur at.
- *
- * This is the lever the material was missing, and it is worth being blunt about the
- * arithmetic because the old default looks harmless and is not. Haze records the sampled
- * backdrop into a scratch `GraphicsLayer` sized `bounds × scale` and runs the blur over
- * that, then upscales ([dev.chrisbanes.haze.HazeEffectNode] `drawEffectWithGraphicsLayer`),
- * and it caches **nothing** across frames — a fresh layer is allocated, recorded, blurred
- * and released every draw. Cost therefore falls with the *square* of the scale, and the
- * hard-coded `HazeInputScale.None` the app shipped with meant every glass surface in the
- * app paid full price:
- *
- * | scale | relative fill cost |
- * |---|---|
- * | 1.0 (`None`) | 1 |
- * | 0.5 | 1/4 |
- * | 0.3334 (Haze's own `Auto`) | 1/9 |
- *
- * **Why this is not a look lever.** Haze scales the blur radius by the same factor when
- * it builds the render effect (`resolveBlurRadius() * inputScale`), so a 22dp blur at
- * 0.3334 is a 7.3dp blur over a third-resolution capture — the *same* visual radius,
- * reconstructed from fewer samples. The comment that pinned the app to full resolution
- * cited Auto's "pixel blocks", and that is a real artefact, but it is a function of the
- * blur radius being *small* relative to the upscale: Haze's own `Auto` turns scaling off
- * entirely below 7dp for exactly that reason. At this app's 22dp radius
- * ([FolioTokens.blurRadius], which is also [FolioTokens.blurRadiusMax], so every surface
- * blurs at it) the upscale is far inside the blur kernel and there is nothing left to
- * block.
- *
- * Per class, not per call site: a call site that names a magic number is a call site that
- * drifts from the budget the next one picks.
+ * Surface budget tokens retained across the material system. Haze 2's quality
+ * fractions are not pixel scales: [folioGlassQuality] maps these class/device
+ * budgets to explicit profiles and reduces quality during scroll work.
  */
 object FolioGlassCost {
-    /**
-     * Full-bleed bars — the masthead, the reader's chrome bands.
-     *
-     * The largest blurred areas in the app by a wide margin, and the ones that re-blur on
-     * every frame the room animates. 0.5 is also the scale Haze itself selects for any
-     * progressive gradient, and the masthead is progressive, so on that surface this is
-     * not even a trade: it is the value the library would have chosen.
-     */
     const val bar: Float = 0.5f
-
-    /**
-     * Panes: cards, heroes, sheets, panels — anything whose job is to be a frosted slab
-     * with content on it.
-     *
-     * Haze's own `Auto` figure. These surfaces are large, their backdrop is the animated
-     * ground plane (low-frequency by construction — a ramp, a lamp bloom, drifting silk),
-     * and the thing the reader is looking at is the *content* on the glass, not the room
-     * through it. A ninth of the fill cost is the single biggest frame-time win available
-     * to this material.
-     */
     const val pane: Float = 0.3334f
-
-    /**
-     * Small, high-attention chrome: the nav capsule, menus, the status banner, chips.
-     *
-     * Finer than [pane] on purpose — these sit under the reader's eye at the moment they
-     * are being used, and they are small enough that their absolute cost is low even at a
-     * generous scale, so there is nothing to buy by starving them. Still not full
-     * resolution: the capsule is on screen on every tab, on every frame, for the life of
-     * the session.
-     */
     const val control: Float = 0.5f
-
-    /**
-     * What [GlassCapabilities.budget] drops to on a device the platform classes below
-     * [FOLIO_GLASS_MEMORY_CLASS_FLOOR]: a further quarter of the fill cost on top of the
-     * surface's own class budget.
-     */
     const val constrainedBudget: Float = 0.5f
-
-    /**
-     * The smallest scale the model will ask Haze for.
-     *
-     * Haze's `HazeInputScale.Fixed` *throws* outside `0 < x <= 1`, so a budget
-     * multiplication has to land somewhere safe rather than somewhere plausible. 0.2 is
-     * also the point past which the upscale starts to show even under a 22dp kernel.
-     */
     const val floor: Float = 0.2f
 
-    /**
-     * A surface's class budget, spent against the device's own
-     * [GlassCapabilities.budget] and clamped into Haze's legal range.
-     *
-     * One function so no call site multiplies and clamps for itself — that is how the
-     * floor gets forgotten on the one surface that reaches it.
-     */
     fun resolve(surface: Float, caps: GlassCapabilities): Float =
         (surface * caps.budget).coerceIn(floor, 1f)
 }
@@ -274,17 +156,7 @@ object FolioGlassCost {
 data class GlassSpec(
     val blurRadius: Dp = FolioTokens.blurRadius,
     val blurEnabled: Boolean = true,
-    /**
-     * This surface's class budget from [FolioGlassCost] — how much of its own
-     * resolution the blur runs at before the device's [GlassCapabilities.budget] is
-     * applied on top.
-     *
-     * Lives here rather than at the effect site because the *caller* is the only thing
-     * that knows which class it is: [folioVeil] paints the nav capsule, a reader sheet,
-     * a search strip and a modal from one body of code, and those are not the same
-     * surface class. [FolioGlassCost.pane] is the default because the overwhelming
-     * majority of veils are panes; the handful that are small chrome say so.
-     */
+    /** Surface class/device budget; mapped to Haze 2 quality at the rendering seam. */
     val inputScale: Float = FolioGlassCost.pane,
 ) {
     companion object {
@@ -299,16 +171,7 @@ data class GlassSpec(
     }
 }
 
-/**
- * The backdrop a screen offers its overlays. Null (the default) means no
- * Compose content is being sampled — desktop never provides one, and screens
- * over the reader's native WebView surface deliberately do not either, which
- * is exactly the ladder's "specular + grain only" row.
- *
- * The value is a Haze state, but callers never name that type: they call
- * [rememberGlassBackdrop], provide it, and attach [folioBackdropSource] to
- * their scrolling child. Pattern precedent: [com.folio.reader.ui.theme.LocalFolioBarInset].
- */
+/** Registered Compose content available to the material. Null uses the painted fallback. */
 val LocalGlassBackdrop = compositionLocalOf<HazeState?> { null }
 
 /**
@@ -340,6 +203,129 @@ val LocalGlassInFlowGlass = compositionLocalOf { true }
 @Composable
 fun rememberGlassBackdrop(): HazeState = remember { HazeState() }
 
+/** Keep the real room backdrop; scope only the shelf's interaction quality budget. */
+@Composable
+internal fun FolioGlassScene(moving: Boolean, content: @Composable () -> Unit) {
+    val workload = remember { FolioGlassWorkload() }
+    androidx.compose.runtime.SideEffect {
+        if (moving) workload.scrolled() else workload.settled()
+    }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalGlassWorkload provides workload,
+        content = content,
+    )
+}
+
+/** A local artwork source for the reading dock, separate from the page it lives inside. */
+@Composable
+internal fun FolioArtworkGlassScene(moving: Boolean, content: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalGlassBackdrop provides rememberGlassBackdrop()) {
+        FolioGlassScene(moving, content)
+    }
+}
+
+/** One functional reading control over artwork; no glass on the cover plates themselves. */
+@Composable
+internal fun Modifier.folioReadingDockGlass(shape: RoundedCornerShape, accent: Color): Modifier {
+    val caps = LocalGlassCapabilities.current
+    val backdrop = LocalGlassBackdrop.current
+    val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val canBlur = caps.blur && LocalGlassInFlowGlass.current && backdrop != null
+    val fill = com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelKnobScale(if (canBlur) .38f else .94f)
+    val sheen = com.folio.reader.ui.theme.folioSheenGain()
+    val base = if (canBlur && fill < .999f) {
+        clip(shape).folioGlassEffect(
+            backdrop = requireNotNull(backdrop),
+            backgroundColor = Color.Transparent,
+            planeTint = colors.surface.copy(alpha = fill),
+            shape = shape,
+            optical = true,
+            backdropAlpha = .84f,
+            inputScale = FolioGlassCost.control,
+            lightGain = .7f * sheen,
+        )
+    } else clip(shape).drawWithCache {
+        onDrawBehind { drawRect(colors.surface.copy(alpha = fill)) }
+    }
+    return base.folioMaterialFinish(shape).drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val edge = Brush.linearGradient(listOf(colors.onSurface.copy(alpha = .23f),
+            colors.onSurface.copy(alpha = .03f), accent.copy(alpha = .32f)),
+            Offset.Zero, Offset(size.width, size.height))
+        onDrawBehind { drawOutline(outline, edge, style = Stroke(.8.dp.toPx())) }
+    }
+}
+
+/** A quiet data sheet: real backdrop diffusion, a defined edge, no ornamental bevel or shadow. */
+@Composable
+internal fun folioDataGlassPlane(fillAlpha: Float? = null, blurEnabled: Boolean = true): Color {
+    val canBlur = blurEnabled && LocalGlassCapabilities.current.blur && LocalGlassInFlowGlass.current && LocalGlassBackdrop.current != null
+    if (fillAlpha == null && LocalFolioSurfaceDepth.current > 0) {
+        val parent = LocalFolioSurfaceFill.current
+            ?: folioReferenceColor().copy(alpha = com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelFill(canBlur))
+        return parent.copy(alpha = parent.alpha * .25f)
+    }
+    return folioReferenceColor().copy(alpha = fillAlpha?.coerceIn(0f, 1f)
+        ?: com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelFill(canBlur))
+}
+
+@Composable
+internal fun Modifier.folioDataGlass(shape: Shape = FolioMaterialShapes.reference, fillAlpha: Float? = null,
+    overlay: Boolean = false, blurEnabled: Boolean = true, clipEnabled: Boolean = true): Modifier {
+    val caps = LocalGlassCapabilities.current
+    val backdrop = LocalGlassBackdrop.current
+    val plane = folioDataGlassPlane(fillAlpha, blurEnabled)
+    val ink = com.folio.reader.ui.theme.FolioTheme.colors.onSurface
+    val embedded = LocalFolioSurfaceDepth.current > 0
+    val clipped = if (clipEnabled) Modifier.clip(shape) else Modifier
+    // A solid preference needs no capture. A scrolling data card never pays for lens refraction.
+    val blurred = if (!embedded && blurEnabled && caps.blur && (overlay || LocalGlassInFlowGlass.current) && backdrop != null && plane.alpha < .999f) {
+        clipped.folioGlassEffect(backdrop, backgroundColor = Color.Transparent,
+            // Fade only the captured backdrop, not the content. With the tint above it,
+            // uncaptured page transmission is (1 - plane.alpha)^2 rather than zero.
+            alpha = plane.alpha, blurRadius = 12.dp, inputScale = FolioGlassCost.resolve(FolioGlassCost.pane, caps))
+    } else clipped
+    return then(blurred).drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val rim = if (embedded) .6f else 1f
+        val edge = Brush.verticalGradient(listOf(ink.copy(alpha = .13f * rim), ink.copy(alpha = .035f * rim)))
+        onDrawBehind {
+            drawOutline(outline, plane)
+            drawOutline(outline, edge, style = Stroke(.75.dp.toPx()))
+        }
+    }.folioMaterialFinish(shape)
+}
+
+/** Reader instruments: optical diffusion, one etched edge, no grain, ribs, bevel or cast shadow.
+ * Native book pages cannot be sampled; their caller suppresses the backdrop, so the same material
+ * resolves to an honest translucent plane. The user's reader opacity is never silently replaced.
+ */
+@Composable
+internal fun Modifier.folioReaderGlass(shape: Shape, fillAlpha: Float, blurEnabled: Boolean = true): Modifier {
+    val backdrop = LocalGlassBackdrop.current
+    val caps = LocalGlassCapabilities.current
+    val plane = folioReferenceColor().copy(alpha = fillAlpha.coerceIn(0f, 1f))
+    val ink = com.folio.reader.ui.theme.FolioTheme.colors.onSurface
+    val sheen = folioSheenGain().coerceIn(0f, 1f)
+    val base = if (blurEnabled && caps.blur && backdrop != null && plane.alpha < .999f) {
+        clip(shape).folioGlassEffect(backdrop, backgroundColor = Color.Transparent,
+            alpha = plane.alpha, blurRadius = 18.dp, noiseFactor = 0f, inputScale = FolioGlassCost.resolve(FolioGlassCost.pane, caps),
+            readerSourcesOnly = true)
+    } else clip(shape)
+    return then(base).drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val edge = Brush.linearGradient(listOf(ink.copy(alpha = .10f + .08f * sheen),
+            ink.copy(alpha = .035f), ink.copy(alpha = .07f)), Offset.Zero, Offset(size.width, size.height))
+        val light = Brush.verticalGradient(listOf(ink.copy(alpha = .018f * sheen), Color.Transparent),
+            endY = minOf(size.height, 32.dp.toPx()))
+        onDrawBehind {
+            drawOutline(outline, plane)
+            drawOutline(outline, light)
+            drawOutline(outline, edge, style = Stroke(.75.dp.toPx()))
+        }
+    }
+}
+
 /**
  * The glass environment for an app root: the platform's capability verdict plus
  * the one backdrop registry everything blurs against. Hosts call this instead of
@@ -355,6 +341,7 @@ fun FolioGlassRoot(
         LocalGlassCapabilities provides capabilities,
         LocalGlassBackdrop provides rememberGlassBackdrop(),
         LocalGlassInFlowGlass provides inFlowGlass,
+        LocalGlassWorkload provides rememberGlassWorkload(),
     ) {
         content()
     }
@@ -511,97 +498,7 @@ fun Modifier.folioBackdropSource(): Modifier {
     if (avScope != null && avScope.transition.targetState == EnterExitState.PostExit) return this
     // Above the room, so a glass surface *inside* this page still resolves the room beneath
     // it instead of resolving nothing at all — see FOLIO_BACKDROP_Z_ROOM.
-    return hazeSource(backdrop, zIndex = FOLIO_BACKDROP_Z_CONTENT)
-}
-
-/**
- * A captured backdrop rung, addressable from the draw phase.
- *
- * This is the piece the previous attempt at refraction concluded was impossible. Its note
- * in `GlassShader.android.kt` reads: *"A render effect can only ever see the subtree it is
- * applied to … refraction of what is behind a surface has to reproduce that thing."* The
- * first half is true and the second does not follow. A render effect sees the subtree it is
- * applied to — so you do not apply it to the glass surface. You apply it to a layer into
- * which the *already captured backdrop* has been replayed, and `uniform shader content`
- * then hands the shader the real pixels of the room.
- *
- * Haze captures exactly that layer for its own blur and exposes it: [HazeArea.contentLayer]
- * and [HazeArea.positionOnScreen] are public reads (only their setters are internal). So the
- * refraction costs no second capture of the screen and no new dependency — it re-uses the
- * capture the blur is already paying for.
- *
- * Both reads are deliberately **unobserved** ([Snapshot.withoutReadObservation]): they are
- * written during layout and draw, and subscribing to them in composition would turn a scroll
- * into a recomposition. Callers read them inside `onDrawBehind`, where they belong.
- *
- * **The rung itself is resolved here too, and that is the second half of the same rule.**
- * This class used to be handed an already-resolved [HazeArea], which meant its factory
- * ([glassRoomPlate]) had to scan `HazeState.areas` *in composition* — and `areas` is a
- * `mutableStateListOf` whose getter returns `_areas.toList()`, so every glass surface in the
- * tree was subscribed to the registry's structure. Nothing mutates that list per frame, but
- * a `hazeSource` node attaching or detaching does: a push, a pop, a tab morph, a screen
- * dropping out of the backdrop while it exits ([folioBackdropSource]'s exiting branch), the
- * reader's PDF source flipping. Each of those recomposed *every* glass surface on screen —
- * a recomposition storm landing exactly on the frames of a transition, which is when the
- * budget is already spent. Holding the state and the key instead, and resolving under
- * [Snapshot.withoutReadObservation] in the draw phase, removes the subscription entirely.
- *
- * The resolution is cached across frames and re-taken only when the cached rung has stopped
- * describing anything, which is also how it self-heals: [dev.chrisbanes.haze.HazeSourceNode]
- * owns exactly one [HazeArea] for its node's lifetime and `reset()`s it on detach, so a dead
- * rung reports an unspecified position, fails [ready], and is replaced by the next scan.
- */
-@Stable
-class FolioGlassPlate internal constructor(
-    private val state: HazeState,
-    private val key: Any,
-) {
-    /** The rung, once found. Draw-phase state; never read in composition. */
-    private var resolved: HazeArea? = null
-
-    private fun area(): HazeArea? = Snapshot.withoutReadObservation {
-        val cached = resolved
-        if (cached != null && cached.positionOnScreen.isSpecified) return@withoutReadObservation cached
-        state.areas.firstOrNull { it.key == key }?.also { resolved = it } ?: cached
-    }
-
-    /** The live capture, or null before the first record / after release. */
-    val layer: GraphicsLayer?
-        get() = Snapshot.withoutReadObservation {
-            area()?.contentLayer?.takeUnless { it.isReleased }
-        }
-
-    /** Where the capture's own origin sits, in the same space as `positionOnScreen`. */
-    val originOnScreen: Offset
-        get() = Snapshot.withoutReadObservation {
-            area()?.positionOnScreen?.takeIf { it.isSpecified } ?: Offset.Zero
-        }
-
-    /** Whether there is anything to bend this frame. */
-    val ready: Boolean
-        get() = Snapshot.withoutReadObservation {
-            val a = area() ?: return@withoutReadObservation false
-            a.positionOnScreen.isSpecified && a.contentLayer?.isReleased == false
-        }
-}
-
-/**
- * The room rung as a draw-phase handle, or null when there is nothing to refract —
- * desktop, previews, pref-off, low-RAM, or before the ground plane's first draw.
- *
- * Always the room, never the page: the room is the one rung that is guaranteed not to
- * contain the caller, so a surface anywhere in the tree can bend it without the
- * self-reference that made the blur inert in the first place.
- *
- * Reads **no** Haze state: it hands the registry and the key to [FolioGlassPlate], which
- * resolves the rung in the draw phase. Calling this is therefore free of the
- * register/unregister subscription it used to carry — see [FolioGlassPlate].
- */
-@Composable
-fun glassRoomPlate(): FolioGlassPlate? {
-    if (!LocalGlassCapabilities.current.blur) return null
-    val backdrop = LocalGlassBackdrop.current ?: return null
-    return remember(backdrop) { FolioGlassPlate(backdrop, FOLIO_BACKDROP_KEY_ROOM) }
+    return this.folioGlassScrollObserver().hazeSource(backdrop, zIndex = FOLIO_BACKDROP_Z_CONTENT)
 }
 
 /**
@@ -625,52 +522,11 @@ fun FolioSuppressibleBackdrop(suppress: Boolean, content: @Composable () -> Unit
 }
 
 /**
- * The single `hazeEffect` call site. Draws the blurred backdrop *under* the
- * caller's own fill, so the surface's fill alpha still governs — at 100% the
- * surface is a lid and the blur is invisible; at the designed glass points the
- * blur reads. Never a tint pass-through: [folioVeil] and the masthead paint
- * their own fills over this.
- *
- * [alpha] fades the whole effect (the masthead gates it on its presence);
- * [progressive] requests the crown-heavy gradient blur, which suits a bar.
- *
- * [tint] is the **chromatic frost**: a colour the blurred backdrop is tinted
- * *inside* the Haze pass, before the caller's own fill lands on top. Empty
- * ([Color.Unspecified], the default) keeps the pre-weight look byte-for-byte —
- * `tints = emptyList()`, a neutral blur. A themed low-alpha tint is what gives
- * the glass weight and per-theme personality: the frost absorbs the room's own
- * hue instead of passing it through as a flat neutral pane.
- *
- * [bodyTint] is the **frosted body** — the single lever that lets the glass be
- * *opaque and glass at the same time*. It is a surface-coloured tint laid under
- * [tint], still inside the Haze pass, so it rides the blurred (spatially
- * varying) backdrop rather than sitting on it as a flat lid. This is exactly how
- * a real frosted material (iOS's `UIBlurEffect`, Windows Acrylic/Mica) reads as
- * a substantial pane you cannot see sharply through while light and colour still
- * bleed through it: the body comes from a *tint over the blur*, not from raising
- * the external fill — which only ever buries the blur and reads as a dead
- * square. Stacking the two tints inside one pass means the body and the hue both
- * composite over the frost, so the slab gains weight and personality together
- * while staying unmistakably glass. Empty keeps the single-tint look unchanged.
- *
- * Tints paint in list order (earlier under later), so [bodyTint] goes first and
- * the chromatic [tint] rides on top of it.
- *
- * [progressiveEndIntensity] is how much of the pane survives at the far end of
- * that gradient. It is a parameter rather than a constant because the masthead's
- * plane now lives inside this pass: a bar the reader has set to 100% must not
- * thin at its foot, or the page shows through the bottom edge of a surface that
- * was asked to be solid. Callers that do not blur progressively never read it.
- *
- * [progressiveEndY] is *where* that far end is, in layer pixels. It defaults to
- * the bottom of the layer, which is right for a surface whose whole height is the
- * surface — and wrong for the masthead, whose height depends on whether the screen
- * hangs a rail under its title. Decaying over the whole Column, Library's railed
- * bar reached the logo row at a different intensity than Home's or a settings
- * category's, which is the same preference painting a different bar per section.
- * Passing the chrome band's bottom pins the decay to the band; beyond it the
- * gradient holds [progressiveEndIntensity].
+ * The single Haze 2 seam. Rounded floating surfaces get one optical material;
+ * full-width bars and in-flow panes use diffusion. Haze owns capture and refraction,
+ * so there is no second room replay or platform-specific lens pass.
  */
+@Composable
 fun Modifier.folioGlassEffect(
     backdrop: HazeState,
     backgroundColor: Color,
@@ -682,76 +538,82 @@ fun Modifier.folioGlassEffect(
     progressiveEndY: Float = Float.POSITIVE_INFINITY,
     tint: Color = Color.Unspecified,
     bodyTint: Color = Color.Unspecified,
-    /**
-     * How much of the backdrop's resolution the blur runs at — a **cost** lever, not a look
-     * lever, and the only one Haze exposes that is worth a factor of nine.
-     *
-     * Haze records the sampled backdrop into a scratch layer sized `bounds × scale` and runs
-     * the blur over that, then upscales. Cost falls with the square, so `1f` is full price,
-     * `0.5f` is a quarter, and Haze's own `Auto` picks `0.3334f` — a ninth — for a plain
-     * surface. Kept as a `Float` rather than Haze's own type so the library stays behind this
-     * one seam (the file's whole contract).
-     *
-     * **The default is [FolioGlassCost.pane], and it used to be `1f`.** The old value was
-     * inherited from a hard-coded `HazeInputScale.None` whose comment cited Auto's "pixel
-     * blocks", and that reasoning does not survive contact with this app's numbers: Haze
-     * scales the blur radius by the same factor when it builds the render effect, and at the
-     * app's 22dp radius ([FolioTokens.blurRadiusMax], which every surface is coerced to) the
-     * upscale sits far inside the blur kernel. Full resolution was buying nothing visible and
-     * costing nine times the fill on every glass surface, every frame — see [FolioGlassCost].
-     *
-     * Values are coerced into Haze's legal `0 < x <= 1` window ([FolioGlassCost.floor]
-     * upward): `HazeInputScale.Fixed` *throws* outside it, and a device-budget multiplication
-     * can otherwise land there.
-     */
     inputScale: Float = FolioGlassCost.pane,
-): Modifier = hazeEffect(
-    state = backdrop,
-    style = HazeStyle(
-        backgroundColor = backgroundColor,
-        tints = buildList {
-            if (bodyTint.isSpecified) add(HazeTint(bodyTint))
-            if (tint.isSpecified) add(HazeTint(tint))
-        },
-        blurRadius = blurRadius.coerceAtMost(FolioTokens.blurRadiusMax),
-        noiseFactor = noiseFactor,
-    ),
-) {
-    // The capabilities resolver already excluded platforms where blur is
-    // unreliable; Haze's own default would additionally exclude API 31 and
-    // substitute a scrim, which is not this design's fallback.
-    blurEnabled = true
-    this.alpha = alpha
-    // Smoothness over thrift was the old policy on every surface, and it was the whole
-    // cost of the material: `None` blurs the full area at full resolution, and Haze
-    // re-records and re-blurs it on every frame the room animates. The budget now comes
-    // from [FolioGlassCost] per surface class — Haze scales the blur radius by the same
-    // factor, so the visual radius is unchanged and only the sample count falls.
-    //
-    // Coerced into Haze's legal window: `HazeInputScale.Fixed` throws outside
-    // `0 < x <= 1`, which a device-budget multiplication can otherwise reach — and a
-    // non-finite value would sail past a bare `>=` comparison straight into that throw,
-    // so it is normalised before the comparison rather than inside the branch.
-    //
-    // `this.` is load-bearing: the parameter shares the scope property's name, and the bare
-    // form would resolve to the parameter (a Float) rather than to the effect scope.
-    val scale = if (inputScale.isFinite()) inputScale else 1f
-    this.inputScale = if (scale >= 1f) {
-        HazeInputScale.None
-    } else {
-        HazeInputScale.Fixed(scale.coerceIn(FolioGlassCost.floor, 1f))
+    shape: Shape? = null,
+    optical: Boolean = false,
+    planeTint: Color = Color.Unspecified,
+    lightGain: Float = 1f,
+    /** The artwork dock blends its refracted input; existing surfaces retain full diffusion. */
+    backdropAlpha: Float = 1f,
+    /** Reader glass may sample page content, never the app's unrelated room plane. */
+    readerSourcesOnly: Boolean = false,
+): Modifier {
+    val moving = LocalGlassWorkload.current.moving
+    val quality = folioGlassQuality(inputScale, moving)
+    val performance = remember(quality) { HazePerformanceMode.Fixed(quality) }
+    // Drop stale retained pixels when navigation removes a source. Folio's source
+    // selection already excludes outgoing screens; retaining them defeats that rule.
+    val input = remember(backdrop, readerSourcesOnly) {
+        if (readerSourcesOnly) HazeInput.Sources(backdrop,
+            selection = HazeSourceSelection.All.where { it.key != FOLIO_BACKDROP_KEY_ROOM && it.zIndex >= FOLIO_BACKDROP_Z_CONTENT },
+            retention = HazeSourceRetention.ClearWhenUnavailable)
+        else HazeInput.Sources(backdrop, retention = HazeSourceRetention.ClearWhenUnavailable)
     }
-    if (progressive) {
-        this.progressive = HazeProgressive.verticalGradient(
-            startY = 0f,
-            startIntensity = 1f,
-            endY = if (progressiveEndY.isFinite() && progressiveEndY > 0f) {
-                progressiveEndY
-            } else {
-                Float.POSITIVE_INFINITY
-            },
-            endIntensity = progressiveEndIntensity.coerceIn(0f, 1f),
-            preferPerformance = true,
+    val motion = rememberMotionEnabled()
+    val rounded = shape as? RoundedCornerShape
+    if (optical && rounded != null) {
+        val material = remember(rounded, backgroundColor, tint, bodyTint, planeTint, alpha, lightGain, inputScale, backdropAlpha) {
+            GlassStyle.regular.then {
+                shape(rounded)
+                backgroundColor(backgroundColor)
+                val frost = if (tint.isSpecified) tint else Color.Transparent
+                val body = if (bodyTint.isSpecified) bodyTint else Color.Transparent
+                tint(if (planeTint.isSpecified) planeTint else frost.compositeOver(body))
+                // Surfaces retain full diffusion. Clear decorative glass explicitly
+                // blends a lighter refraction with the room, without an opaque floor.
+                alpha(backdropAlpha.coerceIn(0f, 1f))
+                specularIntensity((0.48f * lightGain).coerceIn(0f, 1f))
+                ambientResponse(0.12f)
+                lightPosition(Alignment.TopStart)
+                // Small controls retain the recognizable bent edge. Larger panels
+                // keep Regular's size-responsive diffusion behind their labels.
+                if (backdropAlpha < 1f) {
+                    optics(refractionStrength = .25f, refractionDisplacement = 3.dp,
+                        blurRadius = 4.dp, depth = .35f, refractionDetailIntensity = 0f)
+                } else if (inputScale > FolioGlassCost.pane) {
+                    optics(refractionStrength = 0.65f, refractionDisplacement = 8.dp,
+                        blurRadius = 12.dp, depth = 0.65f, refractionDetailIntensity = 0f)
+                }
+                interactionLightRadiusFraction(0.85f)
+                hovered { lightingIntensity(0.72f) }
+                pressed { lightingIntensity(0.95f); refractionMultiplier(1.12f) }
+            }
+        }
+        return hazeGlass(
+            input = input,
+            style = material,
+            performanceMode = performance,
+            interactionReducedMotionPolicy = if (motion) GlassReducedMotionPolicy.System else GlassReducedMotionPolicy.Reduced,
         )
     }
+    val style = remember(backgroundColor, blurRadius, noiseFactor, alpha, progressive,
+        progressiveEndIntensity, progressiveEndY, tint, bodyTint) {
+        HazeBlurStyle {
+            backgroundColor(backgroundColor)
+            blurEnabled(true)
+            blurRadius(blurRadius.coerceAtMost(FolioTokens.blurRadiusMax))
+            noiseFactor(noiseFactor)
+            alpha(alpha.coerceIn(0f, 1f))
+            colorEffects(buildList {
+                if (bodyTint.isSpecified) add(HazeColorEffect.tint(bodyTint))
+                if (tint.isSpecified) add(HazeColorEffect.tint(tint))
+            })
+            progressive(if (progressive) HazeProgressive.verticalGradient(
+                startY = 0f, startIntensity = 1f,
+                endY = progressiveEndY.takeIf { it.isFinite() && it > 0f } ?: Float.POSITIVE_INFINITY,
+                endIntensity = progressiveEndIntensity.coerceIn(0f, 1f),
+            ) else null)
+        }
+    }
+    return hazeBlur(input = input, style = style, performanceMode = performance)
 }

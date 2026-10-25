@@ -1,5 +1,9 @@
 ﻿package com.folio.reader.ui.home
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
+import com.folio.reader.ui.manga.MangaCoverPlate
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -106,7 +110,21 @@ internal fun NewChaptersCard(
     onOpenMangaDetail: (String) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        FolioEyebrow("New chapters", accent = FolioTheme.colors.accentDiscovery)
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+            Box(Modifier.width(88.dp).height(66.dp)) {
+                badges.take(3).asReversed().forEachIndexed { index, badge ->
+                    MangaCoverPlate(backend, badge.sourceId, badge.thumbnailUrl, badge.coverPath, width = 36.dp,
+                        modifier = Modifier.offset(x = (index * 22).dp, y = (index * 3).dp)
+                            .graphicsLayer { rotationZ = (index - 1) * 6f })
+                }
+            }
+            Column {
+                FolioEyebrow("New chapters", accent = FolioTheme.colors.accentDiscovery)
+                Text("${badges.sumOf { it.newChapterCount }} chapters on your shelf",
+                    style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+            }
+        }
         Spacer(Modifier.height(FolioTokens.space2))
         badges.forEachIndexed { index, badge ->
             if (index > 0) FolioRule()
@@ -155,65 +173,3 @@ internal fun NewChaptersCard(
  * suggestion is the least committed thing Home shows. Tapping persists the entry
  * for the detail screen without adding it to the library (the browse contract).
  */
-@Composable
-internal fun DiscoverCard(
-    items: List<MangaDiscoverItem>,
-    backend: MangaBackend,
-    onOpenDiscover: (MangaDiscoverItem) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            FolioEyebrow("Discover", accent = FolioTheme.colors.accentDiscovery)
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "New from your sources",
-                style = FolioTheme.typography.titleMedium,
-                color = FolioTheme.colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Spacer(Modifier.height(FolioTokens.space3))
-        LazyRow(
-            contentPadding = PaddingValues(0.dp),
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2)
-        ) {
-            items(items.size, key = { "${items[it].sourceId}:${items[it].url}" }) { index ->
-                val item = items[index]
-                val interaction = rememberFolioInteraction()
-                Column(
-                    modifier = Modifier
-                        .width(FolioTokens.coverInline * 1.35f)
-                        .folioPressable(interaction)
-                        .clickable(interactionSource = interaction, indication = null) {
-                            onOpenDiscover(item)
-                        }
-                ) {
-                    MangaPlate(
-                        backend = backend,
-                        sourceId = item.sourceId,
-                        thumbnailUrl = item.thumbnailUrl,
-                        coverPath = null,
-                        width = FolioTokens.coverInline * 1.35f,
-                        elevation = FolioTokens.elevationPanel,
-                    )
-                    Spacer(Modifier.height(FolioTokens.space1))
-                    Text(
-                        item.title,
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        item.sourceName,
-                        style = FolioTheme.typography.labelSmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    }
-}

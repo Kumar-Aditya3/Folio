@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.extension.util.ExtensionRuntime
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.Source
@@ -32,6 +33,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -69,19 +72,25 @@ class AndroidMangaBackend(
     }
     private val trustExtension = TrustExtension(trustStore)
     private val installer = ExtensionInstaller(appContext, networkHelper)
-    val extensionManager = ExtensionManager(appContext, trustExtension, extensionApi, installer)
 
-    private val installedSnapshot = MutableStateFlow<List<Extension.Installed>>(emptyList())
-    private val untrustedSnapshot = MutableStateFlow<List<Extension.Untrusted>>(emptyList())
+    init {
+        // This has to run *before* [extensionManager] is constructed. The manager's own init
+        // block kicks off its first extension pass the moment it exists, and that pass reads
+        // the trust extension, the Injekt graph and the NSFW switch out of [ExtensionRuntime].
+        // Initializers and init blocks run in declaration order, so setting them down in the
+        // later init block left the first pass reading whatever had landed by then — mostly
+        // the right thing, occasionally null, and never worth the coin flip.
+        FolioInjektSetup.register(appContext, networkHelper)
+        ExtensionRuntime.trustExtension = trustExtension
+        ExtensionRuntime.showNsfwSource = { showNsfw.value }
+    }
+
+    val extensionManager = ExtensionManager(appContext, trustExtension, extensionApi, installer)
 
     /** Latest FilterList per source; extension filter instances must be reused in place. */
     private val filterCache = mutableMapOf<Long, FilterList>()
 
     init {
-        FolioInjektSetup.register(appContext, networkHelper)
-        ExtensionRuntime.trustExtension = trustExtension
-        ExtensionRuntime.showNsfwSource = { showNsfw.value }
-
         scope.launch {
             trustStore.preload()
             val stored = loadRepos()
@@ -107,12 +116,6 @@ class AndroidMangaBackend(
             extensionApi.repoSigningKeys.collect { keys ->
                 trustStore.setRepoKeys(keys)
             }
-        }
-        scope.launch {
-            extensionManager.installedExtensionsFlow.collect { installedSnapshot.value = it }
-        }
-        scope.launch {
-            extensionManager.untrustedExtensionsFlow.collect { untrustedSnapshot.value = it }
         }
     }
 
@@ -153,6 +156,7 @@ class AndroidMangaBackend(
         if (sourceId == LOCAL_SOURCE_ID) return emptyList()
         val source = sourceById(sourceId) ?: return emptyList()
         // Extensions are third-party code; a broken getFilterList must not crash the app.
+        // Sources that fetch their filter values do it inside getFilterList itself.
         val filterList = runCatching { source.getFilterList() }.getOrNull() ?: return emptyList()
         filterCache[sourceId] = filterList
         return filterList.map { it.toCommonFilter() }
@@ -166,8 +170,8 @@ class AndroidMangaBackend(
         mode: BrowseMode,
         query: String,
         filters: List<MangaFilter>?,
-    ): MangaBrowsePage {
-        if (sourceId == LOCAL_SOURCE_ID) return localAdapter.browse(page, query)
+    ): MangaBrowsePage = sourceRequest(sourceId) {
+        if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.browse(page, query)
 
         val source = sourceById(sourceId) as? CatalogueSource
             ?: throw IllegalStateException("Source $sourceId is not a catalogue source")
@@ -182,20 +186,20 @@ class AndroidMangaBackend(
             mode == BrowseMode.LATEST -> source.getLatestUpdates(page)
             else -> source.getPopularManga(page)
         }
-        return MangaBrowsePage(
+        MangaBrowsePage(
             items = result.mangas.map { MangaBrowseItem(it.url, it.title, it.thumbnail_url) },
             hasNextPage = result.hasNextPage,
         )
     }
 
-    override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): MangaDetail {
-        if (sourceId == LOCAL_SOURCE_ID) return localAdapter.detail(mangaUrl)
+    override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): MangaDetail = sourceRequest(sourceId) {
+        if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.detail(mangaUrl)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
         val stub = SManga.create().apply { url = mangaUrl }
         val update = source.getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
         val manga = update.manga
-        return MangaDetail(
+        MangaDetail(
             url = mangaUrl,
             title = runCatching { manga.title }.getOrDefault(""),
             author = manga.author,
@@ -207,13 +211,13 @@ class AndroidMangaBackend(
         )
     }
 
-    override suspend fun fetchChapterList(sourceId: Long, mangaUrl: String): List<MangaChapterRef> {
-        if (sourceId == LOCAL_SOURCE_ID) return localAdapter.chapters(mangaUrl)
+    override suspend fun fetchChapterList(sourceId: Long, mangaUrl: String): List<MangaChapterRef> = sourceRequest(sourceId) {
+        if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.chapters(mangaUrl)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
         val stub = SManga.create().apply { url = mangaUrl }
         val update = source.getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
-        return update.chapters.mapIndexed { index, it ->
+        update.chapters.mapIndexed { index, it ->
             MangaChapterRef(
                 url = runCatching { it.url }.getOrDefault(mangaUrl),
                 name = runCatching { it.name }.getOrDefault("Chapter ${index + 1}"),
@@ -224,12 +228,12 @@ class AndroidMangaBackend(
         }
     }
 
-    override suspend fun fetchPageList(sourceId: Long, chapter: MangaChapterRef): List<MangaPageRef> {
-        if (sourceId == LOCAL_SOURCE_ID) return localAdapter.pageList(chapter.url)
+    override suspend fun fetchPageList(sourceId: Long, chapter: MangaChapterRef): List<MangaPageRef> = sourceRequest(sourceId) {
+        if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.pageList(chapter.url)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
         val sChapter = SChapter.create().apply { url = chapter.url }
-        return source.getPageList(sChapter).map { MangaPageRef(it.index, it.url, it.imageUrl) }
+        source.getPageList(sChapter).map { MangaPageRef(it.index, it.url, it.imageUrl) }
     }
 
     override suspend fun fetchPageImage(
@@ -366,28 +370,31 @@ class AndroidMangaBackend(
         return extensionManager.installExtension(available).map { it.toCommon() }
     }
 
-    override fun updateExtension(pkgName: String): Flow<ExtensionInstallStep> {
-        val installed = installedSnapshot.value
+    override fun updateExtension(pkgName: String): Flow<ExtensionInstallStep> = flow {
+        val installed = extensionManager.getInstalledExtensions()
             .firstOrNull { it.pkgName == pkgName }
-            ?: return flowOf(ExtensionInstallStep.Error)
-        return extensionManager.updateExtension(installed).map { it.toCommon() }
+        if (installed == null) {
+            emit(ExtensionInstallStep.Error)
+        } else {
+            emitAll(extensionManager.updateExtension(installed).map { it.toCommon() })
+        }
     }
 
     override fun uninstallExtension(pkgName: String) {
-        val installed = installedSnapshot.value
-            .firstOrNull { it.pkgName == pkgName }
-        val untrusted = untrustedSnapshot.value
-            .firstOrNull { it.pkgName == pkgName }
-        when {
-            installed != null -> extensionManager.uninstallExtension(installed)
-            untrusted != null -> extensionManager.uninstallExtension(untrusted)
+        scope.launch {
+            val extension = extensionManager.getInstalledExtensions().firstOrNull { it.pkgName == pkgName }
+                ?: extensionManager.getUntrustedExtensions().firstOrNull { it.pkgName == pkgName }
+            if (extension != null) extensionManager.uninstallExtension(extension)
         }
     }
 
     override suspend fun trustExtension(pkgName: String, versionCode: Long, signatureHash: String) {
-        val untrusted = untrustedSnapshot.value
+        val untrusted = extensionManager.getUntrustedExtensions()
             .firstOrNull { it.pkgName == pkgName }
             ?: return
+        check(untrusted.versionCode == versionCode && untrusted.signatureHash == signatureHash) {
+            "The extension changed while awaiting approval. Review its current version in Extensions."
+        }
         extensionManager.trust(untrusted)
     }
 
@@ -418,6 +425,68 @@ class AndroidMangaBackend(
     }
 
     // ---------- Helpers ----------
+
+    private suspend fun <T> sourceRequest(sourceId: Long, action: suspend () -> T): T {
+        val pendingAtStart = MangaChallenges.pending.value
+        try {
+            val result = action()
+            if (sourceId != LOCAL_SOURCE_ID) {
+                MangaChallenges.clearedForSource(sourceId, pendingAtStart)
+            }
+            return result
+        } catch (error: MangaSiteAccessException) {
+            val url = error.browserUrl ?: (sourceById(sourceId) as? HttpSource)?.baseUrl
+            val challenge = url?.let {
+                MangaChallenges.record(it, error.userAgent, error.reason, sourceId)
+            }
+            if (challenge == null || !MangaChallenges.awaitBrowserSolve(challenge)) throw error
+            return retried(action)
+        } catch (error: HttpException) {
+            // Only statuses a browser can plausibly clear reach the window. Everything else
+            // is a real failure and is rethrown untouched.
+            if (error.code != 403 && error.code != 401 && !error.cloudflareChallenge) throw error
+            // Map only after extension-specific guards have seen the raw response;
+            // keep HttpException's vendored constructor and status ABI unchanged.
+            val reason = accessReason(error)
+            val request = error.failedRequest
+            val url = request?.let { mangaBrowserUrl(it.method, it.url.toString()) }
+                ?: (sourceById(sourceId) as? HttpSource)?.baseUrl
+            val challenge = url?.let {
+                MangaChallenges.record(it, request?.header("User-Agent"), reason, sourceId)
+            }
+            val refused = MangaSiteAccessException(reason, error.code, error)
+            if (challenge == null || !MangaChallenges.awaitBrowserSolve(challenge)) throw refused
+            return retried(action)
+        }
+    }
+
+    /**
+     * The single place a refused HTTP status becomes a reader-facing reason.
+     *
+     * 401 is neither a bot check nor a refusal: a site whose gate is a script answers with
+     * it, and the browser view is the only thing that clears it.
+     */
+    private fun accessReason(error: HttpException): MangaAccessReason = when {
+        error.cloudflareChallenge -> MangaAccessReason.CLOUDFLARE_CHALLENGE
+        error.code == 401 -> MangaAccessReason.SIGN_IN_REQUIRED
+        else -> MangaAccessReason.SITE_REFUSAL
+    }
+
+    /**
+     * One retry after the browser view closed.
+     *
+     * The cookie the window earned is what makes the second attempt different. A wall that
+     * survives it is reported, not solved again: another window would repeat the same round
+     * trip, and the reader has already been shown one.
+     */
+    private suspend fun <T> retried(action: suspend () -> T): T = try {
+        action()
+    } catch (error: MangaSiteAccessException) {
+        throw error
+    } catch (error: HttpException) {
+        if (error.code != 403 && error.code != 401 && !error.cloudflareChallenge) throw error
+        throw MangaSiteAccessException(accessReason(error), error.code, error)
+    }
 
     private suspend fun loadRepos(): List<MangaRepoInfo> {
         val raw = settings.getRaw(KEY_REPOS) ?: return emptyList()
@@ -506,24 +575,18 @@ class AndroidMangaBackend(
 }
 
 /**
- * Trust decisions persisted through Folio's settings repository. The in-memory sets are
- * authoritative so trust checks during extension loading never race persistence.
+ * Android runtime adapter for persisted approvals and repository-key metadata.
  */
 private class FolioTrustStore(
     private val settings: SettingsRepository,
     private val scope: CoroutineScope,
 ) : TrustStore {
 
-    private val trusted = MutableStateFlow<Set<String>>(emptySet())
+    private val approvals = ExtensionTrustStore(settings)
     private val repoKeys = MutableStateFlow<Set<String>>(emptySet())
     private var persistedRepoKeys: Set<String>? = null
 
-    suspend fun preload() {
-        val raw = settings.getRaw(KEY_TRUSTED)
-        if (!raw.isNullOrBlank()) {
-            trusted.value = raw.split("\n").filter { it.isNotBlank() }.toSet()
-        }
-    }
+    suspend fun preload() = approvals.preload()
 
     fun setRepoKeys(keys: Set<String>) {
         if (keys.isEmpty()) return
@@ -544,25 +607,13 @@ private class FolioTrustStore(
         return persistedRepoKeys!!
     }
 
-    override suspend fun trustedExtensions(): Set<String> = trusted.value
+    override suspend fun trustedExtensions(): Set<String> = approvals.trustedExtensions()
 
-    override fun trust(entry: String, pkgName: String) {
-        trusted.value = trusted.value.filterNot { it.startsWith("$pkgName:") }.toSet() + entry
-        persist()
-    }
+    override suspend fun trust(entry: String, pkgName: String) = approvals.trust(entry, pkgName)
 
-    override fun revokeAll() {
-        trusted.value = emptySet()
-        persist()
-    }
-
-    private fun persist() {
-        val snapshot = trusted.value.joinToString("\n")
-        scope.launch { settings.setRaw(KEY_TRUSTED, snapshot) }
-    }
+    override suspend fun revokeAll() = approvals.revokeAll()
 
     companion object {
-        private const val KEY_TRUSTED = "manga.trusted"
         private const val KEY_REPO_KEYS = "manga.repokeys"
     }
 }

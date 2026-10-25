@@ -9,7 +9,9 @@ import com.folio.reader.ui.theme.POOL_ALPHA_CEILING
 import com.folio.reader.ui.theme.atmosphereFor
 import com.folio.reader.ui.theme.barGlassFor
 import com.folio.reader.ui.theme.fieldColors
+import com.folio.reader.ui.theme.folioFacetedFieldPalette
 import com.folio.reader.ui.theme.mixG
+import com.folio.reader.ui.theme.mixOklab
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.test.Test
@@ -72,6 +74,48 @@ class DesignSystemTest {
                 "${palette.id}: pool alpha ${atmos.poolAlpha} exceeds the " +
                     "$POOL_ALPHA_CEILING atmosphere ceiling",
             )
+        }
+    }
+
+    @Test
+    fun facetedFieldsUseAmbientLightsAndBridgeBothEndsOfTheLoop() {
+        val back = Color(0xFF101925)
+        val lights = listOf(Color(0xFF88B5E2), Color(0xFF8BCABD))
+        val colours = folioFacetedFieldPalette(
+            back, lights + Color(0xFFD58B56), listOf(Color(0xFFE5BC75), Color(0xFFC9A5E4)), 0.3f,
+        )
+        assertEquals(
+            colours,
+            folioFacetedFieldPalette(back, lights + Color.Red, listOf(Color.Green, Color.Magenta), 0.3f),
+        )
+        val first = mixOklab(back, lights[0], 0.3f)
+        val second = mixOklab(back, lights[1], 0.3f)
+        assertEquals(
+            listOf(first, mixOklab(first, second, 0.4f), second, mixOklab(first, second, 0.6f)),
+            colours,
+        )
+    }
+
+    @Test
+    fun facetedFieldsKeepNeutralThemesNeutralAndHandleMissingLights() {
+        val back = Color(0xFF151515)
+        val lights = listOf(Color(0xFF888888), Color(0xFFBBBBBB))
+        for (colour in folioFacetedFieldPalette(back, lights, listOf(Color.Red), 0.3f)) {
+            assertTrue(abs(colour.red - colour.green) < 0.0001f)
+            assertTrue(abs(colour.green - colour.blue) < 0.0001f)
+            assertEquals(1f, colour.alpha)
+        }
+        assertEquals(List(4) { back }, folioFacetedFieldPalette(back, lights, emptyList(), 0f))
+        assertEquals(
+            folioFacetedFieldPalette(back, lights, emptyList(), 0.3f),
+            folioFacetedFieldPalette(back, emptyList(), lights, 0.3f),
+        )
+        val fallback = folioFacetedFieldPalette(back, emptyList(), emptyList(), 0.3f)
+        assertEquals(4, fallback.size)
+        for (colour in fallback) {
+            assertTrue(abs(colour.red - back.red) < 0.0001f)
+            assertTrue(abs(colour.green - back.green) < 0.0001f)
+            assertTrue(abs(colour.blue - back.blue) < 0.0001f)
         }
     }
 

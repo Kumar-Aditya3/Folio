@@ -1,5 +1,20 @@
 package com.folio.reader.ui.statistics
 
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.*
+import com.folio.reader.ui.components.*
+import kotlin.math.floor
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,45 +62,66 @@ import com.folio.reader.ui.theme.rememberFolioAmbientColor
  * labelled. The manga chapters chart reuses [SmoothWeekCurve] so both halves
  * of the screen speak one chart language.
  */
+/** Date selection uses the same centered bins as the actual curve's data points. */
+internal fun weekIndexAt(x: Float, width: Float, count: Int): Int {
+    if (count <= 1 || !x.isFinite() || !width.isFinite() || width <= 0f) return 0
+    return floor(x / width * count).toInt().coerceIn(0, count - 1)
+}
+
 @Composable
 internal fun WeekChart(week: List<StatDay>) {
-    val total = week.sumOf { it.minutes }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            FolioSectionHead(
-                title = "Last 7 days",
-                trailing = if (total > 0L) {
-                    {
-                        Text(
-                            text = shortMinutes(total),
-                            style = FolioTheme.typography.labelSmall,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                        )
-                    }
-                } else null,
-            )
+    val colors = FolioTheme.colors
+    if (week.isEmpty()) {
+        Text("No reading recorded yet", color = colors.onSurfaceVariant)
+        return
+    }
+    val dates = remember(week) { week.map { it.date } }
+    val values = remember(week) { week.map { it.minutes.toFloat() } }
+    val labels = remember(dates) { dates.map { it.dayOfWeek.name.take(1) } }
+    var selected by remember(dates) { mutableIntStateOf(week.lastIndex) }
+    val day = week[selected.coerceIn(week.indices)]
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        FolioSectionHead(title = "Last 7 days", trailing = {
+            Text(shortMinutes(week.sumOf { it.minutes }), style = FolioTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant)
+        })
+        // Only the plot accepts a scrub. The readout has its own fixed place below it;
+        // no moving overlay, animated layout, or blur/shader work follows the finger.
+        Box(Modifier.fillMaxWidth().onKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                Key.DirectionLeft -> { selected = (selected - 1).coerceAtLeast(0); true }
+                Key.DirectionRight -> { selected = (selected + 1).coerceAtMost(week.lastIndex); true }
+                else -> false
+            }
+        }.focusable()
+            .pointerInput(dates) {
+                detectTapGestures { selected = weekIndexAt(it.x, size.width.toFloat(), week.size) }
+            }.pointerInput(dates) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    selected = weekIndexAt(change.position.x, size.width.toFloat(), week.size)
+                }
+            }.semantics {
+                contentDescription = "Weekly reading timeline"
+                stateDescription = "${day.date}: ${day.minutes} minutes"
+                customActions = listOf(
+                    CustomAccessibilityAction("Previous day") { selected = (selected - 1).coerceAtLeast(0); true },
+                    CustomAccessibilityAction("Next day") { selected = (selected + 1).coerceAtMost(week.lastIndex); true })
+            }) {
+            SmoothWeekCurve(values, labels, FolioTokens.weekChartHeight, selectedIndex = selected)
         }
-        Spacer(Modifier.height(FolioTokens.space3))
-        SmoothWeekCurve(
-            values = week.map { it.minutes.toFloat() },
-            dayLabels = week.map { it.date.dayOfWeek.name.take(1) },
-            plotHeight = FolioTokens.weekChartHeight,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(day.date.toString(), Modifier.weight(1f), style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant)
+            Text(shortMinutes(day.minutes), style = FolioTheme.typography.titleSmall,
+                color = colors.accentProgress)
+        }
+        Text("Tap or slide across the curve", style = FolioTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant)
     }
 }
 
-/**
- * Alpha of the week curve's area wash where it meets the curve, fading to nothing
- * at the baseline (Rule 15: a chart fill is a gradient, never a slab).
- *
- * 0.25 was calibrated against `accentProgress`, a saturated blue that keeps its
- * edge on the sunken well. An ambient hue is not that obliging: a cover can hand
- * the room a low-chroma sand or a near-black umber, and at a quarter strength
- * either one dissolves into the well's own fill, so the wash reads as nothing.
- * This is the level at which the darkest usable cover hue still separates from the
- * well while the curve — not the colour under it — stays the top edge of the data.
- */
 private const val WEEK_AREA_TOP_ALPHA = 0.42f
 
 /**
@@ -107,6 +143,7 @@ internal fun SmoothWeekCurve(
     plotHeight: Dp,
     modifier: Modifier = Modifier,
     valueCaptions: List<String> = emptyList(),
+    selectedIndex: Int? = null,
 ) {
     val colors = FolioTheme.colors
     Column(modifier = modifier) {
@@ -175,6 +212,14 @@ internal fun SmoothWeekCurve(
                         }
                         // Rule 15 peak marker: the week's max day carries a dot in
                         // accentStreak, appearing only once the sweep has reached it.
+                        selectedIndex?.let { index -> points.getOrNull(index)?.let { point ->
+                            if (progress >= 1f) {
+                                drawLine(colors.onSurface.copy(alpha = .14f), Offset(point.x, topPad),
+                                    Offset(point.x, baseline), strokeWidth = 1.dp.toPx())
+                                drawCircle(colors.surface, radius = 6.dp.toPx(), center = point)
+                                drawCircle(accent, radius = 3.5.dp.toPx(), center = point)
+                            }
+                        } }
                         if (progress >= 1f && peakIndex >= 0 && values[peakIndex] > 0f) {
                             drawCircle(peakAccent, radius = dotRadius, center = points[peakIndex])
                         }

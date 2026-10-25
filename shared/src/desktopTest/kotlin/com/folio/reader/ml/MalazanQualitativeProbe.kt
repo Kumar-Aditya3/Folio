@@ -55,7 +55,7 @@ class MalazanQualitativeProbe {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-malazan-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-malazan-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         searchRepository = JdbcSearchRepository(database)

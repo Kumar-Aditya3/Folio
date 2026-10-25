@@ -30,7 +30,7 @@ class ChunkRepositoryTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-chunks-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-chunks-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         repository = JdbcChunkRepository(database)
     }

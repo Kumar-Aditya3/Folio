@@ -28,6 +28,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
@@ -54,7 +59,7 @@ import com.folio.reader.ui.theme.rememberMotionAnimation
  * when [steps] is set — the value readout above the track is the affordance, and
  * ticks turn a 900-unit weight scale into visual noise.
  */
-private val TrackHeight = 6.dp
+private val TrackHeight = 4.dp
 private val KnobSize = 16.dp
 private val KnobBox = 26.dp
 private val HaloResting = 0.dp
@@ -159,10 +164,18 @@ private fun FolioSliderKnob(accent: Color, ring: Color, halo: Dp, elevation: Dp)
         }
         Box(
             modifier = Modifier
-                .size(KnobSize)
-                .shadow(elevation, CircleShape)
-                .background(accent, CircleShape)
-                .border(2.dp, ring, CircleShape)
+                .size(width = 14.dp, height = 22.dp)
+                .shadow(elevation, RoundedCornerShape(6.dp))
+                .background(accent, RoundedCornerShape(6.dp))
+                .border(1.5.dp, ring, RoundedCornerShape(6.dp))
+                .drawWithCache {
+                    onDrawBehind {
+                        drawLine(ring.copy(alpha = .7f), Offset(size.width * .43f, size.height * .32f),
+                            Offset(size.width * .43f, size.height * .68f), 1.dp.toPx())
+                        drawLine(ring.copy(alpha = .4f), Offset(size.width * .64f, size.height * .40f),
+                            Offset(size.width * .64f, size.height * .68f), .7.dp.toPx())
+                    }
+                }
         )
     }
 }
@@ -180,7 +193,7 @@ private fun FolioSliderTrack(fraction: Float, active: Color, inactive: Color) {
                 modifier = Modifier
                     .fillMaxWidth(fraction)
                     .fillMaxHeight()
-                    .background(active, CircleShape)
+                    .background(Brush.horizontalGradient(listOf(active, lerp(active, FolioTheme.colors.onSurface, .20f))), CircleShape)
             )
         }
     }
@@ -224,6 +237,7 @@ fun FolioSliderRow(
             )
             Text(
                 text = valueLabel,
+                fontFamily = FontFamily.Monospace,
                 style = FolioTheme.typography.labelLarge,
                 fontWeight = FontWeight.Medium,
                 color = if (enabled) readout else readout.copy(alpha = 0.5f),

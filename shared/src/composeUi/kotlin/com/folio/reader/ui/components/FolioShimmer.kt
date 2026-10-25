@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioTheme
@@ -153,18 +154,20 @@ fun Modifier.folioShimmer(
         .clip(shape)
         .drawWithCache {
             val band = size.width * SHIMMER_BAND_FRACTION
+            val sweepBrush = Brush.linearGradient(
+                0f to Color.Transparent,
+                0.5f to peak,
+                1f to Color.Transparent,
+                start = Offset.Zero,
+                end = Offset(band, size.height),
+            )
             onDrawBehind {
                 drawRect(color = base)
                 val x = shimmerSweep(phase.value, size.width, band)
-                drawRect(
-                    brush = Brush.linearGradient(
-                        0f to Color.Transparent,
-                        0.5f to peak,
-                        1f to Color.Transparent,
-                        start = Offset(x, 0f),
-                        end = Offset(x + band, size.height),
-                    ),
-                )
+                // Move the cached shader, keeping the destination rectangle stationary.
+                translate(left = x) {
+                    drawRect(sweepBrush, topLeft = Offset(-x, 0f), size = size)
+                }
             }
         }
 }

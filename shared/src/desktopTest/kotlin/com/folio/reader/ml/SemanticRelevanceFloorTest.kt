@@ -40,7 +40,7 @@ class SemanticRelevanceFloorTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-floor-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-floor-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         chunkRepository = JdbcChunkRepository(database)
     }

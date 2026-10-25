@@ -1,5 +1,6 @@
 package com.folio.reader.ui.quotes
 
+import com.folio.reader.ui.components.folioPaper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -37,7 +38,7 @@ internal fun MangaQuoteCard(
     // rather than by a different container.
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxWidth().folioPaper(layered = true).padding(16.dp)
             .clickable { onClick() }
     ) {
         com.folio.reader.ui.components.FolioCallout(accent = FolioTheme.colors.tertiary) {

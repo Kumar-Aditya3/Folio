@@ -40,7 +40,7 @@ class ExternalOpenDedupeTest {
 
     @BeforeTest
     fun setUp() {
-        root = createTempDir("folio-external-open-")
+        root = kotlin.io.path.createTempDirectory("folio-external-open-").toFile()
         platform = DesktopPlatform(root)
         database = Database(platform.fileSystem.getDatabasePath())
         bookRepository = JdbcBookRepository(database)

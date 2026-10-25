@@ -2,7 +2,12 @@
 
 package com.folio.reader.ui.manga
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,14 +57,22 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.components.FolioDialog
 import com.folio.reader.ui.components.PageBlock
 import com.folio.reader.ui.reader.pageBlockChromeHeight
+import com.folio.reader.ui.reader.ReaderChromeGroup
 import com.folio.reader.ui.components.folioGlassEffect
-import com.folio.reader.ui.components.folioSunken
+import com.folio.reader.ui.components.folioSettingsChoice
 import com.folio.reader.ui.settings.readableLabel
 import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.theme.readerVeilAlpha
+import com.folio.reader.ui.theme.readerPanelVeilAlpha
+import com.folio.reader.ui.theme.glassTierAlpha
+import com.folio.reader.ui.theme.FolioSurfaceOpacity
+import com.folio.reader.ui.theme.folioSheenGain
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.sharedTextOrNoop
 import com.folio.reader.ui.theme.FolioTokens
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 import kotlin.math.roundToInt
 
 @Composable
@@ -71,6 +86,8 @@ internal fun ReaderSettingsDialog(
     // separate window and therefore an opaque slab over the art. See FolioDialog.
     FolioDialog(
         expanded = true,
+        fillAlpha = FolioTheme.readerPanelVeilAlpha,
+        readerMaterial = true,
         onDismissRequest = onDismiss,
         title = "Reader settings",
     ) {
@@ -144,6 +161,12 @@ private fun ReaderModeChip(label: String, selected: Boolean, onClick: () -> Unit
 
 @Composable
 internal fun ReaderControls(
+    /**
+     * Whether the bars are shown. Passed in rather than wrapped in an `if` at the call site: an
+     * `AnimatedVisibility` only animates *out* while it stays composed, so a caller that composes
+     * this conditionally gets an instant disappear however the inside is written.
+     */
+    visible: Boolean = true,
     mangaTitle: String,
     /** §17: the manga's id, so this title pairs with the shelf tile's. Null disables the pairing. */
     mangaId: String? = null,
@@ -158,151 +181,115 @@ internal fun ReaderControls(
     onShowSettings: () -> Unit,
     onSeek: (Int) -> Unit,
     onBack: () -> Unit,
+    onShowPages: () -> Unit = onShowSettings,
+    onPreview: (Int?) -> Unit = {},
 ) {
-    // Immersive glass over the art, not a flat black lid. The base is a vertical
-    // gradient — heavier at the OS-status edge for icon legibility, lighter toward
-    // the page — and the mirror finish is a thin white specular band along the crown,
-    // since the light source is above and both bars catch it at their top edge. The
-    // art stays perceivable through the ~0.70 glass while the bar still dominates.
-    // §16: the pages are a Compose backdrop, so the bars blur the art underneath
-    // when the device can carry it; the gradients above still govern the fill.
-    val glassTop = Brush.verticalGradient(
-        0f to Color.Black.copy(alpha = 0.86f),
-        1f to Color.Black.copy(alpha = 0.70f),
+    // The same thin reader material as books and documents; the page backdrop and
+    // reader opacity preference feed readerIsland through ReaderChromeGroup.
+
+    // The chrome's own row in the motion table — the same key the text reader's bars were built
+    // for. It resolves to a `tween` on `motionStandard`, not Compose's default spring, which
+    // matters here for the reason the text reader documents: a spring's start time comes from the
+    // frame clock, so on a heavy first frame a dropped frame can pin the bar at its start value.
+    // Reduce-motion skips the transition entirely rather than running it at zero duration, so the
+    // bars render their final static form (Rule 19).
+    val chromeMotion = com.folio.reader.ui.theme.rememberMotionEnabled()
+    val chromeSpec = rememberMotionAnimation<Float>(MotionKey.ReaderChromeToggle)
+    // The slide animates an offset, so it needs its own spec: a `FiniteAnimationSpec<Float>` will
+    // not unify with `FiniteAnimationSpec<IntOffset>`.
+    val chromeSlide = rememberMotionAnimation<androidx.compose.ui.unit.IntOffset>(
+        MotionKey.ReaderChromeToggle
     )
-    val glassBottom = Brush.verticalGradient(
-        0f to Color.Black.copy(alpha = 0.70f),
-        1f to Color.Black.copy(alpha = 0.86f),
-    )
-    val sheen = Brush.verticalGradient(
-        0f to Color.White.copy(alpha = 0.16f),
-        0.55f to Color.Transparent,
-    )
-    val hairline = Color.White.copy(alpha = 0.10f)
-    val glassCaps = com.folio.reader.ui.components.LocalGlassCapabilities.current
-    val glassBackdrop = com.folio.reader.ui.components.LocalGlassBackdrop.current
-    val blurLayer = if (glassCaps.blur && glassBackdrop != null) {
-        Modifier.folioGlassEffect(
-            backdrop = glassBackdrop,
-            backgroundColor = Color.Black,
-            // §16 cost model: these are full-bleed chrome bands over a page the reader is
-            // panning and zooming, which is the worst possible frame budget in the app —
-            // the manga backdrop changes every frame of a fling, so the band re-captures
-            // and re-blurs its whole area every frame. The bar class budget is a quarter
-            // of that fill cost at the same visual radius. See FolioGlassCost.
-            inputScale = com.folio.reader.ui.components.FolioGlassCost.resolve(
-                com.folio.reader.ui.components.FolioGlassCost.bar,
-                glassCaps,
-            ),
-        )
-    } else {
-        Modifier
-    }
 
     Column(Modifier.fillMaxSize()) {
-        com.folio.reader.ui.components.FolioStatusBarBand(inkBand = true)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(blurLayer)
-                .background(glassTop)
-                .background(sheen)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // The two bars leave toward opposite edges of the screen — the top bar up to the status
+        // edge, the bottom bar down to the gesture bar — so a tap reads as the chrome folding away
+        // from the page instead of the whole overlay being cut. The spacer between them stays
+        // composed either way, so the layout never reflows; it is empty, and it claims no touches.
+        AnimatedVisibility(
+            visible = visible,
+            enter = if (chromeMotion) {
+                fadeIn(chromeSpec) + slideInVertically(chromeSlide) { -it }
+            } else {
+                androidx.compose.animation.EnterTransition.None
+            },
+            exit = if (chromeMotion) {
+                fadeOut(chromeSpec) + slideOutVertically(chromeSlide) { -it }
+            } else {
+                androidx.compose.animation.ExitTransition.None
+            },
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    mangaTitle,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    // §17: arrives with the cover rather than appearing once the
-                    // reader has already opened, when the shelf's tile is where the
-                    // reader came from.
-                    modifier = if (mangaId != null) {
-                        Modifier.sharedTextOrNoop(FolioSharedKeys.mangaTitle(mangaId))
-                    } else {
-                        Modifier
-                    },
-                )
-                Text(
-                    chapterName,
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconButton(onClick = onToggleBookmark) {
-                Icon(
-                    imageVector = if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                    contentDescription = "Bookmark chapter",
-                    tint = if (bookmarked) Color(0xFF8B9DC3) else Color.White,
-                )
-            }
-            IconButton(onClick = onShowNotes) {
-                Icon(
-                    imageVector = Icons.Filled.EditNote,
-                    contentDescription = "Notes",
-                    tint = Color.White,
-                )
-            }
-            IconButton(onClick = onShowSettings) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Reader settings",
-                    tint = Color.White,
-                )
-            }
+            com.folio.reader.ui.reader.ReaderTopBar(
+                bookTitle = mangaTitle, showClock = false, occludes = false,
+                pageSelection = null, onHighlightParagraph = null, onSelectionConsumed = {},
+                isBookmarked = bookmarked, bookmarkColor = FolioTheme.colors.accentAnnotation,
+                onBackPress = onBack, onSearchClick = onShowPages, onBookmarkClick = onToggleBookmark,
+                onOpenToc = onShowPages, onOpenAnnotations = onShowNotes, onToggleReaderPanel = onShowSettings)
         }
-
-        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
 
         Spacer(Modifier.weight(1f))
 
-        Box(Modifier.fillMaxWidth().height(1.dp).background(hairline))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(blurLayer)
-                .background(glassBottom)
-                .background(sheen)
-                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space2),
-            verticalAlignment = Alignment.CenterVertically,
+        AnimatedVisibility(
+            visible = visible,
+            enter = if (chromeMotion) {
+                fadeIn(chromeSpec) + slideInVertically(chromeSlide) { it }
+            } else {
+                androidx.compose.animation.EnterTransition.None
+            },
+            exit = if (chromeMotion) {
+                fadeOut(chromeSpec) + slideOutVertically(chromeSlide) { it }
+            } else {
+                androidx.compose.animation.ExitTransition.None
+            },
         ) {
-            val lastPage = (pageCount - 1).coerceAtLeast(0)
-            // Progress uses the same leaf-stack PageBlock the document and book readers draw,
-            // so all three bottom bars match; PageBlock mirrors the fill and the seek maths for
-            // RTL internally, so the flanking numerals just swap which end they sit at.
-            val fraction = if (lastPage <= 0) 0f else currentPage.toFloat() / lastPage.toFloat()
-            Text(
-                if (rtl) "$pageCount" else "${currentPage + 1}",
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            PageBlock(
-                fraction = fraction,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(pageBlockChromeHeight)
-                    .padding(horizontal = FolioTokens.space2),
-                paper = Color.Black,
-                ink = Color.White,
-                accent = FolioTheme.colors.accentProgress,
-                pageCountHint = pageCount,
-                stateLabel = "Page ${currentPage + 1} of $pageCount",
-                onSeek = { f -> onSeek((f * lastPage).roundToInt().coerceIn(0, lastPage)) },
-                rtl = rtl,
-            )
-            Text(
-                if (rtl) "${currentPage + 1}" else "$pageCount",
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Column {
+                ReaderChromeGroup(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp), verticalInset = 0.dp) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(pageBlockChromeHeight),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val lastPage = (pageCount - 1).coerceAtLeast(0)
+                    // Progress uses the same leaf-stack PageBlock the document and book readers draw,
+                    // so all three bottom bars match; PageBlock mirrors the fill and the seek maths for
+                    // RTL internally, so the flanking numerals just swap which end they sit at.
+                    val fraction = if (lastPage <= 0) 0f else currentPage.toFloat() / lastPage.toFloat()
+                    Text(
+                        if (rtl) "$pageCount" else "${currentPage + 1}",
+                        color = FolioTheme.colors.onSurface,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                    PageBlock(
+                        fraction = fraction,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(pageBlockChromeHeight)
+                            .padding(horizontal = FolioTokens.space2),
+                        thickness = 9.dp,
+                        paper = FolioTheme.colors.surface,
+                        ink = FolioTheme.colors.onSurface,
+                        accent = FolioTheme.colors.accentProgress,
+                        pageCountHint = pageCount,
+                        stateLabel = "Page ${currentPage + 1} of $pageCount",
+                        onSeek = { f -> onSeek((f * lastPage).roundToInt().coerceIn(0, lastPage)) },
+                        onPreview = { f -> onPreview(f?.let { (it * lastPage).roundToInt().coerceIn(0, lastPage) }) },
+                        rtl = rtl,
+                    )
+                    Text(
+                        if (rtl) "${currentPage + 1}" else "$pageCount",
+                        color = FolioTheme.colors.onSurface,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                }
+                com.folio.reader.ui.reader.ReaderLocationLabel(chapterName,
+                    Modifier.fillMaxWidth().padding(bottom = 2.dp))
+                }
+                }
+            }
         }
     }
 }
@@ -316,6 +303,8 @@ internal fun PageActionsDialog(
 ) {
     FolioDialog(
         expanded = true,
+        fillAlpha = FolioTheme.readerPanelVeilAlpha,
+        readerMaterial = true,
         onDismissRequest = onDismiss,
         title = "Page ${pageIndex + 1}",
     ) {
@@ -370,9 +359,11 @@ internal fun NoteDialog(
     onSave: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(existing?.content ?: "") }
+    var text by remember(existing?.id, pageIndex) { mutableStateOf(existing?.content ?: "") }
     FolioDialog(
         expanded = true,
+        fillAlpha = FolioTheme.readerPanelVeilAlpha,
+        readerMaterial = true,
         onDismissRequest = onDismiss,
         title = "Note — page ${pageIndex + 1}",
     ) {
@@ -411,12 +402,14 @@ internal fun NotesListDialog(
     val revision by viewModel.notesRevision.collectAsState()
     val colors = FolioTheme.colors
 
-    LaunchedEffect(revision) { notes = viewModel.chapterNotes() }
+    LaunchedEffect(revision) { notes = viewModel.mangaNotes() }
 
     FolioDialog(
         expanded = true,
+        fillAlpha = FolioTheme.readerPanelVeilAlpha,
+        readerMaterial = true,
         onDismissRequest = onDismiss,
-        title = "Chapter notes",
+        title = "Manga notes",
     ) {
         if (notes.isEmpty()) {
             Text(
@@ -435,15 +428,9 @@ internal fun NotesListDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            // Was `.background(colors.surfaceVariant, …)`: an opaque row inside a
-                            // glass pane, which is the same defect as the pane itself one level
-                            // down. `folioSunken` is the app's own nested-well material and the
-                            // host already quiets it (FolioSurfaceContents) — but the §19 fill
-                            // floor stops there: this pane sits over a native WebView Android
-                            // cannot blur, and on the no-blur path a floored well would stack
-                            // translucencies and let the page's text bleed through the very bed
-                            // the well exists to give. The reader stays opaque (fullMaterial).
-                            .folioSunken(FolioShapes.inset, fullMaterial = true)
+                            .clickable { viewModel.openNote(note); onDismiss() }
+                            // The row shares the reader dialog's material instead of adding an opaque well.
+                            .folioSettingsChoice(false, FolioShapes.inset)
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

@@ -30,7 +30,7 @@ class ChapterTextReadTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-chaptertext-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-chaptertext-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         searchRepository = JdbcSearchRepository(database)
     }

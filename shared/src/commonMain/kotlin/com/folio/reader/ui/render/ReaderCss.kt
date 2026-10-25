@@ -21,6 +21,14 @@ import com.folio.reader.settings.TextAlignment
  */
 object ReaderCss {
 
+    /** Generic CSS families are keywords, not quoted installed-font names. */
+    internal fun genericFontStack(requested: String): String? = when (requested.trim().lowercase()) {
+        "serif" -> "serif"
+        "sans serif", "sans-serif", "sansserif" -> "sans-serif"
+        "monospace" -> "monospace"
+        else -> null
+    }
+
     private fun Int.rgb(): String = toUInt().toString(16).padStart(8, '0').drop(2)
 
     /** Weighted luminance, good enough to pick readable ink over a flat selection wash. */
@@ -236,6 +244,7 @@ object ReaderCss {
                 // calm; the theme's expressive heading/link colour only paints when the
                 // reader opts into editorial styling. Hierarchy survives on size/weight.
                 "h1,h2,h3,h4,h5,h6{color:#${(if (settings.editorialReading) theme.headingText else theme.primaryText).rgb()} !important;}" +
+                chapterComposition(settings) +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
@@ -376,6 +385,7 @@ object ReaderCss {
                 prettyWrapCss +
                 balanceWrapCss +
                 "h1,h2,h3,h4,h5,h6{color:#${(if (settings.editorialReading) theme.headingText else theme.primaryText).rgb()} !important;}" +
+                chapterComposition(settings) +
                 HighlightPaint.css +
                 "img{max-width:100%;height:auto;break-inside:avoid;}" +
                 "a{color:inherit;text-decoration:none;}" +
@@ -390,10 +400,27 @@ object ReaderCss {
                             "float:none !important;margin:0 !important;padding:0 !important;vertical-align:baseline !important;}")
     }
 
+    /** Native text structure is left intact: no inserted nodes, invented chapter numbers or
+     * locator changes. Original and Hybrid retain publisher heading composition. */
+    internal fun chapterComposition(settings: ReaderSettings): String {
+        if (settings.formattingMode != FormattingMode.NORMALIZED) return ""
+        val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+        return "h1,h2,body h1,body h2{font-family:'FolioDisplay',sans-serif !important;font-weight:500 !important;" +
+            "font-optical-sizing:auto !important;letter-spacing:-.035em !important;line-height:1.14 !important;" +
+            "text-align:start !important;break-after:avoid !important;}" +
+            "h1{font-size:2.15em !important;margin:1.2em 0 .85em !important;}" +
+            "h2{font-size:1.6em !important;margin:1.35em 0 .8em !important;}" +
+            "h1::after{content:'';display:block;width:2.5rem;height:1px;" +
+            "background:#${theme.divider.rgb()};margin-top:.7em;}" +
+            "h1+p,h2+p{font-size:1.04em !important;text-indent:0 !important;}" +
+            "blockquote{border-inline-start:1px solid #${theme.divider.rgb()};" +
+            "padding-inline-start:1em !important;margin-inline:0 !important;}"
+    }
+
     // The shadow sheet is generated without the surface's font-stack resolver, so it
     // falls back to a serif stack plus the requested family name; imported/bundled
     // faces still resolve by family-name because their @font-face lives in the
     // document (fonts pierce shadow boundaries by name).
     private fun fontStackFallback(requested: String): String =
-        "'$requested',Literata,'EB Garamond',Georgia,serif"
+        genericFontStack(requested) ?: "'$requested',Literata,'EB Garamond',Georgia,serif"
 }

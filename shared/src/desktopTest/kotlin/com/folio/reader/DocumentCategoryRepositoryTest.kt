@@ -31,7 +31,7 @@ class DocumentCategoryRepositoryTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-document-categories-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-document-categories-").toFile()
         database = Database(DesktopPlatform(tempRoot).fileSystem.getDatabasePath())
         documents = JdbcDocumentRepository(database)
         categories = JdbcDocumentCategoryRepository(database)

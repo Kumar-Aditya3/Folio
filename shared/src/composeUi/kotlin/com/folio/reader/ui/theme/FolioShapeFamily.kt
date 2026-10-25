@@ -73,10 +73,10 @@ enum class FolioShapeClass {
      */
     HERO,
 
-    /** Grouped content, 18dp. FREE ±3dp, which is the largest budget that keeps every card clear of inset's ceiling. */
+    /** Grouped content, 20dp. FREE ±3dp, which is the largest budget that keeps every card clear of inset's ceiling. */
     CARD,
 
-    /** Sunken panels, 12dp. FREE ±2dp — the tightest budget, because a well is identified by its depth against the plane around it. */
+    /** Sunken panels, 14dp. FREE ±2dp — the tightest budget, because a well is identified by its depth against the plane around it. */
     INSET,
 
     /**
@@ -231,7 +231,7 @@ internal val FolioMaxCorner: Dp = 50.dp
  *
  *  - hero — wide 28..40, narrow 4..23, and never within 8dp of the wide pair's tighter
  *    corner whatever the dice roll (the guard, not the range, is what holds them apart);
- *  - card 15..21, inset 10..14 — card's floor clears inset's ceiling, so "embedded things
+ *  - card 17..23, inset 12..16 — card's floor clears inset's ceiling, so "embedded things
  *    read smaller than the surface holding them" survives every seed;
  *  - callout — leading 1..3, trailing 10..18, so the rule edge stays flat at any seed.
  *
@@ -264,7 +264,7 @@ object FolioShapeFamily {
     )
 
     val card = FolioShapeRow(
-        base = FolioCorners(18.dp, 18.dp, 18.dp, 18.dp),
+        base = FolioCorners(20.dp, 20.dp, 20.dp, 20.dp),
         delta = FolioCorners(3.dp, 3.dp, 3.dp, 3.dp),
         mask = FolioCornerMask.All,
         salt = 0x11D3,
@@ -272,7 +272,7 @@ object FolioShapeFamily {
     )
 
     val inset = FolioShapeRow(
-        base = FolioCorners(12.dp, 12.dp, 12.dp, 12.dp),
+        base = FolioCorners(14.dp, 14.dp, 14.dp, 14.dp),
         delta = FolioCorners(2.dp, 2.dp, 2.dp, 2.dp),
         mask = FolioCornerMask.All,
         salt = 0x11D4,

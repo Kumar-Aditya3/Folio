@@ -94,6 +94,12 @@ internal class ReaderContentLoader(
         scope.launch { loadChapterHtml() }
     }
 
+    suspend fun previewChapter(index: Int, fraction: Float, paragraph: Int?): ReaderPassagePreview? {
+        val bookId = currentBookId() ?: return null
+        val chapter = chapters().getOrNull(index) ?: return null
+        return withContext(Dispatchers.IO) { readerPassagePreview(loadHtml(bookId, chapter), fraction, paragraph) }
+    }
+
     /**
      * Builds the window [READER_WINDOW_PRELOAD] chapters either side of [center]
      * (clamped to the book).
@@ -299,15 +305,17 @@ internal class ReaderContentLoader(
 
     private suspend fun loadHtml(bookId: String, chapter: Chapter): String {
         val key = "$bookId:${chapter.href}"
-        return htmlCache[key]
+        return synchronized(htmlCache) { htmlCache[key] }
             ?: chapterContentProvider(bookId, chapter.href).also { loaded ->
                 if (loaded.isNotBlank()) {
-                    htmlCache[key] = loaded
-                    while (htmlCache.size > MAX_HTML_CACHE) {
-                        val eldest = htmlCache.entries.iterator()
-                        if (!eldest.hasNext()) break
-                        eldest.next()
-                        eldest.remove()
+                    synchronized(htmlCache) {
+                        htmlCache[key] = loaded
+                        while (htmlCache.size > MAX_HTML_CACHE) {
+                            val eldest = htmlCache.entries.iterator()
+                            if (!eldest.hasNext()) break
+                            eldest.next()
+                            eldest.remove()
+                        }
                     }
                 }
             }

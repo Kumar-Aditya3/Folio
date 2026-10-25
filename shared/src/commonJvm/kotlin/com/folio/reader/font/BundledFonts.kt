@@ -95,10 +95,11 @@ object BundledFonts {
     /**
      * The interface faces. Extracted next to the reader fonts so [UiFonts] can load
      * them from a file, but deliberately kept out of [ALL]: they are app chrome
-     * (Fraunces for display, Manrope for everything functional), not typefaces to
+     * (Space Grotesk/Fraunces for display, Manrope for UI copy), not typefaces to
      * read a book in.
      */
     val UI_ONLY = listOf(
+        "spacegrotesk_variable.ttf",
         "fraunces_variable.ttf",
         "fraunces_italic_variable.ttf",
         "manrope_variable.ttf",

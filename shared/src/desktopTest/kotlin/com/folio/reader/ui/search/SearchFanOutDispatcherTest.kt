@@ -54,7 +54,7 @@ class SearchFanOutDispatcherTest {
 
     @BeforeEach
     fun setUp() {
-        tempRoot = createTempDir("folio-searchfanout-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-searchfanout-").toFile()
         database = Database(File(tempRoot, "folio.db").absolutePath)
         searchRepository = JdbcSearchRepository(database)
         highlightRepository = JdbcHighlightRepository(database)

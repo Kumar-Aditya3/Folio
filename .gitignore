@@ -168,3 +168,8 @@ docs/BUGS-*.md
 docs/TROUBLESHOOTING.md
 docs/FOLIO_*_PLAN.md
 docs/FOLIO_*_SPEC.md
+
+# Generated artifacts: rendered shader simulations, artwork captures and local build output.
+# Regenerable from source; kept out of history (225 MB of media + 30 MB build dir).
+outputs/
+.build-out/

@@ -278,9 +278,8 @@ fun AnimationsSettingsPanel(
             color = colors.onSurface,
         )
         Text(
-            text = "The living room behind every screen. Its speed costs nothing — the field " +
-                "redraws at the display's rate either way — and its intensity is how much the " +
-                "theme's colour shows through.",
+            text = "The living room behind every screen. Each field has its own motion and " +
+                "rendering budget; intensity controls how much of the theme's colour shows through.",
             style = FolioTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )

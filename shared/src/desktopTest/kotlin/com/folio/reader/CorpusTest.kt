@@ -53,7 +53,7 @@ class CorpusTest {
 
     @BeforeTest
     fun setUp() {
-        tempRoot = createTempDir("folio-test-")
+        tempRoot = kotlin.io.path.createTempDirectory("folio-test-").toFile()
         platform = DesktopPlatform(tempRoot)
         database = Database(platform.fileSystem.getDatabasePath())
         bookRepository = JdbcBookRepository(database)

@@ -26,16 +26,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -49,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.folio.reader.ui.components.FolioDialog
 import com.folio.reader.manga.MangaBrowseItem
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioCoverRailSkeleton
@@ -255,100 +249,19 @@ internal fun GlobalSourceSection(
 @Composable
 internal fun CategoryPickerDialog(
     categories: List<com.folio.reader.manga.MangaCategory>,
-    initialSelected: Set<String>,
+    initialSelected: Set<String>?,
     onCreate: suspend (String) -> String?,
-    onApply: (Set<String>) -> Unit,
+    onApply: suspend (Set<String>) -> Unit,
     onDismiss: () -> Unit,
+    title: String = "Categories",
 ) {
-    val colors = FolioTheme.colors
-    val scope = rememberCoroutineScope()
-    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
-    var newName by remember { mutableStateOf("") }
-
-    // Taps apply immediately — membership is written on every change, no confirm step.
-    fun apply(next: Set<String>) {
-        selected = next
-        onApply(next)
-    }
-
-    // §16 P5: the app's own in-window pane rather than Material's `AlertDialog` — a Dialog is a
-    // second window, so it can never blur the room behind it (see FolioDialog).
-    FolioDialog(
-        expanded = true,
-        onDismissRequest = onDismiss,
-        title = "Categories",
-    ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (categories.isEmpty()) {
-                    Text(
-                        "No categories yet — create one below.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-                categories.forEach { category ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                apply(
-                                    if (category.id in selected) selected - category.id
-                                    else selected + category.id,
-                                )
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = category.id in selected,
-                            onCheckedChange = {
-                                apply(if (it) selected + category.id else selected - category.id)
-                            },
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            category.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("New category") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = {
-                            val name = newName.trim()
-                            if (name.isNotBlank()) {
-                                scope.launch {
-                                    onCreate(name)?.let { apply(selected + it) }
-                                }
-                                newName = ""
-                            }
-                        },
-                        enabled = newName.trim().isNotEmpty(),
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create category")
-                    }
-                }
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = FolioTokens.space3, bottom = FolioTokens.space2),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onDismiss) { Text("Done") }
-        }
+    com.folio.reader.ui.library.LibraryAssignmentDialog(
+        title = title,
+        choices = categories.map { it.id to it.name },
+        initialSelected = initialSelected,
+        kind = "category",
+        onCreate = onCreate,
+        onConfirm = onApply,
+        onDismiss = onDismiss,
+    )
 }

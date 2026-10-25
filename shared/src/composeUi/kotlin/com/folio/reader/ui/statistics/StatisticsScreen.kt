@@ -1,5 +1,7 @@
 package com.folio.reader.ui.statistics
 
+import com.folio.reader.ui.components.*
+import com.folio.reader.ui.theme.FolioSurfaceContents
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -12,6 +14,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -149,6 +153,8 @@ fun StatisticsTabContent(
     /** Tapping a kept passage opens that quote's chapter in the reader (bookId, spineIndex).
      *  Default no-op keeps other hosts unchanged. */
     onOpenQuote: (RecentQuote) -> Unit = {},
+    mangaBackend: com.folio.reader.manga.MangaBackend? = null,
+    onMangaClick: (String) -> Unit = {},
 ) {
     val stats by state.collectAsState()
     // Gate the first frames on the real emission. `state` is a combine of four
@@ -162,16 +168,14 @@ fun StatisticsTabContent(
     // manga statistics, which compute with it (never filter after the fact).
     val exclusions by exclusionsFlow.collectAsState()
 
-    // ── Manga statistics ─────────────────────────────────────────────────
-    // The repository runs a library count, a completed count and the reading
-    // aggregates in one pass. Keyed on the exclusion set rather than re-fetched
-    // per visit: the old `LaunchedEffect(mangaStatsRepo, exclusions)` re-ran all of
-    // it every time the tab was entered, which made re-entering Stats as expensive
-    // as opening it. A settings-driven exclusion change still reloads, because that
-    // is a real change to what the numbers mean.
-    var mangaStats by remember { mutableStateOf<MangaStatistics?>(null) }
-    LaunchedEffect(mangaStatsRepo, exclusions) {
-        mangaStats = mangaStatsRepo?.getStatistics(exclusions)
+    // Live manga aggregates. A changed exclusion set starts with no stale snapshot
+    // while its replacement loads; library/category/history revisions refresh in place.
+    val mangaStats: MangaStatistics? = androidx.compose.runtime.key(mangaStatsRepo, exclusions) {
+        val flow: kotlinx.coroutines.flow.Flow<MangaStatistics?> = remember {
+            mangaStatsRepo?.observeStatistics(exclusions) ?: kotlinx.coroutines.flow.flowOf(null)
+        }
+        val current by flow.collectAsState(initial = null)
+        current
     }
 
     var goalMinutes by remember { mutableIntStateOf(initialGoalMinutes) }
@@ -239,6 +243,8 @@ fun StatisticsTabContent(
             onBookClick = onBookClick,
             onOpenExclusions = onOpenExclusions,
             onOpenQuote = onOpenQuote,
+            mangaBackend = mangaBackend,
+            onMangaClick = onMangaClick,
         )
     }
 }
@@ -250,7 +256,7 @@ fun StatisticsTabContent(
  * skeleton changes nothing about what it reads.
  */
 @Composable
-private fun StatisticsContent(
+internal fun StatisticsContent(
     stats: StatisticsUiState,
     listState: LazyListState,
     exclusions: Set<Pair<Scope, String>>,
@@ -262,6 +268,8 @@ private fun StatisticsContent(
     onBookClick: (String) -> Unit,
     onOpenExclusions: (() -> Unit)?,
     onOpenQuote: (RecentQuote) -> Unit,
+    mangaBackend: com.folio.reader.manga.MangaBackend?,
+    onMangaClick: (String) -> Unit,
 ) {
     LazyColumn(
         state = listState,
@@ -306,137 +314,73 @@ private fun StatisticsContent(
             if (mangaStats != null && mangaStats!!.hasData) {
                 item {
                     Spacer(Modifier.height(FolioTokens.spaceMovement))
-                    MangaStatsSection(mangaStats!!)
+                    StatsOpenSection { MangaStatsSection(mangaStats!!, stats.mostReadManga) }
                 }
             }
             return@LazyColumn
         }
 
-        // ── The four movements ─────────────────────────────────────────────
-        //
-        // This screen used to be ten sections separated by ten identical
-        // `spaceMovement` gaps, which is the literal definition of the
-        // "undifferentiated stack" FolioTokens' own rhythm note warns against:
-        // equal gaps tell the eye that every panel is equally important and
-        // unrelated to its neighbour, so a reader scans it like a spreadsheet
-        // rather than reading it.
-        //
-        // The content was always four ideas, so the spacing now says so:
-        //
-        //   I   Where you are now   overture · ledger
-        //   II  The shape of time   week chart · heatmap
-        //   III Per-book breakdown  predictions · where time went · genres
-        //   IV  Who you are         patterns · quotes
-        //       (manga is its own domain and keeps a full movement break)
-        //
-        // Within a movement: `spaceBeat`. Between movements: `spaceMovement`.
-        // Nothing is reordered and nothing is removed — only the air between
-        // them changes, which is the cheapest possible way to turn a list into
-        // a composition.
-        //
-        // ── Movement I — where you are right now ───────────────────────────
-        item {
-            StatsOverture(
-                stats = stats,
-                goalMinutes = goalMinutes,
-                onGoalChanged = onGoalChanged,
-                settingsRepository = settingsRepository,
-            )
-            // Movement I, second beat. The ledger is the overture's *caption* —
-            // the same question ("where am I right now?") answered in figures
-            // rather than in a hero numeral — so it sits a beat away, not a
-            // movement away. At spaceMovement the two read as unrelated slabs,
-            // which is what made the opening of this screen feel like a list.
+        // Open charts and ledgers carry the page; glass is reserved for two instruments.
+        item(key = "stats-overture") {
+            StatsOverture(stats, goalMinutes, onGoalChanged, settingsRepository)
             Spacer(Modifier.height(FolioTokens.spaceBeat))
         }
-
-        item {
-            StatsGlassCard { HeadlineRow(stats) }
-            // Movement I closes. A full movement break before the charts.
+        item(key = "stats-ledger") {
+            StatsReveal(listState, "stats-ledger") { StatsOpenSection { HeadlineRow(stats) } }
             Spacer(Modifier.height(FolioTokens.spaceMovement))
         }
-
-        // ── Movement II — the shape of your time ───────────────────────────
-        item {
-            StatsGlassCard { WeekChart(stats.week) }
-            // Movement II, second beat. The heatmap asks the week chart's own
-            // question at a longer scale — "when do I read?" over a year rather
-            // than over seven days — so the two charts are one movement with two
-            // beats, not two movements. Grouping them also gives the eye a single
-            // place to compare shapes instead of two isolated panels.
+        item(key = "stats-week") {
+            StatsReveal(listState, "stats-week") { StatsOpenSection { WeekChart(stats.week) } }
             Spacer(Modifier.height(FolioTokens.spaceBeat))
         }
-
-        item {
-            ActivityHeatmap(stats.heatmap, stats.heatmapBooks, stats.heatmapManga)
-            // Movement II closes.
+        item(key = "stats-year") {
+            StatsReveal(listState, "stats-year") {
+                ActivityHeatmap(stats.heatmap, stats.heatmapBooks, stats.heatmapManga)
+            }
             Spacer(Modifier.height(FolioTokens.spaceMovement))
         }
-
-        // ── Movement III — the per-book breakdown ──────────────────────────
-        if (stats.currentlyReading.isNotEmpty()) {
-            item {
-                StatsGlassCard {
-                    FinishPredictionsCard(
-                        books = stats.currentlyReading.take(5),
-                        onBookClick = onBookClick,
-                    )
-                }
-                // Movement III opens: the per-book breakdown. Predictions, where
-                // the time went and the genre split are three views of one shelf,
-                // so they group tightly and the movement break lands after them.
-                Spacer(Modifier.height(FolioTokens.spaceBeat))
-            }
-        }
-
-        if (stats.topBooks.isNotEmpty()) {
-            item {
-                StatsGlassCard {
-                    WhereYourTimeWentCard(
-                        books = stats.topBooks.take(6),
-                        everythingElseMinutes = everythingElseMinutes(stats.topBooks, stats.timeThisYearMs / 60_000),
-                        booksOpened = stats.booksOpened,
-                        librarySize = stats.librarySize,
-                        onBookClick = onBookClick,
-                    )
-                }
-                // Still Movement III: the genre split is the same shelf cut a
-                // third way.
-                Spacer(Modifier.height(FolioTokens.spaceBeat))
-            }
-        }
-        if (stats.genres.isNotEmpty()) {
-            item {
-                StatsGlassCard(accent = FolioTheme.colors.accentDiscovery) { GenresCard(slices = stats.genres) }
-                // Movement III closes.
-                Spacer(Modifier.height(FolioTokens.spaceMovement))
-            }
-        }
-
-        // ── Movement IV — who you are as a reader ──────────────────────────
-        item {
-            StatsGlassCard(accent = FolioTheme.colors.accentDiscovery) { PatternsCard(stats, mangaStats) }
-            // Movement IV, second beat. Quotes are the human end of the same
-            // "who are you as a reader" idea the patterns card opens, so they
-            // belong together; the movement break falls before the manga
-            // section, which is a different domain entirely.
+        if (stats.currentlyReading.isNotEmpty()) item(key = "stats-forecast") {
+            StatsReveal(listState, "stats-forecast") { StatsOpenSection {
+                FinishPredictionsCard(stats.currentlyReading.take(5), onBookClick)
+            } }
             Spacer(Modifier.height(FolioTokens.spaceBeat))
         }
-
-        if (recentQuotes.isNotEmpty()) {
-            item {
-                StatsGlassCard(accent = FolioTheme.colors.accentAnnotation) {
-                    FloatingQuotesCard(quotes = recentQuotes, onQuoteClick = onOpenQuote)
-                }
-                Spacer(Modifier.height(FolioTokens.spaceMovement))
-            }
+        val allocation = stats.readingTime.ifEmpty { stats.topBooks.map {
+            ReadingTimeEntry(it.id, it.title, it.author, it.coverPath, it.minutes)
+        } }
+        if (allocation.isNotEmpty()) item(key = "stats-allocation") {
+            StatsReveal(listState, "stats-allocation") { StatsGlassCard {
+                WhereYourTimeWentCard(
+                    books = allocation,
+                    everythingElseMinutes = readingTimeRemainder(allocation, stats.readingTimeTotalMinutes),
+                    booksOpened = stats.readingTitlesOpened.takeIf { it > 0 } ?: stats.booksOpened,
+                    librarySize = stats.readingLibrarySize.takeIf { it > 0 } ?: stats.librarySize,
+                    onBookClick = onBookClick, onMangaClick = onMangaClick, mangaBackend = mangaBackend,
+                )
+            } }
+            Spacer(Modifier.height(FolioTokens.spaceBeat))
         }
-
-        if (mangaStats != null && mangaStats!!.hasData) {
-            item {
-                StatsGlassCard { MangaStatsSection(mangaStats!!) }
-                Spacer(Modifier.height(FolioTokens.spaceMovement))
+        if (stats.genres.isNotEmpty()) item(key = "stats-genres") {
+            StatsReveal(listState, "stats-genres") { StatsOpenSection { GenresCard(stats.genres) } }
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+        item(key = "stats-patterns") {
+            StatsReveal(listState, "stats-patterns") {
+                StatsGlassCard(accent = FolioTheme.colors.accentDiscovery, instrument = true) {
+                    PatternsCard(stats, mangaStats)
+                }
             }
+            Spacer(Modifier.height(FolioTokens.spaceBeat))
+        }
+        if (recentQuotes.isNotEmpty()) item(key = "stats-passages") {
+            StatsReveal(listState, "stats-passages") { StatsOpenSection {
+                FloatingQuotesCard(recentQuotes, onOpenQuote)
+            } }
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+        if (mangaStats?.hasData == true) item(key = "stats-manga") {
+            StatsReveal(listState, "stats-manga") { StatsOpenSection { MangaStatsSection(mangaStats, stats.mostReadManga) } }
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
         }
     }
 }
@@ -445,44 +389,49 @@ private fun StatisticsContent(
 // The overture — Stats' opening statement
 // ---------------------------------------------------------------------------
 
-/**
- * The one surface every Stats block now shares.
- *
- * Earlier the screen was deliberately mixed — raised panes, sunken wells, veils
- * and bare ruled lists — on the theory that "not every statistic deserves a
- * card". In practice those four materials each take the room's light
- * differently, so the sections read as a patchwork of inconsistent colour
- * blocks: a sunken well is a different tint from a veil is a different tint from
- * the bare page. This wraps every section in the *same* glass pane the heatmap
- * uses (`folioRaised` + `paneFill()`), so the whole screen is one material and
- * the only thing that changes between cards is their content. Inner wells were
- * removed from the sections so nothing nests a second, differently-lit block
- * inside this one.
- */
+/** Shared page margins, without manufacturing a card for each statistic. */
+@Composable
+internal fun StatsOpenSection(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter), content = content)
+}
+
+/** The same scroll-coupled arrival as Home; no idle animation or per-frame composition. */
+@Composable
+private fun StatsReveal(state: LazyListState, key: String, content: @Composable () -> Unit) {
+    com.folio.reader.ui.home.ReadingDeskSection(state, key, true, LocalFolioBarInset.current, content)
+}
+
+/** A bound ledger and a rounded instrument share glass chemistry, but have different silhouettes. */
 @Composable
 internal fun StatsGlassCard(
     modifier: Modifier = Modifier,
     accent: Color = FolioTheme.colors.accentProgress,
+    instrument: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = FolioTokens.gutter)
-            .folioRaised(
-                shape = FolioShapes.hero,
-                accent = accent,
-                fill = FolioTheme.atmosphere.paneFill(),
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .padding(FolioTokens.space3),
-        content = content,
-    )
+    val plane = folioDataGlassPlane()
+    val shape = if (instrument) RoundedCornerShape(32.dp) else RoundedCornerShape(
+        topStart = 10.dp, topEnd = 28.dp, bottomEnd = 28.dp, bottomStart = 10.dp)
+    Column(modifier.padding(horizontal = FolioTokens.gutter).fillMaxWidth()
+        .folioDataGlass(shape = shape)
+        .drawWithCache {
+            val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Ltr) 1.dp.toPx()
+                else size.width - 1.dp.toPx()
+            onDrawBehind {
+                if (!instrument) drawLine(accent.copy(alpha = .55f),
+                    Offset(x, 24.dp.toPx()), Offset(x, (size.height - 24.dp.toPx()).coerceAtLeast(24.dp.toPx())),
+                    1.5.dp.toPx(), StrokeCap.Round)
+            }
+        }
+        .padding(FolioTokens.space3), verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+        val scope = this
+        FolioSurfaceContents(plane) { scope.content() }
+    }
 }
 
 
 /**
- * Stats' opening statement, and the screen's only raised composition.
+ * Stats' open opening statement, with a compact daily-goal companion.
  *
  * The old screen opened with a 140dp ring inside a card, so the first thing it
  * said was "here is a widget". This says something about the reader instead:
@@ -502,66 +451,24 @@ private fun StatsOverture(
     settingsRepository: SettingsRepository?,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
-    val colors = FolioTheme.colors
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
-            .folioRaised(
-                shape = FolioShapes.heroBleed,
-                accent = colors.accentProgress,
-                // Pane, not the default opaque raisedFill: Stats' overture is a hero in
-                // every sense but this file's history, and an opaque one here is what
-                // made the screen read as slabs laid on a page.
-                fill = FolioTheme.atmosphere.paneFill(),
-                // In-flow like the blocks around it, and for the same reason: it is an item
-                // in Stats' list, so there is no page scrolling behind it to refract. The
-                // skeleton below tracks it, so the two must agree — see StatsSkeleton.
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .padding(
-                start = FolioTokens.gutter,
-                end = FolioTokens.space3,
-                top = FolioTokens.space3,
-                bottom = FolioTokens.space3,
-            )
-    ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f)) {
-                FolioFigure(
-                    value = formatWeekHours(stats.timeThisWeekMs),
-                    label = "Reading this week",
-                    accent = colors.accentProgress,
-                    emphasis = FigureScale.Hero,
-                )
-                if (stats.chronotype.isNotBlank()) {
-                    Spacer(Modifier.height(FolioTokens.space2))
-                    Text(
-                        text = stats.chronotype,
-                        style = FolioTheme.typography.titleMedium,
-                        color = colors.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (stats.peakWindow.isNotBlank()) {
-                    Text(
-                        text = "Mostly between ${stats.peakWindow}",
-                        style = FolioTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+    BoxWithConstraints(Modifier.fillMaxWidth()
+        .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)) {
+        val stacked = maxWidth < 330.dp || LocalDensity.current.fontScale > 1.2f
+        val edit: (() -> Unit)? = if (settingsRepository != null) ({ showEditDialog = true }) else null
+        if (stacked) Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+            StatsWeekFigure(stats)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+                StatsReadingRhythm(stats, Modifier.weight(1f))
+                GoalDial(stats.todayMinutes, goalMinutes, edit)
             }
-            Spacer(Modifier.width(FolioTokens.space3))
-            GoalDial(
-                todayMinutes = stats.todayMinutes,
-                goalMinutes = goalMinutes,
-                onEdit = if (settingsRepository != null) {
-                    { showEditDialog = true }
-                } else null,
-            )
+        } else Row(verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                StatsWeekFigure(stats)
+                StatsReadingRhythm(stats)
+            }
+            GoalDial(stats.todayMinutes, goalMinutes, edit)
         }
     }
 
@@ -575,6 +482,24 @@ private fun StatsOverture(
             },
             settingsRepository = settingsRepository,
         )
+    }
+}
+
+@Composable
+private fun StatsWeekFigure(stats: StatisticsUiState) {
+    FolioFigure(formatWeekHours(stats.timeThisWeekMs), label = "Reading this week",
+        accent = FolioTheme.colors.accentProgress, emphasis = FigureScale.Hero)
+}
+
+@Composable
+private fun StatsReadingRhythm(stats: StatisticsUiState, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        if (stats.chronotype.isNotBlank()) Text(stats.chronotype,
+            style = FolioTheme.typography.titleMedium, color = FolioTheme.colors.onSurface,
+            maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (stats.peakWindow.isNotBlank()) Text("Mostly between ${stats.peakWindow}",
+            style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant,
+            maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
 }
 

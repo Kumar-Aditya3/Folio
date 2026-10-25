@@ -1,5 +1,8 @@
 package com.folio.reader.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,29 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.IconButton
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.items
+import com.folio.reader.ui.library.FolioSearchField
+import com.folio.reader.ui.components.FolioBackHandler
+import com.folio.reader.ui.theme.MotionKey
+import com.folio.reader.ui.theme.rememberMotionAnimation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -51,15 +77,12 @@ import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioFieldBottom
 import com.folio.reader.ui.components.folioTypeGround
-import com.folio.reader.ui.components.folioVeil
-import com.folio.reader.ui.components.folioVeilPlane
+import com.folio.reader.ui.components.FolioGlassPanel
 import com.folio.reader.ui.components.folioPressable
-import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.theme.FolioShapes
-import com.folio.reader.ui.theme.FolioSurfaceContents
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioBarInset
@@ -91,6 +114,14 @@ fun SettingsHubScreen(
     onOpenDownloads: () -> Unit,
     onOpenHistory: () -> Unit
 ) {
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchRailHeight by remember { mutableIntStateOf(0) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val closeSearch: () -> Unit = { searchOpen = false; query = ""; focus.clearFocus(); keyboard?.hide() }
+    FolioBackHandler(enabled = searchOpen, onBack = closeSearch)
     val headerState = rememberFolioHeaderState()
     // Re-tap on the More nav item scrolls the hub back to its top.
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -106,6 +137,30 @@ fun SettingsHubScreen(
     // The bar's at-rest height: status icons plus the bar row. Paid by the list
     // alone, and static — tracking the scrolled glass would translate every row
     // mid-scroll.
+    LaunchedEffect(searchOpen) {
+        headerState.reset()
+        if (searchOpen) {
+            listState.scrollToItem(0)
+            withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+    val searchInset = with(LocalDensity.current) { searchRailHeight.toDp() }
+    val searchFade = rememberMotionAnimation<Float>(MotionKey.ReaderChromeToggle)
+    val searchSize = rememberMotionAnimation<IntSize>(MotionKey.ReaderChromeToggle)
+    val matches = remember(query) { searchSettings(query) }
+    fun openSearchResult(entry: SettingsSearchEntry) {
+        focus.clearFocus(); keyboard?.hide()
+        when (entry.route) {
+            "@tags" -> onOpenTags()
+            "@quotes" -> onOpenQuotes()
+            "@revisit" -> onOpenRevisit()
+            "@extensions" -> onOpenExtensions()
+            "@downloads" -> onOpenDownloads()
+            "@history" -> onOpenHistory()
+            else -> onOpenSettings(entry.route)
+        }
+    }
     val topInset = folioBarTopInset()
     val colors = FolioTheme.colors
 
@@ -114,6 +169,7 @@ fun SettingsHubScreen(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .then(if (searchOpen) Modifier.imePadding() else Modifier)
                 .nestedScroll(headerState.nestedScrollConnection)
                 // §16: the hub list is the backdrop the "More" masthead and the
                 // capsule blur.
@@ -121,10 +177,27 @@ fun SettingsHubScreen(
             contentPadding = PaddingValues(
                 start = FolioTokens.gutter,
                 end = FolioTokens.gutter,
-                top = topInset + FolioTokens.space2,
+                top = topInset + searchInset + FolioTokens.space2,
                 bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
             ),
         ) {
+            if (searchOpen) {
+                item(key = "settings-search-caption") {
+                    Text(if (query.isBlank()) "Find a setting by name or what you want to change." else "${matches.size} matching ${if (matches.size == 1) "destination" else "destinations"}",
+                        style = FolioTheme.typography.bodyMedium, color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 16.dp))
+                }
+                items(matches, key = { "setting:${it.route}" }) { entry ->
+                    HubRow(icon = settingsSearchIcon(entry.route), title = entry.title,
+                        subtitle = "${entry.section} · ${entry.summary}", accent = colors.primary,
+                        onClick = { openSearchResult(entry) })
+                }
+                if (matches.isEmpty()) item(key = "settings-no-match") {
+                    Text("No matching settings. Try a word such as font, opacity, manga or sync.",
+                        style = FolioTheme.typography.bodyLarge, color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 24.dp))
+                }
+            } else {
             item {
                 HubSection("Reading", colors.accentProgress) {
                     HubRow(
@@ -266,6 +339,10 @@ fun SettingsHubScreen(
             }
             item {
                 HubSection("Manga", colors.tertiary) {
+                    HubRow(icon = Icons.Filled.Search, title = "Discover",
+                        subtitle = "Usual suggestions, selected extensions, or hidden",
+                        accent = colors.tertiary,
+                        onClick = { onOpenSettings(FolioSettingsCategory.DISCOVER) })
                     HubRow(
                         icon = Icons.Filled.Notifications,
                         title = "Manga updates",
@@ -297,6 +374,7 @@ fun SettingsHubScreen(
                     )
                 }
             }
+            }
         }
 
         // Last, so it is on top of the list rather than a sibling above it: the
@@ -304,8 +382,25 @@ fun SettingsHubScreen(
         // translucent bar read as a bar.
         FolioTopBar(
             title = "More",
-            collapse = headerState.collapse,
+            collapse = if (searchOpen) 0f else headerState.collapse,
             modifier = Modifier.align(Alignment.TopCenter),
+            actions = {
+                IconButton(onClick = { if (searchOpen) closeSearch() else searchOpen = true }) {
+                    Icon(if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = if (searchOpen) "Close settings search" else "Search settings")
+                }
+            },
+            rail = {
+                AnimatedVisibility(searchOpen,
+                    enter = expandVertically(searchSize, expandFrom = Alignment.Top) + fadeIn(searchFade),
+                    exit = shrinkVertically(searchSize, shrinkTowards = Alignment.Top) + fadeOut(searchFade),
+                    modifier = Modifier.fillMaxWidth().onSizeChanged { searchRailHeight = it.height }) {
+                    Box(Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter, vertical = 12.dp)) {
+                        FolioSearchField(query, { query = it }, "Search settings",
+                            Modifier.fillMaxWidth().focusRequester(focusRequester))
+                    }
+                }
+            },
         )
     }
 }
@@ -340,25 +435,10 @@ private fun HubSection(
             background = folioFieldBottom(),
         )
         Spacer(Modifier.height(FolioTokens.space2))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .folioVeil(
-                    FolioShapes.card,
-                    accent = accent,
-                    tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                )
-                .padding(horizontal = FolioTokens.space3, vertical = FolioTokens.space1),
-        ) {
-            // The rows live inside this veil, so their own surfaces are nested by
-            // construction — the icon tiles' wells most of all. Claiming the content
-            // keeps the group's plane and drops the depth cues that were describing a
-            // page behind a surface that is actually behind glass. §19: the plane
-            // published is the exact one this veil paints with (folioVeilPlane, given
-            // the same accent the veil itself was), so a nested well is a whisper of
-            // the hub's own material plus a rim — not a second tier of fill.
-            FolioSurfaceContents(folioVeilPlane(accent = accent)) { content() }
-        }
+        FolioGlassPanel(
+            contentPadding = PaddingValues(horizontal = FolioTokens.space3, vertical = FolioTokens.space1),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp),
+        ) { content() }
     }
 }
 
@@ -390,7 +470,9 @@ private fun HubRow(
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .folioSunken(FolioShapes.inset, accent = accent),
+                    .clip(FolioShapes.inset)
+                    .background(accent.copy(alpha = .09f))
+                    .border(.7.dp, accent.copy(alpha = .16f), FolioShapes.inset),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -427,4 +509,23 @@ private fun HubRow(
         }
         if (!last) FolioRule()
     }
+}
+
+private fun settingsSearchIcon(route: String): ImageVector = when (route) {
+    FolioSettingsCategory.TEXT_AND_PAGE -> Icons.Filled.TextFields
+    FolioSettingsCategory.TRANSPARENCY -> Icons.Filled.Opacity
+    FolioSettingsCategory.THEMES, FolioSettingsCategory.CUSTOM_THEME -> Icons.Filled.Palette
+    FolioSettingsCategory.ANIMATIONS -> Icons.Filled.Animation
+    FolioSettingsCategory.CLOUD_SYNC -> Icons.Filled.Sync
+    FolioSettingsCategory.STORAGE -> Icons.Filled.Storage
+    FolioSettingsCategory.ADVANCED -> Icons.Filled.Backup
+    FolioSettingsCategory.DOCUMENTS -> Icons.Filled.Description
+    "@tags" -> Icons.AutoMirrored.Filled.Label
+    "@quotes" -> Icons.Filled.FormatQuote
+    "@revisit", "@history" -> Icons.Filled.History
+    "@extensions" -> Icons.Filled.Extension
+    "@downloads" -> Icons.Filled.Download
+    FolioSettingsCategory.MANGA -> Icons.Filled.Notifications
+    FolioSettingsCategory.DISCOVER, FolioSettingsCategory.SEMANTIC_SEARCH, FolioSettingsCategory.LIBRARY_SCAN -> Icons.Filled.Search
+    else -> Icons.Filled.Equalizer
 }

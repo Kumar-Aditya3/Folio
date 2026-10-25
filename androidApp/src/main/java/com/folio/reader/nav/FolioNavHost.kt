@@ -10,6 +10,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -133,6 +134,13 @@ fun FolioNavHost(
     // zero and the covers snap; holding the content opaque for the duration keeps the
     // morph without the crossfade.) Pushes (shelf → detail/reader) keep their
     // fade+slide below.
+    val traceRepository = androidx.compose.runtime.remember(graph) {
+        com.folio.reader.database.ReadingTraceRepository(graph.database)
+    }
+    com.folio.reader.ui.components.FolioReadingTraceProvider(traceRepository.traces,
+        onOpenPassage = { bookId, passage ->
+            navController.navigate(FolioDestination.reader(bookId, highlightId = passage.id))
+        }) {
     SharedTransitionLayout(modifier = modifier) {
         // §17 shared elements: one transition scope spans every destination, so a
         // cover tapped on a shelf is the same object that lands on the detail page.
@@ -268,7 +276,8 @@ fun FolioNavHost(
                         navArgument(FolioNavArgs.BOOK_ID) { type = NavType.StringType },
                         navArgument(FolioNavArgs.SPINE) { type = NavType.IntType; defaultValue = -1 },
                         navArgument(FolioNavArgs.FRAC) { type = NavType.IntType; defaultValue = -1 },
-                        navArgument(FolioNavArgs.HL) { type = NavType.StringType; defaultValue = "" }
+                        navArgument(FolioNavArgs.HL) { type = NavType.StringType; defaultValue = "" },
+                        navArgument(FolioNavArgs.LOC) { type = NavType.StringType; defaultValue = "" }
                     ),
                     deepLinks = listOf(navDeepLink { uriPattern = "folio://reader/{${FolioNavArgs.BOOK_ID}}" })
                 ) { entry ->
@@ -278,6 +287,12 @@ fun FolioNavHost(
                     val targetFraction = entry.arguments?.getInt(FolioNavArgs.FRAC)
                         ?.takeIf { it in 0..1000 }?.let { it / 1000f }
                     val targetHighlightId = entry.arguments?.getString(FolioNavArgs.HL)?.takeIf { it.isNotBlank() }
+                    val targetLocator = entry.arguments?.getString(FolioNavArgs.LOC)?.takeIf { it.isNotBlank() }
+                    val returnToSource = remember(entry) {
+                        val origin = navController.previousBackStackEntry?.destination?.route
+                        targetHighlightId != null || targetLocator != null ||
+                            origin in setOf(FolioRoutes.QUOTES, FolioRoutes.REVISIT, FolioRoutes.TAGS) || origin?.startsWith("reader/") == true
+                    }
                     // §17: the reader is a morph destination too. A cover tapped on a
                     // shelf lands here as the plate the first chapter starts under, so
                     // opening a book reads as the cover flying to where you will read
@@ -289,12 +304,20 @@ fun FolioNavHost(
                             targetSpineIndex = spine,
                             targetFraction = targetFraction,
                             targetHighlightId = targetHighlightId,
+                            targetLocator = targetLocator,
                             // Back from the reader lands on the **Library**, whichever tab it
                             // was opened from — including Home. See [popToTab].
-                            onBack = { navController.popToTab(FolioRoutes.LIBRARY) },
+                            onBack = {
+                                if (!returnToSource || !navController.popBackStack()) navController.popToTab(FolioRoutes.LIBRARY)
+                            },
                             // Search from the reader goes to its own destination so search's
-                            // own back can return here instead of to the Library.
-                            onOpenSearch = { navController.navigate(FolioRoutes.SEARCH_FROM_READER) },
+                            // own back can return here instead of to the Library. The book
+                            // rides on the route so the visit opens on *this* book's content —
+                            // which is also what keeps the vector index scoped to one book
+                            // instead of being rebuilt for the whole library on entry.
+                            onOpenSearch = {
+                                navController.navigate(FolioDestination.searchFromReader(bookId))
+                            },
                             onOpenSettings = { navController.goToTopLevelTab(FolioRoutes.MORE) },
                             // An echo opens another book's reader at the resonant passage. Push a
                             // fresh reader so back returns to the book the reader was reading from.
@@ -373,7 +396,12 @@ fun FolioNavHost(
                 // Opening a result pushes the reader again rather than reusing the one below,
                 // so backing out of it returns here — to the results the reader was reading —
                 // instead of dropping them.
-                composable(FolioRoutes.SEARCH_FROM_READER) {
+                composable(
+                    FolioRoutes.SEARCH_FROM_READER,
+                    arguments = listOf(
+                        navArgument(FolioNavArgs.BOOK_ID) { type = NavType.StringType }
+                    )
+                ) { entry ->
                     FolioSection(FolioTheme.colors.accentDiscovery) {
                         navModel.searchContent(
                             onBack = { navController.popBackStack() },
@@ -381,7 +409,8 @@ fun FolioNavHost(
                                 navController.navigate(
                                     FolioDestination.reader(bookId, spine, frac?.let { (it * 1000).toInt() })
                                 )
-                            }
+                            },
+                            contentBookId = entry.arguments?.getString(FolioNavArgs.BOOK_ID),
                         )
                     }
                 }
@@ -407,7 +436,7 @@ fun FolioNavHost(
                             navModel.tagsContent(
                                 onBack = { navController.popBackStack() },
                                 onOpenBookDetail = { bookId -> navController.navigate(FolioDestination.bookDetail(bookId)) },
-                                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) }
+                                onOpenReader = { target -> navController.navigate(FolioDestination.reader(target)) }
                             )
                         }
                     }
@@ -418,7 +447,7 @@ fun FolioNavHost(
                         FolioSection(FolioTheme.colors.accentAnnotation) {
                             navModel.quotesContent(
                                 onBack = { navController.popBackStack() },
-                                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                                onOpenReader = { target -> navController.navigate(FolioDestination.reader(target)) },
                                 onOpenMangaDetail = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
                             )
                         }
@@ -430,7 +459,7 @@ fun FolioNavHost(
                         FolioSection(FolioTheme.colors.accentStreak) {
                             navModel.revisitContent(
                                 onBack = { navController.popBackStack() },
-                                onOpenReader = { bookId -> navController.navigate(FolioDestination.reader(bookId)) },
+                                onOpenReader = { target -> navController.navigate(FolioDestination.reader(target)) },
                                 onOpenMangaDetail = { mangaId -> navController.navigate(FolioDestination.mangaDetail(mangaId)) }
                             )
                         }
@@ -535,5 +564,6 @@ fun FolioNavHost(
                 }
             }
         }
+    }
     }
 }

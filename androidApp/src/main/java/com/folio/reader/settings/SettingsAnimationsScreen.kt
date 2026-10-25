@@ -15,7 +15,7 @@ fun SettingsAnimationsScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
     LaunchedEffect(Unit) {
         runCatching { navModel.globalSettings = navModel.graph.settingsRepository.getGlobalSettings() }
     }
-    SettingsCategoryScaffold(title = "Animations", onBack = onBack) {
+    SettingsCategoryScaffold(title = "Animations", onBack = onBack, materialPreviewSettings = navModel.globalSettings) {
         AnimationsSettingsPanel(
             settings = navModel.globalSettings,
             onSettingsChange = { navModel.updateSettings(it) }

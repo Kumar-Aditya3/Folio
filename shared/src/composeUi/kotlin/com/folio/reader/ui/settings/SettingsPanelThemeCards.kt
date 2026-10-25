@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.folio.reader.ui.components.FolioSegmented
 import com.folio.reader.ui.components.folioPanel
 import com.folio.reader.ui.components.folioPressable
-import com.folio.reader.ui.components.folioRaised
+import com.folio.reader.ui.components.folioSettingsChoice
 import com.folio.reader.ui.components.rememberFolioInteraction
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTokens
@@ -91,36 +91,12 @@ internal fun ThemePackCard(
     val pageHeading by animateColorAsState(Color(page.headingText), fade, label = "pageHeading")
     val pageInk by animateColorAsState(Color(page.secondaryText), fade, label = "pageInk")
     // The theme's four most telling accents, in palette order.
-    val accents = listOf(spec.primary, spec.secondary, spec.tertiary, spec.accentAnnotation)
+    val accents = listOf(spec.primary, spec.accentProgress, spec.accentDiscovery, spec.accentAnnotation)
     androidx.compose.foundation.layout.Column(
         modifier = Modifier
             .width(148.dp)
             .folioPressable(interaction, scaleTo = 0.96f)
-            .then(
-                if (selected) {
-                    Modifier.folioRaised(
-                        shape = shape,
-                        elevation = FolioTokens.elevationVeil,
-                        accent = colors.primary,
-                        // A pane, not an opaque slab: the selected tile used the opaque
-                        // raised treatment whose directional gradient border laid a
-                        // bright-then-dark band just inside the edge — the hard "square
-                        // within" the pack picker. As a pane it takes the same uniform
-                        // hairline rim and frosted body as every other glass surface, so
-                        // the selected card matches the section card it sits on.
-                        fill = com.folio.reader.ui.theme.FolioTheme.atmosphere.paneFill(),
-                        // …and it matches that card's *tier* too, which is the point: this
-                        // tile is an item in a scrolling row inside an in-flow section card,
-                        // so nothing passes behind it but the ground plane. At the Overlay
-                        // default it was one of the last surfaces on the Appearance panel
-                        // still paying a full-area Haze capture-and-blur and an AGSL lens
-                        // every frame, to frost a smooth ramp. See FolioGlassTier.
-                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                    )
-                } else {
-                    Modifier.folioPanel(shape)
-                }
-            )
+            .folioSettingsChoice(selected, shape)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
     ) {
         // The accent band: a gradient of the theme's own accents. The animation
@@ -209,6 +185,9 @@ internal fun ThemePackCard(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
             )
         }
+        Text(pack.material, style = com.folio.reader.ui.theme.FolioTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant, minLines = 2, maxLines = 2,
+            modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp))
     }
 }
 
@@ -282,21 +261,7 @@ internal fun ThemeFieldOverridePicker(
                 modifier = Modifier
                     .width(150.dp)
                     .folioPressable(interaction, scaleTo = 0.95f)
-                    .then(
-                        if (selected) {
-                            Modifier.folioRaised(
-                                shape = shape,
-                                elevation = FolioTokens.elevationPanel,
-                                accent = colors.primary,
-                                fill = com.folio.reader.ui.theme.FolioTheme.atmosphere.paneFill(),
-                                // An item in a scrolling row inside an in-flow card — see
-                                // the theme-pack tile above.
-                                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                            )
-                        } else {
-                            Modifier.folioPanel(shape)
-                        }
-                    )
+                    .folioSettingsChoice(selected, shape)
                     .clickable(interactionSource = interaction, indication = null) {
                         onChoose(opt.token)
                     },
@@ -387,23 +352,7 @@ internal fun FontThemeCard(
         modifier = Modifier
             .width(132.dp)
             .folioPressable(interaction, scaleTo = 0.96f)
-            .then(
-                if (selected) {
-                    Modifier.folioRaised(
-                        shape = shape,
-                        elevation = FolioTokens.elevationVeil,
-                        accent = colors.primary,
-                        // Same as the theme-pack tile: a pane so the selected font card
-                        // wears the uniform rim + frosted body instead of the opaque
-                        // slab's directional border band.
-                        fill = com.folio.reader.ui.theme.FolioTheme.atmosphere.paneFill(),
-                        // …and in flow for the same reason — see the theme-pack tile.
-                        tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                    )
-                } else {
-                    Modifier.folioPanel(shape)
-                }
-            )
+            .folioSettingsChoice(selected, shape)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),

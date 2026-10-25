@@ -39,7 +39,7 @@ class DocumentImportTest {
 
     @BeforeTest
     fun setUp() {
-        root = createTempDir("folio-document-import-")
+        root = kotlin.io.path.createTempDirectory("folio-document-import-").toFile()
         platform = DesktopPlatform(root)
         database = Database(platform.fileSystem.getDatabasePath())
         repository = ThumbnailDocumentRepository(

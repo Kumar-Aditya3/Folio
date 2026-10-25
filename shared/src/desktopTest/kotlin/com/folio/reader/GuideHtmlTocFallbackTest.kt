@@ -25,7 +25,7 @@ class GuideHtmlTocFallbackTest {
     private lateinit var tempRoot: File
 
     @BeforeTest
-    fun setUp() { tempRoot = createTempDir("folio-guidetoc-") }
+    fun setUp() { tempRoot = kotlin.io.path.createTempDirectory("folio-guidetoc-").toFile() }
 
     @AfterTest
     fun tearDown() { tempRoot.deleteRecursively() }

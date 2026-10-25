@@ -88,7 +88,8 @@ actual fun HtmlContentSurface(
     clearSelectionRequest: Long?,
     seekRequest: Pair<Float, Long>?,
     seekTargetRequest: Pair<String, Long>?,
-    onContentReady: () -> Unit
+    onContentReady: () -> Unit,
+    onSelectionBounds: ((ReaderSelectionBounds?) -> Unit)?,
 ) {
     val currentTapHandler = rememberUpdatedState(onTap)
     // Display-cutout inset (CSS px == dp in the WebView). The reader draws edge-to-edge
@@ -112,6 +113,7 @@ actual fun HtmlContentSurface(
     val latestContentReady by rememberUpdatedState(onContentReady)
     val latestHighlight by rememberUpdatedState(onHighlightParagraph)
     val latestSelection by rememberUpdatedState(onSelectionChanged)
+    val latestSelectionBounds by rememberUpdatedState(onSelectionBounds)
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     // Sections on screen, including DOM extensions: the `sections` param is the
     // document as loaded (extensions never rebuild it), so the live list grows
@@ -601,11 +603,21 @@ actual fun HtmlContentSurface(
 
                     t.startsWith("folio-edge:start:") -> mainHandler.post { latestStart() }
 
+                    t.startsWith("folio-sel3:") -> {
+                        val message = parseReaderSelectionMessage(t)
+                        if (message != null) mainHandler.post {
+                            val text = runCatching { java.net.URLDecoder.decode(message.encodedText, "UTF-8") }.getOrNull()
+                            latestSelectionBounds?.invoke(message.bounds)
+                            latestSelection?.invoke(chapterIdForSpine(message.spine), message.paragraph, text?.takeIf { it.isNotBlank() })
+                        }
+                    }
                     t.startsWith("folio-selclear:") -> mainHandler.post {
+                        latestSelectionBounds?.invoke(null)
                         latestSelection?.invoke(latestAnchorChapterId ?: liveSectionsState.value.firstOrNull()?.chapterId.orEmpty(), 0, null)
                     }
 
                     t.startsWith("folio-sel2:") -> {
+                        mainHandler.post { latestSelectionBounds?.invoke(null) }
                         val rest = t.removePrefix("folio-sel2:")
                         val spine = rest.substringBefore(':').toIntOrNull() ?: -1
                         val afterSpine = rest.substringAfter(':')
@@ -618,6 +630,7 @@ actual fun HtmlContentSurface(
                     }
 
                     t.startsWith("folio-sel:") -> {
+                        mainHandler.post { latestSelectionBounds?.invoke(null) }
                         val rest = t.removePrefix("folio-sel:")
                         val idx = rest.substringBefore(':').toIntOrNull() ?: 0
                         val encoded = rest.substringAfter(':').substringBeforeLast(':')
@@ -705,7 +718,11 @@ actual fun HtmlContentSurface(
             // initial: loading that would paint a blank document over the reader.
             if (resourcesReady && content.isNotEmpty() && webView.tag != contentKey) {
                 webView.tag = contentKey
-                val importedFonts = settings.customFonts.joinToString("") { font ->
+                val displayFile = com.folio.reader.ui.theme.FontTheme.byId(settings.fontThemeId).displayFile
+                val displayUrl = "file://${webView.context.filesDir.absolutePath}/fonts/$displayFile"
+                val displayWeight = if (displayFile.contains("variable")) "100 900" else "400"
+                val displayFace = "@font-face{font-family:'FolioDisplay';src:url('$displayUrl');font-weight:$displayWeight;font-style:normal;font-display:swap;}"
+                val importedFonts = displayFace + settings.customFonts.joinToString("") { font ->
                     val url = "file://${webView.context.filesDir.absolutePath}/fonts/${font.fileName}"
                     // Variable files declare a weight RANGE so real weights resolve
                     // from the axis; static files pin their single weight. Prefer the
@@ -1129,7 +1146,7 @@ private fun readerStyleSheet(
     return ReaderCss.styleSheet(
         settings,
         PageEngine.colsFor(safeLayoutMode),
-        fontStack = { "'$it',serif" },
+        fontStack = { ReaderCss.genericFontStack(it) ?: "'$it',serif" },
         // Scrolling mode: publisher height rules otherwise clamp the document
         // box and the page cannot grow.
         continuousCss = "html,body{height:auto !important;min-height:100% !important;overflow-y:visible !important;}html{overflow-y:auto !important;}" + revealGateCss,

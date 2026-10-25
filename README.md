@@ -39,7 +39,7 @@ in a local SQLite database. Cloud sync exists but is opt-in and off by default.
 | --- | --- | --- |
 | Status | Primary target | Windows only |
 | Minimum | Android 7.0 (API 24) | Windows 10 x64 |
-| Built against | compileSdk 34 | JDK 17, JVM target 17 |
+| Built against | compileSdk 37 | JDK 17, JVM target 17 |
 
 Desktop is Windows-only in practice, not by preference: the reader's HTML surface uses JCEF and
 the build declares only `jcef-natives-windows-amd64`, while packaging targets MSI and EXE. The

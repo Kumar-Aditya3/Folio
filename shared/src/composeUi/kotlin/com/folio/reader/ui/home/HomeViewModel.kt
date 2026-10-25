@@ -5,6 +5,8 @@ import com.folio.reader.database.CollectionRepository
 import com.folio.reader.database.ReadingSessionRepository
 import com.folio.reader.settings.AppSettingsStore
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.DiscoverMode
+import kotlinx.coroutines.flow.flatMapLatest
 import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
 import com.folio.reader.manga.BrowseMode
@@ -34,8 +36,10 @@ import com.folio.reader.ui.statistics.localSessions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flow
@@ -70,10 +74,17 @@ data class HomeUiState(
     val continueReading: List<ReadingInProgress> = emptyList(),
     val becauseFinishedTitle: String? = null,
     val candidates: List<Book> = emptyList(),
+    val becauseFinishedBook: Book? = null,
+    val recommendationReasons: Map<String, String> = emptyMap(),
     /** §11.4: library manga with new chapters, newest check first — empty hides the card. */
     val newChapters: List<MangaNewChapterBadge> = emptyList(),
     /** §11.4: manga Continue reading — recently read library manga, cap 3. */
     val mangaContinue: List<MangaContinueItem> = emptyList(),
+    /**
+     * True once the manga side has answered for this exclusion set. Until then `readingNow` holds
+     * books only, so its first entry is a provisional hero — the surface must not paint it.
+     */
+    val mangaSettled: Boolean = false,
     /**
      * Books **and** manga ranked together by last activity: the anchor is
      * `readingNow.first()` and the shelf behind it is the rest.
@@ -92,6 +103,7 @@ data class HomeUiState(
     val exclusionsActive: Boolean = false,
     /** §13.3: hero gradient is tinted from the current book's cover (Themes toggle). */
     val coverTint: Boolean = true,
+    val readingDesk: Boolean = false,
     /** Whether the room itself is lit from the book being read (Appearance toggle). */
     val ambientColor: Boolean = true,
     /**
@@ -203,10 +215,15 @@ class HomeViewModel(
     private fun today(): LocalDate = Clock.System.todayIn(timeZone)
 
     /** Cold so a goal edited on the Stats tab is picked up on the next Home visit. */
-    private data class HomeSettings(val goalMinutes: Int, val coverTint: Boolean, val ambientColor: Boolean)
+    private data class HomeSettings(
+        val goalMinutes: Int,
+        val coverTint: Boolean,
+        val ambientColor: Boolean,
+        val readingDesk: Boolean,
+    )
 
     /**
-     * The live settings row, narrowed to the three fields Home draws with.
+     * The live settings row, narrowed to the fields Home draws with.
      *
      * This used to be `flow { emit(getGlobalSettings()) }` — cold and one-shot, firing
      * once and then never again. A cover-tint, ambient-colour or daily-goal change made
@@ -215,22 +232,21 @@ class HomeViewModel(
      * already keeps live; it is the only way a ViewModel, which cannot read a
      * `mutableStateOf`, finds out anything changed.
      *
-     * `distinctUntilChangedBy` is load-bearing: the store republishes the whole row on
+     * `distinctUntilChanged` is load-bearing: the store republishes the whole row on
      * a save of *any* field, and without this Home would re-run its entire query set
      * because the reading font changed.
      */
     private val settingsFlow: Flow<HomeSettings> =
         (settingsStore?.state ?: flowOf(ReaderSettings()))
-            .distinctUntilChangedBy {
-                it.dailyGoalMinutes to (it.homeCoverTint to it.ambientColor)
-            }
             .map {
                 HomeSettings(
                     goalMinutes = it.dailyGoalMinutes,
                     coverTint = it.homeCoverTint,
                     ambientColor = it.ambientColor,
+                    readingDesk = it.homeReadingDesk,
                 )
             }
+            .distinctUntilChanged()
 
     /** One combine emission before exclusion gating, so both pipelines share it. */
     private data class Inputs(
@@ -253,7 +269,16 @@ class HomeViewModel(
     private data class MangaSections(
         val newChapters: List<MangaNewChapterBadge>,
         val mangaContinue: List<MangaContinueItem>,
-        val hasManga: Boolean
+        val hasManga: Boolean,
+        /**
+         * True once the manga side has actually answered for this exclusion set.
+         *
+         * The Home hero is `readingNow.first()`, which ranks books against `mangaContinue`. On the
+         * base emission that list is empty by design, so the anchor can only be a book — a hero
+         * that is about to be replaced. The surface uses this flag to withhold the hero until the
+         * answer is real instead of painting the wrong item and flipping.
+         */
+        val settled: Boolean = false
     ) {
         companion object {
             val EMPTY = MangaSections(emptyList(), emptyList(), false)
@@ -289,17 +314,115 @@ class HomeViewModel(
             return@flow
         }
         // The one place the extension→source expansion is resolved, and the only
-        // thing here that waits on the source list. A no-op when no EXTENSION row
-        // is present, which `expandExtensionExclusions` short-circuits itself.
-        val exclusions = rawExclusions?.let { expandExtensionExclusions(it, sourcesFlow.first()) }
-        val newChapters = runCatching {
-            mangaUpdateRepository?.getNewChapterBadges(exclusions ?: emptySet()).orEmpty()
-        }.getOrDefault(emptyList())
+        // thing here that waits on the source list.
+        //
+        // Guarded on the presence of an EXTENSION row, because `sourcesFlow.first()`
+        // is an *argument*: it is awaited before `expandExtensionExclusions` gets the
+        // chance to short-circuit on an empty package set. Left unguarded, every Home
+        // load waited for extension loading — measured 7.0s with three extensions —
+        // and on a backend whose source list never emits, the wait never returned and
+        // this flow never reached its emission at all.
+        //
+        // That was the "home hero shows a book when the last thing read was a manga"
+        // report, end to end: [MangaSections.EMPTY] carries no `mangaContinue`, so the
+        // base emission ranks books only and the anchor is always a book. The sections
+        // were supposed to arrive on the next emission and outrank it; when this wait
+        // stalled they never did, so the hero stayed on a book across every cold start.
+        val exclusions = rawExclusions?.let { raw ->
+            if (raw.any { it.first == Scope.EXTENSION }) {
+                expandExtensionExclusions(raw, sourcesFlow.first())
+            } else {
+                raw
+            }
+        }
+        // Continue-reading first, then the badges — two emissions, for the same reason this whole
+        // function is a second emission behind the book pipeline.
+        //
+        // The Home hero is `readingNow.first()`, which ranks books against `mangaContinue`. While
+        // that list is empty the anchor can only be a book, so the hero painted the last-read
+        // book and then flipped to the manga once the sections arrived — the "hero takes a while
+        // to switch" report. `getNewChapterBadges` is a join over the whole library and feeds
+        // none of that, so it must not sit in front of the list the anchor needs.
         val mangaContinue = runCatching { buildMangaContinue(exclusions) }.getOrDefault(emptyList())
         val hasManga = runCatching {
             mangaRepository?.observeLibrary()?.first().orEmpty().isNotEmpty()
         }.getOrDefault(false)
-        emit(MangaSections(newChapters, mangaContinue, hasManga))
+        emit(MangaSections(emptyList(), mangaContinue, hasManga, settled = true))
+        val newChapters = runCatching {
+            mangaUpdateRepository?.getNewChapterBadges(exclusions ?: emptySet()).orEmpty()
+        }.getOrDefault(emptyList())
+        if (newChapters.isNotEmpty()) {
+            emit(MangaSections(newChapters, mangaContinue, hasManga, settled = true))
+        }
+    }
+
+    /**
+     * The one manga the reader last opened, resolved on its own so Home can paint the hero on the
+     * **first** frame.
+     *
+     * The hero is `readingNow.first()`, which ranks books against `mangaContinue`. The full manga
+     * half is deliberately deferred (badges, library read, statistics), so on the base emission
+     * that list was empty and the anchor could only be a book — the last-read manga replaced it a
+     * beat later, which is the flicker. Rather than withhold the hero or move the whole fan-out
+     * onto the critical path, this resolves just the single most recent item: one
+     * `observeRecent(1)` row, that manga's own row, and its progress.
+     *
+     * Nothing needs to be stored for this — the tap already wrote it. `manga_history.updated_at`
+     * is the last chapter opened, and it survives restarts, so the same manga wins here on the
+     * first frame after a cold start as it did while the app was running.
+     *
+     * `settled = false` because this is one row, not the section: the full list still replaces it,
+     * and the ranking means that replacement does not move the anchor unless the reader has read
+     * something else since.
+     */
+    private suspend fun mangaLastReadItem(
+        rawExclusions: Set<Pair<Scope, String>>?,
+        /**
+         * Whether to resolve EXTENSION rows into MANGA_SOURCE rows, which means awaiting the
+         * backend's source list. False on the first emission: that await is the multi-second
+         * extension load, and this value is on Home's critical path (the `combine` below waits
+         * for it before `loaded = true`). MANGA, CATEGORY and MANGA_SOURCE exclusions are all
+         * honoured without it, so the only thing the unexpanded pass can miss is an exclusion
+         * set at the extension level — corrected by the expanded pass when one exists.
+         */
+        expandExtensions: Boolean
+    ): MangaContinueItem? {
+        val history = mangaHistoryRepository ?: return null
+        val mangaRepo = mangaRepository ?: return null
+        val last = runCatching { history.observeRecent(1).first().firstOrNull() }.getOrNull()
+            ?: return null
+        val entry = runCatching { mangaRepo.get(last.mangaId) }.getOrNull() ?: return null
+        // The same gates the full section applies, in the same order — a history row may only
+        // surface for a title that is in the library and not excluded from statistics. Without
+        // the scope gate this path made an excluded title the hero, which is worse than the
+        // staleness it exists to fix: the full section hides it, but the hero would still show it.
+        if (!entry.inLibrary) return null
+        val exclusions = rawExclusions?.let { raw ->
+            if (expandExtensions && raw.any { it.first == Scope.EXTENSION }) {
+                expandExtensionExclusions(raw, sourcesFlow.first())
+            } else {
+                raw
+            }
+        }
+        val scope = exclusions?.let(::StatsScope)
+        val categories = mangaCategoryRepository?.categoriesFor(entry.id).orEmpty()
+        if (scope?.includesManga(entry.id, categories, entry.sourceId) == false) return null
+        val progress = runCatching {
+            mangaChapterRepository?.observeProgress()?.first()?.get(entry.id)
+        }.getOrNull() ?: 0f
+        return MangaContinueItem(
+            mangaId = entry.id,
+            title = entry.title,
+            thumbnailUrl = entry.thumbnailUrl,
+            coverPath = entry.coverPath,
+            sourceId = entry.sourceId,
+            sourceName = entry.sourceName,
+            chapterId = last.chapterId,
+            caption = last.chapterName?.takeIf { it.isNotBlank() },
+            progress = progress.coerceIn(0f, 1f),
+            webUrl = null,
+            lastReadAt = last.readAt,
+        )
     }
 
     /** The source list the extension expansion resolves against; empty without a backend. */
@@ -335,36 +458,38 @@ class HomeViewModel(
      * The first emission only needs the *raw* exclusion rows as its cache
      * signature, and a raw row is a local read.
      */
-    private val discoverFlow: Flow<List<MangaDiscoverItem>> = flow {
-        // Raw rows first: a local read, and enough to key the cache. Extension
-        // rows are expanded to source ids only for the live fetch below, which
-        // runs after the cache has already been shown.
-        val raw = statsExclusionRepository?.observeExclusions()?.first()
-        val rawSignature = raw.hashCode()
-        // Fresh cache: one emission, no network — the "one browse request per
-        // cache window" contract. Stale cache: show the stale rows immediately
-        // (stale beats blank), then refresh in place. No cache: empty, then
-        // fetch. The fetch only ever runs when the window has actually lapsed.
-        // A cache written under a different exclusion set is a miss, not a
-        // window: rows sourced from a now-excluded extension must not linger.
-        val now = Clock.System.now()
-        val cached = discoverCache
-        if (cached != null) {
-            val ttl = if (cached.items.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
-            if (cached.signature == rawSignature) {
-                if (now - cached.at < ttl) {
-                    emit(cached.items)
-                    awaitCancellation()
-                }
-                emit(cached.items)
-            } else {
+    private data class DiscoverPreferences(val mode: DiscoverMode, val packages: Set<String>)
+    private data class DiscoverSignature(val exclusions: Set<Pair<Scope, String>>, val preferences: DiscoverPreferences)
+
+    private val discoverPreferences = (settingsStore?.state ?: flowOf(ReaderSettings())).map {
+        DiscoverPreferences(it.discoverMode,
+            if (it.discoverMode == DiscoverMode.SELECTED_EXTENSIONS) it.discoverExtensionPackages.toSet() else emptySet())
+    }.distinctUntilChanged()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val discoverFlow: Flow<List<MangaDiscoverItem>> = combine(discoverPreferences,
+        statsExclusionRepository?.observeExclusions() ?: flowOf(emptySet())) { preferences, raw ->
+        preferences to raw
+    }.flatMapLatest { (preferences, raw) ->
+        flow {
+            // Disable before touching extensions, history, cache or the network. A mode change
+            // cancels an in-flight browse; a late result cannot resurrect a hidden shelf.
+            if (preferences.mode == DiscoverMode.HIDDEN ||
+                (preferences.mode == DiscoverMode.SELECTED_EXTENSIONS && preferences.packages.isEmpty())) {
                 emit(emptyList())
+                awaitCancellation()
             }
-        } else {
-            emit(emptyList())
+            val signature = DiscoverSignature(raw.toSet(), preferences)
+            val now = Clock.System.now()
+            val cached = discoverCache?.takeIf { it.signature == signature }
+            emit(cached?.items.orEmpty())
+            if (cached != null) {
+                val ttl = if (cached.items.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
+                if (now - cached.at < ttl) awaitCancellation()
+            }
+            emit(fetchDiscover(raw, preferences, signature))
+            awaitCancellation()
         }
-        emit(fetchDiscover(raw))
-        awaitCancellation()
     }
 
     /**
@@ -418,19 +543,63 @@ class HomeViewModel(
         val sections: Flow<Pair<Set<Pair<Scope, String>>?, MangaSections>> =
             rawExclusions.flatMapConcat { raw ->
                 flow {
+                    // EMPTY first, so `loaded` never waits on the manga fan-out — that split is
+                    // the whole point of this flow and `HomeColdStartTest` asserts it.
                     emit(raw to MangaSections.EMPTY)
-                    emit(raw to mangaSectionsFlow(raw).first())
+                    // `emitAll`, not `.first()`: the sections flow emits twice — the continue
+                    // list and then the new-chapter badges. `.first()` silently dropped the
+                    // badges.
+                    emitAll(mangaSectionsFlow(raw).map { raw to it })
                 }
             }
-        val base = combine(inputs, sections) { value, (raw, manga) ->
+        // The hero's own signal, kept separate from `sections` on purpose.
+        //
+        // Two things go wrong if the last-read row is folded back into `sections`: the shelf is
+        // built from `mangaContinue`, so re-emitting a one-item list would collapse it, and
+        // `sections` is keyed on the exclusions flow alone, so a manga read changed nothing it
+        // listens to and the hero stayed on the last book until the flow was re-collected — the
+        // "only updates when I reopen the app" report.
+        //
+        // `observeProgress()` maps over `mangaDataRevision`, and a history write bumps it
+        // (`JdbcMangaHistoryRepository.record` ends with `bumpMangaData`), so combining with it
+        // re-resolves the last-read row on every manga write. `combine` rather than
+        // `flatMapLatest` so this needs no experimental opt-in.
+        val lastRead: Flow<Pair<Set<Pair<Scope, String>>?, MangaContinueItem?>> =
+            combine(
+                rawExclusions,
+                // No history repository means the fast row is already known to be empty;
+                // do not hold book layout behind the first manga progress snapshot. With
+                // history wired, mangaLastReadItem still resolves the real row before emit,
+                // preserving the last-read manga on the very first hero frame.
+                mangaChapterRepository?.observeProgress()?.onStart { emit(emptyMap()) }
+                    ?: flowOf(emptyMap<String, Float>())
+            ) { raw, _ -> raw }
+                .flatMapConcat { raw ->
+                    flow {
+                        // Cheap pass first. `combine(inputs, sections, lastRead)` waits for this
+                        // flow before it emits at all, so anything awaited here is awaited in
+                        // front of `loaded = true` — which is why the extension→source expansion
+                        // is *not* in this pass. It is the extension load, measured in seconds,
+                        // and putting it back on this path made a fresh launch sit on the
+                        // skeleton ("taking forever to load home page").
+                        emit(raw to mangaLastReadItem(raw, expandExtensions = false))
+                        // Expanded pass, only when there is actually an EXTENSION row to resolve.
+                        // Lands as an in-place update; the common case never reaches it.
+                        if (raw?.any { it.first == Scope.EXTENSION } == true) {
+                            emit(raw to mangaLastReadItem(raw, expandExtensions = true))
+                        }
+                    }
+                }
+        val base = combine(inputs, sections, lastRead) { value, (raw, manga), (_, last) ->
             value.build(
                 exclusions = raw,
-                discover = cachedDiscover(raw.hashCode()),
-                manga = manga
+                discover = emptyList(),
+                manga = manga,
+                lastRead = last
             )
         }
         combine(base, discoverFlow) { value, discover ->
-            if (discover.isEmpty()) value else value.copy(discover = discover)
+            value.copy(discover = discover)
         }
     }
 
@@ -439,13 +608,16 @@ class HomeViewModel(
      * signature — stale beats blank, but rows from a now-excluded extension
      * must not linger. 0 is the null-exclusions signature.
      */
-    private fun cachedDiscover(signature: Int): List<MangaDiscoverItem> =
-        discoverCache?.takeIf { it.signature == signature }?.items.orEmpty()
-
     private suspend fun Inputs.build(
         exclusions: Set<Pair<Scope, String>>?,
         discover: List<MangaDiscoverItem>,
-        manga: MangaSections = MangaSections.EMPTY
+        manga: MangaSections = MangaSections.EMPTY,
+        /**
+         * The single manga the reader opened most recently, resolved independently of [manga] so
+         * it is current even while the sections are not. Feeds the anchor only — the shelf behind
+         * the hero still comes from [manga]'s `mangaContinue`.
+         */
+        lastRead: MangaContinueItem? = null
     ): HomeUiState {
         val coverTint = settings.coverTint
         val today = today()
@@ -523,7 +695,11 @@ class HomeViewModel(
         val mangaContinue = manga.mangaContinue
         val hasManga = manga.hasManga
         // One ranked list for the anchor and the shelf behind it.
-        val readingNow = buildReadingNow(heroBook, gatedInProgress, gatedSessions, mangaContinue)
+        // `lastRead` is the freshest row for its own title, so it goes first and `distinctBy`
+        // keeps it — the sections' copy of the same manga is stale by however long ago they were
+        // resolved. Ranking is by `lastActivity`, so position here only breaks ties.
+        val rankedManga = mergeMangaReadingRows(lastRead, mangaContinue)
+        val readingNow = buildReadingNow(heroBook, gatedInProgress, gatedSessions, rankedManga)
 
         return HomeUiState(
             loaded = true,
@@ -542,12 +718,18 @@ class HomeViewModel(
             continueReading = continueReading,
             becauseFinishedTitle = anchor?.displayTitle,
             candidates = candidatePool,
+            becauseFinishedBook = anchor,
+            recommendationReasons = candidatePool.mapNotNull { candidate ->
+                recommendationReason(anchor, candidate)?.let { candidate.id to it }
+            }.toMap(),
             newChapters = newChapters,
             mangaContinue = mangaContinue,
+            mangaSettled = manga.settled,
             readingNow = readingNow,
             discover = discover,
             exclusionsActive = exclusions?.isNotEmpty() == true,
             coverTint = coverTint,
+            readingDesk = settings.readingDesk,
             ambientColor = settings.ambientColor,
             daysSinceLastRead = daysSinceLastRead
         )
@@ -607,11 +789,10 @@ class HomeViewModel(
         }
         return (books + mangaRows)
             .sortedByDescending { it.lastActivity }
-            .take(READING_NOW_CAP)
     }
 
     /**
-     * §11.4 manga Continue reading: the most recently read library manga, cap 3,
+     * §11.4 manga Continue reading: the most recently read library manga, cap 12,
      * same gating as the badge card — history rows without a library entry and
      * out-of-library reads never surface, and §11.2 manga exclusions hide their
      * titles here too (Rule 18).
@@ -680,9 +861,10 @@ class HomeViewModel(
      * [cachedDiscover], so this runs *off* Home's first-emission path and its
      * result lands as an in-place update.
      */
-    private suspend fun fetchDiscover(rawExclusions: Set<Pair<Scope, String>>?): List<MangaDiscoverItem> {
+    private suspend fun fetchDiscover(rawExclusions: Set<Pair<Scope, String>>?, preferences: DiscoverPreferences,
+        signature: DiscoverSignature): List<MangaDiscoverItem> {
         val backend = mangaBackend ?: return emptyList()
-        val history = mangaHistoryRepository ?: return emptyList()
+        val history = mangaHistoryRepository
         val mangaRepo = mangaRepository ?: return emptyList()
         val now = Clock.System.now()
         // The source list is awaited here, after Discover's first emission has
@@ -694,7 +876,6 @@ class HomeViewModel(
                 if (error is CancellationException) throw error
                 rawExclusions
             }
-        val signature = exclusions.hashCode()
         val fetched: List<MangaDiscoverItem> = runCatching {
             val scope = exclusions?.let(::StatsScope)
             val library = mangaRepo.observeLibrary().first()
@@ -730,21 +911,30 @@ class HomeViewModel(
             // Walk the reading history, newest first, until a library manga
             // from a clean, LATEST-capable source is found. (A plain loop, not
             // a sequence chain: the entry lookup is a suspend call.)
+            val allowed = sources.filter { source ->
+                !source.isLocal && source.supportsLatest && source.id !in bannedSources &&
+                    (scope?.includesManga("", emptySet(), source.id) != false) &&
+                    (preferences.mode != DiscoverMode.SELECTED_EXTENSIONS || source.extensionPkg in preferences.packages)
+            }
             var anchor: com.folio.reader.manga.MangaEntry? = null
-            for (item in history.observeRecent(DISCOVER_CANDIDATE_POOL).first().distinctBy { it.mangaId }) {
+            for (item in history?.observeRecent(DISCOVER_CANDIDATE_POOL)?.first().orEmpty().distinctBy { it.mangaId }) {
                 val entry = mangaRepo.get(item.mangaId) ?: continue
                 if (!entry.inLibrary || entry.isLocal) continue
                 if (entry.sourceId in bannedSources) continue
-                if (sources.firstOrNull { it.id == entry.sourceId }?.supportsLatest != true) continue
+                if (allowed.none { it.id == entry.sourceId }) continue
                 anchor = entry
                 break
             }
-            val anchorEntry = anchor ?: return@runCatching emptyList()
+            // An explicit extension choice can discover from an unread source too. The default
+            // retains its original recent-reading anchor and never invents one.
+            val source = anchor?.let { entry -> allowed.firstOrNull { it.id == entry.sourceId } }
+                ?: (if (preferences.mode == DiscoverMode.SELECTED_EXTENSIONS) allowed.firstOrNull() else null)
+                ?: return@runCatching emptyList()
             val inLibraryTitles = library
                 .map { it.title.trim().lowercase() }
                 .toSet()
             val browsePage = withTimeoutOrNull(DISCOVER_FETCH_TIMEOUT_MS) {
-                backend.fetchBrowse(anchorEntry.sourceId, page = 1, mode = BrowseMode.LATEST)
+                backend.fetchBrowse(source.id, page = 1, mode = BrowseMode.LATEST)
             }
             // Slowness, unlike failure, is not handled by runCatching: without a
             // timeout this await can hold Home's loaded=true for OkHttp's full
@@ -758,7 +948,7 @@ class HomeViewModel(
                 .filter { it.title.trim().lowercase() !in inLibraryTitles }
                 .take(DISCOVER_CAP)
                 .map {
-                    MangaDiscoverItem(anchorEntry.sourceId, anchorEntry.sourceName, it.url, it.title, it.thumbnailUrl)
+                    MangaDiscoverItem(source.id, source.name, it.url, it.title, it.thumbnailUrl)
                 }
         }.getOrElse { error ->
             // runCatching absorbs CancellationException, which would mis-cache a
@@ -817,16 +1007,11 @@ class HomeViewModel(
 
     companion object {
         /** In-progress books surfaced in "Continue reading". */
-        private const val CONTINUE_CAP = 3
+        private const val CONTINUE_CAP = 12
         /** Books suggested by "Because you finished". */
         private const val CANDIDATE_CAP = 6
         /** Manga surfaced in the manga Continue-reading card (§11.4). */
-        private const val MANGA_CONTINUE_CAP = 3
-        /**
-         * Cards in the merged Reading now: the anchor plus the shelf behind it.
-         * Six is where the shelf stops being a shelf and starts being a library.
-         */
-        private const val READING_NOW_CAP = 6
+        private const val MANGA_CONTINUE_CAP = 12
         /** History pool scanned before the cap, so filtered rows don't starve the card. */
         private const val RECENT_POOL = 25
         /** Browse hits surfaced in Discover (§11.4). */
@@ -859,7 +1044,7 @@ class HomeViewModel(
          */
         private data class DiscoverCacheEntry(
             val at: Instant,
-            val signature: Int,
+            val signature: DiscoverSignature,
             val items: List<MangaDiscoverItem>
         )
 
@@ -870,4 +1055,23 @@ class HomeViewModel(
             discoverCache = null
         }
     }
+}
+
+/** Reasons reflect the actual eligibility rule, rather than inferred semantic similarity. */
+internal fun recommendationReason(anchor: Book?, candidate: Book): String? = when {
+    anchor == null || anchor.id == candidate.id -> null
+    anchor.seriesId != null && anchor.seriesId == candidate.seriesId -> "Same series"
+    anchor.authors.intersect(candidate.authors.toSet()).isNotEmpty() -> "By the same author"
+    else -> null
+}
+
+/** Keep the fresh identity/progress, without discarding a resolved projection of the same read. */
+internal fun mergeMangaReadingRows(lastRead: MangaContinueItem?, sections: List<MangaContinueItem>): List<MangaContinueItem> {
+    val fresh = lastRead?.let { latest ->
+        val full = sections.firstOrNull { it.mangaId == latest.mangaId && it.chapterId == latest.chapterId &&
+            it.lastReadAt == latest.lastReadAt }
+        if (full == null) latest else latest.copy(estimate = full.estimate, horizon = full.horizon,
+            caption = latest.caption ?: full.caption, webUrl = full.webUrl)
+    }
+    return (listOfNotNull(fresh) + sections).distinctBy { it.mangaId }
 }
