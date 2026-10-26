@@ -139,8 +139,11 @@ class NarrationCoreTest {
         } finally { db.close(); root.deleteRecursively() }
     }
     @Test fun newSessionMetadataRoundTripsAndOldSessionDefaultsRemainVisual() {
-        val p = ReadingPosition("b","d","c",0,"")
-        val session = ReadingSession("s","b",null,"d",Clock.System.now(),startPosition=p,
+        // A live-clock default can compare equal during encoding and be omitted, then
+        // decode to a later instant. This fixture tests modality, independently of clock resolution.
+        val at = kotlinx.datetime.Instant.parse("2026-10-01T12:00:00Z")
+        val p = ReadingPosition("b","d","c",0,"",updatedAt=at)
+        val session = ReadingSession("s","b",null,"d",at,startPosition=p,
             activity=SessionActivity(listeningMs=1000,listenedWords=12,sittingId="s"))
         assertEquals(session,Json.decodeFromString(ReadingSession.serializer(),Json.encodeToString(ReadingSession.serializer(),session)))
         val old = session.copy(activity=null)
