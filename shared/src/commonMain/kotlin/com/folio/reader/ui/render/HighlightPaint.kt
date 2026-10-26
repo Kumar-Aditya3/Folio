@@ -48,6 +48,9 @@ object HighlightPaint {
         "mark.folio-hl{color:inherit;" +
                 "-webkit-box-decoration-break:clone;box-decoration-break:clone;" +
                 "border-radius:2px;padding:0;}" +
+                "mark.folio-hl-new{background-repeat:no-repeat;animation:folio-ink-settle var(--folio-ink-duration,240ms) ease-out both;}" +
+                "@keyframes folio-ink-settle{from{background-size:0% 100%}to{background-size:100% 100%}}" +
+                "@media(prefers-reduced-motion:reduce){mark.folio-hl-new{animation:none}}" +
                 "mark.folio-hl[data-folio-note='1']{position:relative;}" +
                 "mark.folio-hl[data-folio-note='1']::after{content:'';position:absolute;right:-5px;top:0.1em;" +
                 "width:3px;height:3px;border:1px solid currentColor;border-radius:50%;pointer-events:none;}"
@@ -89,9 +92,11 @@ object HighlightPaint {
     fun applyJs(highlights: List<Highlight>, theme: Theme): String =
         "window.__folioPaintHighlights&&window.__folioPaintHighlights(${payload(highlights, theme)});"
 
+    fun motionJs(durationMs: Long): String = "(function setInk(d){try{d.documentElement.style.setProperty('--folio-ink-duration','${durationMs.coerceAtLeast(0)}ms');var f=d.querySelectorAll('iframe');for(var i=0;i<f.length;i++)if(f[i].contentDocument)setInk(f[i].contentDocument);}catch(e){}})(document);"
+
     private fun js(payload: String): String =
         "(function(){\n" +
-                "var ITEMS=$payload;\n" +
+                "var ITEMS=$payload,PREVIOUS=null;\n" +
                 "function isWs(c){return c===' '||c==='\\t'||c==='\\n'||c==='\\r'||c==='\\f'||c==='\\u00a0';}\n" +
                 // Whitespace is dropped from both the document map and the needle: a
                 // selection taken across a paragraph, list item or line break carries a
@@ -152,10 +157,10 @@ object HighlightPaint {
                 "    try{\n" +
                 "      var g=segs[s],r=document.createRange();\n" +
                 "      r.setStart(g.node,g.first);r.setEnd(g.node,g.last+1);\n" +
-                "      var mk=document.createElement('mark');mk.className='folio-hl';\n" +
+                "      var mk=document.createElement('mark');var fresh=PREVIOUS&&!PREVIOUS[mid];mk.className='folio-hl'+(fresh?' folio-hl-new':'');\n" +
                 "      if(mid)mk.setAttribute('data-folio-hl',mid);\n" +
                 "      if(note&&!noted){mk.setAttribute('data-folio-note','1');mk.setAttribute('aria-description','Has a saved note');noted=true;}\n" +
-                "      mk.style.background=bg;if(sh)mk.style.boxShadow=sh;\n" +
+                "      mk.style.background=fresh?'linear-gradient('+bg+','+bg+')':bg;if(sh)mk.style.boxShadow=sh;\n" +
                 "      r.surroundContents(mk);done=true;\n" +
                 "    }catch(e){}\n" +
                 "  }\n" +
@@ -187,6 +192,7 @@ object HighlightPaint {
                 "  return kids[para]||null;\n" +
                 "}\n" +
                 "window.__folioPaintHighlights=function(items){\n" +
+                "  PREVIOUS=window.__folioKnownHighlights||null;var known={};for(var ki=0;ki<items.length;ki++)known[items[ki].id||items[ki].i||'']=true;\n" +
                 "  unwrap();\n" +
                 "  var roots=folioRoots(),ri,k;\n" +
                 // When the document really has spine sections, a highlight whose section
@@ -222,6 +228,7 @@ object HighlightPaint {
                 "      }\n" +
                 "    }\n" +
                 "  }\n" +
+                "  window.__folioKnownHighlights=known;\n" +
                 "  if(window.__folioRelayout)window.__folioRelayout();\n" +
                 "};\n" +
                 "window.__folioPaintHighlights(ITEMS);\n" +

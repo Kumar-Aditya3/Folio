@@ -1,0 +1,4 @@
+AndroidX Media3 common and session 1.11.1
+The Android Open Source Project
+Apache License 2.0
+https://cs.android.com/androidx/media

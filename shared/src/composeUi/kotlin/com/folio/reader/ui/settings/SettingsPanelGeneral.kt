@@ -168,26 +168,8 @@ fun GeneralSettingsPanel(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().toggleable(
-                value = settings.homeReadingDesk,
-                role = Role.Switch,
-                onValueChange = { onSettingsChange(settings.copy(homeReadingDesk = it)) },
-            ),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text("Reading desk Home", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Experimental: an artwork-lit revolving shelf, glass reading dock and scroll-revealed sections. Turn off to compare with classic Home.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = settings.homeReadingDesk, onCheckedChange = null)
-        }
-
+        // The "Reading desk Home" switch is gone: the desk is Home now, unconditionally, so
+        // there is nothing left to compare it against. See ReaderSettings' retired-key note.
         // §13.3: hero tint sampled from the current book's cover. On by default —
         // the contrast guard keeps the hero legible even on white/black covers.
         Row(

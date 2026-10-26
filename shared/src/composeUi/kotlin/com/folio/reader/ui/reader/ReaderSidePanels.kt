@@ -78,8 +78,12 @@ internal fun BoxScope.ReaderSidePanels(
     layout: ReaderWorkspaceLayout? = null,
     contents: (@Composable () -> Unit)? = null,
     noteEditor: (@Composable () -> Unit)? = null,
+    showListen: Boolean = false,
+    onCloseListen: () -> Unit = {},
+    listenContent: (@Composable () -> Unit)? = null,
 ) {
     val active = when {
+        showListen -> ReaderTool.Listen
         showReaderPanel -> ReaderTool.Settings
         showSearch -> ReaderTool.Search
         showEchoes -> ReaderTool.Echoes
@@ -88,6 +92,7 @@ internal fun BoxScope.ReaderSidePanels(
         else -> null
     }
     fun close() {
+        onCloseListen()
         if (showToc) onToggleToc()
         if (showAnnotations) onToggleAnnotations()
         if (showSearch) onCloseSearch()
@@ -97,13 +102,14 @@ internal fun BoxScope.ReaderSidePanels(
     ReaderWorkspace(
         active = active,
         tools = listOfNotNull(ReaderTool.Contents, ReaderTool.Search, ReaderTool.Saved,
-            ReaderTool.Echoes.takeIf { echoesEnabled }, ReaderTool.Settings),
+            ReaderTool.Echoes.takeIf { echoesEnabled }, ReaderTool.Listen.takeIf { listenContent != null }, ReaderTool.Settings),
         location = chapterLabel(currentChapterIndex, null),
         onSelect = onSelectTool,
         onDismiss = ::close,
         layout = layout,
     ) { tool ->
         when (tool) {
+            ReaderTool.Listen -> listenContent?.invoke()
             ReaderTool.Contents -> if (contents != null) contents() else
                 TOCSidebar(tocEntries, currentChapterIndex, currentFraction, onChapterClick = onTocRowClick, onDismiss = ::close)
             ReaderTool.Saved -> if (noteEditor != null) noteEditor() else

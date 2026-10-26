@@ -126,4 +126,34 @@ class MangaChallengeTest {
         MangaChallenges.clearedForSource(12L, pending)
         assertNull(MangaChallenges.pending.value)
     }
+
+    @Test
+    fun `global search keeps every source check without opening browsers`() {
+        var opened = 0
+        MangaChallenges.solver = { opened++ }
+        MangaChallenges.record("https://one.test/", sourceId = 1)
+        val first = MangaChallenges.forSource(1)
+        MangaChallenges.record("https://two.test/", sourceId = 2)
+        assertEquals(0, opened)
+        assertEquals("one.test", MangaChallenges.forSource(1)?.host)
+        assertEquals("two.test", MangaChallenges.forSource(2)?.host)
+        MangaChallenges.solve(first)
+        assertEquals(1, opened)
+        MangaChallenges.closed()
+        assertEquals(first, MangaChallenges.forSource(1))
+        MangaChallenges.clearedForSource(1, first)
+        assertNull(MangaChallenges.forSource(1))
+        assertEquals("two.test", MangaChallenges.forSource(2)?.host)
+    }
+
+    @Test
+    fun `an older source retry cannot erase its newer check amid other sources`() {
+        MangaChallenges.record("https://one.test/", sourceId = 1)
+        val old = MangaChallenges.forSource(1)
+        MangaChallenges.record("https://one.test/new", sourceId = 1)
+        val newer = MangaChallenges.forSource(1)
+        MangaChallenges.record("https://two.test/", sourceId = 2)
+        MangaChallenges.clearedForSource(1, old)
+        assertEquals(newer, MangaChallenges.forSource(1))
+    }
 }

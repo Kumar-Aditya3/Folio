@@ -569,28 +569,18 @@ fun LibraryScreen(
                         },
                     )
                 } else {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        item { LibraryModeSwitch(libraryMode, onLibraryModeChange) }
-                        items(documentCategories, key = { it.id }) { category ->
-                            com.folio.reader.ui.components.FolioChip(
-                                selected = selectedDocumentCategory == category.id,
-                                onClick = { documentLibraryViewModel?.selectCategory(category.id) },
-                                label = category.name
-                            )
-                        }
-                        item {
-                            com.folio.reader.ui.components.FolioChip(
-                                selected = false,
-                                onClick = { manageDocumentCategories = true },
-                                label = "Edit"
-                            )
-                        }
-                    }
+                    com.folio.reader.ui.components.FolioCategoryRail(
+                        categories = documentCategories.map { com.folio.reader.ui.components.FolioCategoryChip(
+                            it.id, it.name, it.id != DocumentCategory.MAIN_ID || documentCategories.size > 1,
+                        ) },
+                        selectedId = selectedDocumentCategory,
+                        onSelect = { documentLibraryViewModel?.selectCategory(it) },
+                        onReorder = { documentLibraryViewModel?.reorderCategories(it) },
+                        onRename = { id, name -> documentLibraryViewModel?.renameCategory(id, name) },
+                        onDelete = { documentLibraryViewModel?.deleteCategory(it) },
+                        onEdit = { manageDocumentCategories = true },
+                        leading = { LibraryModeSwitch(libraryMode, onLibraryModeChange) },
+                    )
                 }
                 }
             }
@@ -704,6 +694,9 @@ fun LibraryScreen(
                         selectedCollectionId = selectedCollectionId,
                         onSelectCollection = { viewModel.selectCollection(it) },
                         onEditCollections = { manageCollectionsOpen = true },
+                        onReorderCollections = { viewModel.reorderCollections(it) },
+                        onRenameCollection = { id, name -> viewModel.renameCollection(id, name) },
+                        onDeleteCollection = { viewModel.deleteCollection(it) },
                         leading = if (mangaContent != null || documentLibraryViewModel != null) {
                             ({ LibraryModeSwitch(libraryMode, onLibraryModeChange) })
                         } else {

@@ -640,7 +640,11 @@ class ExportManager(
 
         try {
             // Older backups may still carry credentials; never restore them.
-            settingsRepository.saveGlobalSettings(backup.globalSettings.withoutCredentials())
+            val restored = backup.globalSettings.withoutCredentials()
+            settingsRepository.mergeGlobalSettings { current ->
+                if (mode == RestoreMode.MERGE) restored.copy(readingExperience = com.folio.reader.experience.mergeReadingExperience(current.readingExperience, restored.readingExperience))
+                else restored
+            }
         } catch (e: Exception) {
             errors += "Failed to restore global settings: ${e.message}"
         }

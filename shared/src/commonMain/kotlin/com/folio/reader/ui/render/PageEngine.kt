@@ -474,6 +474,7 @@ window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page
 // highlight, "p:<paragraph>" on the Nth paragraph. A missing mark must never
 // degrade to paragraph 0 — that reads as "the jump took me to the chapter top".
 function folioTargetEl(t){
+  if(String(t).indexOf('n:')===0)return document.querySelector('[data-folio-narration="'+String(t).substring(2)+'"]');
   var parts=String(t).split(':'),isH=parts[0]==='h',el=null;
   var id=isH?(parts[1]||''):'';
   if(id){try{el=document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){el=null;}}

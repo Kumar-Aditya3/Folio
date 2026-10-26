@@ -379,7 +379,8 @@ class MangaReaderViewModel(
             return ChapterSlot(chapter = chapter, pages = pages, startIndex = 0)
         }
         return try {
-            val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
+            val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber,
+                scanlator = chapter.scanlator, dateUpload = chapter.dateUpload, sourceMemo = chapter.sourceMemo)
             val pages = backend.fetchPageList(sourceId, ref)
             currentCoroutineContext().ensureActive()
             cachePageList(chapter.id, pages)

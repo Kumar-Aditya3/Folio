@@ -132,6 +132,12 @@ enum class MotionKey {
 
     /** The bookmark glyph filling or emptying. */
     BookmarkGlyphSwap,
+    HighlightInkSettle,
+    QuoteExportReveal,
+    QuoteTemplateChange,
+    SoundscapeExpand,
+    BookmarkRibbon,
+    ReadingPaperReveal,
 
     // ── Surfaces and press ─────────────────────────────────────────────────────
     /** The press scale on a tappable surface. */
@@ -294,6 +300,12 @@ internal fun motionProfile(key: MotionKey): MotionSpec = when (key) {
     MotionKey.SelectionToolbar -> MotionSpec(180L, FolioEasing.Enter, channel = MotionChannel.CHROME)
     MotionKey.ReaderPlateDissolve -> MotionSpec(FolioTokens.motionStandard, FolioEasing.Enter, channel = MotionChannel.CHROME)
     MotionKey.BookmarkGlyphSwap -> MotionSpec(FolioTokens.motionStandard, FolioEasing.Enter, channel = MotionChannel.CHROME)
+    MotionKey.HighlightInkSettle -> MotionSpec(240L, FolioEasing.Enter, channel = MotionChannel.FEEDBACK)
+    MotionKey.QuoteExportReveal -> MotionSpec(320L, FolioEasing.Travel, channel = MotionChannel.MORPH)
+    MotionKey.QuoteTemplateChange -> MotionSpec(220L, FolioEasing.Enter, channel = MotionChannel.MORPH)
+    MotionKey.SoundscapeExpand -> MotionSpec(240L, FolioEasing.Enter, channel = MotionChannel.SHEET)
+    MotionKey.BookmarkRibbon -> MotionSpec(220L, FolioEasing.Enter, channel = MotionChannel.FEEDBACK)
+    MotionKey.ReadingPaperReveal -> MotionSpec(200L, FolioEasing.Enter, channel = MotionChannel.ENTRY)
 
     // ── Surfaces and press ─────────────────────────────────────────────────────
     // Press is the fastest thing in the app: it must feel like the surface moved *now*.

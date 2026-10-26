@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import com.folio.reader.ui.theme.FolioTheme
@@ -97,6 +98,15 @@ fun FolioLogoMark(
 
 /** The box the traced contours live in. */
 private const val VIEWPORT = 100f
+
+private val cardLogoPath by lazy { foliologoPath() }
+
+/** The exact launcher silhouette, also usable by deterministic image exporters. */
+internal fun DrawScope.drawFolioLogoMark(topLeft: Offset, size: Float, tint: Color) {
+    translate(topLeft.x, topLeft.y) {
+        scale(size / VIEWPORT, size / VIEWPORT, pivot = Offset.Zero) { drawPath(cardLogoPath, tint) }
+    }
+}
 
 /**
  * Parses [FolioLogo.PATH]. Deliberately narrow: `M x,y`, `L x,y`, `Z`, space

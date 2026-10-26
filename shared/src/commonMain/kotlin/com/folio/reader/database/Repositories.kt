@@ -168,6 +168,7 @@ interface TagRepository {
  * a real seeded Main, one shelf at a time, and every book always on some shelf.
  */
 interface CollectionRepository {
+    suspend fun reorderCollections(ids: List<String>)
     suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean = true)
     suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean = true)
 
@@ -296,6 +297,9 @@ data class SearchResult(
 )
 
 interface SettingsRepository {
+    fun observeReadingExperience(): Flow<com.folio.reader.experience.ReadingExperienceData> = kotlinx.coroutines.flow.flow {
+        emit(getGlobalSettings().readingExperience)
+    }
     suspend fun getGlobalSettings(): ReaderSettings
     suspend fun saveGlobalSettings(settings: ReaderSettings, emitSyncEvent: Boolean = true)
 

@@ -4,6 +4,7 @@ import com.folio.reader.model.DocumentCategory
 import kotlinx.coroutines.flow.Flow
 
 interface DocumentCategoryRepository {
+    suspend fun reorder(ids: List<String>)
     suspend fun create(name: String): DocumentCategory
     suspend fun rename(id: String, name: String)
     suspend fun delete(id: String): Boolean

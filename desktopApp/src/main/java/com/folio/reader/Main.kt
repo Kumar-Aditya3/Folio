@@ -1195,6 +1195,8 @@ fun main(args: Array<String>) {
                 // foreground animation is shared code and must resolve identically.
                 motion = globalSettings.motion,
             ) {
+com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, deps.bookRepository, deps.highlightRepository, deps.noteRepository, deps.sessionRepository) {
+
                 com.folio.reader.ui.components.FolioGlassRoot(
                     capabilities = com.folio.reader.ui.components.glassCapabilitiesFor(
                         platformBlurSupported = true,
@@ -1913,7 +1915,9 @@ fun main(args: Array<String>) {
                     }
                 }
                 }
-            }
+
+}
+}
         }
     }
 }
@@ -2022,6 +2026,7 @@ private fun ReaderRoute(
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
     val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
     val loadError by viewModel.loadError.collectAsState(initial = null)
+    val reflectionInvitation by viewModel.reflectionInvitation.collectAsState()
     val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
     // Continuous-mode chapter window.
     val windowSections by viewModel.windowSections.collectAsState(initial = emptyList())
@@ -2077,6 +2082,9 @@ private fun ReaderRoute(
     }
 
     ReaderScreen(
+        reflectionInvitation = reflectionInvitation,
+        onSaveReflection = viewModel::saveReflection,
+        onDismissReflection = viewModel::dismissReflection,
         bookTitle = book.title,
         chapters = chapters,
         bookToc = bookToc,

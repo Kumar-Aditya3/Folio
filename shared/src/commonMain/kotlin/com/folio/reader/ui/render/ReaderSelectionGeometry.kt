@@ -43,7 +43,7 @@ window.__folioAnimateSelTools=function(t,shown){
 window.__folioHideSelTools=function(){var t=window.__folioSelectionToolsRef||document.getElementById('folio-selection-tools');
   if(t&&t.__folioVisible!==false)window.__folioAnimateSelTools(t,false);};
 window.folioSelectionMessage=function(spine,paragraph,text,sel,n){
-  var encoded=encodeURIComponent(text.slice(0,500));
+  var encoded=encodeURIComponent(text);
   try{
     var range=sel.getRangeAt(0),source=range.startContainer.ownerDocument||document,sourceWindow=source.defaultView||window;
     var r=range.getBoundingClientRect(),l=r.left,t=r.top,b=r.bottom,rr=r.right,w=sourceWindow;
@@ -56,7 +56,7 @@ window.folioSelectionMessage=function(spine,paragraph,text,sel,n){
       var tools=source.getElementById('folio-selection-tools');
       if(!tools){tools=source.createElement('div');tools.id='folio-selection-tools';
         tools.style.cssText='position:fixed;z-index:2147483646;display:flex;border-radius:10px;box-shadow:0 2px 12px #0004;padding:2px;font:13px system-ui;';
-        ['Keep','Note','Copy'].forEach(function(label){var btn=source.createElement('button');btn.textContent=label;
+        ['Keep','Note','Export','Copy'].forEach(function(label){var btn=source.createElement('button');btn.textContent=label;
           btn.style.cssText='min-width:56px;min-height:48px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer;';
           btn.onmousedown=function(e){e.preventDefault();e.stopPropagation();};
           btn.onclick=function(e){e.preventDefault();e.stopPropagation();window.__folioHideSelTools();

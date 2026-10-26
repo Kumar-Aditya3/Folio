@@ -74,6 +74,7 @@ class MangaLibrarySharingTest {
         private val delegate: MangaReaderProgressTest.FakeCategoryRepo =
             MangaReaderProgressTest.FakeCategoryRepo(),
     ) : MangaCategoryRepository {
+        override suspend fun reorder(ids: List<String>) = delegate.reorder(ids)
         var categorySubscriptions = 0
             private set
 

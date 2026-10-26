@@ -230,7 +230,7 @@ actual fun HtmlContentSurface(
                 it.spineIndex in op.fromSpine..op.toSpine
             }
         }
-        current.applyHighlights(HighlightPaint.applyJs(highlights, theme))
+        current.applyHighlights(HighlightPaint.motionJs(if (resolvedMotion.reduced) 0L else resolvedMotion[com.folio.reader.ui.theme.MotionKey.HighlightInkSettle].durationMs) + HighlightPaint.applyJs(highlights, theme))
         onWindowOpApplied(op.nonce)
     }
 
@@ -790,7 +790,7 @@ private class JcefSession private constructor(
     }
 }
 
-private object JcefRuntime {
+internal object JcefRuntime {
     @Volatile private var instance: CefApp? = null
 
     fun dataDir(): File = File(

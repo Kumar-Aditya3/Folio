@@ -11,6 +11,9 @@ import java.util.UUID
 class JdbcDocumentCategoryRepository(
     private val db: Database
 ) : DocumentCategoryRepository {
+    override suspend fun reorder(ids: List<String>) {
+        if (db.reorderCategoryRows("document_categories", ids).isNotEmpty()) db.bumpDocumentData()
+    }
     override suspend fun create(name: String): DocumentCategory {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty())

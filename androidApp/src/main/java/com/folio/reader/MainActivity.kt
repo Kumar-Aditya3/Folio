@@ -47,6 +47,7 @@ import com.folio.reader.ui.components.folioRoomSource
 import com.folio.reader.ui.theme.folioLamp
 import com.folio.reader.ui.theme.folioRoomScrim
 import com.folio.reader.nav.FolioRoutes
+import com.folio.reader.nav.goToTopLevelTab
 import com.folio.reader.nav.changeMangaDownloadsLocation
 import com.folio.reader.nav.handleAnnotationsExport
 import com.folio.reader.nav.handleBackupRestore
@@ -102,6 +103,14 @@ class MainActivity : ComponentActivity() {
     private var pendingImportRoute: String? = null
     internal lateinit var navModel: FolioNavModelImpl
     private var pendingOpenRoute: String? = null
+    private var pendingSurfaceManga = false
+
+    override fun onStop() {
+        super.onStop()
+        if (com.folio.reader.surfaces.WidgetRefreshWorker.installed(this)) {
+            com.folio.reader.surfaces.WidgetRefreshWorker.enqueue(this)
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -154,7 +163,13 @@ class MainActivity : ComponentActivity() {
                 model.navController = navController
                 pendingOpenRoute?.let { route ->
                     pendingOpenRoute = null
-                    navController.navigate(route)
+                    if (pendingSurfaceManga) {
+                        model.libraryModeLoaded = true
+                        model.libraryMode = LibraryMode.MANGA
+                        pendingSurfaceManga = false
+                    }
+                    navController.goToTopLevelTab(if (route in FolioRoutes.BAR_ROUTES) route else FolioRoutes.LIBRARY)
+                    if (route !in FolioRoutes.BAR_ROUTES) navController.navigate(route) { launchSingleTop = true }
                 }
             }
 
@@ -429,6 +444,7 @@ class MainActivity : ComponentActivity() {
                 inFlowGlass = !model.globalSettings.minimalLiquidGlass,
             ) {
                 androidx.compose.runtime.CompositionLocalProvider(
+                    com.folio.reader.narration.LocalNarrationController provides graph.narration,
                     com.folio.reader.ui.theme.LocalDynamicSchemes provides dynamicSchemes,
                 ) {
                     FolioTheme.AppTheme(
@@ -449,6 +465,8 @@ class MainActivity : ComponentActivity() {
                         // apart. See ui/theme/Motion.kt.
                         motion = model.globalSettings.motion,
                     ) {
+com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository, graph.bookRepository, graph.highlightRepository, graph.noteRepository, graph.sessionRepository) {
+
                     // §17 living glass: the room's slow animated light, provided
                     // once at the Android root. Every material's sheen and the
                     // field's pools read it in the draw phase, so a resting page
@@ -757,7 +775,9 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     }
-                    }
+
+}
+}
                 }
             }
         }
@@ -1100,6 +1120,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent) {
+        if (intent.action == com.folio.reader.surfaces.ReadingSurfaceIntents.ACTION) {
+            val kind = intent.data?.pathSegments?.getOrNull(0)
+            val id = intent.data?.pathSegments?.getOrNull(1).orEmpty()
+            appScope.launch {
+                val graph = (application as FolioApplication).graph
+                val route = withContext(Dispatchers.IO) {
+                    when (kind) {
+                        "book" -> graph.bookRepository.getBook(id)?.let { FolioDestination.reader(it.id) }
+                        "document" -> graph.documentRepository.getDocument(id)?.let { FolioDestination.documentReader(it.id) }
+                        "manga" -> if (id.isNotBlank()) graph.mangaRepository.get(id)?.let { manga ->
+                            val next = com.folio.reader.surfaces.nextReadingChapter(graph.mangaChapterRepository.getChapters(manga.id))
+                            next?.let { FolioDestination.mangaReader(manga.id, it.id) } ?: FolioDestination.mangaDetail(manga.id)
+                        } else FolioRoutes.LIBRARY
+                        "stats" -> FolioRoutes.STATS
+                        "downloads" -> FolioRoutes.MANGA_DOWNLOADS
+                        "library" -> FolioRoutes.LIBRARY
+                        else -> FolioRoutes.HOME
+                    } ?: FolioRoutes.LIBRARY
+                }
+                val controller = if (::navModel.isInitialized) navModel.navController else null
+                if (::navModel.isInitialized && kind == "manga") {
+                    navModel.libraryModeLoaded = true
+                    navModel.libraryMode = LibraryMode.MANGA
+                }
+                if (controller != null) {
+                    controller.goToTopLevelTab(if (route in FolioRoutes.BAR_ROUTES) route else FolioRoutes.LIBRARY)
+                    if (route !in FolioRoutes.BAR_ROUTES) controller.navigate(route) { launchSingleTop = true }
+                } else {
+                    pendingSurfaceManga = kind == "manga"
+                    pendingOpenRoute = route
+                }
+            }
+            return
+        }
         val uris = LinkedHashSet<Uri>()
         if (intent.action == Intent.ACTION_VIEW) {
             intent.data?.let(uris::add)

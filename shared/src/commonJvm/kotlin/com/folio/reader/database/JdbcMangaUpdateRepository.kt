@@ -135,7 +135,10 @@ class JdbcMangaUpdateRepository(
 
     private suspend fun checkManga(manga: MangaEntry): CheckOutcome {
         val refs: List<MangaChapterRef>? = try {
-            withTimeoutOrNull(REQUEST_TIMEOUT_MS) { backend.fetchChapterList(manga.sourceId, manga.url) }
+            withTimeoutOrNull(REQUEST_TIMEOUT_MS) {
+                backend.restoreMangaMetadata(manga)
+                backend.fetchChapterList(manga.sourceId, manga.url)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -147,9 +150,11 @@ class JdbcMangaUpdateRepository(
             return CheckOutcome.Failure("timeout")
         }
         return try {
-            val existingUrls = chapterRepository.getChapters(manga.id).map { it.url }.toSet()
+            val savedChapters = chapterRepository.getChapters(manga.id)
+            val existingUrls = savedChapters.map { it.url }.toSet()
+            val existingMemos = savedChapters.associate { it.url to it.sourceMemo }
             val newCount = refs.count { it.url !in existingUrls }
-            if (newCount > 0) {
+            if (newCount > 0 || refs.any { it.sourceMemo != existingMemos[it.url] }) {
                 // Replace with the full remote list; replaceChapters restores
                 // read/bookmark/progress on rows whose url still exists.
                 chapterRepository.replaceChapters(
@@ -181,6 +186,7 @@ class JdbcMangaUpdateRepository(
         chapterNumber = if (ref.chapterNumber >= 0f) ref.chapterNumber else ChapterNumberParser.parse(ref.name),
         dateUpload = ref.dateUpload,
         sortOrder = index,
+        sourceMemo = ref.sourceMemo,
     )
 
     override fun observeUpdateStates(): Flow<List<MangaUpdateState>> = db.mangaDataRevision.map {

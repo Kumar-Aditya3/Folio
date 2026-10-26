@@ -291,7 +291,8 @@ data class FsReadingSession(
     val startProgress: Double = 0.0,
     val endProgress: Double = 0.0,
     val wordsRead: Long = 0,
-    val isActive: Boolean = false
+    val isActive: Boolean = false,
+    val activity: String? = null,
 )
 
 @Serializable

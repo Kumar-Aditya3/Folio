@@ -1,4 +1,5 @@
 package com.folio.reader.ui.quotes
+import androidx.compose.material.icons.filled.IosShare
 
 import com.folio.reader.ui.components.*
 import androidx.compose.foundation.layout.FlowRow
@@ -99,6 +100,7 @@ fun QuoteBrowserScreen(
     viewModel: QuoteBrowserViewModel,
     onOpenRelated: ((RelatedPassage) -> Unit)? = null,
 ) {
+    var chooseSequence by remember { mutableStateOf(false) }
     var viewMode by remember { mutableStateOf(QuoteBrowserViewModel.ViewMode.LIST) }
     var filter by remember { mutableStateOf(QuoteBrowserViewModel.FilterState()) }
     var searchExpanded by remember { mutableStateOf(false) }
@@ -127,6 +129,7 @@ fun QuoteBrowserScreen(
     val quotesLoading by viewModel.loading.collectAsState(initial = true)
     val displayItems by viewModel.filteredDisplayItems(filter)
         .collectAsState(initial = emptyList())
+    if (chooseSequence) com.folio.reader.experience.QuoteSequencePicker(displayItems) { chooseSequence = false }
     // null = the manga-notes flow has not emitted yet (loading); an empty list is a real
     // "no manga notes". Kept distinct so a slow manga source cannot force a false empty state.
     val mangaItems by viewModel.mangaItems(filter)
@@ -213,6 +216,7 @@ fun QuoteBrowserScreen(
                 }
             },
             actions = {
+                IconButton(onClick = { chooseSequence = true }) { Icon(Icons.Filled.IosShare, "Export selected quotes") }
                 IconButton(onClick = { searchExpanded = !searchExpanded }) {
                     Icon(Icons.Filled.Search, contentDescription = "Search")
                 }
@@ -463,10 +467,8 @@ private fun QuoteList(
 }
 
 /**
- * A saved passage, as a pull-quote rather than a card. The highlight's own colour
- * becomes the leading rule, so the reader's chosen highlighter is what identifies
- * the quote — the strongest available signal, and it was previously reduced to a
- * 4dp strip on top of a grey box.
+ * A saved passage on theme-relative paper. Its ink and leading rule follow the
+ * current app palette; the stored highlighter colour remains a reader annotation.
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -478,7 +480,8 @@ internal fun QuoteCard(
     expanded: Boolean = false,
     onExpand: () -> Unit = {},
 ) {
-    val accent = item.highlight?.effectiveColor?.let { Color(it) } ?: FolioTheme.colors.accentAnnotation
+    val accent = FolioTheme.colors.primary
+    val quoteInk = rememberLegibleAccent(accent, background = folioPaperColor())
     FolioPaperSheet(accent = accent, layered = true) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onExpand),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -490,7 +493,7 @@ internal fun QuoteCard(
                     color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
-        Text("\u201C${item.quote.text}\u201D", style = FolioTheme.typography.quote, color = FolioTheme.colors.onSurface,
+        Text("\u201C${item.quote.text}\u201D", style = FolioTheme.typography.quote, color = quoteInk,
             maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand)
                 .semantics { stateDescription = if (expanded) "Expanded quote" else "Collapsed quote" })
@@ -513,6 +516,8 @@ internal fun QuoteCard(
                 }
             }
         }
+
+        com.folio.reader.experience.QuoteExperienceActions(item)
     }
 }
 
@@ -524,6 +529,7 @@ private fun QuoteListItem(
     onFindRelated: ((QuoteDisplayItem) -> Unit)? = null,
 ) {
     // Compact form: the same leading-rule language as the card form, no box.
+    val quoteInk = rememberLegibleAccent(FolioTheme.colors.primary, background = folioPaperColor())
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -531,9 +537,7 @@ private fun QuoteListItem(
             .folioPaper().padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            val highlightColor = item.highlight?.effectiveColor
-                ?.let { androidx.compose.ui.graphics.Color(it) }
-                ?: FolioTheme.colors.accentAnnotation
+            val highlightColor = FolioTheme.colors.primary
             Box(
                 modifier = Modifier
                     .width(2.dp)
@@ -545,7 +549,7 @@ private fun QuoteListItem(
                 Text(
                     text = "\u201C${item.quote.text}\u201D",
                     style = FolioTheme.typography.quote.copy(fontSize = 15.sp, lineHeight = 21.sp),
-                    color = FolioTheme.colors.onSurface,
+                    color = quoteInk,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -583,6 +587,8 @@ private fun QuoteListItem(
                 }
             }
         }
+
+        com.folio.reader.experience.QuoteExperienceActions(item)
     }
 }
 

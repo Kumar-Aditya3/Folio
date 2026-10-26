@@ -16,34 +16,25 @@ import kotlin.test.assertTrue
 
 class ReadingDeskTest {
     @Test
-    fun existingSettingsRemainClassicAndTheChoiceSurvivesReload() = runBlocking {
+    fun theRetiredReadingDeskKeyIsIgnoredOnDecode() {
         val json = Json { ignoreUnknownKeys = true }
-        assertFalse(json.decodeFromString<ReaderSettings>("{}").homeReadingDesk)
-        val root = kotlin.io.path.createTempDirectory("folio-reading-desk-").toFile()
-        val database = Database(DesktopPlatform(root).fileSystem.getDatabasePath())
-        try {
-            val repo = JdbcSettingsRepository(database)
-            repo.saveGlobalSettings(ReaderSettings(homeReadingDesk = true), emitSyncEvent = false)
-            assertTrue(JdbcSettingsRepository(database).getGlobalSettings().homeReadingDesk)
-            repo.saveGlobalSettings(repo.getGlobalSettings().copy(homeReadingDesk = false), emitSyncEvent = false)
-            assertFalse(JdbcSettingsRepository(database).getGlobalSettings().homeReadingDesk)
-        } finally {
-            database.close()
-            root.deleteRecursively()
-        }
+        // The field is gone from ReaderSettings; a blob an older build wrote carrying the key
+        // must still decode cleanly rather than fall back to defaults.
+        val decoded = json.decodeFromString<ReaderSettings>("""{"homeReadingDesk": false}""")
+        assertEquals(60, decoded.dailyGoalMinutes)
     }
 
     @Test
     fun comparisonTogglePatchesOnlyItsOwnFieldAndCanResetToDefault() {
         val initial = ReaderSettings()
-        val desk = initial.copy(homeReadingDesk = true)
+        val desk = initial.copy(homeCoverTint = false)
         val concurrent = initial.copy(fontSize = 25f, ambientColor = false)
         val enabled = concurrent.withFieldsFrom(initial.diffFields(desk), desk)
-        assertTrue(enabled.homeReadingDesk)
+        assertFalse(enabled.homeCoverTint)
         assertEquals(25f, enabled.fontSize)
         assertFalse(enabled.ambientColor)
         val restored = enabled.withFieldsFrom(desk.diffFields(initial), initial)
-        assertFalse(restored.homeReadingDesk)
+        assertTrue(restored.homeCoverTint)
         assertEquals(25f, restored.fontSize)
     }
 

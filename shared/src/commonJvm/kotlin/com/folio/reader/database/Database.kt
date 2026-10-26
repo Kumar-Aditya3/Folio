@@ -73,6 +73,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
 
     /** Saved-passage changes invalidate reading traces without reloading book lists. */
     val annotationDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val settingsDataRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     fun bumpAnnotationData() { annotationDataRevision.value += 1 }
 
     /**
@@ -337,6 +338,13 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 )
             """.trimIndent())
             // reading_sessions grows unboundedly with reading activity and had no indexes: the
+            val sessionColumns = conn.createStatement().use { statement ->
+                statement.executeQuery("PRAGMA table_info(reading_sessions)").use { rows ->
+                    buildSet { while (rows.next()) add(rows.getString("name")) }
+                }
+            }
+            if ("activity_json" !in sessionColumns) conn.createStatementExec("ALTER TABLE reading_sessions ADD COLUMN activity_json TEXT")
+            conn.createStatementExec("CREATE TABLE IF NOT EXISTS narration_checkpoints (book_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
             // per-tick getActiveSession and the whole statistics screen were full scans.
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_sessions_book ON reading_sessions (book_id, started_at)")
             conn.createStatementExec("CREATE INDEX IF NOT EXISTS idx_sessions_started ON reading_sessions (started_at)")
@@ -1085,6 +1093,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
 
     suspend fun updateNormalizedProgress(bookId: String, progress: Double): Unit = withContext(dispatcher) {
         writeMutex.withLock {
+            if (com.folio.reader.narration.NarrationActivity.ownerBookId == bookId) return@withLock
             val conn = driverDelegate.getConnection()
             // Any measurable progress makes a book Reading by definition; only UNREAD
             // is promoted so an explicit Paused/Finished choice is never overridden.
@@ -1161,8 +1170,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
 
     // ---------- Reading positions ----------
 
-    suspend fun upsertPosition(position: ReadingPosition): Unit = withContext(dispatcher) {
+    suspend fun upsertPosition(position: ReadingPosition): Boolean = withContext(dispatcher) {
         writeMutex.withLock {
+            if (com.folio.reader.narration.NarrationActivity.ownerBookId == position.bookId &&
+                com.folio.reader.narration.NarrationActivity.ownerDeviceId == position.deviceId) return@withLock false
             val conn = driverDelegate.getConnection()
             conn.prepareStatement(
                 """
@@ -1189,6 +1200,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 })
                 stmt.executeUpdate()
             }
+            true
         }
     }
 
@@ -1381,6 +1393,7 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 stmt.setLong(3, Clock.System.now().toEpochMilliseconds())
                 stmt.executeUpdate()
             }
+            settingsDataRevision.value += 1
         }
     }
 

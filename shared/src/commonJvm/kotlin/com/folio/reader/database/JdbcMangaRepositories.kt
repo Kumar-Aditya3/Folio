@@ -55,13 +55,20 @@ class JdbcMangaRepository(
                     stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) == 1 else manga.inLibrary }
                 }
             } else manga.inLibrary
+            // Sync payloads from other devices do not carry local extension metadata.
+            val sourceMemo = if (manga.sourceMemo == "{}") {
+                conn.prepareStatement("SELECT source_memo FROM manga_library WHERE id = ?").use { stmt ->
+                    stmt.setString(1, manga.id)
+                    stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) ?: "{}" else "{}" }
+                }
+            } else manga.sourceMemo
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO manga_library (
                     id, source_id, source_name, url, title, author, artist, description,
                     genres, status, thumbnail_url, cover_path, favorite, initialized,
-                    added_at, updated_at, last_read_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    added_at, updated_at, last_read_at, source_memo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, manga.id)
@@ -81,9 +88,10 @@ class JdbcMangaRepository(
                 stmt.setLong(15, manga.addedAt.toEpochMilliseconds())
                 stmt.setLong(16, manga.updatedAt.toEpochMilliseconds())
                 stmt.setObject(17, manga.lastReadAt?.toEpochMilliseconds())
+                stmt.setString(18, sourceMemo)
                 stmt.executeUpdate()
             }
-            manga.copy(inLibrary = inLibrary)
+            manga.copy(inLibrary = inLibrary, sourceMemo = sourceMemo)
         }
         if (emitSyncEvent) {
             db.onEntityChanged?.invoke(
@@ -264,6 +272,7 @@ class JdbcMangaRepository(
             updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(rs.getLong("updated_at")),
             lastReadAt = rs.getLong("last_read_at").takeIf { it > 0 }
                 ?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it) },
+            sourceMemo = rs.getString("source_memo") ?: "{}",
         )
     }
 }
@@ -318,8 +327,8 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                 """
                 INSERT INTO manga_chapters (
                     id, manga_id, url, name, scanlator, chapter_number, date_upload,
-                    sort_order, read, bookmarked, last_page_read, downloaded_pages, updated_at, total_pages
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sort_order, read, bookmarked, last_page_read, downloaded_pages, updated_at, total_pages, source_memo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
@@ -339,6 +348,7 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
                     stmt.setInt(12, previousDownloaded[chapter.url] ?: chapter.downloadedPages)
                     stmt.setLong(13, previousUpdated[chapter.url] ?: now)
                     stmt.setInt(14, previousTotal[chapter.url] ?: chapter.totalPages)
+                    stmt.setString(15, chapter.sourceMemo)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -692,6 +702,7 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
         lastPageRead = rs.getInt("last_page_read"),
         downloadedPages = rs.getInt("downloaded_pages"),
         totalPages = rs.getInt("total_pages"),
+        sourceMemo = rs.getString("source_memo") ?: "{}",
         updatedAt = kotlinx.datetime.Instant.fromEpochMilliseconds(
             rs.getLong("updated_at").takeIf { it > 0 } ?: kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         ),
@@ -699,9 +710,22 @@ class JdbcMangaChapterRepository(private val db: Database) : com.folio.reader.ma
 }
 
 class JdbcMangaCategoryRepository(private val db: Database) : com.folio.reader.manga.MangaCategoryRepository {
+    override suspend fun reorder(ids: List<String>) {
+        val changed = db.reorderCategoryRows("manga_categories", ids)
+        if (changed.isEmpty()) return
+        db.bumpMangaData()
+        changed.forEach { id -> get(id)?.let { emitCategoryEvent(it, "UPSERT", isDeleted = false) } }
+    }
 
     override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory {
-        val category = MangaCategory(id = UUID.randomUUID().toString(), name = name)
+        val nextOrder = db.withConnection { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM manga_categories").use { result ->
+                    result.next(); result.getInt(1)
+                }
+            }
+        }
+        val category = MangaCategory(id = UUID.randomUUID().toString(), name = name, sortOrder = nextOrder)
         insertCategoryRow(category)
         db.bumpMangaData()
         if (emitSyncEvent) emitCategoryEvent(category, "UPSERT", isDeleted = false)
@@ -1658,6 +1682,17 @@ object MangaSchema {
             """.trimIndent()
         )
         exec("CREATE INDEX IF NOT EXISTS idx_manga_chapters_manga ON manga_chapters(manga_id)")
+        // Metadata is opaque to Folio but required by modern extension route resolvers.
+        for (table in listOf("manga_library", "manga_chapters")) {
+            val hasMemo = conn.createStatement().use { stmt ->
+                stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
+                    var found = false
+                    while (rs.next()) if (rs.getString("name") == "source_memo") found = true
+                    found
+                }
+            }
+            if (!hasMemo) exec("ALTER TABLE $table ADD COLUMN source_memo TEXT NOT NULL DEFAULT '{}'")
+        }
         runCatching {
             conn.createStatement().executeQuery("SELECT updated_at FROM manga_chapters LIMIT 0").close()
         }.onFailure {

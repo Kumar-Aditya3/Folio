@@ -337,6 +337,36 @@ class SyncEngineTest {
     )
 
     @Test
+    fun `narration evidence restores modality and later cumulative totals without duplicate time`() = runBlocking {
+        val fake = FakeFirestoreSync(selfDeviceId)
+        val engine = makeEngine(fake)
+        val book = seedBook()
+        bookRepo.insertBook(book)
+        val now = Clock.System.now().toEpochMilliseconds()
+        val position = com.folio.reader.model.ReadingPosition(book.id,"other","c0",0,"")
+        val payload = Json.encodeToString(com.folio.reader.model.ReadingPosition.serializer(),position)
+        val evidence = FsReadingSession(id="audio",bookId=book.id,deviceId="other",startedAt=now,
+            endedAt=now+60_000,durationMs=60_000,startPosition=payload,
+            activity=Json.encodeToString(com.folio.reader.narration.SessionActivity.serializer(),com.folio.reader.narration.SessionActivity(listeningMs=60_000,sittingId="one")))
+        // A legacy summary and its independently keyed evidence have the same payload id.
+        fake.sessions.add(evidence.copy(activity=null))
+        fake.sessions.add(evidence)
+        engine.syncOnce()
+        var rows=sessionRepo.getSessionsForBook(book.id).first()
+        assertEquals(1,rows.size)
+        assertEquals(60_000L,rows.single().activity!!.listeningMs)
+        // The next checkpoint must update an already known row instead of being ignored.
+        fake.sessions.clear()
+        fake.sessions.add(evidence.copy(durationMs=90_000,endedAt=now+90_000,
+            activity=Json.encodeToString(com.folio.reader.narration.SessionActivity.serializer(),com.folio.reader.narration.SessionActivity(listeningMs=90_000,sittingId="one"))))
+        engine.syncOnce()
+        rows=sessionRepo.getSessionsForBook(book.id).first()
+        assertEquals(1,rows.size)
+        assertEquals(90_000L,rows.single().durationMs)
+        assertEquals(90_000L,rows.single().activity!!.listeningMs)
+    }
+
+    @Test
     fun `queued local changes are pushed to the transport`() = runBlocking {
         val fake = FakeFirestoreSync(selfDeviceId)
         val engine = makeEngine(fake)

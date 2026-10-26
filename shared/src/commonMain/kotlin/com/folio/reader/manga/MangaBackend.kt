@@ -29,6 +29,9 @@ interface MangaBackend {
 
     suspend fun fetchChapterList(sourceId: Long, mangaUrl: String): List<MangaChapterRef>
 
+    /** Restores opaque extension metadata before requesting a persisted manga. */
+    suspend fun restoreMangaMetadata(manga: MangaEntry) {}
+
     suspend fun fetchPageList(sourceId: Long, chapter: MangaChapterRef): List<MangaPageRef>
 
     suspend fun fetchPageImage(

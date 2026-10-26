@@ -280,6 +280,18 @@ class FolioOverlayController internal constructor() {
         entries = entries.subList(0, index)
         removed.forEach { it.onDismiss?.invoke() }
     }
+
+    /**
+     * A menu's owner has closed it, often while opening a new dialog in the same
+     * frame. Remove only that menu: the replacement is an independent operation.
+     * Explicit back/scrim dismissal still uses [dismiss] and closes descendants.
+     */
+    internal fun retireMenu(token: Int) {
+        val entry = entries.firstOrNull { it.token == token } ?: return
+        if (entry.kind != FolioOverlayKind.Menu) return
+        entries = entries.filterNot { it.token == token }
+        entry.onDismiss?.invoke()
+    }
 }
 
 /**
@@ -749,7 +761,7 @@ fun FolioMenu(
                 }
             }
         } else if (token != 0) {
-            controller.dismiss(token)
+            controller.retireMenu(token)
             token = 0
         }
     }
@@ -764,7 +776,7 @@ fun FolioMenu(
         }
     }
     DisposableEffect(Unit) {
-        onDispose { if (token != 0) controller.dismiss(token) }
+        onDispose { if (token != 0) controller.retireMenu(token) }
     }
 }
 

@@ -229,11 +229,15 @@ class RestFirestoreSync(
         json.encodeToString(bookmark)
     )
 
-    override fun upsertSession(session: FsReadingSession) = putPayload(
-        "${FirestorePaths.userSessions(uid)}/${fsId(session.id)}",
-        session.startedAt,
-        json.encodeToString(session)
-    )
+    override fun upsertSession(session: FsReadingSession) {
+        val payload = json.encodeToString(session)
+        val watermark = if (session.activity != null) session.endedAt ?: session.startedAt else session.startedAt
+        putPayload("${FirestorePaths.userSessions(uid)}/${fsId(session.id)}",watermark,payload)
+        // Separate evidence survives a legacy client's replacement of the compatibility payload.
+        // Its payload retains the original session id, so old and new databases both upsert one row.
+        if (session.activity != null) putPayload(
+            "${FirestorePaths.userSessions(uid)}/narration-evidence-${fsId(session.id)}",watermark,payload)
+    }
 
     override fun upsertSettings(settings: FsSettings) =
         putPayload(FirestorePaths.userSettingsDocument(uid), settings.updatedAt, json.encodeToString(settings))

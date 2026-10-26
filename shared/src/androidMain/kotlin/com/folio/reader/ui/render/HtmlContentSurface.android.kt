@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import android.webkit.JavascriptInterface
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -115,6 +116,8 @@ actual fun HtmlContentSurface(
     val latestSelection by rememberUpdatedState(onSelectionChanged)
     val latestSelectionBounds by rememberUpdatedState(onSelectionBounds)
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    val inkMotion = com.folio.reader.ui.theme.LocalMotion.current
+    val inkMotionJs = HighlightPaint.motionJs(if (inkMotion.reduced) 0L else inkMotion[com.folio.reader.ui.theme.MotionKey.HighlightInkSettle].durationMs)
     // Sections on screen, including DOM extensions: the `sections` param is the
     // document as loaded (extensions never rebuild it), so the live list grows
     // and trims here as window ops apply. One state object for the whole
@@ -186,6 +189,24 @@ actual fun HtmlContentSurface(
     // loading from the DB a beat later — the "sometimes coloured instantly, sometimes not"
     // race. Painting is idempotent (it unwraps first), so an extra apply is harmless.
     var pageReadyTick by remember(loadKey) { mutableStateOf(0) }
+    val narrationController = com.folio.reader.narration.LocalNarrationController.current
+    val narration = narrationController?.state?.collectAsState()?.value
+    val currentNarration = rememberUpdatedState(narrationController)
+    val latestNarrationPosition = rememberUpdatedState(position)
+    LaunchedEffect(pageReadyTick) {
+        val saved = position
+        if (pageReadyTick > 0 && saved?.contentLocator?.startsWith("n:") == true) {
+            val target = kotlinx.serialization.json.JsonPrimitive("c:${saved.chapterId}|${saved.contentLocator}").toString()
+            webViewRef?.evaluateJavascript("if(window.__folioSeekTo)window.__folioSeekTo($target);",null)
+        }
+    }
+
+    LaunchedEffect(narration?.blockId, narration?.position?.spineIndex, narration?.followText, narration?.phase, pageReadyTick) {
+        val speaking = narration?.takeIf { it.bookId == position?.bookId && it.hasBook }
+        webViewRef?.evaluateJavascript(com.folio.reader.narration.NarrationDom.script(
+            speaking?.position?.spineIndex, speaking?.position?.chapterId, speaking?.blockId,
+            speaking?.followText == true), null)
+    }
     // Adding or removing a highlight re-runs the painter on the page that is
     // already up — reloading the chapter here would flash the whole screen.
     LaunchedEffect(highlights, settings.themeId, settings.customTheme, webViewRef, pageReadyTick) {
@@ -193,7 +214,7 @@ actual fun HtmlContentSurface(
         val theme = settings.customTheme
             ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
         wv.evaluateJavascript(
-            HighlightPaint.applyJs(highlights, theme), null
+            inkMotionJs + HighlightPaint.applyJs(highlights, theme), null
         )
     }
     // The document: a window is assembled from its sections with every resource
@@ -433,7 +454,7 @@ actual fun HtmlContentSurface(
         if (dimsJson.length > 2) {
             wv.evaluateJavascript("window.__folioStampImgs&&window.__folioStampImgs($dimsJson);", null)
         }
-        wv.evaluateJavascript(HighlightPaint.applyJs(highlights, theme), null)
+        wv.evaluateJavascript(inkMotionJs + HighlightPaint.applyJs(highlights, theme), null)
         windowOpTick++
         onWindowOpApplied(op.nonce)
     }
@@ -544,9 +565,21 @@ actual fun HtmlContentSurface(
     // parser covers progress, links, taps, edges, selections and extend requests.
     val chromeClient = remember {
         object : WebChromeClient() {
+            private var lastNarrationProbe = 0L
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 super.onReceivedTitle(view, title)
                 val t = title ?: return
+                if (t.startsWith("folio-progress:") && currentNarration.value?.pack?.value?.phase == com.folio.reader.narration.VoicePackPhase.Installed &&
+                    android.os.SystemClock.elapsedRealtime()-lastNarrationProbe > 500) {
+                    lastNarrationProbe = android.os.SystemClock.elapsedRealtime()
+                    view?.evaluateJavascript(com.folio.reader.narration.NarrationDom.visibleScript) { raw ->
+                        val parts = raw.trim('"').split('|')
+                        val p = latestNarrationPosition.value
+                        if (p != null && parts.size == 2 && parts[1].matches(Regex("b\\d+"))) {
+                            currentNarration.value?.visibleSource(p.bookId,parts[0].toIntOrNull()?.takeIf { it >= 0 } ?: p.spineIndex,parts[1])
+                        }
+                    }
+                }
                 if (READER_DEBUG_LOG && t.startsWith("folio-")) android.util.Log.i("FolioLoad", "title=${t.take(140)}")
                 when {
                     t.startsWith("folio-progress:") -> {
@@ -688,6 +721,8 @@ actual fun HtmlContentSurface(
                 var downY = 0f
                 var downAt = 0L
                 setOnTouchListener { view, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) position?.bookId?.let { currentNarration.value?.visualActivity(it) }
+                    if (event.actionMasked == MotionEvent.ACTION_MOVE) currentNarration.value?.setFollowText(false)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
                             downX = event.x

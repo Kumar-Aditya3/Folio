@@ -164,6 +164,7 @@ fun ReaderSettingsPanel(
             // opens or closes, and only the scrollable range below the last row grows.
             .padding(bottom = readerImeBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+        com.folio.reader.experience.ReaderPresetSettings(settings, apply)
         ReadingTypeSpecimen(settings)
 
         // ── TEXT ────────────────────────────────────────────────────────────
@@ -497,6 +498,10 @@ fun ReaderSettingsPanel(
             }
         }
 
+        FolioRule()
+        com.folio.reader.experience.ReaderSoundscapeSettings(settings, apply)
+        FolioRule()
+        com.folio.reader.experience.ReaderTimeSettings()
         if (scopeControlEnabled) {
             TextButton(
                 onClick = { onResetBook?.invoke() },

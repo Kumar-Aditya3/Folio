@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,6 +76,7 @@ fun BookDetailScreen(
     // when there is one — so the header (and the shared cover/title the morph flies
     // to) is composed before the enter transition starts.
     val book by viewModel.book.collectAsState()
+    val readingEnvironment = com.folio.reader.experience.LocalReadingEnvironment.current
     val sessions by viewModel.sessions.collectAsState(initial = emptyList())
     val highlights by viewModel.highlights.collectAsState(initial = emptyList())
     val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
@@ -325,6 +327,11 @@ fun BookDetailScreen(
                     }
                 },
                 actions = {
+                    if (readingEnvironment != null) b?.let { current ->
+                        FloatingIconButton(onClick = { readingEnvironment.perform { openJournal(current.id) } }) {
+                            Icon(Icons.Filled.Print, contentDescription = "Export reading journal")
+                        }
+                    }
                     if (onShareClick != null) {
                         FloatingIconButton(onClick = onShareClick) {
                             Icon(Icons.Filled.Share, contentDescription = "Share EPUB")

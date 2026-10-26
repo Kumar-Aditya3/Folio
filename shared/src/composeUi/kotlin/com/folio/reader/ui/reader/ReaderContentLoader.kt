@@ -306,7 +306,9 @@ internal class ReaderContentLoader(
     private suspend fun loadHtml(bookId: String, chapter: Chapter): String {
         val key = "$bookId:${chapter.href}"
         return synchronized(htmlCache) { htmlCache[key] }
-            ?: chapterContentProvider(bookId, chapter.href).also { loaded ->
+            ?: chapterContentProvider(bookId, chapter.href).let { raw ->
+                com.folio.reader.narration.NarrationText.prepare(raw).html
+            }.also { loaded ->
                 if (loaded.isNotBlank()) {
                     synchronized(htmlCache) {
                         htmlCache[key] = loaded

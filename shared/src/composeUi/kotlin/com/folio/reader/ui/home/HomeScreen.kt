@@ -176,6 +176,7 @@ fun HomeScreen(
     onOpenDiscover: (MangaDiscoverItem) -> Unit = {},
     onHeroCollapse: (Float, String?, Color?) -> Unit = { _, _, _ -> },
     topInset: Dp = 0.dp, // the masthead floats over the page; the host sizes the gap
+    onOpenReview: ((com.folio.reader.model.ReaderPassageTarget) -> Unit)? = null,
 ) {
     val motion = rememberMotionEnabled()
     val deskEntryMotion = rememberMotionSpec(MotionKey.ChartEntry)
@@ -372,6 +373,9 @@ fun HomeScreen(
                     }
                     Spacer(Modifier.height(FolioTokens.spaceBeat))
                 }
+                item(key = "home-scheduled-reviews") { com.folio.reader.experience.ScheduledReviews(limit = 3, onOpen = { source ->
+                    if (onOpenReview != null) onOpenReview(com.folio.reader.model.ReaderPassageTarget(source.bookId, source.spineIndex, source.locator)) else onOpenBook(source.bookId)
+                }) }
                 item(key = "home-ledger") {
                     ReadingDeskSection(listState, "home-ledger", state.readingDesk, bottomInset) {
                     HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentStreak) { LedgerStrip(state, climate, onOpenStats, onOpenExclusions) }

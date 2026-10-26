@@ -11,11 +11,13 @@ internal data class SettingsSearchEntry(
 )
 
 internal val settingsSearchEntries = listOf(
+    SettingsSearchEntry(FolioSettingsCategory.READING_SURFACES, "Widgets & notifications", "Reading", "Home-screen widgets and quiet reading reminders", "widget widgets notification notifications reminder daily goal home screen continue reading rhythm"),
     SettingsSearchEntry(FolioSettingsCategory.TEXT_AND_PAGE, "Text & page", "Reading", "Typeface, measure, alignment, hyphenation", "font fonts size weight line paragraph spacing margins layout scroll paginated formatting original hybrid normalized justify serif"),
     SettingsSearchEntry(FolioSettingsCategory.TRANSPARENCY, "Transparency", "Appearance", "Bars, cards and in-reader controls", "opacity transparent translucent glass material reader panels metallic sheen vividness vibrancy blur"),
     SettingsSearchEntry(FolioSettingsCategory.THEMES, "Themes", "Appearance", "Theme packs, typeface pairing, fonts", "colors colours dark light palette typeface font pairing appearance classic charcoal paper ember forest midnight ocean abyss editorial crimson blush vaporwave acid rave synthwave porcelain cobalt linen copper reading desk home hero revolving"),
     SettingsSearchEntry(FolioSettingsCategory.DISCOVER, "Discover", "Manga", "Usual suggestions, selected extensions, or hidden", "home recommendations sources extensions whitelist allowlist choose hide disable remove selected"),
     SettingsSearchEntry(FolioSettingsCategory.READING, "Reader behavior", "Reading", "Chapter title, progress, clock, brightness", "reader controls navigation gestures screen brightness keep awake chapter progress clock eye protection editorial"),
+    SettingsSearchEntry(FolioSettingsCategory.NARRATION, "Narration", "Reading", "Offline English voice and listening", "tts text speech audio voice narration listen download phonon sleep timer"),
     SettingsSearchEntry(FolioSettingsCategory.DEFAULTS, "Reader defaults", "Reading", "What a new book or manga starts with", "default book manga reader mode rtl ltr webtoon page opening start"),
     SettingsSearchEntry(FolioSettingsCategory.DOCUMENTS, "Documents", "Reading", "How PDFs and Word files are shown", "pdf word docx html txt document reader text page default"),
     SettingsSearchEntry(FolioSettingsCategory.CUSTOM_THEME, "Custom theme", "Appearance", "Author your own palette and gradient", "custom colours colors palette gradient background"),

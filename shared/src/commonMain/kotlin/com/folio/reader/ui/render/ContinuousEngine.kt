@@ -333,6 +333,11 @@ function seekResolve(t){
   // what put a jump "a few chapters behind": the ordinal is relative to one chapter.
   if(scoped&&!scope)return null;
   var parts=rest.split(':'),isH=parts[0]==='h',el=null;
+  if(parts[0]==='n'){
+    var nr=scope?[contentRoot(scope)]:folioRoots();
+    for(var ni=0;ni<nr.length;ni++){var ne=nr[ni].querySelector('[data-folio-narration="'+parts[1]+'"]');if(ne)return {el:ne};}
+    return null;
+  }
   var id=isH?(parts[1]||''):'';
   if(id){
     try{

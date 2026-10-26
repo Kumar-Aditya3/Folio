@@ -29,6 +29,8 @@ import com.folio.reader.model.BookStatus
 import com.folio.reader.model.Collection as FolioCollection
 import com.folio.reader.model.Series
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioCategoryChip
+import com.folio.reader.ui.components.FolioCategoryRail
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 
@@ -51,6 +53,9 @@ internal fun LibraryFilterChips(
     selectedCollectionId: String?,
     onSelectCollection: (String) -> Unit,
     onEditCollections: () -> Unit,
+    onReorderCollections: (List<String>) -> Unit,
+    onRenameCollection: (String, String) -> Unit,
+    onDeleteCollection: (String) -> Unit,
     leading: (@Composable () -> Unit)? = null
 ) {
     // One rail, one scroller. The Filters dropdown used to be pinned as an
@@ -59,37 +64,23 @@ internal fun LibraryFilterChips(
     // underneath it. It is now the rail's last chip, so the switch, the
     // collections, Edit and Filters all share one uninterrupted scroll and
     // nothing overlaps the categories.
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (leading != null) {
-            item(key = "mode-switch") { leading() }
-        }
-        items(collections, key = { it.id }) { collection ->
-            FolioChip(
-                selected = selectedCollectionId == collection.id,
-                onClick = { onSelectCollection(collection.id) },
-                label = collection.name
-            )
-        }
-        item(key = "edit-collections") {
-            FolioChip(
-                selected = false,
-                onClick = onEditCollections,
-                label = "Edit"
-            )
-        }
-        item(key = "filters") {
+    FolioCategoryRail(
+        categories = collections.map { FolioCategoryChip(it.id, it.name, it.id != FolioCollection.MAIN_ID || collections.size > 1) },
+        selectedId = selectedCollectionId,
+        onSelect = onSelectCollection,
+        onReorder = onReorderCollections,
+        onRename = onRenameCollection,
+        onDelete = onDeleteCollection,
+        onEdit = onEditCollections,
+        leading = leading,
+        trailing = {
             FilterDropdown(
                 filter = filter,
                 allSeries = allSeries,
                 onFilterChange = onFilterChange,
             )
-        }
-    }
+        },
+    )
 }
 
 /**

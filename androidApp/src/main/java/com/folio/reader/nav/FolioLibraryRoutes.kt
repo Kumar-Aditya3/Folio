@@ -132,6 +132,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                 state = state,
                 topInset = folioBarTopInset(),
                 onOpenBook = { navController.navigate(FolioDestination.reader(it)) },
+                onOpenReview = { navController.navigate(FolioDestination.reader(it)) },
                 onOpenBookDetail = { navController.navigate(FolioDestination.bookDetail(it)) },
                 onImportClick = { navModel.callbacks.onImportEpubs() },
                 onOpenStats = { navController.navigate(FolioRoutes.STATS) },
@@ -212,8 +213,13 @@ fun LibraryRoute(
     // Persist the selected Library mode across launches (same raw key as pre-nav).
     LaunchedEffect(Unit) {
         runCatching {
-            val raw = graph.settingsRepository.getRaw("library.mode")
-            LibraryMode.entries.firstOrNull { it.name == raw }?.let { navModel.libraryMode = it }
+            if (!navModel.libraryModeLoaded) {
+                val raw = graph.settingsRepository.getRaw("library.mode")
+                // A direct destination can choose a shelf while the settings read is suspended.
+                if (!navModel.libraryModeLoaded) {
+                    LibraryMode.entries.firstOrNull { it.name == raw }?.let { navModel.libraryMode = it }
+                }
+            }
             val viewIdx = graph.settingsRepository.getRaw("library.viewMode")?.toIntOrNull()
             if (viewIdx != null && viewIdx in LibraryViewModel.ViewMode.entries.indices) {
                 navModel.sharedViewIndex = viewIdx
@@ -549,6 +555,8 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.READING ->
             com.folio.reader.settings.SettingsReadingScreen(navModel, onBack)
+        com.folio.reader.settings.FolioSettingsCategory.NARRATION ->
+            com.folio.reader.settings.SettingsNarrationScreen(navModel, onBack)
 
         com.folio.reader.settings.FolioSettingsCategory.THEMES ->
             com.folio.reader.settings.SettingsThemesScreen(navModel, onBack)
@@ -573,6 +581,9 @@ fun SettingsRoute(navModel: FolioNavModelImpl, category: String, onBack: () -> U
 
         com.folio.reader.settings.FolioSettingsCategory.MANGA ->
             com.folio.reader.settings.SettingsMangaScreen(navModel, onBack)
+
+        com.folio.reader.settings.FolioSettingsCategory.READING_SURFACES ->
+            com.folio.reader.settings.SettingsReadingSurfacesScreen(navModel, onBack)
 
         com.folio.reader.settings.FolioSettingsCategory.LIBRARY_SCAN ->
             com.folio.reader.settings.SettingsLibraryScanScreen(navModel, onBack)

@@ -150,6 +150,7 @@ internal class ReaderPositionStore(
 
     /** Writes the reader's place on disk; flushed on chapter changes and when closing. */
     private fun persistProgress(position: ReadingPosition, normalized: Double) {
+        if (com.folio.reader.narration.NarrationActivity.ownerBookId == position.bookId) return
         val totalMs = tracker.activeMs()
         val words = tracker.creditedWordsFor(normalized, totalMs)
         sessionState.value = sessionState.value?.copy(
@@ -180,6 +181,7 @@ internal class ReaderPositionStore(
 
     fun updatePosition(newPosition: ReadingPosition) {
         positionState.value = newPosition
+        if (com.folio.reader.narration.NarrationActivity.ownerBookId == newPosition.bookId) return
         scope.launch {
             runCatching { positionRepository.upsertPosition(newPosition) }
         }
@@ -187,6 +189,7 @@ internal class ReaderPositionStore(
 
     /** Writes the reader's place at close time and queues it for cloud sync. */
     suspend fun persistOnClose(bookId: String, position: ReadingPosition) {
+        if (com.folio.reader.narration.NarrationActivity.ownerBookId == bookId) return
         positionRepository.upsertPosition(position)
         bookRepository.updateNormalizedProgress(bookId, position.normalizedProgress)
 

@@ -17,6 +17,9 @@ class UncaughtExceptionInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         return try {
             chain.proceed(chain.request())
+        } catch (e: LinkageError) {
+            // Extension interceptors execute on OkHttp threads, outside sourceRequest.
+            throw IOException("Extension network code is incompatible with Folio", e)
         } catch (e: Exception) {
             if (e is IOException) {
                 throw e

@@ -1,5 +1,7 @@
 package com.folio.reader.model
 
+import kotlinx.datetime.toLocalDateTime
+
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -104,14 +106,15 @@ data class ReadingSession(
     val startProgress: Double = 0.0,
     val endProgress: Double = 0.0,
     val wordsRead: Long = 0,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val activity: com.folio.reader.narration.SessionActivity? = null,
 ) {
     val durationMinutes: Double
         get() = durationMs / 60000.0
 
     val wordsPerMinute: Double?
         get() {
-            if (durationMinutes <= 0) return null
+            if (durationMinutes <= 0 || activity?.listeningMs?.let { it > 0 } == true) return null
             return wordsRead / durationMinutes
         }
 
@@ -181,4 +184,10 @@ data class ReadingCycle(
             sessionCount = sessionCount + 1
         )
     }
+}
+
+/** Listening keeps the civil day/hour where it was earned, including after travel. */
+fun ReadingSession.activityDateTime(fallbackZone: kotlinx.datetime.TimeZone): kotlinx.datetime.LocalDateTime {
+    val zone = activity?.timeZoneId?.let { runCatching { kotlinx.datetime.TimeZone.of(it) }.getOrNull() } ?: fallbackZone
+    return startedAt.toLocalDateTime(zone)
 }

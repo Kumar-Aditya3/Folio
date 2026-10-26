@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+androidComponents.onVariants { variant ->
+    variant.sources.assets?.addStaticSourceDirectory("../shared/src/androidMain/assets")
+}
+
 // Release signing credentials live in /keystore.properties (not committed to VCS).
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
@@ -22,8 +26,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 171
-        versionName = "1.2.117"
+        versionCode = 172
+        versionName = "1.2.118"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -34,7 +38,7 @@ android {
         // Both ONNX Runtime and ML Kit publish arm64-v8a and armeabi-v7a, so nothing is
         // lost for physical devices. Emulator users can add x86_64 back locally.
         ndk {
-            abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += if (providers.gradleProperty("folioEmulator").isPresent) setOf("x86_64") else setOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
@@ -46,7 +50,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a")
+            if (providers.gradleProperty("folioEmulator").isPresent) include("x86_64") else include("arm64-v8a", "armeabi-v7a")
             isUniversalApk = true
         }
     }
@@ -89,6 +93,7 @@ android {
     }
 
     packaging {
+        jniLibs.useLegacyPackaging = true
         resources.excludes += "META-INF/*.kotlin_module"
         jniLibs.excludes += setOf(
             "org/sqlite/native/Linux/**",
@@ -180,6 +185,9 @@ kotlin {
 }
 
 dependencies {
+    implementation("androidx.media3:media3-session:1.11.1")
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
+    implementation(libs.kotlinx.serialization.json)
     implementation(project(":shared"))
     // Conscrypt TLS provider — FolioApplication.onCreate installs it as the top
     // security provider. `implementation` in :shared does not expose it here, so the

@@ -338,7 +338,7 @@ internal fun DocumentThumbnail(
  * selection behind a single gesture.
  */
 @Composable
-private fun DocumentItemMenu(
+internal fun DocumentItemMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     onOpen: () -> Unit,

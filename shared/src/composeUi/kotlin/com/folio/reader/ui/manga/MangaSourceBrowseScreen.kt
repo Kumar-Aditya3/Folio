@@ -161,6 +161,9 @@ fun SourceBrowseScreen(
                 horizontalArrangement = Arrangement.spacedBy(FolioTokens.space2),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
             ) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    MangaChallengePrompt(sourceId = viewModel.source.id)
+                }
                 items(state.items, key = { it.url + it.title }) { item ->
                     BrowseGridItem(
                         item = item,

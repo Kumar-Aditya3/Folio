@@ -5,6 +5,8 @@ import com.folio.reader.settings.ReaderSettings
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import java.sql.Connection
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
 
@@ -15,6 +17,7 @@ private val settingsJson = Json { ignoreUnknownKeys = true }
  * is atomic against every other local writer.
  */
 class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
+    override fun observeReadingExperience() = db.settingsDataRevision.map { getGlobalSettings().readingExperience }.distinctUntilChanged()
     companion object {
         private const val KEY_GLOBAL = "global_reader_settings"
         private fun keyForBook(bookId: String) = Database.bookSettingsKey(bookId)
@@ -49,6 +52,7 @@ class JdbcSettingsRepository(private val db: Database) : SettingsRepository {
             if (emitSyncEvent) {
                 db.onEntityChanged?.invoke("settings", "global", "UPSERT", encoded)
             }
+            db.settingsDataRevision.value += 1
         }
         merged
     }

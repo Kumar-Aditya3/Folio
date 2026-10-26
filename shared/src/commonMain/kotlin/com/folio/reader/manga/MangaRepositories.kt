@@ -87,6 +87,7 @@ interface MangaNoteRepository {
 }
 
 interface MangaCategoryRepository {
+    suspend fun reorder(ids: List<String>)
     suspend fun create(name: String, emitSyncEvent: Boolean = true): MangaCategory
     suspend fun rename(id: String, name: String, emitSyncEvent: Boolean = true)
 

@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.ByteArrayOutputStream
 
 /**
@@ -88,7 +89,12 @@ class AndroidMangaBackend(
     val extensionManager = ExtensionManager(appContext, trustExtension, extensionApi, installer)
 
     /** Latest FilterList per source; extension filter instances must be reused in place. */
-    private val filterCache = mutableMapOf<Long, FilterList>()
+    private val filterCache = java.util.concurrent.ConcurrentHashMap<Long, FilterList>()
+
+    // Preserve extension metadata (including memo) between detail and chapter requests.
+    private val mangaCache = object : LinkedHashMap<Pair<Long, String>, SManga>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<Long, String>, SManga>?): Boolean = size > 128
+    }
 
     init {
         scope.launch {
@@ -182,23 +188,38 @@ class AndroidMangaBackend(
 
         val result = when {
             query.isNotBlank() || effectiveFilters != null ->
-                source.getSearchManga(page, query, effectiveFilters ?: FilterList())
+                source.getSearchManga(page, query, effectiveFilters ?: source.getFilterList())
             mode == BrowseMode.LATEST -> source.getLatestUpdates(page)
             else -> source.getPopularManga(page)
         }
         MangaBrowsePage(
-            items = result.mangas.map { MangaBrowseItem(it.url, it.title, it.thumbnail_url) },
+            items = result.mangas.map { MangaBrowseItem(it.url, it.title, it.thumbnail_url, it.memo.toString()) },
             hasNextPage = result.hasNextPage,
         )
+    }
+
+    override suspend fun restoreMangaMetadata(manga: MangaEntry) {
+        synchronized(mangaCache) {
+            mangaCache[manga.sourceId to manga.url] = SManga.create().apply {
+                url = manga.url
+                title = manga.title
+                memo = json.parseToJsonElement(manga.sourceMemo).jsonObject
+            }
+        }
     }
 
     override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): MangaDetail = sourceRequest(sourceId) {
         if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.detail(mangaUrl)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
-        val stub = SManga.create().apply { url = mangaUrl }
+        val stub = synchronized(mangaCache) { mangaCache[sourceId to mangaUrl] }
+            ?: SManga.create().apply { url = mangaUrl; title = "" }
         val update = source.getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
         val manga = update.manga
+        // Detail parsers commonly omit the URL because the caller already has it.
+        if (runCatching { manga.url }.getOrNull().isNullOrBlank()) manga.url = mangaUrl
+        if (runCatching { manga.title }.getOrNull() == null) manga.title = ""
+        synchronized(mangaCache) { mangaCache[sourceId to mangaUrl] = manga }
         MangaDetail(
             url = mangaUrl,
             title = runCatching { manga.title }.getOrDefault(""),
@@ -208,6 +229,7 @@ class AndroidMangaBackend(
             genres = manga.genre?.split(", ")?.filter { it.isNotBlank() } ?: emptyList(),
             status = MangaStatus.fromValue(manga.status),
             thumbnailUrl = manga.thumbnail_url,
+            sourceMemo = manga.memo.toString(),
         )
     }
 
@@ -215,7 +237,8 @@ class AndroidMangaBackend(
         if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.chapters(mangaUrl)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
-        val stub = SManga.create().apply { url = mangaUrl }
+        val stub = synchronized(mangaCache) { mangaCache[sourceId to mangaUrl] }
+            ?: SManga.create().apply { url = mangaUrl; title = "" }
         val update = source.getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
         update.chapters.mapIndexed { index, it ->
             MangaChapterRef(
@@ -224,6 +247,7 @@ class AndroidMangaBackend(
                 scanlator = it.scanlator,
                 chapterNumber = it.chapter_number,
                 dateUpload = it.date_upload,
+                sourceMemo = it.memo.toString(),
             )
         }
     }
@@ -232,16 +256,24 @@ class AndroidMangaBackend(
         if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.pageList(chapter.url)
 
         val source = sourceById(sourceId) ?: throw IllegalStateException("Unknown source $sourceId")
-        val sChapter = SChapter.create().apply { url = chapter.url }
-        source.getPageList(sChapter).map { MangaPageRef(it.index, it.url, it.imageUrl) }
+        val sChapter = SChapter.create().apply {
+            url = chapter.url
+            name = chapter.name
+            chapter_number = chapter.chapterNumber
+            scanlator = chapter.scanlator
+            date_upload = chapter.dateUpload
+            memo = json.parseToJsonElement(chapter.sourceMemo).jsonObject
+        }
+        // The extension API defines list order as authoritative; indices may repeat.
+        source.getPageList(sChapter).mapIndexed { index, page -> MangaPageRef(index, page.url, page.imageUrl) }
     }
 
     override suspend fun fetchPageImage(
         sourceId: Long,
         chapter: MangaChapterRef,
         page: MangaPageRef,
-    ): MangaImageData {
-        if (sourceId == LOCAL_SOURCE_ID) return localAdapter.pageImage(chapter.url, page)
+    ): MangaImageData = sourceRequest(sourceId) {
+        if (sourceId == LOCAL_SOURCE_ID) return@sourceRequest localAdapter.pageImage(chapter.url, page)
 
         val source = sourceById(sourceId) as? HttpSource
             ?: throw IllegalStateException("Source $sourceId cannot fetch images")
@@ -250,7 +282,7 @@ class AndroidMangaBackend(
             sPage.imageUrl = source.getImageUrl(sPage)
         }
         source.getImage(sPage).use { response ->
-            return MangaImageData(response.body.bytes(), response.header("Content-Type"))
+            MangaImageData(response.body.bytes(), response.header("Content-Type"))
         }
     }
 
@@ -268,7 +300,9 @@ class AndroidMangaBackend(
     override suspend fun sourceWebUrl(sourceId: Long, mangaUrl: String): String? {
         if (sourceId == LOCAL_SOURCE_ID) return null
         val source = sourceById(sourceId) as? HttpSource ?: return null
-        return runCatching { source.baseUrl + mangaUrl }.getOrNull()
+        val manga = synchronized(mangaCache) { mangaCache[sourceId to mangaUrl] }
+            ?: SManga.create().apply { url = mangaUrl; title = "" }
+        return runCatching { source.getMangaUrl(manga) }.getOrNull()
     }
 
     // ---------- Extensions ----------
@@ -427,7 +461,7 @@ class AndroidMangaBackend(
     // ---------- Helpers ----------
 
     private suspend fun <T> sourceRequest(sourceId: Long, action: suspend () -> T): T {
-        val pendingAtStart = MangaChallenges.pending.value
+        val pendingAtStart = MangaChallenges.forSource(sourceId)
         try {
             val result = action()
             if (sourceId != LOCAL_SOURCE_ID) {
@@ -436,11 +470,10 @@ class AndroidMangaBackend(
             return result
         } catch (error: MangaSiteAccessException) {
             val url = error.browserUrl ?: (sourceById(sourceId) as? HttpSource)?.baseUrl
-            val challenge = url?.let {
+            url?.let {
                 MangaChallenges.record(it, error.userAgent, error.reason, sourceId)
             }
-            if (challenge == null || !MangaChallenges.awaitBrowserSolve(challenge)) throw error
-            return retried(action)
+            throw error
         } catch (error: HttpException) {
             // Only statuses a browser can plausibly clear reach the window. Everything else
             // is a real failure and is rethrown untouched.
@@ -451,12 +484,13 @@ class AndroidMangaBackend(
             val request = error.failedRequest
             val url = request?.let { mangaBrowserUrl(it.method, it.url.toString()) }
                 ?: (sourceById(sourceId) as? HttpSource)?.baseUrl
-            val challenge = url?.let {
+            url?.let {
                 MangaChallenges.record(it, request?.header("User-Agent"), reason, sourceId)
             }
-            val refused = MangaSiteAccessException(reason, error.code, error)
-            if (challenge == null || !MangaChallenges.awaitBrowserSolve(challenge)) throw refused
-            return retried(action)
+            throw MangaSiteAccessException(reason, error.code, error)
+        } catch (error: LinkageError) {
+            android.util.Log.e("FolioManga", "Extension compatibility failure for source $sourceId", error)
+            throw java.io.IOException("This extension is incompatible with Folio. Update the extension and try again.", error)
         }
     }
 
@@ -470,22 +504,6 @@ class AndroidMangaBackend(
         error.cloudflareChallenge -> MangaAccessReason.CLOUDFLARE_CHALLENGE
         error.code == 401 -> MangaAccessReason.SIGN_IN_REQUIRED
         else -> MangaAccessReason.SITE_REFUSAL
-    }
-
-    /**
-     * One retry after the browser view closed.
-     *
-     * The cookie the window earned is what makes the second attempt different. A wall that
-     * survives it is reported, not solved again: another window would repeat the same round
-     * trip, and the reader has already been shown one.
-     */
-    private suspend fun <T> retried(action: suspend () -> T): T = try {
-        action()
-    } catch (error: MangaSiteAccessException) {
-        throw error
-    } catch (error: HttpException) {
-        if (error.code != 403 && error.code != 401 && !error.cloudflareChallenge) throw error
-        throw MangaSiteAccessException(accessReason(error), error.code, error)
     }
 
     private suspend fun loadRepos(): List<MangaRepoInfo> {

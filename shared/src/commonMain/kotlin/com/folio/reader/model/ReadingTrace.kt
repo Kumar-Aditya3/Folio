@@ -62,5 +62,5 @@ fun readingTrace(
                 it.selectedText, it.noteId != null)
         }
     return ReadingTrace(if (progress.isFinite()) progress.coerceIn(0f, 1f) else 0f,
-        spans, passages, measured.size, measured.sumOf { it.durationMs } / 60_000)
+        spans, passages, measured.distinctBy { it.activity?.sittingId ?: it.id }.size, measured.sumOf { it.durationMs } / 60_000)
 }

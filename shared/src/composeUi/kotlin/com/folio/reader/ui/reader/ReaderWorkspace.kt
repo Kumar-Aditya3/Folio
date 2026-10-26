@@ -45,6 +45,7 @@ import com.folio.reader.ui.components.FolioBackHandler
 import com.folio.reader.ui.theme.*
 
 internal enum class ReaderTool(val label: String, val icon: ImageVector, val description: String) {
+    Listen("Listen", Icons.Filled.Headphones, "Read this book aloud"),
     Contents("Contents", Icons.AutoMirrored.Filled.Toc, "The shape of this book"),
     Pages("Pages", Icons.Filled.GridView, "A map of this chapter"),
     Search("Search", Icons.Filled.Search, "Find a passage in this book"),

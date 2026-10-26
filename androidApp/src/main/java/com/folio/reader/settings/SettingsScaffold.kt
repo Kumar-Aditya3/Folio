@@ -61,10 +61,12 @@ object FolioSettingsCategory {
     const val FORMATTING = "formatting"
 
     const val READING = "reading"
+    const val NARRATION = "narration"
     const val CLOUD_SYNC = "cloud_sync"
     const val ADVANCED = "advanced"
     const val STATS = "stats"
     const val MANGA = "manga"
+    const val READING_SURFACES = "reading_surfaces"
 
     /** Library scanning (folder / device-wide import): its own destination under "Library tools". */
     const val LIBRARY_SCAN = "library_scan"

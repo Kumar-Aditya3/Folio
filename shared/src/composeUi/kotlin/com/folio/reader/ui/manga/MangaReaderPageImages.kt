@@ -2,6 +2,7 @@ package com.folio.reader.ui.manga
 
 import com.folio.reader.manga.MangaChapterRef
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 
@@ -31,12 +32,18 @@ internal suspend fun MangaReaderViewModel.resolvePageBytes(index: Int): ByteArra
                                     url = slot.chapter.url,
                                     name = slot.chapter.name,
                                     chapterNumber = slot.chapter.chapterNumber,
+                                    scanlator = slot.chapter.scanlator,
+                                    dateUpload = slot.chapter.dateUpload,
+                                    sourceMemo = slot.chapter.sourceMemo,
                                 )
                                 backend.fetchPageImage(sourceId, ref, page).bytes
                             }
                         if (bytes != null) pageBytesPut(key, bytes)
                         bytes
-                    } catch (_: Throwable) {
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        println("Manga page image failed (source=$sourceId, page=$local): ${error.stackTraceToString()}")
                         null
                     } finally {
                         synchronized(inflightBytes) { inflightBytes.remove(key) }

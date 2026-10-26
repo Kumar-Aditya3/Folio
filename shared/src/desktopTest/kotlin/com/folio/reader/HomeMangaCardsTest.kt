@@ -169,6 +169,7 @@ class HomeMangaCardsTest {
     }
 
     private class FakeCategoryRepo(private val byManga: Map<String, Set<String>> = emptyMap()) : MangaCategoryRepository {
+        override suspend fun reorder(ids: List<String>) {}
         override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory =
             MangaCategory(id = name, name = name)
         override suspend fun rename(id: String, name: String, emitSyncEvent: Boolean) {}

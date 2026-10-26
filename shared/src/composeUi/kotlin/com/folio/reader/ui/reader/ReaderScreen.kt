@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.locatorsMatch
 import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.ReaderSettings
+import com.folio.reader.settings.forReaderContent
 import com.folio.reader.ui.components.FolioSharedKeys
 import com.folio.reader.ui.components.pageBlockBandFraction
 import com.folio.reader.ui.components.pageBlockChapterStops
@@ -63,6 +66,7 @@ import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
+import com.folio.reader.narration.narrationSwipeToDismiss
 
 /**
  * Words per estimated page in continuous mode, which has no real page turns.
@@ -180,7 +184,18 @@ fun ReaderScreen(
     initialSeekFraction: Float? = null,
     onPreviewChapter: suspend (Int, Float, Int?) -> ReaderPassagePreview? = { _, _, _ -> null },
     initialLocator: String? = null,
+    reflectionInvitation: com.folio.reader.experience.ReflectionInvitation? = null,
+    onSaveReflection: (String) -> Unit = {},
+    onDismissReflection: () -> Unit = {},
 ) {
+    val readingExperience = com.folio.reader.experience.rememberReaderExperienceSession(bookTitle, coverPath, position, chapters, currentChapterIndex, settings, highlights, notes)
+    val contentSettings = remember(settings) { settings.forReaderContent() }
+    LaunchedEffect(currentChapterIndex, position?.bookId) {
+        kotlinx.coroutines.delay(800)
+        readingExperience.latestExcerpt = onPreviewChapter(currentChapterIndex, (position?.chapterProgress ?: 0.0).toFloat(), null)?.text.orEmpty()
+    }
+    androidx.compose.runtime.CompositionLocalProvider(com.folio.reader.experience.LocalReaderExperience provides readingExperience) {
+
     val currentChapter = chapters.getOrNull(currentChapterIndex)
     var currentPage by remember(currentChapterIndex) { mutableStateOf(1) }
     var totalPages by remember(currentChapterIndex) { mutableStateOf(1) }
@@ -253,6 +268,11 @@ fun ReaderScreen(
     com.folio.reader.ui.components.ReaderSystemBars(showControls)
 
     var showReaderPanel by remember { mutableStateOf(false) }
+    val narration = com.folio.reader.narration.LocalNarrationController.current
+    val narrationState = narration?.state?.collectAsState()?.value ?: com.folio.reader.narration.NarrationState()
+    val narratingHere = narrationState.hasBook && narrationState.bookId == position?.bookId
+    var showListen by remember { mutableStateOf(false) }
+    var listenOrigin by remember { mutableStateOf<ReadingPosition?>(null) }
     var showEchoesWorkspace by remember { mutableStateOf(false) }
     var seekPreview by remember { mutableStateOf<Float?>(null) }
     var returnOrigin by remember(position?.bookId) { mutableStateOf<ReadingPosition?>(null) }
@@ -498,8 +518,8 @@ fun ReaderScreen(
      * When the target is the chapter already on screen a pendingJump would never fire (the index
      * does not change), so that case issues the seek directly.
      */
-    fun jumpToChapter(index: Int, seekParagraph: Int = 0, seedFraction: Double = 0.0) {
-        val target = "p:$seekParagraph"
+    fun jumpToChapter(index: Int, seekParagraph: Int = 0, seedFraction: Double = 0.0, sourceLocator: String? = null) {
+        val target = sourceLocator ?: "p:$seekParagraph"
         if (index != currentChapterIndex) {
             pendingJump = Triple(index, target, null)
         } else {
@@ -507,6 +527,24 @@ fun ReaderScreen(
         }
         if (seedFraction > 0.0) jumpSeed = index to seedFraction
         onChapterChange(index)
+    }
+
+    var lastHeard by remember { mutableStateOf<ReadingPosition?>(null) }
+    SideEffect { if (narratingHere) lastHeard = narrationState.position }
+    LaunchedEffect(narratingHere) {
+        val heard = lastHeard
+        if (!narratingHere && heard?.bookId == position?.bookId && narrationState.phase == com.folio.reader.narration.NarrationPhase.Idle) {
+            val index = chapters.indexOfFirst { it.spineIndex == heard?.spineIndex }
+            if (index >= 0 && heard != null) jumpToChapter(index,heard.paragraphIndex,heard.chapterProgress,heard.contentLocator.takeIf { it.startsWith("n:") })
+            lastHeard = null
+        }
+    }
+
+    LaunchedEffect(narrationState.position?.spineIndex, narrationState.blockId, narrationState.followText) {
+        if (narratingHere && narrationState.followText) {
+            val index = chapters.indexOfFirst { it.spineIndex == narrationState.position?.spineIndex }
+            if (index >= 0 && index != currentChapterIndex) jumpToChapter(index)
+        }
     }
 
     // The reading theme paints the page and nothing else. Chrome and overlays are app
@@ -675,6 +713,10 @@ fun ReaderScreen(
                         onHighlightParagraph?.invoke(selected.first, selected.second, selected.third); selectionConsumed()
                     }
                     "note" -> beginSelectionNote(true)
+                    "export" -> pageSelection?.let { selected ->
+                        readingExperience.environment?.exportAnchor = pageSelectionBounds?.let { readerSelectionRect(it, pageViewport) }
+                        readingExperience.exportSelection(selected.first, selected.second, selected.third); selectionConsumed()
+                    }
                     "copy" -> pageSelection?.let { clipboard.setText(AnnotatedString(it.third)); selectionConsumed() }
                 }
             } else handleReaderOverlayAction(
@@ -720,7 +762,7 @@ fun ReaderScreen(
         BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(readerThemePreset.background))
             .onGloballyPositioned { readerBounds = it.boundsInWindow() }) {
         val workspaceLayout = readerWorkspaceLayout(maxWidth, maxHeight, LocalDensity.current.fontScale)
-        val workspaceOpen = showToc || showAnnotations || showSearch || showReaderPanel || showEchoes || showEchoesWorkspace || (noteInWorkspace && selectionNote != null)
+        val workspaceOpen = showListen || showToc || showAnnotations || showSearch || showReaderPanel || showEchoes || showEchoesWorkspace || (noteInWorkspace && selectionNote != null)
         val reservedEnd = if (workspaceOpen && workspaceLayout.docked) workspaceLayout.dockWidth else 0.dp
         // The reader's chrome and in-reader panels wear the calm glass unless the
         // reader is in editorial styling: dimmed, hue-stripped light catches so the
@@ -735,15 +777,16 @@ fun ReaderScreen(
                 (if (showChapterLine) pageBlockChromeHeightWithChapter else pageBlockChromeHeight) + 14.dp else 0.dp
             val nativePaneBottom = if (occludes && workspaceOpen && !workspaceLayout.docked)
                 workspaceLayout.sheetHeight + 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp
+            val quietActionsBottom = if (occludes && !workspaceOpen && (readingExperience.targetFinished || reflectionInvitation != null)) 240.dp else 0.dp
             val contentInsets = PaddingValues(top = if (occludes && showControls) 56.dp else 0.dp,
-                bottom = maxOf(chromeBottom, nativePaneBottom), end = reservedEnd)
+                bottom = maxOf(chromeBottom, nativePaneBottom, quietActionsBottom), end = reservedEnd)
             ChapterContent(
                 chapter = currentChapter,
                 html = chapterHtml,
                 isLoading = isLoadingContent,
                 loadError = loadError,
                 coverPath = coverPath,
-                settings = settings,
+                settings = contentSettings,
                 enabled = workspaceLayout.docked || (!showToc && !showAnnotations),
                 onTap = onToggleControls,
                 onScrollFraction = onScrollProgress,
@@ -928,7 +971,7 @@ fun ReaderScreen(
         // position carried by the material of the page itself. Same explicit spec
         // and Rule 19 skip as the top bar above.
         androidx.compose.animation.AnimatedVisibility(
-            visible = settings.showProgress && showControls && !workspaceOpen,
+            visible = (settings.showProgress || narrationState.hasBook) && showControls && !workspaceOpen,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = if (chromeMotion) {
                 androidx.compose.animation.fadeIn(chromeSpec) +
@@ -943,7 +986,12 @@ fun ReaderScreen(
                 androidx.compose.animation.ExitTransition.None
             }
         ) {
-            BottomPageBlock(
+            if (narrationState.hasBook && narration != null) {
+                Box(Modifier.navigationBarsPadding().padding(8.dp)
+                    .narrationSwipeToDismiss(narrationState.bookId, narration::stop).readerIsland()) {
+                    com.folio.reader.narration.NarrationTransport(narration, { showListen = true })
+                }
+            } else BottomPageBlock(
                 chapterTitle = if (showChapterLine) currentChapter?.title ?: "" else "",
                 fraction = bookFraction,
                 paper = Color(readerThemePreset.background),
@@ -995,6 +1043,18 @@ fun ReaderScreen(
                         },
                         onNote = onNoteSelection?.let { { if (selectionVisible) beginSelectionNote(workspaceLayout.docked) } },
                         onEchoes = if (echoesEnabled) openEchoesAction else null,
+                        onExport = { if (selectionVisible) { readingExperience.environment?.exportAnchor = anchor; readingExperience.exportSelection(displayed.first, displayed.second, displayed.third); selectionConsumed() } },
+                        onListen = narration?.let { controller -> { if (selectionVisible) {
+                            val chapter = chapters.firstOrNull { it.id == displayed.first }
+                            position?.copy(chapterId = displayed.first, spineIndex = chapter?.spineIndex ?: 0,
+                                paragraphIndex = displayed.second, characterOffset = 0, contentLocator = "selection:${displayed.second}")?.let { selectedPosition ->
+                                listenOrigin = selectedPosition
+                                if (controller.pack.value.phase == com.folio.reader.narration.VoicePackPhase.Installed &&
+                                    (!controller.state.value.hasBook || controller.state.value.bookId == selectedPosition.bookId)) controller.start(selectedPosition)
+                                showListen = true
+                            }
+                            selectionConsumed()
+                        } } },
                         onDismiss = selectionConsumed)
                 }
             val preview = seekPreview
@@ -1027,7 +1087,15 @@ fun ReaderScreen(
         // glass overlays on desktop (the heavyweight browser would cover any
         // Compose overlay).
         val editingSelection = selectionNote
+        val readingModal = readingExperience.environment?.exports != null || readingExperience.environment?.journal != null ||
+            readingExperience.showReminder || readingExperience.returnCard != null || readingExperience.reflectionEditor
+        if (!workspaceOpen && !readingModal) com.folio.reader.experience.ReaderSoundAtmosphere(readingExperience, Modifier.matchParentSize())
+        if (!workspaceOpen && !narratingHere) com.folio.reader.experience.ReaderPauseActions(readingExperience, reflectionInvitation, onBackPress,
+            onDismissReflection, Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).padding(bottom = 100.dp))
         ReaderSidePanels(
+            showListen = showListen,
+            onCloseListen = { showListen = false; listenOrigin = null },
+            listenContent = narration?.let { controller -> { com.folio.reader.narration.NarrationPanel(controller, listenOrigin ?: position) } },
             occludes = occludes,
             showToc = showToc,
             showAnnotations = showAnnotations,
@@ -1077,6 +1145,7 @@ fun ReaderScreen(
             onWriteGlobal = onWriteGlobal,
             onResetBook = onResetBook,
             onSelectTool = { tool ->
+                showListen = false
                 showReaderPanel = false
                 showEchoesWorkspace = false
                 if (showToc) onToggleToc()
@@ -1084,6 +1153,7 @@ fun ReaderScreen(
                 if (showSearch) onCloseSearch()
                 if (showEchoes) onCloseEchoes()
                 when (tool) {
+                    ReaderTool.Listen -> showListen = true
                     ReaderTool.Contents -> onToggleToc()
                     ReaderTool.Saved -> onToggleAnnotations()
                     ReaderTool.Search -> onSearchClick()
@@ -1124,5 +1194,10 @@ fun ReaderScreen(
         }
         }
     }
+    }
+
+    com.folio.reader.experience.ReaderCompanionHost(readingExperience, onBackPress,
+        reflectionInvitation, onSaveReflection, onDismissReflection,
+        onOpenReturn = { context -> jumpToLocation(context.position.spineIndex, context.position.chapterId, context.position.spotLocator()) })
     }
 }

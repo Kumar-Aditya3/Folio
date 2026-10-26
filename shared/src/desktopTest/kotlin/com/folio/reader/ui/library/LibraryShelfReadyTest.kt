@@ -283,6 +283,7 @@ class LibraryShelfReadyTest {
         private val default: Collection? = null,
         private val firstReadDelayMs: Long = 0L,
     ) : CollectionRepository {
+        override suspend fun reorderCollections(ids: List<String>) {}
         private val state = MutableStateFlow(initial)
 
         /**

@@ -93,6 +93,7 @@ class StatisticsPhaseCTest {
     }
 
     private class FakeCollectionRepo : CollectionRepository {
+        override suspend fun reorderCollections(ids: List<String>) {}
         override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun deleteCollection(collectionId: String): Boolean = false

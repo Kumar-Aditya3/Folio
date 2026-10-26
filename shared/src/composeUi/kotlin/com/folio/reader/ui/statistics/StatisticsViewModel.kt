@@ -9,6 +9,7 @@ import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
+import com.folio.reader.model.activityDateTime
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
@@ -123,6 +124,8 @@ data class StatisticsUiState(
     val hasData: Boolean = false,
     val timeThisWeekMs: Long = 0,
     val timeThisYearMs: Long = 0,
+    val listeningThisWeekMs: Long = 0,
+    val followAlongThisWeekMs: Long = 0,
     val streakDays: Int = 0,
     val longestStreakDays: Int = 0,
     val activeDaysThisWeek: Int = 0,
@@ -545,32 +548,33 @@ class StatisticsViewModel(
         val yearStart = today.minus(DatePeriod(days = historyDays - 1))
 
         val minutesByDay = sessions
-            .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
+            .groupBy { it.activityDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
         // Split sessions into book vs manga by the contentLocator discriminator
         // ([isMangaSession]): the manga reader writes `manga-page…` locators.
         val (mangaSessions, bookSessions) = sessions.partition { it.isMangaSession() }
         val bookMinutesByDay = bookSessions
-            .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
+            .groupBy { it.activityDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
         val mangaMinutesByDay = mangaSessions
-            .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
+            .groupBy { it.activityDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
         // A day counts as read if it holds a session at all. Measured durations can
         // legitimately round to zero on a short sitting, and treating that as "did not
         // read" breaks a streak the reader actually earned.
-        val readDays = sessions.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }
+        val readDays = sessions.mapTo(mutableSetOf()) { it.activityDateTime(timeZone).date }
 
-        val thisWeek = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= weekStart }
-        val thisYear = sessions.filter { it.startedAt.toLocalDateTime(timeZone).date >= yearStart }
+        val thisWeek = sessions.filter { it.activityDateTime(timeZone).date >= weekStart }
+        val thisYear = sessions.filter { it.activityDateTime(timeZone).date >= yearStart }
         val timed = sessions.filter { it.durationMs > 0 }
+        val sittingDurations = timed.groupBy { it.activity?.sittingId ?: it.id }.values.map { group -> group.sumOf { it.durationMs } }
         // Minutes per start-hour (minutes, not ms — the band and the chronotype
         // comparisons both want human-scale buckets).
         val hourTotals = LongArray(24)
         sessions.forEach {
-            hourTotals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs / 60_000
+            hourTotals[it.activityDateTime(timeZone).hour] += it.durationMs / 60_000
         }
 
         // §12.5 leaderboard + genre breakdown. Minutes per bookId over the
@@ -623,12 +627,14 @@ class StatisticsViewModel(
             hasData = sessions.isNotEmpty(),
             timeThisWeekMs = thisWeek.sumOf { it.durationMs },
             timeThisYearMs = thisYear.sumOf { it.durationMs },
+            listeningThisWeekMs = thisWeek.sumOf { it.activity?.listeningMs ?: 0L },
+            followAlongThisWeekMs = thisWeek.sumOf { it.activity?.followAlongMs ?: 0L },
             streakDays = currentStreak(readDays, today),
             longestStreakDays = longestStreak(readDays),
-            activeDaysThisWeek = thisWeek.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }.size,
-            sessionsThisWeek = thisWeek.size,
+            activeDaysThisWeek = thisWeek.mapTo(mutableSetOf()) { it.activityDateTime(timeZone).date }.size,
+            sessionsThisWeek = thisWeek.distinctBy { it.activity?.sittingId ?: it.id }.size,
             wordsReadThisYear = thisYear.sumOf { it.wordsRead },
-            averageSessionMinutes = if (timed.isEmpty()) 0.0 else timed.sumOf { it.durationMs } / 60_000.0 / timed.size,
+            averageSessionMinutes = sittingDurations.takeIf { it.isNotEmpty() }?.average()?.div(60_000.0) ?: 0.0,
             averageSpeedWpm = timed.mapNotNull { it.wordsPerMinute }.takeIf { it.isNotEmpty() }?.average() ?: 0.0,
             mostReadDay = mostReadDay(minutesByDay),
             mostReadHour = mostReadHour(sessions),
@@ -668,7 +674,7 @@ class StatisticsViewModel(
             readingTitlesOpened = timeEntries.size,
             readingLibrarySize = books.size + manga.count { it.inLibrary },
             genres = genres,
-            longestSessionMinutes = timed.maxOfOrNull { it.durationMs / 60_000 } ?: 0L,
+            longestSessionMinutes = sittingDurations.maxOfOrNull { it / 60_000 } ?: 0L,
             daysActiveThisYear = readDays.size,
             booksOpened = minutesByBook.count { it.value > 0L },
             librarySize = books.size,
@@ -706,7 +712,7 @@ class StatisticsViewModel(
 
     private fun mostReadHour(sessions: List<ReadingSession>): String {
         val totals = LongArray(24)
-        sessions.forEach { totals[it.startedAt.toLocalDateTime(timeZone).hour] += it.durationMs }
+        sessions.forEach { totals[it.activityDateTime(timeZone).hour] += it.durationMs }
         val best = totals.indices.maxByOrNull { totals[it] } ?: return ""
         return if (totals[best] == 0L) "" else hourLabel(best)
     }

@@ -39,6 +39,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +49,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -93,6 +96,7 @@ import com.folio.reader.ui.theme.navCapsuleFill
 import com.folio.reader.ui.theme.rememberFolioHaptics
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.surfaceOpacity
+import com.folio.reader.narration.narrationSwipeToDismiss
 
 /**
  * Navigation as a **floating capsule** rather than a full-width Material bar.
@@ -128,6 +132,12 @@ fun FolioNavShell(
     content: @Composable () -> Unit
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: ""
+    val narration = com.folio.reader.narration.LocalNarrationController.current
+    val narrationState = narration?.state?.collectAsState()?.value
+    val density = LocalDensity.current
+    var narrationHeight by remember { mutableStateOf(76.dp) }
+    val showNarration = narrationState?.hasBook == true && !currentRoute.startsWith("reader/") &&
+        navController.currentBackStackEntry?.arguments?.getString("category") != "narration"
     // The runway the capsule needs: the OS gesture/nav inset, the capsule itself
     // and the air on both sides of it. Reserved once here so no screen has to
     // know a floating bar exists.
@@ -183,13 +193,25 @@ fun FolioNavShell(
         // LocalFolioBarInset to their own contentPadding, so their last row still
         // clears the glass while everything above it passes underneath.
         CompositionLocalProvider(
-            LocalFolioBarInset provides if (showBottomBar) contentBottomInset else 0.dp,
+            LocalFolioBarInset provides (if (showBottomBar) contentBottomInset else if (showNarration) systemBottomInset + 8.dp else 0.dp) +
+                if (showNarration) narrationHeight else 0.dp,
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 content()
             }
         }
 
+        if (showNarration && narration != null) {
+            com.folio.reader.ui.components.FolioGlassPanel(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp)
+                .padding(bottom = if (showBottomBar) contentBottomInset else systemBottomInset + 8.dp)
+                .narrationSwipeToDismiss(narrationState?.bookId, narration::stop),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                com.folio.reader.narration.NarrationTransport(narration, {
+                    narrationState?.bookId?.let { id -> navController.navigate(FolioDestination.reader(id,
+                        spine = narrationState.position?.spineIndex, locator = narrationState.position?.contentLocator)) { launchSingleTop = true } }
+                }, modifier = Modifier.onSizeChanged { size -> narrationHeight = with(density) { size.height.toDp() + 12.dp } })
+            }
+        }
         if (showBottomBar) {
             // §16 glass tier: when the capsule is actually blurring the page
             // beneath it, its fill steps down from the designed 0.9 to ~0.60 —
@@ -411,21 +433,7 @@ fun FolioNavShell(
                                 // cache resetting). Only Home showed it because only Home is the
                                 // pop target. Non-start tabs keep save/restore so their scroll
                                 // position survives a round trip.
-                                val goingHome = item.route == FolioRoutes.HOME
-                                navController.navigate(item.route) {
-                                    // `findStartDestination().id`, NOT `graph.startDestinationId`:
-                                    // the latter returns the id of the graph's start *entry*, which
-                                    // on a graph with any nested navigation is the nested graph node
-                                    // rather than Home itself. Popping to the wrong node is why a
-                                    // Home tap from Stats/Library sometimes did nothing — the pop
-                                    // target did not match the back stack, so the restore landed on
-                                    // the tab you were already on. Resolving the real start fixes it.
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = !goingHome
-                                }
+                                navController.goToTopLevelTab(item.route)
                             },
                         )
                     }

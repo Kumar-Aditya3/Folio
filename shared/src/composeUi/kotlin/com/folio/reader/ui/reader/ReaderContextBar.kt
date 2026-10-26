@@ -8,6 +8,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,27 +67,32 @@ internal fun ReaderSelectionBar(
     onHighlight: () -> Unit,
     onNote: (() -> Unit)?,
     onEchoes: (() -> Unit)?,
+    onExport: (() -> Unit)? = null,
     onDismiss: () -> Unit,
+    onListen: (() -> Unit)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     val haptics = rememberFolioHaptics()
+    var more by remember { mutableStateOf(false) }
     ReaderChromeGroup(verticalInset = 0.dp) {
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { haptics.play(FolioHaptic.Confirm); onHighlight() }) {
-                Icon(Icons.Filled.Highlight, null, Modifier.size(17.dp), tint = FolioTheme.colors.accentAnnotation)
-                Text("Keep", modifier = Modifier.padding(start = 6.dp), color = FolioTheme.colors.onSurface)
+                Text("Keep", color = FolioTheme.colors.onSurface)
             }
             if (onNote != null) IconButton(onClick = onNote) {
                 Icon(Icons.Filled.EditNote, "Add note to selection", Modifier.size(20.dp), FolioTheme.colors.onSurface)
             }
-            IconButton(onClick = { clipboard.setText(AnnotatedString(text)); onDismiss() }) {
-                Icon(Icons.Filled.ContentCopy, "Copy selection", Modifier.size(18.dp), FolioTheme.colors.onSurface)
+            if (onExport != null) TextButton(onClick = onExport) {
+                Text("Export", color = FolioTheme.colors.onSurface)
             }
-            if (onEchoes != null) IconButton(onClick = onEchoes) {
-                Icon(Icons.Filled.AutoAwesome, "Find echoes of this passage", Modifier.size(19.dp), FolioTheme.colors.onSurface)
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.Close, "Dismiss selection", Modifier.size(18.dp), FolioTheme.colors.onSurfaceVariant)
+            Box {
+                IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreHoriz, "More selection actions", Modifier.size(19.dp), FolioTheme.colors.onSurface) }
+                com.folio.reader.ui.components.FolioMenu(more, { more = false }, readerMaterial = true) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Copy") }, onClick = { more = false; clipboard.setText(AnnotatedString(text)); onDismiss() })
+                    if (onEchoes != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Find echoes") }, onClick = { more = false; onEchoes() })
+                    if (onListen != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Listen from here") }, onClick = { more = false; onListen() })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Dismiss selection") }, onClick = { more = false; onDismiss() })
+                }
             }
         }
     }

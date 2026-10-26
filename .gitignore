@@ -173,3 +173,7 @@ docs/FOLIO_*_SPEC.md
 # Regenerable from source; kept out of history (225 MB of media + 30 MB build dir).
 outputs/
 .build-out/
+
+# Pinned Phonon CPU engine; model assets remain opt-in.
+!androidApp/src/main/jniLibs/arm64-v8a/libptts_ffi.so
+!androidApp/src/main/jniLibs/x86_64/libptts_ffi.so

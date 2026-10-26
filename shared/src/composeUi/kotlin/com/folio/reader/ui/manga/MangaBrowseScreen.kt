@@ -128,6 +128,7 @@ fun MangaBrowseScreen(
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
             ) {
                 val finished = globalResults.count { !it.loading }
+                item { MangaChallengePrompt() }
                 item {
                     Text(
                         when {

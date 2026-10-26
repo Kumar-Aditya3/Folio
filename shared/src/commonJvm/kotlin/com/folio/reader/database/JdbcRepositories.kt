@@ -50,6 +50,7 @@ class JdbcBookRepository(private val db: Database) : BookRepository {
     }
     override suspend fun deleteBook(bookId: String, emitSyncEvent: Boolean) {
         db.deleteBook(bookId)
+        com.folio.reader.experience.pruneReadingExperience(db, bookId = bookId, emitSyncEvent = emitSyncEvent)
         db.bumpBookData()
         // deleteBook now also deletes chapter_chunks/chapter_vectors for the book, so honour the
         // documented chunkDataRevision invariant (bumped after every write to those tables). This
@@ -475,7 +476,7 @@ class JdbcDocumentRepository(private val db: Database) : DocumentRepository {
 
 class JdbcReadingPositionRepository(private val db: Database) : ReadingPositionRepository {
     override suspend fun upsertPosition(position: ReadingPosition, emitSyncEvent: Boolean) {
-        db.upsertPosition(position)
+        if (!db.upsertPosition(position)) return
         if (emitSyncEvent) db.onEntityChanged?.invoke("position", "${position.bookId}_${position.deviceId}", "UPSERT", repoJson.encodeToString(ReadingPosition.serializer(), position))
     }
     override suspend fun getPosition(bookId: String, deviceId: String): ReadingPosition? =
@@ -509,7 +510,10 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
         startProgress = rs.getDouble("start_progress"),
         endProgress = rs.getDouble("end_progress"),
         wordsRead = rs.getLong("words_read"),
-        isActive = rs.getInt("is_active") == 1
+        isActive = rs.getInt("is_active") == 1,
+        activity = rs.getString("activity_json")?.let { raw -> runCatching {
+            repoJson.decodeFromString(com.folio.reader.narration.SessionActivity.serializer(), raw)
+        }.getOrNull() }
     )
 
     private fun decodePosition(jsonText: String): ReadingPosition =
@@ -518,11 +522,16 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
 
     override suspend fun insertSession(session: ReadingSession, emitSyncEvent: Boolean) {
         db.withConnection { conn ->
+            val activityJson = session.activity?.let { repoJson.encodeToString(com.folio.reader.narration.SessionActivity.serializer(), it) }
+                ?: conn.prepareStatement("SELECT activity_json FROM reading_sessions WHERE id = ?").use { statement ->
+                    statement.setString(1, session.id)
+                    statement.executeQuery().use { rows -> if (rows.next()) rows.getString(1) else null }
+                }
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO reading_sessions (id, book_id, cycle_id, device_id, started_at, ended_at,
-                    duration_ms, start_position, end_position, start_progress, end_progress, words_read, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    duration_ms, start_position, end_position, start_progress, end_progress, words_read, is_active, activity_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, session.id)
@@ -538,6 +547,7 @@ class JdbcReadingSessionRepository(private val db: Database) : ReadingSessionRep
                 stmt.setDouble(11, session.endProgress)
                 stmt.setLong(12, session.wordsRead)
                 stmt.setInt(13, if (session.isActive) 1 else 0)
+                stmt.setString(14, activityJson)
                 stmt.executeUpdate()
             }
         }
@@ -662,6 +672,7 @@ class JdbcHighlightRepository(private val db: Database) : HighlightRepository {
         if (emitSyncEvent) db.getHighlight(highlightId)?.let { highlight ->
             db.onEntityChanged?.invoke("highlight", highlight.id, "UPSERT", repoJson.encodeToString(Highlight.serializer(), highlight))
         }
+        com.folio.reader.experience.pruneReadingExperience(db, sourceId = highlightId, emitSyncEvent = emitSyncEvent)
     }
 
     override suspend fun restoreHighlight(highlightId: String) {
@@ -778,6 +789,7 @@ class JdbcNoteRepository(private val db: Database) : NoteRepository {
         if (emitSyncEvent) getNote(noteId)?.let { note ->
             db.onEntityChanged?.invoke("note", note.id, "UPSERT", repoJson.encodeToString(Note.serializer(), note))
         }
+        com.folio.reader.experience.pruneReadingExperience(db, sourceId = noteId, emitSyncEvent = emitSyncEvent)
     }
 
     override suspend fun restoreNote(noteId: String) {
@@ -949,6 +961,16 @@ class JdbcBookmarkRepository(private val db: Database) : BookmarkRepository {
 // ---------- Collections & Series ----------
 
 class JdbcCollectionRepository(private val db: Database) : CollectionRepository {
+    override suspend fun reorderCollections(ids: List<String>) {
+        val changed = db.reorderCategoryRows("collections", ids)
+        if (changed.isEmpty()) return
+        db.bumpBookData()
+        changed.forEach { id ->
+            getCollection(id)?.let { collection ->
+                db.onEntityChanged?.invoke("collection", id, "UPSERT", repoJson.encodeToString(Collection.serializer(), collection))
+            }
+        }
+    }
 
     private fun mapRow(rs: ResultSet) = Collection(
         id = rs.getString("id"),

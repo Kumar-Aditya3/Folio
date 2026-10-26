@@ -45,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaCategory
 import com.folio.reader.ui.components.FolioChip
+import com.folio.reader.ui.components.FolioCategoryChip
+import com.folio.reader.ui.components.FolioCategoryRail
 import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -135,30 +137,17 @@ fun MangaLibraryRail(
                 leading = leading,
             )
         } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = FolioTokens.gutter),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (leading != null) {
-                    item { leading() }
-                }
-                items(categories, key = { it.id }) { category ->
-                    FolioChip(
-                        selected = selectedCategory == category.id,
-                        onClick = { viewModel.selectCategory(category.id) },
-                        label = category.name,
-                    )
-                }
-                item {
-                    FolioChip(
-                        selected = false,
-                        onClick = { manageCollectionsOpen = true },
-                        label = "Edit",
-                    )
-                }
-                item {
+            FolioCategoryRail(
+                categories = categories.map { FolioCategoryChip(it.id, it.name, it.id != MangaCategory.MAIN_ID || categories.size > 1) },
+                selectedId = selectedCategory,
+                onSelect = { viewModel.selectCategory(it) },
+                onReorder = { viewModel.reorderCategories(it) },
+                onRename = { id, name -> viewModel.renameCategory(id, name) },
+                onDelete = { id -> categoryToDelete = categories.firstOrNull { it.id == id } },
+                onDeleteRequest = { id -> categoryToDelete = categories.firstOrNull { it.id == id } },
+                onEdit = { manageCollectionsOpen = true },
+                leading = leading,
+                trailing = {
                     // Queue entry point for the whole manga side (it replaced the
                     // overflow-menu item): a live count while anything is queued or
                     // downloading, plain otherwise so storage settings stay reachable.
@@ -167,8 +156,8 @@ fun MangaLibraryRail(
                         onClick = onOpenDownloads,
                         label = if (activeDownloads > 0) "Downloads · $activeDownloads" else "Downloads",
                     )
-                }
-            }
+                },
+            )
             Spacer(Modifier.height(4.dp))
         }
         }

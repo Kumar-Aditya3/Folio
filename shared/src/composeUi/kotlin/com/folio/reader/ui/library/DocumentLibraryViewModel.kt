@@ -236,6 +236,12 @@ class DocumentLibraryViewModel(
         scope.launch { categoryRepository.rename(id, name) }
     }
 
+    private val categoryOrderWrites = kotlinx.coroutines.channels.Channel<List<String>>(
+        kotlinx.coroutines.channels.Channel.CONFLATED,
+    ).also { writes -> scope.launch { for (ids in writes) categoryRepository.reorder(ids) } }
+
+    fun reorderCategories(ids: List<String>) { categoryOrderWrites.trySend(ids.toList()) }
+
     fun deleteCategory(id: String) {
         scope.launch {
             if (categoryRepository.delete(id) && selectedCategoryId.value == id) {

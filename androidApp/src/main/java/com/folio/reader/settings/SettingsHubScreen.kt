@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
@@ -200,6 +201,12 @@ fun SettingsHubScreen(
             } else {
             item {
                 HubSection("Reading", colors.accentProgress) {
+                    HubRow(icon = Icons.Filled.Headphones, title = "Narration",
+                        subtitle = "Offline voice, listening and sleep timer", accent = colors.accentProgress,
+                        onClick = { onOpenSettings(FolioSettingsCategory.NARRATION) })
+                    HubRow(icon = Icons.Filled.Notifications, title = "Widgets & notifications",
+                        subtitle = "Your reading rhythm, beyond the app", accent = colors.accentProgress,
+                        onClick = { onOpenSettings(FolioSettingsCategory.READING_SURFACES) })
                     HubRow(
                         icon = Icons.Filled.Equalizer,
                         title = "Reader defaults",

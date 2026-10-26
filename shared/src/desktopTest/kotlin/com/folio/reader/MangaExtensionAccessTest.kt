@@ -138,6 +138,35 @@ class MangaExtensionAccessTest {
     }
 
     @Test
+    fun chaptersLoadEvenWhenMetadataEndpointFails() = runBlocking {
+        val id = "metadata-failure"
+        val mangaRepo = MangaReaderProgressTest.FakeMangaRepo().apply {
+            entries[id] = com.folio.reader.manga.MangaEntry(id, 999L, "Source", "/manga", "Saved title")
+        }
+        val backend = object : MangaBackend by MangaReaderProgressTest.FakeBackend(emptyMap()) {
+            override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): com.folio.reader.manga.MangaDetail {
+                throw IOException("Metadata unavailable")
+            }
+            override suspend fun fetchChapterList(sourceId: Long, mangaUrl: String) =
+                listOf(com.folio.reader.manga.MangaChapterRef("/chapter", "Chapter 1", sourceMemo = """{"mangaId":"abc"}"""))
+        }
+        val viewModel = MangaDetailViewModel(backend, mangaRepo, MangaReaderProgressTest.FakeChapterRepo(),
+            MangaReaderProgressTest.FakeHistoryRepo(), downloadManager = null, downloadRepo = null,
+            categoryRepo = MangaReaderProgressTest.FakeCategoryRepo(),
+            settingsRepo = MangaReaderProgressTest.FakeSettingsRepo())
+        try {
+            viewModel.open(id)
+            withTimeout(5_000) { viewModel.refreshNotice.first { it != null } }
+            assertEquals("/chapter", viewModel.chapters.value.single().url)
+            assertEquals("""{"mangaId":"abc"}""", viewModel.chapters.value.single().sourceMemo)
+            assertEquals("Saved title", viewModel.manga.value?.title)
+            assertNull(viewModel.error.value)
+        } finally {
+            viewModel.scope.cancel()
+        }
+    }
+
+    @Test
     fun blockedRefreshPreservesSavedChaptersWithoutCallingItOffline() = runBlocking {
         val id = "blocked-refresh"
         val mangaRepo = MangaReaderProgressTest.FakeMangaRepo().apply {

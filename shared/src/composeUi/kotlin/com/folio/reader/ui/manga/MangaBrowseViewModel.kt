@@ -298,7 +298,9 @@ class BrowseViewModel(
                                         ?: 0,
                                 )
                             }
-                        } catch (e: Throwable) {
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
                             setGlobalResult(source.id) {
                                 it.copy(loading = false, error = e.message ?: "Search failed")
                             }
@@ -315,7 +317,14 @@ class BrowseViewModel(
 
     /** Opens a search result: persists it for the detail screen without adding to library. */
     suspend fun ensureEntry(source: MangaSourceInfo, item: MangaBrowseItem): MangaEntry {
-        mangaRepo.findBySourceUrl(source.id, item.url)?.let { return it }
+        mangaRepo.findBySourceUrl(source.id, item.url)?.let { existing ->
+            if (item.sourceMemo != "{}" && item.sourceMemo != existing.sourceMemo) {
+                val updated = existing.copy(sourceMemo = item.sourceMemo)
+                mangaRepo.upsert(updated, preserveLibraryState = true)
+                return updated
+            }
+            return existing
+        }
         val entry = MangaEntry(
             id = mangaId(source.id, item.url),
             sourceId = source.id,
@@ -323,6 +332,7 @@ class BrowseViewModel(
             url = item.url,
             title = item.title,
             thumbnailUrl = item.thumbnailUrl,
+            sourceMemo = item.sourceMemo,
             inLibrary = false,
             addedAt = Clock.System.now(),
             updatedAt = Clock.System.now(),
@@ -525,7 +535,14 @@ class SourceBrowseViewModel(
 
     /** Persists a tapped result so the detail screen can open it, without adding to library. */
     suspend fun ensureEntry(item: MangaBrowseItem): MangaEntry {
-        mangaRepo.findBySourceUrl(source.id, item.url)?.let { return it }
+        mangaRepo.findBySourceUrl(source.id, item.url)?.let { existing ->
+            if (item.sourceMemo != "{}" && item.sourceMemo != existing.sourceMemo) {
+                val updated = existing.copy(sourceMemo = item.sourceMemo)
+                mangaRepo.upsert(updated, preserveLibraryState = true)
+                return updated
+            }
+            return existing
+        }
         val entry = MangaEntry(
             id = mangaId(source.id, item.url),
             sourceId = source.id,
@@ -533,6 +550,7 @@ class SourceBrowseViewModel(
             url = item.url,
             title = item.title,
             thumbnailUrl = item.thumbnailUrl,
+            sourceMemo = item.sourceMemo,
             inLibrary = false,
             addedAt = Clock.System.now(),
             updatedAt = Clock.System.now(),

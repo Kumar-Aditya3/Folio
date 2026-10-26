@@ -62,6 +62,7 @@ internal class ReadingSessionTracker(
     private var activeSpanMs = 0L
     private var bankedSpanMs = 0L
     private var lastActivityAt: TimeSource.Monotonic.ValueTimeMark? = null
+    private var lastPlaybackMs = com.folio.reader.narration.NarrationActivity.totalPlaybackMs
 
     /** Words credited to this session, advanced a readable pace at a time. */
     private var creditedWords = 0L
@@ -78,12 +79,20 @@ internal class ReadingSessionTracker(
      * idle, and banking it is what turned reading time into elapsed time.
      */
     fun markReadingActivity() {
+        val playbackMs = com.folio.reader.narration.NarrationActivity.totalPlaybackMs
+        val overlapMs = (playbackMs - lastPlaybackMs).coerceAtLeast(0)
+        lastPlaybackMs = playbackMs
+        if (com.folio.reader.narration.NarrationActivity.playbackActive ||
+            com.folio.reader.narration.NarrationActivity.ownerBookId?.let { it == sessionState.value?.bookId } == true) {
+            lastActivityAt = null
+            return
+        }
         val now = TimeSource.Monotonic.markNow()
         val previous = lastActivityAt
         lastActivityAt = now
         if (previous == null) return
         val gapMs = (now - previous).inWholeMilliseconds
-        if (gapMs in 1 until IDLE_GRACE_MS) activeSpanMs += gapMs
+        if (gapMs in 1 until IDLE_GRACE_MS) activeSpanMs += (gapMs - overlapMs).coerceAtLeast(0)
     }
 
     /**
@@ -93,6 +102,11 @@ internal class ReadingSessionTracker(
      * clamped to [MAX_CREDIBLE_WPM] over the active time elapsed.
      */
     fun creditedWordsFor(normalized: Double, totalActiveMs: Long): Long {
+        if (com.folio.reader.narration.NarrationActivity.ownerBookId == sessionState.value?.bookId) {
+            wordsBaseProgress = normalized
+            wordsBaseActiveMs = totalActiveMs
+            return creditedWords
+        }
         val totalWords = bookTotalWords()
         val advance = (normalized - wordsBaseProgress).coerceAtLeast(0.0)
         wordsBaseProgress = normalized

@@ -176,7 +176,7 @@ class ReaderSearchFieldMotionTest {
                                 ReaderTool.Saved -> AnnotationsSidebar(emptyList(), emptyList(), emptyList(), {}, {}, {}, {})
                                 ReaderTool.Echoes -> EchoesPanel(EchoesState.Idle, {}, { _, _, _ -> })
                                 ReaderTool.Settings -> ReaderSettingsPanel(ReaderSettings(), {}, {}, {})
-                                ReaderTool.Pages -> Unit
+                                ReaderTool.Pages, ReaderTool.Listen -> Unit
                             }
                         }
                     }

@@ -270,6 +270,7 @@ fun AnnotationsSidebar(
     chapterLabel: (spineIndex: Int?, chapterId: String?) -> String = { spine, _ -> "Spine ${(spine ?: 0) + 1}" },
     onJump: (kind: String, id: String) -> Unit = { _, _ -> }
 ) {
+    val experience = com.folio.reader.experience.LocalReaderExperience.current
     var noteDraftFor by remember { mutableStateOf<String?>(null) }
     var noteContent by remember { mutableStateOf("") }
     // A dismissed (not cancelled) dialog keeps its unsaved draft for this highlight.
@@ -305,6 +306,7 @@ fun AnnotationsSidebar(
         }
         LazyColumn(modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = readerImeBottomPadding())) {
+            item { com.folio.reader.experience.ReaderSavedTools() }
             if (bookmarks.isNotEmpty()) {
                 item { SectionHeader("Bookmarks (${bookmarks.size})", Icons.Filled.Bookmark) }
                 items(bookmarks, key = { "bm:${it.id}" }) { bookmark ->
@@ -336,7 +338,9 @@ fun AnnotationsSidebar(
                             noteDraftFor = highlight.id
                         },
                         onClick = { onJump("hl", highlight.id) },
-                        onDelete = { onRemoveHighlight(highlight.id) },
+                        onDelete = { onRemoveHighlight(highlight.id); experience?.environment?.perform { repository.removeSource(highlight.id) } },
+                        onExport = experience?.let { { it.export(highlight.id) } },
+                        onReview = experience?.let { { it.review(highlight.id) } },
                         // §17: the passage in the note composer is the same text as
                         // this row, so the composer's passage lifts out of the row it
                         // was opened from. Both sides are Compose — the highlight in
@@ -355,7 +359,9 @@ fun AnnotationsSidebar(
                         subtitle = chapterLabel(note.spineIndex, note.chapterId),
                         leadingIcon = Icons.AutoMirrored.Filled.Notes,
                         onClick = { onJump("nt", note.id) },
-                        onDelete = { onRemoveNote(note.id) }
+                        onDelete = { onRemoveNote(note.id); experience?.environment?.perform { repository.removeSource(note.id) } },
+                        onExport = experience?.let { { it.export(note.id) } },
+                        onReview = experience?.let { { it.review(note.id) } }
                     )
                 }
             }
@@ -428,6 +434,8 @@ private fun AnnotationRow(
     onNote: (() -> Unit)? = null,
     onClick: () -> Unit = {},
     onDelete: () -> Unit,
+    onExport: (() -> Unit)? = null,
+    onReview: (() -> Unit)? = null,
     /**
      * §17 shared-element key, paired with the same key on the page this row
      * points at. Null for rows with no in-page counterpart (orphan notes), which
@@ -454,6 +462,8 @@ private fun AnnotationRow(
             if (onNote != null) TextButton(onClick = onNote) {
                 Text(if (note.isNullOrBlank()) "Add note" else "Edit note", color = accent)
             }
+            if (onExport != null) TextButton(onClick = onExport) { Text("Export") }
+            if (onReview != null) TextButton(onClick = onReview) { Text("Review later") }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Delete, "Delete saved passage", Modifier.size(16.dp), FolioTheme.colors.onSurfaceVariant)

@@ -45,6 +45,10 @@ class SettingsMergeTest {
 
     /** A row where every field holds a non-default value, so every key is encoded. */
     private fun nonDefaultRow(): ReaderSettings = ReaderSettings(
+        soundscape = com.folio.reader.experience.SoundscapePreferences(com.folio.reader.experience.Soundscape.RAIN),
+        readingExperience = com.folio.reader.experience.ReadingExperienceData(chapterReflections = true),
+        discoverMode = com.folio.reader.settings.DiscoverMode.HIDDEN,
+        discoverExtensionPackages = setOf("test.extension"),
         fontFamily = "Calluna",
         fontSize = 21f,
         fontWeight = 450,
@@ -234,7 +238,11 @@ class SettingsMergeTest {
             }
             StructureKind.LIST -> {
                 val items = original as? JsonArray ?: return null
-                items.firstOrNull()?.let { first -> JsonArray(items + first) }
+                // Sets share the LIST descriptor: appending the same element is a no-op.
+                items.firstOrNull()?.let { first ->
+                    val changed = mutateValue(first, descriptor.getElementDescriptor(0)) ?: return null
+                    JsonArray(items + changed)
+                }
             }
             else -> null
         }

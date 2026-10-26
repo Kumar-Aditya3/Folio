@@ -170,8 +170,10 @@ internal fun GlobalSourceSection(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (result.items.isNotEmpty()) {
-                androidx.compose.material3.TextButton(onClick = onViewAll) { Text("View all") }
+            if (!result.loading || result.items.isNotEmpty()) {
+                androidx.compose.material3.TextButton(onClick = onViewAll) {
+                    Text(if (result.items.isEmpty()) "Open source" else "View all")
+                }
             }
         }
         Spacer(Modifier.height(FolioTokens.space1))

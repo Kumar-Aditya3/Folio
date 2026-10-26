@@ -48,6 +48,8 @@ class MangaDownloadService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var queueJob: Job? = null
+    private val trackedDownloadIds = mutableSetOf<String>()
+    private var resultPosted = false
 
     // The queue flow re-emits on every page write, so a chapter name is resolved at most
     // once per chapter and cached; building the notification stays cheap mid-download.
@@ -107,7 +109,15 @@ class MangaDownloadService : Service() {
         graph.mangaDownloadRepository.observeQueue().collect { queue ->
             val downloading = queue.filter { it.status == MangaDownloadStatus.DOWNLOADING }
             val queued = queue.count { it.status == MangaDownloadStatus.QUEUED }
+            trackedDownloadIds += queue.filter { it.status == MangaDownloadStatus.DOWNLOADING || it.status == MangaDownloadStatus.QUEUED }.map { it.id }
             if (downloading.isEmpty() && queued == 0) {
+                if (!resultPosted && trackedDownloadIds.isNotEmpty()) {
+                    resultPosted = true
+                    val results = queue.filter { it.id in trackedDownloadIds }
+                    com.folio.reader.surfaces.ReadingNotifications.downloadsFinished(this,
+                        results.count { it.status == MangaDownloadStatus.DOWNLOADED },
+                        results.count { it.status == MangaDownloadStatus.ERROR })
+                }
                 // Queue drained (everything DOWNLOADED/ERROR, or empty): retire the service.
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -187,17 +197,9 @@ class MangaDownloadService : Service() {
     }
 
     private fun buildNotification(text: String): Notification {
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val contentIntent = launchIntent?.let {
-            PendingIntent.getActivity(
-                this,
-                0,
-                it,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-        }
+        val contentIntent = com.folio.reader.surfaces.ReadingSurfaceIntents.pending(this, "downloads")
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_notification_folio)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(contentIntent)

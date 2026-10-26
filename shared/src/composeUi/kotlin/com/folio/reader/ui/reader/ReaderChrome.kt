@@ -155,8 +155,7 @@ internal fun ReaderTopBar(
                     modifier = Modifier.padding(horizontal = 4.dp))
                 val haptics = rememberFolioHaptics()
                 IconButton(onClick = { haptics.play(FolioHaptic.Confirm); onBookmarkClick() }) {
-                    Icon(if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                        if (isBookmarked) "Remove bookmark" else "Bookmark this spot", Modifier.size(19.dp),
+                    com.folio.reader.experience.ReadingBookmarkGlyph(isBookmarked,
                         if (isBookmarked) FolioTheme.colors.accentAnnotation else FolioTheme.colors.onSurface)
                 }
                 // A single stable entry opens the shared workspace. All five tools are one tap away.
@@ -171,6 +170,10 @@ internal fun ReaderTopBar(
                         FolioMenuItem(text = { Text("Saved passages") }, onClick = { menuOpen = false; onOpenAnnotations() })
                         FolioMenuItem(text = { Text("Reading settings") }, onClick = { menuOpen = false; onToggleReaderPanel() })
                         pageSelection?.let { selected ->
+                            val experience = com.folio.reader.experience.LocalReaderExperience.current
+                            FolioMenuItem(text = { Text("Export selection") }, onClick = {
+                                menuOpen = false; experience?.exportSelection(selected.first, selected.second, selected.third); onSelectionConsumed()
+                            })
                             FolioMenuItem(text = { Text("Keep selection") }, onClick = {
                                 menuOpen = false
                                 onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)

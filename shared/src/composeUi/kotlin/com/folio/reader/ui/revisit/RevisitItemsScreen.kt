@@ -200,6 +200,15 @@ fun RevisitItemsScreen(
     onItemClick: (RevisitDisplayItem) -> Unit,
     viewModel: RevisitItemsViewModel
 ) {
+    val environment = com.folio.reader.experience.LocalReadingEnvironment.current
+    val scheduled = environment?.repository?.state?.collectAsState()?.value?.reviews.orEmpty()
+    val openScheduled: (com.folio.reader.experience.ExportSource) -> Unit = { source -> environment?.perform {
+        val book = books.getBook(source.bookId)
+        val chapter = books.getChaptersForBook(source.bookId).firstOrNull { it.id == source.chapterId }
+        onItemClick(RevisitDisplayItem(RevisitItem("scheduled-${source.id}", source.bookId, source.chapterId.orEmpty(),
+            if (source.isPersonalNote) RevisitType.NOTE else RevisitType.HIGHLIGHT, source.id, deviceId = ""), book, chapter = chapter,
+            sourceSnippet = source.text, note = source.note, readerTarget = com.folio.reader.model.ReaderPassageTarget(source.bookId, source.spineIndex, source.locator)))
+    } }
     var filterType by remember { mutableStateOf<RevisitType?>(null) }
     // Build the flow once per filter, not per recomposition: collectAsState keys on the flow
     // instance, so an unremembered new instance would tear down and re-run the full per-item
@@ -235,7 +244,7 @@ fun RevisitItemsScreen(
             ) {
                 LoadingPlaceholder()
             }
-            list.isEmpty() -> Box(
+            list.isEmpty() && scheduled.isEmpty() -> Box(
                 modifier = Modifier.fillMaxSize().padding(top = topInset),
                 contentAlignment = Alignment.Center
             ) {
@@ -258,6 +267,7 @@ fun RevisitItemsScreen(
                     .nestedScroll(headerState.nestedScrollConnection)
                     .folioBackdropSource()
             ) {
+                item { com.folio.reader.experience.ScheduledReviews(includeUpcoming = true, onOpen = openScheduled) }
                 items(list, key = { it.revisitItem.id }) { item ->
                     RevisitCard(
                         item = item,

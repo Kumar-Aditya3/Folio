@@ -70,6 +70,9 @@ class SweepPace(
      * and makes it impossible to pace a pass without measuring it.
      */
     suspend fun <T> embedPass(block: suspend () -> T): T {
+        // Narration has a real-time audio deadline. Finish an in-flight pass, then yield
+        // between complete passes without truncating a chapter's stored vectors.
+        while (com.folio.reader.narration.NarrationActivity.ownerBookId != null) kotlinx.coroutines.delay(250)
         val started = System.nanoTime()
         val result = block()
         val pause = pauseMsFor((System.nanoTime() - started) / 1_000_000L, readerInApp())

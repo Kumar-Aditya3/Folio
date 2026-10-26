@@ -1,10 +1,7 @@
 package com.folio.reader.manga
 
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -54,26 +51,12 @@ object MangaChallenges {
      */
     const val BLOCKED_MESSAGE = "Cloudflare's site check could not be completed. Access may remain blocked in browser view."
 
-    /** How long a blocked request waits for its browser view to be closed. */
-    private const val BROWSER_SOLVE_TIMEOUT_MS = 3L * 60 * 1000
-
-    /** A host that already had a browser window this recently is not given another one. */
-    private const val AUTO_SOLVE_COOLDOWN_MS = 90L * 1000
-
     private val _pending = MutableStateFlow<MangaChallenge?>(null)
+    private val _bySource = MutableStateFlow<Map<Long, MangaChallenge>>(emptyMap())
+    /** All blocked sources survive a global search; one source cannot overwrite another. */
+    val bySource: StateFlow<Map<Long, MangaChallenge>> = _bySource
+    fun forSource(sourceId: Long): MangaChallenge? = _bySource.value[sourceId]
     private val generation = AtomicLong()
-
-    /**
-     * Completes when the browser view currently on screen goes away.
-     *
-     * Replaced on every [record]: a close belonging to an earlier attempt must not release
-     * a request that is waiting on a newer one.
-     */
-    @Volatile
-    private var closedSignal: CompletableDeferred<Unit>? = null
-
-    /** Hosts that already opened a window, so one wall is not re-opened on every request. */
-    private val autoSolvedAt = ConcurrentHashMap<String, Long>()
 
     /** The block waiting on the reader, or null when nothing is blocked. */
     val pending: StateFlow<MangaChallenge?> = _pending
@@ -84,8 +67,7 @@ object MangaChallenges {
     /**
      * Set by the platform host; false while the app cannot put a window on screen.
      *
-     * Android refuses activity starts from the background, and that refusal is silent, so
-     * a request that waited on a window that never appeared would hang until the timeout.
+     * Prevents manual browser actions from trying to launch while Android is backgrounded.
      */
     var canShowWindow: (() -> Boolean)? = null
 
@@ -95,9 +77,9 @@ object MangaChallenges {
     /**
      * Called by the network layer when a request came back as a bot check.
      *
-     * Returns the published challenge so the caller can wait for its browser view, or null
-     * when the URL carries no host to key on.
+     * Records the notice without opening a window or waiting for a user action.
      */
+    @Synchronized
     fun record(
         url: String,
         userAgent: String? = null,
@@ -107,62 +89,48 @@ object MangaChallenges {
         val host = hostOf(url) ?: return null
         val challenge = MangaChallenge(url = url, host = host, userAgent = userAgent,
             reason = reason, generation = generation.incrementAndGet(), sourceId = sourceId)
-        closedSignal = CompletableDeferred()
+        if (sourceId != null) _bySource.value = _bySource.value + (sourceId to challenge)
         _pending.value = challenge
         return challenge
     }
 
     /** Called after a source request to [host] has loaded and parsed successfully. */
+    @Synchronized
     fun clearedFor(host: String?, expected: MangaChallenge? = _pending.value) {
         if (host != null && expected?.host == host) {
-            // The wall is gone, so the next block of this host may open a window again.
-            autoSolvedAt.remove(host)
-            _pending.compareAndSet(expected, null)
+            clear(expected)
         }
     }
 
-    fun clearedForSource(sourceId: Long, expected: MangaChallenge? = _pending.value) {
-        if (expected?.sourceId == sourceId) _pending.compareAndSet(expected, null)
+    @Synchronized
+    fun clearedForSource(sourceId: Long, expected: MangaChallenge? = forSource(sourceId)) {
+        if (expected?.sourceId == sourceId) clear(expected)
     }
 
-    fun clear(expected: MangaChallenge? = _pending.value) {
-        _pending.compareAndSet(expected, null)
+    @Synchronized
+    fun clear() {
+        _bySource.value = emptyMap()
+        _pending.value = null
+    }
+
+    @Synchronized
+    fun clear(expected: MangaChallenge?) {
+        val sourceId = expected?.sourceId
+        if (sourceId != null && _bySource.value[sourceId] == expected) {
+            _bySource.value = _bySource.value - sourceId
+        }
+        _pending.compareAndSet(expected, _bySource.value.values.lastOrNull())
     }
 
     /** Hands [challenge] to the platform solver. No-op where none is registered. */
     fun solve(challenge: MangaChallenge? = _pending.value) {
         val target = challenge ?: return
+        if (canShowWindow?.invoke() == false) return
         solver?.invoke(target)
     }
 
-    /**
-     * Opens the browser view for [challenge] and suspends until it closes.
-     *
-     * This is the only way past a wall whose refusal is a script: the page has to run in a
-     * real browser, and the cookie it earns is what the next request needs. Returns false
-     * when the platform has no window to show, when this host already had one this
-     * recently, or when the reader kept it open past [timeoutMs] — in each case the caller
-     * reports the original failure instead of retrying into the same wall.
-     */
-    suspend fun awaitBrowserSolve(
-        challenge: MangaChallenge,
-        timeoutMs: Long = BROWSER_SOLVE_TIMEOUT_MS,
-    ): Boolean {
-        if (!canSolve) return false
-        if (canShowWindow?.invoke() == false) return false
-        val now = System.currentTimeMillis()
-        val previous = autoSolvedAt[challenge.host]
-        if (previous != null && now - previous < AUTO_SOLVE_COOLDOWN_MS) return false
-        autoSolvedAt[challenge.host] = now
-        val signal = closedSignal ?: return false
-        solve(challenge)
-        return withTimeoutOrNull(timeoutMs) { signal.await() } != null
-    }
-
-    /** Called by the platform host once the browser view is gone. */
-    fun closed() {
-        closedSignal?.complete(Unit)
-    }
+    /** Browser closure is not proof of access; only an explicit source retry clears a check. */
+    fun closed() = Unit
 
     fun hostOf(url: String): String? =
         runCatching { java.net.URI(mangaBrowserUrl("POST", url)).host }.getOrNull()?.takeIf { it.isNotBlank() }

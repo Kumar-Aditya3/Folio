@@ -44,6 +44,8 @@ data class MangaEntry(
     val addedAt: Instant = Clock.System.now(),
     val updatedAt: Instant = Clock.System.now(),
     val lastReadAt: Instant? = null,
+    /** Opaque extension metadata required to resolve source-specific routes. */
+    val sourceMemo: String = "{}",
 ) {
     val isLocal: Boolean get() = sourceId == LOCAL_SOURCE_ID
 }
@@ -77,6 +79,7 @@ data class MangaChapter(
     val downloadedPages: Int = 0,
     val totalPages: Int = 0,
     val updatedAt: Instant = Clock.System.now(),
+    val sourceMemo: String = "{}",
 )
 
 @Serializable
@@ -244,6 +247,7 @@ data class MangaBrowseItem(
     val url: String,
     val title: String,
     val thumbnailUrl: String? = null,
+    val sourceMemo: String = "{}",
 )
 
 data class MangaBrowsePage(
@@ -260,6 +264,7 @@ data class MangaDetail(
     val genres: List<String> = emptyList(),
     val status: MangaStatus = MangaStatus.UNKNOWN,
     val thumbnailUrl: String? = null,
+    val sourceMemo: String = "{}",
 )
 
 data class MangaChapterRef(
@@ -268,6 +273,7 @@ data class MangaChapterRef(
     val scanlator: String? = null,
     val chapterNumber: Float = -1f,
     val dateUpload: Long = 0L,
+    val sourceMemo: String = "{}",
 )
 
 data class MangaPageRef(

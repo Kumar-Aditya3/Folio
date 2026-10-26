@@ -182,6 +182,7 @@ class MangaReaderProgressTest {
     }
 
     class FakeCategoryRepo : MangaCategoryRepository {
+        override suspend fun reorder(ids: List<String>) {}
         var categoriesList: List<MangaCategory> = emptyList()
 
         override suspend fun create(name: String, emitSyncEvent: Boolean): MangaCategory =

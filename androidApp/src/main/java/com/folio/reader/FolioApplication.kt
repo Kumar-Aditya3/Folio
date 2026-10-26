@@ -56,6 +56,7 @@ import java.io.File
  * Firestore access is authenticated anonymously using only the Web API key.
  */
 class AppGraph(private val app: Application) {
+    val narration by lazy { com.folio.reader.narration.AndroidNarrationController(app, this) }
     val platform = AndroidPlatform(app)
     val database = Database(platform.fileSystem.getDatabasePath())
 
@@ -852,6 +853,7 @@ class FolioApplication : Application() {
             // Last-resort: rethrow so the crash is visible in logcat rather than a blank hang
             throw e
         }
+        com.folio.reader.surfaces.ReadingSurfaceRuntime.start(this, graph)
         // Same directory holds the interface faces (Fraunces/Manrope); installed here
         // so the first frame is never drawn in the system font.
         com.folio.reader.ui.theme.UiFonts.install(graph.platform.fileSystem.getFontsDir())

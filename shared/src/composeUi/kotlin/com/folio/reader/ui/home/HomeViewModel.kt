@@ -20,6 +20,7 @@ import com.folio.reader.manga.MangaStatisticsRepository
 import com.folio.reader.manga.MangaUpdateRepository
 import com.folio.reader.model.Book
 import com.folio.reader.model.BookStatus
+import com.folio.reader.model.activityDateTime
 import com.folio.reader.model.ReadingSession
 import com.folio.reader.statistics.Scope
 import com.folio.reader.statistics.StatsScope
@@ -243,7 +244,10 @@ class HomeViewModel(
                     goalMinutes = it.dailyGoalMinutes,
                     coverTint = it.homeCoverTint,
                     ambientColor = it.ambientColor,
-                    readingDesk = it.homeReadingDesk,
+                    // The desk is the only Home. The old `homeReadingDesk` field is retired from
+                    // ReaderSettings; hard-coded so a persisted `false` from an older build can
+                    // never bring the classic layout back.
+                    readingDesk = true,
                 )
             }
             .distinctUntilChanged()
@@ -641,10 +645,10 @@ class HomeViewModel(
         fun passes(book: Book) = book.id !in excluded && book.id !in directBooks
 
         val minutesByDay = gatedSessions
-            .groupBy { it.startedAt.toLocalDateTime(timeZone).date }
+            .groupBy { it.activityDateTime(timeZone).date }
             .mapValues { (_, group) -> group.sumOf { it.durationMs } / 60_000 }
 
-        val readDays = gatedSessions.mapTo(mutableSetOf()) { it.startedAt.toLocalDateTime(timeZone).date }
+        val readDays = gatedSessions.mapTo(mutableSetOf()) { it.activityDateTime(timeZone).date }
         // Reading weather: how long since the last sitting, over the same
         // gated sessions every other number here uses. Null = no history yet.
         val lastReadDate = readDays.maxOrNull()

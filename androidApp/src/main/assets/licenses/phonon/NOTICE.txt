@@ -1,0 +1,6 @@
+Phonon / xn-ptts by Gradium
+https://github.com/gradium-ai/xn-ptts
+Source revision: 0418e21963f646e66f5b27d6c1aa5740524ec545
+Engine built with generic CPU instructions, CPU only, 16 KB ELF alignment.
+Build instructions: scripts/build_phonon.py
+The optional voice pack is gradium/phonon-31m-en, Apache-2.0, revision 92741c5b07d085ff840e26fea8ce43110b87852f.

@@ -140,3 +140,14 @@
     java.lang.String SHADER;
 }
 
+# Phonon's JNA ABI is reflectively accessed; native layout must survive R8.
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keep class com.folio.reader.narration.PhononNative$* { *; }
+
+# JNA includes optional desktop AWT helpers. Folio only uses its Android C ABI;
+# these desktop-only entry points are never called on Android.
+-dontwarn java.awt.Component
+-dontwarn java.awt.GraphicsEnvironment
+-dontwarn java.awt.HeadlessException
+-dontwarn java.awt.Window

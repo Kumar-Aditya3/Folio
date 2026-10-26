@@ -118,6 +118,7 @@ class HomeStatsScopeTest {
     }
 
     private open class EmptyCollectionRepo : CollectionRepository {
+        override suspend fun reorderCollections(ids: List<String>) {}
         override suspend fun insertCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun updateCollection(collection: Collection, emitSyncEvent: Boolean) {}
         override suspend fun deleteCollection(collectionId: String): Boolean = false
@@ -245,17 +246,11 @@ class HomeStatsScopeTest {
     // ── §12.9 acceptance ─────────────────────────────────────────────────────
 
     @Test
-    fun `reading desk switches live on the same Home view model without changing the shelf`() = runBlocking {
+    fun `home is always the reading desk`() = runBlocking {
         val settings = com.folio.reader.settings.AppSettingsStore()
         val vm = homeViewModel(listOf(book("desk")), emptyList(), settingsStore = settings)
-        val original = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded } }
-        settings.publish(settings.current.copy(homeReadingDesk = true))
-        val desk = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded && it.readingDesk } }
-        assertEquals(original.readingNow.map { it.id }, desk.readingNow.map { it.id })
-        assertEquals(original.goalMinutes, desk.goalMinutes)
-        settings.publish(settings.current.copy(homeReadingDesk = false))
-        val classic = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded && !it.readingDesk } }
-        assertEquals(desk.readingNow.map { it.id }, classic.readingNow.map { it.id })
+        val state = kotlinx.coroutines.withTimeout(10_000) { vm.state.first { it.loaded } }
+        assertEquals(true, state.readingDesk)
     }
 
     @Test

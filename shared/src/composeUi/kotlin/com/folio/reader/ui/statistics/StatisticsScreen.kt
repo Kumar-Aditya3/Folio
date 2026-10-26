@@ -487,8 +487,15 @@ private fun StatsOverture(
 
 @Composable
 private fun StatsWeekFigure(stats: StatisticsUiState) {
-    FolioFigure(formatWeekHours(stats.timeThisWeekMs), label = "Reading this week",
-        accent = FolioTheme.colors.accentProgress, emphasis = FigureScale.Hero)
+    Column {
+        FolioFigure(formatWeekHours(stats.timeThisWeekMs), label = if (stats.listeningThisWeekMs > 0) "Reading & listening this week" else "Reading this week",
+            accent = FolioTheme.colors.accentProgress, emphasis = FigureScale.Hero)
+        if (stats.listeningThisWeekMs > 0) Text(
+            "Reading ${formatWeekHours((stats.timeThisWeekMs - stats.listeningThisWeekMs).coerceAtLeast(0))} · Listening ${formatWeekHours(stats.listeningThisWeekMs)}",
+            style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+        if (stats.followAlongThisWeekMs > 0) Text("Listening includes ${formatWeekHours(stats.followAlongThisWeekMs)} following along",
+            style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant)
+    }
 }
 
 @Composable

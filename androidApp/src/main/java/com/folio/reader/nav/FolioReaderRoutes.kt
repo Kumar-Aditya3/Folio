@@ -148,6 +148,11 @@ private fun ReaderRouteContent(
     }
 
     val chapters by viewModel.chapters.collectAsState(initial = emptyList())
+    val narrationState by graph.narration.state.collectAsState()
+    LaunchedEffect(narrationState.phase, narrationState.bookId) {
+        viewModel.narrationOwnershipChanged(com.folio.reader.narration.NarrationActivity.ownerBookId == book.id,
+            narrationState.position)
+    }
     val bookToc by viewModel.bookToc.collectAsState()
     val chapterIndex by viewModel.currentChapterIndex.collectAsState(initial = 0)
     // Both are StateFlows, so these calls resolve to the no-`initial` overload and
@@ -178,6 +183,7 @@ private fun ReaderRouteContent(
         canEcho.value = runCatching { graph.semanticDiscoveryRepository.canEcho() }.getOrDefault(false)
     }
     val loadError by viewModel.loadError.collectAsState(initial = null)
+    val reflectionInvitation by viewModel.reflectionInvitation.collectAsState()
     val chapterChip by viewModel.chapterChip.collectAsState(initial = null)
     // Continuous-mode chapter window.
     val windowSections by viewModel.windowSections.collectAsState(initial = emptyList())
@@ -266,6 +272,9 @@ private fun ReaderRouteContent(
     BackHandler(onBack = onReaderBack)
 
     ReaderScreen(
+        reflectionInvitation = reflectionInvitation,
+        onSaveReflection = viewModel::saveReflection,
+        onDismissReflection = viewModel::dismissReflection,
         bookTitle = book.title,
         chapters = chapters,
         bookToc = bookToc,

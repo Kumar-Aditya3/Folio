@@ -158,8 +158,26 @@ class MangaDetailViewModel(
             refreshNotice.value = null
             val oldIds = chapters.value.map { it.id }.toSet()
             try {
-                val detail = backend.fetchMangaDetail(m.sourceId, m.url)
+                backend.restoreMangaMetadata(m)
+                // Metadata and chapters may come from different endpoints. A failed
+                // description/cover request must not hide otherwise readable chapters.
+                val detailResult = try {
+                    Result.success(backend.fetchMangaDetail(m.sourceId, m.url))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
                 val refs = backend.fetchChapterList(m.sourceId, m.url)
+                if (refs.isEmpty()) {
+                    detailResult.exceptionOrNull()?.let { throw it }
+                    if (chapters.value.isNotEmpty()) {
+                        throw IllegalStateException("The source returned no chapters")
+                    }
+                }
+                val detail = detailResult.getOrNull() ?: com.folio.reader.manga.MangaDetail(
+                    url = m.url, title = m.title,
+                )
                 val mapped = refs.mapIndexed { index, ref ->
                     MangaChapter(
                         id = chapterId(m.id, ref.url),
@@ -172,6 +190,7 @@ class MangaDetailViewModel(
                             else ChapterNumberParser.parse(ref.name),
                         dateUpload = ref.dateUpload,
                         sortOrder = index,
+                        sourceMemo = ref.sourceMemo,
                     )
                 }
                 chapterRepo.replaceChapters(m.id, mapped)
@@ -183,14 +202,17 @@ class MangaDetailViewModel(
                     genres = detail.genres.ifEmpty { m.genres },
                     status = if (detail.status == MangaStatus.UNKNOWN) m.status else detail.status,
                     thumbnailUrl = detail.thumbnailUrl ?: m.thumbnailUrl,
-                    initialized = true,
+                    sourceMemo = if (detailResult.isSuccess) detail.sourceMemo else m.sourceMemo,
+                    initialized = detailResult.isSuccess,
                     updatedAt = Clock.System.now(),
                 )
                 mangaRepo.upsert(updated, preserveLibraryState = true)
                 manga.value = mangaRepo.get(m.id)
                 chapters.value = chapterRepo.getChapters(m.id)
                 val newCount = chapters.value.count { it.id !in oldIds }
-                refreshNotice.value = if (newCount > 0) "$newCount new chapters" else "Already up to date"
+                refreshNotice.value = if (detailResult.isFailure) {
+                    "Chapters loaded. Manga details could not refresh: ${detailResult.exceptionOrNull()?.message}"
+                } else if (newCount > 0) "$newCount new chapters" else "Already up to date"
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

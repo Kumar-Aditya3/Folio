@@ -186,7 +186,8 @@ class MangaDownloadManager(
             downloadsRepo.remove(item.id)
             return
         }
-        val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber)
+        val ref = MangaChapterRef(url = chapter.url, name = chapter.name, chapterNumber = chapter.chapterNumber,
+            scanlator = chapter.scanlator, dateUpload = chapter.dateUpload, sourceMemo = chapter.sourceMemo)
         val path = chapterPath(item.mangaId, item.chapterId)
         if (path == null) {
             downloadsRepo.remove(item.id)

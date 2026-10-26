@@ -209,6 +209,12 @@ class LibraryViewModel(
         scope.launch { runCatching { collectionRepository.renameCollection(id, name) } }
     }
 
+    private val categoryOrderWrites = kotlinx.coroutines.channels.Channel<List<String>>(
+        kotlinx.coroutines.channels.Channel.CONFLATED,
+    ).also { writes -> scope.launch { for (ids in writes) collectionRepository.reorderCollections(ids) } }
+
+    fun reorderCollections(ids: List<String>) { categoryOrderWrites.trySend(ids.toList()) }
+
     fun deleteCollection(id: String) {
         scope.launch {
             if (runCatching { collectionRepository.deleteCollection(id) }.getOrDefault(false) &&

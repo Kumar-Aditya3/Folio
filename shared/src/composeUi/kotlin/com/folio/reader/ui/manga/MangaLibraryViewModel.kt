@@ -289,6 +289,12 @@ class MangaLibraryViewModel(
         scope.launch { categoryRepo.rename(id, name) }
     }
 
+    private val categoryOrderWrites = kotlinx.coroutines.channels.Channel<List<String>>(
+        kotlinx.coroutines.channels.Channel.CONFLATED,
+    ).also { writes -> scope.launch { for (ids in writes) categoryRepo.reorder(ids) } }
+
+    fun reorderCategories(ids: List<String>) { categoryOrderWrites.trySend(ids.toList()) }
+
     suspend fun deleteCategory(id: String): Boolean {
         val deleted = categoryRepo.delete(id, removeExclusiveManga = true)
         if (deleted) {
@@ -407,10 +413,13 @@ class MangaLibraryViewModel(
             val updated = mutableSetOf<String>()
             for (manga in library.value.filter { it.inLibrary }) {
                 try {
-                    val existing = chapterRepo.getChapters(manga.id).map { it.url }.toSet()
+                    val savedChapters = chapterRepo.getChapters(manga.id)
+                    val existing = savedChapters.map { it.url }.toSet()
+                    val existingMemos = savedChapters.associate { it.url to it.sourceMemo }
+                    backend.restoreMangaMetadata(manga)
                     val refs = backend.fetchChapterList(manga.sourceId, manga.url)
                     val newCount = refs.count { it.url !in existing }
-                    if (newCount > 0) {
+                    if (newCount > 0 || refs.any { it.sourceMemo != existingMemos[it.url] }) {
                         val mapped = refs.mapIndexed { index, ref ->
                             com.folio.reader.manga.MangaChapter(
                                 id = com.folio.reader.manga.chapterId(manga.id, ref.url),
@@ -423,6 +432,7 @@ class MangaLibraryViewModel(
                                     else ChapterNumberParser.parse(ref.name),
                                 dateUpload = ref.dateUpload,
                                 sortOrder = index,
+                                sourceMemo = ref.sourceMemo,
                             )
                         }
                         chapterRepo.replaceChapters(manga.id, mapped)

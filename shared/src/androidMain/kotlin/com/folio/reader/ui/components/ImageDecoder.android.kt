@@ -49,9 +49,11 @@ actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
         val srcW = bounds.outWidth
         val srcH = bounds.outHeight
         var sample = 1
-        if (srcW > 0 && srcH > 0 && targetWidthPx > 0) {
+        if (srcW > 0 && srcH > 0) {
             // Subsample while the decoded width would still cover the target.
-            while (srcW / (sample * 2) >= targetWidthPx) sample *= 2
+            if (targetWidthPx > 0) {
+                while (srcW / (sample * 2) >= targetWidthPx) sample *= 2
+            }
             // Extremely tall strips: keep the decoded height sane without shrinking
             // the width further than the height cap forces.
             while (srcH / sample > MAX_DECODE_HEIGHT) sample *= 2

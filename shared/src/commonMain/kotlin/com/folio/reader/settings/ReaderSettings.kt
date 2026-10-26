@@ -29,6 +29,8 @@ const val FOLIO_METALLIC_SHEEN_FULL = 1f
 
 @Serializable
 data class ReaderSettings(
+    val soundscape: com.folio.reader.experience.SoundscapePreferences = com.folio.reader.experience.SoundscapePreferences(),
+    val readingExperience: com.folio.reader.experience.ReadingExperienceData = com.folio.reader.experience.ReadingExperienceData(),
     val fontFamily: String = "Literata",
     val fontSize: Float = 18f,
     val fontWeight: Int = 400,
@@ -71,8 +73,9 @@ data class ReaderSettings(
     val mangaUpdateIntervalHours: Int = 0,
     /** §13.3: tint the Home hero from the current book's cover. Contrast-guarded, so on by default. */
     val homeCoverTint: Boolean = true,
-    /** Optional Home composition. Global only; existing installs retain the classic layout. */
-    val homeReadingDesk: Boolean = false,
+    // `homeReadingDesk` retired: the reading desk *is* Home now. The stored key is ignored on
+    // decode (`ignoreUnknownKeys`), so an old blob carrying it decodes cleanly and the desk wins
+    // either way — see HomeViewModel's `readingDesk = true`.
     /**
      * Light the room from what is being read: the field, the colour pools, the
      * bars' glass and the dissolve under the nav all take the featured cover's
@@ -261,6 +264,7 @@ data class ReaderSettings(
 ) {
     fun copyWith(bookSettings: BookReaderSettings): ReaderSettings {
         return copy(
+            soundscape = bookSettings.soundscape ?: soundscape,
             fontFamily = bookSettings.fontFamily ?: fontFamily,
             fontSize = bookSettings.fontSize ?: fontSize,
             fontWeight = bookSettings.fontWeight ?: fontWeight,
@@ -294,6 +298,7 @@ data class ReaderSettings(
      * follow the global defaults now.
      */
     fun toBookSettings(): BookReaderSettings = BookReaderSettings(
+        soundscape = soundscape,
         fontFamily = fontFamily,
         fontSize = fontSize,
         fontWeight = fontWeight,
@@ -322,6 +327,7 @@ data class ReaderSettings(
  */
 @Serializable
 data class BookReaderSettings(
+    val soundscape: com.folio.reader.experience.SoundscapePreferences? = null,
     val fontFamily: String? = null,
     val fontSize: Float? = null,
     val fontWeight: Int? = null,
@@ -355,6 +361,7 @@ data class BookReaderSettings(
  */
 fun BookReaderSettings.overriddenFields(global: ReaderSettings): Set<String> {
     val fields = mutableSetOf<String>()
+    if (soundscape != null && soundscape != global.soundscape) fields += "soundscape"
     if (fontFamily != null && fontFamily != global.fontFamily) fields += "fontFamily"
     if (fontSize != null && fontSize != global.fontSize) fields += "fontSize"
     if (fontWeight != null && fontWeight != global.fontWeight) fields += "fontWeight"
@@ -376,6 +383,7 @@ fun BookReaderSettings.overriddenFields(global: ReaderSettings): Set<String> {
 
 /** Drops the named fields so the book follows the global defaults again. */
 fun BookReaderSettings.clearing(fields: Set<String>): BookReaderSettings = copy(
+    soundscape = if ("soundscape" in fields) null else soundscape,
     fontFamily = if ("fontFamily" in fields) null else fontFamily,
     fontSize = if ("fontSize" in fields) null else fontSize,
     fontWeight = if ("fontWeight" in fields) null else fontWeight,
@@ -406,6 +414,7 @@ fun BookReaderSettings.clearing(fields: Set<String>): BookReaderSettings = copy(
  */
 fun ReaderSettings.changedFields(other: ReaderSettings): Set<String> {
     val fields = mutableSetOf<String>()
+    if (soundscape != other.soundscape) fields += "soundscape"
     if (fontFamily != other.fontFamily) fields += "fontFamily"
     if (fontSize != other.fontSize) fields += "fontSize"
     if (fontWeight != other.fontWeight) fields += "fontWeight"

@@ -381,7 +381,8 @@ class SyncEngine(
             startProgress = session.startProgress,
             endProgress = session.endProgress,
             wordsRead = session.wordsRead,
-            isActive = session.isActive
+            isActive = session.isActive,
+            activity = session.activity?.let { Json.Default.encodeToString(com.folio.reader.narration.SessionActivity.serializer(), it) }
         )
         firestoreSync.upsertSession(fsSession)
     }
@@ -396,6 +397,10 @@ class SyncEngine(
         // Credentials never leave the device: the payload would otherwise carry the
         // account password and API key into the cloud document (and every restore).
         val shareable = settings.copy(
+            readingExperience = settings.readingExperience.copy(
+                returns = settings.readingExperience.returns.takeIf { current.syncAnnotations && current.syncPositions } ?: emptyList(),
+                reflections = settings.readingExperience.reflections.takeIf { current.syncAnnotations } ?: emptyList(),
+                reviews = settings.readingExperience.reviews.takeIf { current.syncAnnotations } ?: emptyList()),
             firebaseApiKey = "",
             syncAccountEmail = "",
             syncAccountPassword = ""
@@ -691,6 +696,10 @@ class SyncEngine(
             com.folio.reader.util.JsonUtils.Compact.decodeFromString(ReaderSettings.serializer(), remote.global)
         }.getOrNull() ?: return
         val merged = incoming.copy(
+            readingExperience = incoming.readingExperience.copy(
+                returns = if (current.syncAnnotations && current.syncPositions) incoming.readingExperience.returns else current.readingExperience.returns,
+                reflections = if (current.syncAnnotations) incoming.readingExperience.reflections else current.readingExperience.reflections,
+                reviews = if (current.syncAnnotations) incoming.readingExperience.reviews else current.readingExperience.reviews),
             firebaseApiKey = current.firebaseApiKey,
             firebaseProjectId = current.firebaseProjectId,
             syncAccountEmail = current.syncAccountEmail,
@@ -1210,14 +1219,14 @@ class SyncEngine(
 
     private suspend fun applyRemoteSessions() {
         val measuredFrom = ReadingSession.FIRST_MEASURED_SESSION.toEpochMilliseconds()
-        for (remote in fetchedSessions) {
+        for (remote in fetchedSessions.groupBy { it.id }.values.map { rows -> rows.maxWith(compareBy<FsReadingSession> { it.durationMs }.thenBy { it.activity != null }) }) {
             if (remote.deviceId == deviceId || remote.isActive) continue
             // Another device's pre-fix history is just as unmeasured as this one's was.
             if (remote.startedAt < measuredFrom) continue
             val targetBookId = resolveLocalBookId(remote.bookId)
             if (bookRepository.getBook(targetBookId) == null) continue
             val known = sessionRepository.getSessionsForBook(targetBookId).first().firstOrNull { it.id == remote.id }
-            if (known != null) continue
+            if (known != null && known.durationMs >= remote.durationMs && (known.activity != null || remote.activity == null)) continue
             runCatching {
                 sessionRepository.insertSession(
                     ReadingSession(
@@ -1238,7 +1247,10 @@ class SyncEngine(
                         startProgress = remote.startProgress,
                         endProgress = remote.endProgress,
                         wordsRead = remote.wordsRead,
-                        isActive = remote.isActive
+                        isActive = remote.isActive,
+                        activity = remote.activity?.let { raw -> runCatching {
+                            Json.Default.decodeFromString(com.folio.reader.narration.SessionActivity.serializer(), raw)
+                        }.getOrNull() }
                     ),
                     emitSyncEvent = false
                 )

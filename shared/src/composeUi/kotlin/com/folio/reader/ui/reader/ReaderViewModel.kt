@@ -14,6 +14,7 @@ import com.folio.reader.model.Highlight
 import com.folio.reader.model.Note
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.model.ReadingSession
+import com.folio.reader.model.spotLocator
 import com.folio.reader.settings.BookReaderSettings
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.clearing
@@ -96,6 +97,9 @@ class ReaderViewModel(
     private var echoesWarmed = false
     private val _chapterHtml = MutableStateFlow("")
     private val _chapterChip = MutableStateFlow<String?>(null)
+    private val _reflectionInvitation = MutableStateFlow<com.folio.reader.experience.ReflectionInvitation?>(null)
+    val reflectionInvitation = _reflectionInvitation as kotlinx.coroutines.flow.StateFlow<com.folio.reader.experience.ReflectionInvitation?>
+    private var reflectionOffered = false
     /**
      * True while a chapter is being loaded.
      *
@@ -119,6 +123,21 @@ class ReaderViewModel(
     private var currentBookId: String? = null
     private var deviceId: String = ""
     private var closeStarted = false
+    private var narrationOwnsSession = false
+    fun narrationOwnershipChanged(owned: Boolean, heardPosition: ReadingPosition?) {
+        if (narrationOwnsSession == owned) return
+        narrationOwnsSession = owned
+        viewModelScope.launch {
+            withContext(Dispatchers.Default) {
+                if (owned) sessionTracker.endActiveSession(_session.value, _position.value)
+                else if (!closeStarted) {
+                    heardPosition?.takeIf { it.bookId == currentBookId }?.let { _position.value = it }
+                    currentBookId?.let { sessionTracker.openSession(it, deviceId, _chapters.value,
+                        _currentChapterIndex.value, _position.value) }
+                }
+            }
+        }
+    }
     /** This book's session history, loaded at open; feeds the chapter-chip pace band. */
     private var recentSessions: List<ReadingSession> = emptyList()
 
@@ -245,6 +264,8 @@ class ReaderViewModel(
         this.deviceId = deviceId
         currentBookId = bookId
         closeStarted = false
+        reflectionOffered = false
+        _reflectionInvitation.value = null
         _settings.value = initialSettings
         // Per-book isolation: start from a clean overlay so nothing from the
         // previously opened book leaks into this one; this book's stored
@@ -494,6 +515,20 @@ class ReaderViewModel(
 
     /** §5.3 end-of-chapter summary; null when there is nothing honest to claim. */
     private fun buildChapterChip(finishedIndex: Int, chapterMs: Long, chapterWords: Long): String? {
+        if (!reflectionOffered && chapterMs >= 120_000 && chapterWords >= 100) {
+            val chapter = _chapters.value.getOrNull(finishedIndex)
+            val position = _position.value
+            val session = _session.value
+            if (chapter != null && position != null && session != null) {
+                reflectionOffered = true
+                viewModelScope.launch {
+                    if (runCatching { settingsRepository.getGlobalSettings().readingExperience.chapterReflections }.getOrDefault(false)) {
+                        _reflectionInvitation.value = com.folio.reader.experience.ReflectionInvitation(position.bookId, chapter.id, chapter.title, session.id,
+                            position.copy(chapterId = chapter.id, spineIndex = chapter.spineIndex, contentLocator = "/${chapter.spineIndex}/f1000", chapterProgress = 1.0, previousPosition = null))
+                    }
+                }
+            }
+        }
         if (chapterMs < 30_000L) return null
         val minutesLabel = if (chapterMs >= 60_000L) "${chapterMs / 60_000L} min" else "<1 min"
         val base = "Chapter ${finishedIndex + 1} · $minutesLabel"
@@ -524,6 +559,28 @@ class ReaderViewModel(
 
     fun toggleControls() {
         _showControls.value = !_showControls.value
+    }
+
+    fun dismissReflection() { _reflectionInvitation.value = null }
+
+    fun saveReflection(content: String) {
+        val invitation = _reflectionInvitation.value ?: return
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            try {
+            val id = "reflection-${invitation.sessionId}-${invitation.chapterId}"
+            val existing = noteRepository.getNote(id)
+            val note = existing?.copy(content = content, updatedAt = Clock.System.now()) ?: Note(id,
+                invitation.bookId, invitation.chapterId, invitation.position.spineIndex, invitation.position.spotLocator(),
+                content, com.folio.reader.model.NoteType.CHAPTER_NOTE, deviceId = deviceId)
+            if (existing == null) noteRepository.insertNote(note) else noteRepository.updateNote(note)
+            settingsRepository.mergeGlobalSettings { settings -> settings.copy(readingExperience = settings.readingExperience.copy(
+                reflections = settings.readingExperience.reflections.filterNot { it.noteId == id } +
+                    com.folio.reader.experience.ReadingReflection(id, invitation.bookId, invitation.chapterId, invitation.sessionId))) }
+            _reflectionInvitation.value = null
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { _chapterChip.value = "Could not save this reflection. Please try again." }
+        }
     }
 
     fun hideControls() {

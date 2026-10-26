@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.folio.reader.FolioApplication
+import kotlinx.coroutines.flow.first
 
 /**
  * Background manga chapter update check (§11.3). The heavy lifting (rate limiting,
@@ -22,10 +23,16 @@ class MangaUpdateWorker(
             return Result.failure()
         }
         if (result.newChaptersTotal > 0) {
+            val updates = graph.mangaUpdateRepository.observeUpdateStates().first().filter { it.newChapterCount > 0 }
+            val titles = updates.take(4).mapNotNull { update -> graph.mangaRepository.get(update.mangaId)?.let {
+                "${it.title} · ${update.newChapterCount} waiting"
+            } }
             MangaUpdateNotifier.showUpdateSummary(
                 applicationContext,
                 result.newChaptersTotal,
                 result.seriesWithNewChapters,
+                titles,
+                updates.singleOrNull()?.mangaId,
             )
         }
         return Result.success()

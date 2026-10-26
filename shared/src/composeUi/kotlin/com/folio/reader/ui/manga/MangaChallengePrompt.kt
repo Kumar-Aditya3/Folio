@@ -40,10 +40,22 @@ fun MangaChallengePrompt(
     sourceId: Long? = null,
 ) {
     val challenge by MangaChallenges.pending.collectAsState()
+    val bySource by MangaChallenges.bySource.collectAsState()
 
-    val target = challenge ?: return
+    val target = (if (sourceId != null) bySource[sourceId] else challenge) ?: return
     if (sourceId != null && target.sourceId != null && sourceId != target.sourceId) return
     if (!MangaChallenges.canSolve) return
+
+    // Browse only notifies. Opening a browser requires visiting the affected source.
+    if (sourceId == null) {
+        Text(
+            "Some sources need attention. Open the affected source to complete its browser check, then retry.",
+            modifier = modifier,
+            style = MaterialTheme.typography.bodySmall,
+            color = FolioTheme.colors.onSurfaceVariant,
+        )
+        return
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
