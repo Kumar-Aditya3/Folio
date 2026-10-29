@@ -5,9 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material3.Button
+import com.folio.reader.ui.components.FolioActionButton as Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -51,7 +50,7 @@ fun MangaChallengePrompt(
         Text(
             "Some sources need attention. Open the affected source to complete its browser check, then retry.",
             modifier = modifier,
-            style = MaterialTheme.typography.bodySmall,
+            style = FolioTheme.typography.bodySmall,
             color = FolioTheme.colors.onSurfaceVariant,
         )
         return
@@ -64,7 +63,7 @@ fun MangaChallengePrompt(
     ) {
         Text(
             text = "${target.host}: ${target.reason.message} Return here and retry the source to verify access.",
-            style = MaterialTheme.typography.bodySmall,
+            style = FolioTheme.typography.bodySmall,
             color = FolioTheme.colors.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )

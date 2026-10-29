@@ -1,5 +1,7 @@
 package com.folio.reader
 
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
 import com.folio.reader.database.SettingsRepository
 import com.folio.reader.manga.BrowseMode
 import com.folio.reader.manga.ChapterNumberParser
@@ -42,6 +44,9 @@ import com.folio.reader.ui.manga.MangaReaderViewModel
 import com.folio.reader.ui.manga.MangaSearchRanker
 import com.folio.reader.ui.manga.openNote
 import com.folio.reader.ui.manga.pageKey
+import com.folio.reader.ui.manga.resolvePreviewImage
+import com.folio.reader.ui.manga.MangaCachedPage
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -221,6 +226,8 @@ class MangaReaderProgressTest {
     class FakeBackend(
         private val pageLists: Map<String, List<MangaPageRef>>,
         private val gates: Map<String, CompletableDeferred<Unit>> = emptyMap(),
+        private val imageGates: Map<String, CompletableDeferred<Unit>> = emptyMap(),
+        private val imageBytes: ByteArray = ByteArray(16) { it.toByte() },
     ) : MangaBackend {
         /**
          * Every page-list fetch, in the order the source was asked.
@@ -234,7 +241,7 @@ class MangaReaderProgressTest {
          * about fetch ordering and is not one.
          */
         val pageListFetches = java.util.concurrent.ConcurrentLinkedQueue<String>()
-        private val fakeBytes = ByteArray(16) { it.toByte() }
+        val pageImageFetches = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
         override val supportsExtensions: Boolean = false
         override fun observeSources(): Flow<List<MangaSourceInfo>> = flowOf(emptyList())
@@ -262,7 +269,11 @@ class MangaReaderProgressTest {
             sourceId: Long,
             chapter: MangaChapterRef,
             page: MangaPageRef,
-        ): MangaImageData = MangaImageData(fakeBytes, "image/png")
+        ): MangaImageData {
+            pageImageFetches += page.url.orEmpty()
+            imageGates[page.url]?.await()
+            return MangaImageData(imageBytes, "image/png")
+        }
 
         override suspend fun fetchCover(sourceId: Long, thumbnailUrl: String?): ByteArray? = null
         override fun observeExtensions(): Flow<List<ExtensionEntry>> = flowOf(emptyList())
@@ -387,6 +398,95 @@ class MangaReaderProgressTest {
     }
 
     // ---------- Offline downloads ----------
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class, androidx.compose.ui.InternalComposeUiApi::class)
+    @Test
+    fun composedPreviewRequestsArtworkAgainWhenTheVisiblePageChanges() = runBlocking {
+        val chapter = seedChapters(linkedMapOf("/c1" to 40)).single()
+        val image = java.awt.image.BufferedImage(12, 18, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        val png = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(image, "png", it) }.toByteArray()
+        val backend = FakeBackend(pageListsFor(listOf(chapter)), imageBytes = png)
+        val vm = newReaderVm(backend)
+        var scene: androidx.compose.ui.ImageComposeScene? = null
+        val page = androidx.compose.runtime.mutableIntStateOf(31)
+        var frame = 0L
+        try {
+            vm.open(manga, chapter)
+            awaitCondition(message = "preview chapter opens") { !vm.loading.value && vm.pages.value.size == 40 }
+            javax.swing.SwingUtilities.invokeAndWait {
+                scene = androidx.compose.ui.ImageComposeScene(180, 220) {
+                    com.folio.reader.ui.theme.FolioTheme.MaterialTheme(darkTheme = true) {
+                        MangaCachedPage(vm, chapter.id, page.intValue)
+                    }
+                }
+            }
+            for (target in listOf(31, 32)) {
+                javax.swing.SwingUtilities.invokeAndWait { page.intValue = target }
+                var decoded = false
+                awaitCondition(message = "visible preview ${target + 1} fetches and decodes") {
+                    javax.swing.SwingUtilities.invokeAndWait {
+                        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                        scene!!.render(frame++ * 100_000_000L).close()
+                        decoded = scene!!.semanticsOwners.flatMap {
+                            it.getAllSemanticsNodes(mergingEnabled = true)
+                        }.any { node ->
+                            node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)
+                                ?.contains("Page ${target + 1} preview") == true
+                        }
+                    }
+                    decoded && "/c1/p$target" in backend.pageImageFetches
+                }
+                assertTrue("/c1/p$target" in backend.pageImageFetches)
+            }
+            assertEquals(0, vm.currentIndex.value)
+        } finally {
+            javax.swing.SwingUtilities.invokeAndWait { scene?.close() }
+            vm.close()
+        }
+    }
+
+    @Test
+    fun uncachedMapAndSliderPreviewsFetchOnceWithoutChangingReadingProgress() = runBlocking {
+        val chapter = seedChapters(linkedMapOf("/c1" to 40)).single()
+        val gate = CompletableDeferred<Unit>()
+        val backend = FakeBackend(pageListsFor(listOf(chapter)), imageGates = mapOf("/c1/p32" to gate))
+        val vm = newReaderVm(backend)
+        try {
+            vm.open(manga, chapter)
+            awaitCondition(message = "chapter opened") { !vm.loading.value && vm.pages.value.size == 40 }
+            val originalIndex = vm.currentIndex.value
+            val map = async { vm.resolvePreviewImage(chapter.id, 32) }
+            val slider = async { vm.resolvePreviewImage(chapter.id, 32) }
+            awaitCondition(message = "uncached preview requests source artwork") { "/c1/p32" in backend.pageImageFetches }
+            gate.complete(Unit)
+            assertNotNull(map.await())
+            assertNotNull(slider.await())
+            assertNotNull(vm.resolvePreviewImage(chapter.id, 32))
+            assertEquals(1, backend.pageImageFetches.count { it == "/c1/p32" }, "Map, slider and cache share one fetch")
+            assertEquals(originalIndex, vm.currentIndex.value, "Previewing must not move the reader")
+            assertNull(vm.resolvePreviewImage(chapter.id, 40))
+            assertNull(vm.resolvePreviewImage("unknown-chapter", 0))
+        } finally {
+            gate.complete(Unit)
+            vm.close()
+        }
+    }
+
+    @Test
+    fun pagePreviewUsesDownloadedArtworkWithoutContactingTheSource() = runBlocking {
+        val chapter = seedChapters(linkedMapOf("/c1" to 40)).single().copy(downloadedPages = 40)
+        chapterRepo.chapters[chapter.id] = chapter
+        seedDownloadedPages(chapter, 40)
+        val backend = FakeBackend(emptyMap())
+        val vm = newReaderVm(backend, downloadManager())
+        try {
+            vm.open(manga, chapter)
+            awaitCondition(message = "offline chapter opened") { !vm.loading.value && vm.pages.value.size == 40 }
+            assertNotNull(vm.resolvePreviewImage(chapter.id, 32))
+            assertTrue(backend.pageImageFetches.isEmpty())
+            assertTrue(backend.pageListFetches.isEmpty())
+        } finally { vm.close() }
+    }
 
     @Test
     fun fullyDownloadedChapterOpensOfflineAfterQueueMarkerIsCleared() = runBlocking {

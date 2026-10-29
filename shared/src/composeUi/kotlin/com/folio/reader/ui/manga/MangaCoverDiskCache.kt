@@ -30,6 +30,11 @@ object MangaCoverDiskCache {
         return File(dir, name)
     }
 
+    /** Resolve the same artwork used by the shelf for non-Compose surfaces such as widgets. */
+    fun cachedPath(sourceId: Long, thumbnailUrl: String?): String? =
+        thumbnailUrl?.let { fileFor("$sourceId:$it") }
+            ?.takeIf { it.isFile && it.length() > 0 }?.absolutePath
+
     /** Cached bytes for [key], or null when nothing (or no directory) is stored. */
     fun read(key: String): ByteArray? {
         val file = fileFor(key) ?: return null

@@ -1,5 +1,8 @@
 package com.folio.reader.settings
 
+import com.folio.reader.ui.components.FolioHubSection as HubSection
+import com.folio.reader.ui.components.FolioHubRow as HubRow
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
@@ -264,7 +267,7 @@ fun SettingsHubScreen(
                     HubRow(
                         icon = Icons.Filled.Opacity,
                         title = "Transparency",
-                        subtitle = "How solid bars, cards and reader controls are",
+                        subtitle = "Bars, cards, reader controls and widgets",
                         accent = colors.accentDiscovery,
                         last = true,
                         onClick = { onOpenSettings(FolioSettingsCategory.TRANSPARENCY) }
@@ -409,112 +412,6 @@ fun SettingsHubScreen(
                 }
             },
         )
-    }
-}
-
-/** A titled group: accent eyebrow on the page, rows on a resting panel so the group reads
- *  as a surface instead of fading into the wallpaper, a real gap after. */
-@Composable
-private fun HubSection(
-    title: String,
-    accent: Color,
-    content: @Composable () -> Unit,
-) {
-    Column(modifier = Modifier.padding(bottom = FolioTokens.spaceMovement)) {
-        // Issue 4: these kickers ("APPEARANCE", "SYNC & BACKUP", "FEATURED") sit on bare
-        // field, outside the veil below them, and the field is a warm animated Mirage — so
-        // an accent-coloured kicker over a bloom of the same hue was orange on orange and
-        // effectively invisible. Two additive fixes, both reusing what already exists:
-        //
-        //  - `folioTypeGround` gives the label the page's own lower ramp colour at under
-        //    half strength, dissolved at head and foot, exactly as the shelf captions get
-        //    it. Full width, so the wash has no side edge to read as the lip of a card —
-        //    a kicker must not become a chip.
-        //  - `background = folioFieldBottom()` fixes the contrast guard inside FolioEyebrow,
-        //    which blends an accent toward the field-secondary ink until it clears 4.5:1
-        //    *against the ground it is passed*. It defaulted to `colors.surface` — a plane
-        //    this label is nowhere near — so the guard was measuring the wrong ground and
-        //    passing an accent that the real field never supported.
-        FolioEyebrow(
-            title,
-            modifier = Modifier.fillMaxWidth().folioTypeGround(),
-            accent = accent,
-            background = folioFieldBottom(),
-        )
-        Spacer(Modifier.height(FolioTokens.space2))
-        FolioGlassPanel(
-            contentPadding = PaddingValues(horizontal = FolioTokens.space3, vertical = FolioTokens.space1),
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp),
-        ) { content() }
-    }
-}
-
-/**
- * One navigation row. The icon sits on an embedded tile tinted by its section's
- * accent — icon and surface belong to each other, instead of a bare glyph in a
- * gutter. A hairline closes the row unless it is the section's last.
- */
-@Composable
-private fun HubRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    accent: Color,
-    last: Boolean = false,
-    onClick: () -> Unit
-) {
-    val colors = FolioTheme.colors
-    val interaction = rememberFolioInteraction()
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .folioPressable(interaction, scaleTo = 0.99f)
-                .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                .padding(vertical = FolioTokens.space2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(FolioShapes.inset)
-                    .background(accent.copy(alpha = .09f))
-                    .border(.7.dp, accent.copy(alpha = .16f), FolioShapes.inset),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-            Spacer(Modifier.width(FolioTokens.space3))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = FolioTheme.typography.titleSmall,
-                    color = colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    subtitle,
-                    style = FolioTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(FolioTokens.space2))
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        if (!last) FolioRule()
     }
 }
 

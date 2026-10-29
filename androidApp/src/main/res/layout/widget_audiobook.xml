@@ -1,0 +1,20 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="4dp" android:background="@android:color/transparent">
+    <ImageView android:id="@+id/widget_glass" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/widget_glass_base" android:scaleType="fitXY" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="4dp" android:orientation="vertical">
+        <TextView android:id="@+id/widget_eyebrow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="AUDIOBOOK" android:textColor="#D4C4A9" android:textSize="10sp" android:letterSpacing="0.12" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+        <LinearLayout android:id="@+id/widget_audio_body" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:gravity="center_vertical">
+            <ImageView android:id="@+id/widget_disc" android:layout_width="76dp" android:layout_height="76dp" android:layout_marginEnd="14dp" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+            <ImageView android:id="@+id/widget_disc_compact" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginEnd="10dp" android:scaleType="fitCenter" android:visibility="gone" android:importantForAccessibility="no" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="A story, out loud" android:textColor="#F3F0E9" android:textSize="17sp" android:fontFamily="serif" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+                <TextView android:id="@+id/widget_audio_chapter" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Your place is saved" android:layout_marginTop="3dp" android:textColor="#B8C1CE" android:textSize="11sp" android:maxLines="1" android:ellipsize="end" />
+                <TextView android:id="@+id/widget_subtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Open a book to start listening" android:layout_marginTop="2dp" android:textColor="#B8C1CE" android:textSize="10sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="2dp" android:orientation="horizontal" android:gravity="center">
+            <ImageView android:id="@+id/widget_audio_previous" android:layout_width="48dp" android:layout_height="48dp" android:contentDescription="Previous passage" android:scaleType="fitCenter" />
+            <ImageView android:id="@+id/widget_audio_toggle" android:layout_width="48dp" android:layout_height="48dp" android:contentDescription="Resume narration" android:scaleType="fitCenter" />
+            <ImageView android:id="@+id/widget_audio_next" android:layout_width="48dp" android:layout_height="48dp" android:contentDescription="Next passage" android:scaleType="fitCenter" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

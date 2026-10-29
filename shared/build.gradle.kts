@@ -41,6 +41,7 @@ kotlin {
         create("commonJvm") {
             dependsOn(getByName("commonMain"))
             dependencies {
+                implementation("org.apache.commons:commons-compress:1.27.1")
                 implementation(libs.sqlite.jdbc)
                 implementation(libs.jsoup)
                 // API only: Android ships org.xmlpull.v1 in the framework; desktop
@@ -105,7 +106,7 @@ kotlin {
                 // On-device embedding inference. The Android artifact carries its own
                 // native libs per ABI and cannot be resolved on desktop, which is why
                 // openOnnxModel() is expect/actual rather than living in commonJvm.
-                implementation(libs.onnxruntime.android)
+                implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
                 // Phase 6 (OCR + translation). Same shape of problem as ONNX above, and the
                 // same answer: Android-only AARs, so `onDeviceTextTools()` is expect/actual
                 // and desktop's actual is a documented no-op. Text recognition is one model

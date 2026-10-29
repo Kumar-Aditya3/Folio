@@ -136,7 +136,8 @@ fun FolioNavShell(
     val narrationState = narration?.state?.collectAsState()?.value
     val density = LocalDensity.current
     var narrationHeight by remember { mutableStateOf(76.dp) }
-    val showNarration = narrationState?.hasBook == true && !currentRoute.startsWith("reader/") &&
+    val readerSurface = currentRoute in setOf(FolioRoutes.READER, FolioRoutes.MANGA_READER, FolioRoutes.DOCUMENT_READER)
+    val showNarration = narrationState?.hasBook == true && !readerSurface &&
         navController.currentBackStackEntry?.arguments?.getString("category") != "narration"
     // The runway the capsule needs: the OS gesture/nav inset, the capsule itself
     // and the air on both sides of it. Reserved once here so no screen has to

@@ -160,23 +160,12 @@ internal fun GlobalSourceSection(
     onViewAll: () -> Unit,
     onOpenManga: (MangaBrowseItem) -> Unit,
 ) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                result.source.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = FolioTheme.colors.onSurface,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!result.loading || result.items.isNotEmpty()) {
-                androidx.compose.material3.TextButton(onClick = onViewAll) {
-                    Text(if (result.items.isEmpty()) "Open source" else "View all")
-                }
+    com.folio.reader.ui.components.FolioHubSection(result.source.name, FolioTheme.colors.tertiary) {
+        if (!result.loading || result.items.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            androidx.compose.material3.TextButton(onClick = onViewAll) {
+                Text(if (result.items.isEmpty()) "Open source" else "View all")
             }
         }
-        Spacer(Modifier.height(FolioTokens.space1))
         val swapSpec = rememberMotionAnimation<Float>(MotionKey.MangaContentSwap)
         AnimatedContent(
             targetState = result.loading,
@@ -201,7 +190,7 @@ internal fun GlobalSourceSection(
                         Spacer(Modifier.width(6.dp))
                         Text(
                             result.error ?: "Search failed",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = FolioTheme.typography.bodySmall,
                             color = FolioTheme.colors.onSurfaceVariant,
                         )
                     }
@@ -230,7 +219,7 @@ internal fun GlobalSourceSection(
                             Spacer(Modifier.height(FolioTokens.spaceHair))
                             Text(
                                 item.title,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = FolioTheme.typography.labelSmall,
                                 color = FolioTheme.colors.onSurface,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,

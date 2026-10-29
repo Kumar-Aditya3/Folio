@@ -53,7 +53,7 @@ private fun cachePut(path: String, bitmap: ImageBitmap) {
         coverCache.put(path, bitmap)?.let { coverCacheBytes -= coverBytesOf(it) }
         coverCacheBytes += coverBytesOf(bitmap)
         val it = coverCache.entries.iterator()
-        while (coverCacheBytes > COVER_CACHE_MAX_BYTES && coverCache.size > 1 && it.hasNext()) {
+        while (coverCacheBytes > com.folio.reader.util.ReaderMemoryBudget.coverBytes && coverCache.isNotEmpty() && it.hasNext()) {
             val e = it.next()
             coverCacheBytes -= coverBytesOf(e.value)
             it.remove()
@@ -68,19 +68,28 @@ fun clearCoverCache() {
     }
 }
 
-/**
- * §13.3: the already-decoded cover bitmap for accent sampling — reads the cache
- * only, waiting briefly for [BookCover] to finish decoding the same path. Never
- * decodes here: a second decode path would re-open the v1.0.24 crash class.
- */
-internal suspend fun awaitCoverBitmapForAccent(path: String, timeoutMs: Long = 3_000): ImageBitmap? {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
+private val coverDecode = kotlinx.coroutines.sync.Mutex()
+
+/** Covers, inline images and accent sampling share one bounded decode path. */
+internal suspend fun loadCoverBitmap(path: String): ImageBitmap? {
+    cacheGet(path)?.let { return it }
+    coverDecode.lock()
+    try {
         cacheGet(path)?.let { return it }
-        kotlinx.coroutines.delay(100)
-    }
-    return cacheGet(path)
+        val decoded = withContext(Dispatchers.IO) {
+            runCatching {
+                val file = File(path)
+                if (file.isFile && file.length() in 1..32L*1024*1024)
+                    decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) else null
+            }.getOrNull()
+        }
+        if (decoded != null) cachePut(path,decoded)
+        return decoded
+    } finally { coverDecode.unlock() }
 }
+
+internal suspend fun awaitCoverBitmapForAccent(path: String, timeoutMs: Long = 3_000): ImageBitmap? =
+    kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { loadCoverBitmap(path) }
 
 /**
  * An inline EPUB image: [src] is resolved against the chapter by [resolve]
@@ -100,23 +109,7 @@ fun EpubImage(
     LaunchedEffect(src) {
         val path = resolve(src)
         resolvedPath = path
-        if (path != null) {
-            val cached = cacheGet(path)
-            if (cached != null) {
-                bitmap = cached
-            } else {
-                val decoded = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val file = File(path)
-                if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) else null
-                    }.getOrNull()
-                }
-                if (decoded != null) {
-                    cachePut(path, decoded)
-                    bitmap = decoded
-                }
-            }
-        }
+        if (path != null) bitmap = loadCoverBitmap(path)
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -204,23 +197,9 @@ fun BookCover(
             failed = true
             return@LaunchedEffect
         }
-        val cached = cacheGet(path)
-        if (cached != null) {
-            bitmap = cached
-            return@LaunchedEffect
-        }
-        val decoded = withContext(Dispatchers.IO) {
-            runCatching {
-                val file = File(path)
-                if (file.exists() && file.length() > 0) decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) else null
-            }.getOrNull()
-        }
-        if (decoded != null) {
-            cachePut(path, decoded)
-            bitmap = decoded
-        } else {
-            failed = true
-        }
+        val decoded = loadCoverBitmap(path)
+        bitmap = decoded
+        failed = decoded == null
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {

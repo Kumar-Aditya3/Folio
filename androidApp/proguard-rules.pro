@@ -151,3 +151,7 @@
 -dontwarn java.awt.GraphicsEnvironment
 -dontwarn java.awt.HeadlessException
 -dontwarn java.awt.Window
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keep class com.folio.reader.narration.KokoroNative$AudioCallback { *; }
+# WorkManager stores the worker's class name in its persistent database.
+-keep class com.folio.reader.narration.NarrationPreparationWorker { public <init>(android.content.Context, androidx.work.WorkerParameters); }

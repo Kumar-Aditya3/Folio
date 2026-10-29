@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,16 +25,16 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem as DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import com.folio.reader.ui.components.FolioInputField as OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,6 +54,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.folio.reader.manga.MangaSourceInfo
 import com.folio.reader.ui.components.FolioSourceSectionSkeleton
+import com.folio.reader.ui.components.FolioHubHeading
+import com.folio.reader.ui.components.FolioHubRow
+import com.folio.reader.ui.components.FolioHubSection
+import com.folio.reader.ui.components.FolioHubGroupItem
+import com.folio.reader.ui.library.FolioSearchField
 import com.folio.reader.ui.components.FolioTopBar
 import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioVeil
@@ -61,6 +67,7 @@ import com.folio.reader.ui.components.glassPanel
 import com.folio.reader.ui.components.rememberFolioHeaderState
 import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.LocalFolioBarInset
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.folioBarTopInset
@@ -120,10 +127,10 @@ fun MangaBrowseScreen(
                     .nestedScroll(headerState.nestedScrollConnection)
                     .folioBackdropSource().folioPageWash(),
                 contentPadding = PaddingValues(
-                    start = FolioTokens.space3,
-                    top = topInset + FolioTokens.space3,
-                    end = FolioTokens.space3,
-                    bottom = FolioTokens.space3,
+                    start = FolioTokens.gutter,
+                    top = topInset + FolioTokens.space2,
+                    end = FolioTokens.gutter,
+                    bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
                 verticalArrangement = Arrangement.spacedBy(FolioTokens.space3),
             ) {
@@ -136,7 +143,7 @@ fun MangaBrowseScreen(
                             finished < globalResults.size -> "Searching ${finished + 1}/${globalResults.size}…"
                             else -> "${globalResults.sumOf { it.items.size }} results from ${globalResults.count { it.items.isNotEmpty() }} sources"
                         },
-                        style = MaterialTheme.typography.labelSmall,
+                        style = FolioTheme.typography.labelSmall,
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
                 }
@@ -174,199 +181,75 @@ fun MangaBrowseScreen(
                     .nestedScroll(headerState.nestedScrollConnection)
                     .folioBackdropSource().folioPageWash(),
                 contentPadding = PaddingValues(
-                    start = FolioTokens.space3,
-                    top = topInset + FolioTokens.space3,
-                    end = FolioTokens.space3,
-                    bottom = FolioTokens.space3,
+                    start = FolioTokens.gutter,
+                    top = topInset + FolioTokens.space2,
+                    end = FolioTokens.gutter,
+                    bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current,
                 ),
-                verticalArrangement = Arrangement.spacedBy(FolioTokens.space2),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                item {
-                    // A blocked source shows up here too: the reader may have hit the
-                    // check inside a source and come back to Browse.
-                    MangaChallengePrompt()
-                }
-                item {
-                    Text(
-                        "SOURCES",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = FolioTheme.colors.primary,
-                    )
-                }
-                sources.filter { it.isLocal }.forEach { source ->
-                    item(key = "src-${source.id}") {
-                        SourceRow(source = source, onClick = { onOpenSource(source, "") })
-                    }
-                }
-                // One group per language, English first: the same site publishing ten
-                // language editions used to arrive as ten identical-looking rows in a
-                // single "other languages" pile.
-                val remote = sources.filterNot { it.isLocal }
-                val grouped = remote
-                    .groupBy { it.lang.lowercase() }
-                    .toList()
-                    .sortedWith(
-                        compareByDescending<Pair<String, List<MangaSourceInfo>>> { it.first == "en" }
-                            .thenBy { languageLabel(it.first) },
-                    )
-                grouped.forEach { (lang, group) ->
-                    item(key = "hdr-$lang") {
-                        Text(
-                            languageLabel(lang).uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = FolioTheme.colors.primary,
-                            modifier = Modifier.padding(top = FolioTokens.space2),
-                        )
-                    }
-                    group.sortedBy { it.name.lowercase() }.forEach { source ->
-                        item(key = "src-${source.id}") {
-                            SourceRow(source = source, onClick = { onOpenSource(source, "") })
+                item { MangaChallengePrompt() }
+                val local = sources.filter { it.isLocal }
+                if (local.isNotEmpty()) {
+                    item(key = "local-heading") { BrowseGroupHeading("On this device", first = true) }
+                    itemsIndexed(local, key = { _, source -> "src-${source.id}" }) { index, source ->
+                        FolioHubGroupItem(index == 0, index == local.lastIndex) {
+                            SourceRow(source, last = index == local.lastIndex, onClick = { onOpenSource(source, "") })
                         }
                     }
                 }
-                val hiddenCount = allSources.count { source ->
-                    !source.isLocal && sources.none { it.id == source.id }
-                }
-                if (hiddenCount > 0) {
-                    item(key = "lang-hint") {
-                        TextButton(onClick = { viewModel.setSourceLanguages(availableLanguages.toSet()) }) {
-                            Text("Show $hiddenCount sources hidden by the language filter")
+                val grouped = sources.filterNot { it.isLocal }.groupBy { it.lang.lowercase() }.toList()
+                    .sortedWith(compareByDescending<Pair<String, List<MangaSourceInfo>>> { it.first == "en" }
+                        .thenBy { languageLabel(it.first) })
+                grouped.forEachIndexed { groupIndex, (lang, entries) ->
+                    val group = entries.sortedBy { it.name.lowercase() }
+                    item(key = "hdr-$lang") { BrowseGroupHeading(languageLabel(lang), first = local.isEmpty() && groupIndex == 0) }
+                    itemsIndexed(group, key = { _, source -> "src-${source.id}" }) { index, source ->
+                        FolioHubGroupItem(index == 0, index == group.lastIndex) {
+                            SourceRow(source, last = index == group.lastIndex, onClick = { onOpenSource(source, "") })
                         }
                     }
                 }
-                unavailableBrowseExtensions(extensions, allSources).forEach { entry ->
-                    item(key = "unavailable-${entry.pkgName}") {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .folioVeil(shape = RoundedCornerShape(FolioTokens.radiusControl))
-                                .clickable(onClick = onOpenExtensions)
-                                .padding(FolioTokens.space3),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Filled.Extension, contentDescription = null, tint = FolioTheme.colors.primary)
-                            Spacer(Modifier.width(FolioTokens.space2))
-                            Column(Modifier.weight(1f)) {
-                                Text(entry.name, style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    if (entry.isUntrusted) "Trust in Extensions to enable its sources"
-                                    else "No usable sources. Open Extensions to check load errors or a conflicting copy.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = FolioTheme.colors.onSurfaceVariant,
-                                )
-                            }
+                val hiddenCount = allSources.count { source -> !source.isLocal && sources.none { it.id == source.id } }
+                if (hiddenCount > 0) item(key = "lang-hint") {
+                    TextButton(onClick = { viewModel.setSourceLanguages(availableLanguages.toSet()) }) {
+                        Text("Show $hiddenCount sources hidden by language")
+                    }
+                }
+                val attention = unavailableBrowseExtensions(extensions, allSources)
+                if (attention.isNotEmpty() || loadErrors.isNotEmpty()) item(key = "source-attention") {
+                    Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    FolioHubSection("Needs attention", FolioTheme.colors.error) {
+                        attention.forEach { entry ->
+                            FolioHubRow(Icons.Filled.Extension, entry.name,
+                                if (entry.isUntrusted) "Review trust to enable this source" else "No available sources · check this extension",
+                                FolioTheme.colors.error, last = entry == attention.last() && loadErrors.isEmpty(), onClick = onOpenExtensions)
+                        }
+                        loadErrors.forEachIndexed { index, error ->
+                            FolioHubRow(Icons.Filled.Extension, "Extension could not load", error,
+                                FolioTheme.colors.error, last = index == loadErrors.lastIndex, onClick = onOpenExtensions)
                         }
                     }
                 }
-                loadErrors.forEachIndexed { index, error ->
-                    item(key = "source-load-error-$index") {
-                        Text(
-                            "Extension could not load: $error",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = FolioTheme.colors.error,
-                            modifier = Modifier.clickable(onClick = onOpenExtensions),
-                        )
+                if (viewModel.supportsExtensions) item(key = "manage-extensions") {
+                    Spacer(Modifier.height(FolioTokens.spaceMovement))
+                    FolioHubSection("Extensions", FolioTheme.colors.tertiary) {
+                        FolioHubRow(Icons.Filled.Extension, "Manage extensions",
+                            "${extensions.count { it.isInstalled }} installed · add or update sources",
+                            FolioTheme.colors.tertiary, last = true, onClick = onOpenExtensions)
                     }
+                } else item(key = "extensions-unavailable") {
+                    Text("Extensions run on Android. Import CBZ, ZIP or image folders to read manga on this device.",
+                        style = FolioTheme.typography.bodyMedium, color = FolioTheme.colors.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = FolioTokens.spaceMovement))
                 }
-                if (viewModel.supportsExtensions) {
-                    item {
-                        Spacer(Modifier.height(FolioTokens.space2))
-                        Text(
-                            "EXTENSIONS",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = FolioTheme.colors.primary,
-                            // Issue 4: a bare kicker on the animated field — same ground the
-                            // shelf captions take, full width so it has no side edge.
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .folioTypeGround()
-                                .padding(vertical = FolioTokens.space1),
-                        )
-                    }
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                // Issue 4: in-flow veil, not the opaque `glassPanel` alias —
-                                // see SourceRow.
-                                .folioVeil(
-                                    shape = RoundedCornerShape(FolioTokens.radiusControl),
-                                    tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-                                )
-                                .clickable(onClick = onOpenExtensions)
-                                .padding(FolioTokens.space3),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Filled.Extension, contentDescription = null, tint = FolioTheme.colors.primary)
-                            Spacer(Modifier.width(FolioTokens.space2))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Manage extensions",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = FolioTheme.colors.onSurface,
-                                )
-                                Text(
-                                    "${extensions.count { it.isInstalled }} installed",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = FolioTheme.colors.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    item {
-                        Spacer(Modifier.height(FolioTokens.space2))
-                        Text(
-                            "Extensions run on Android only. On desktop you can read local manga " +
-                                "(CBZ/ZIP/folders) imported into the library.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = FolioTheme.colors.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
 
-        // Furniture the screen hangs under the masthead, overlaid with it so results
-        // still run behind the glass. Always composed, even with the search field
-        // closed: an empty layer measures zero, which is what retracts the padding.
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(top = barInset)
-                // Its own ground: an OutlinedTextField's container is transparent, so
-                // results passing under it would render text on text. The glass veil
-                // (not a flat opaque fill) keeps this strip consistent with every other
-                // surface — the rows still frost through it instead of being boxed out
-                // by an opaque rectangle. Bottom-only rounding so it meets the screen
-                // edges cleanly under the masthead.
-                .folioVeil(shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
-                .onSizeChanged { furniturePx = it.height },
-        ) {
-            if (searchActive) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = FolioTokens.space3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = queryText,
-                        onValueChange = { queryText = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search all sources") },
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.width(FolioTokens.space1))
-                    IconButton(onClick = { queryText = "" }, enabled = queryText.isNotBlank()) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                    }
-                }
-                Spacer(Modifier.height(FolioTokens.space1))
             }
         }
 
         FolioTopBar(
             title = "Browse",
-            collapse = headerState.collapse,
+            collapse = if (searchActive) 0f else headerState.collapse,
             modifier = Modifier.align(Alignment.TopCenter),
             bottomRule = false,
             navigationIcon = {
@@ -374,21 +257,25 @@ fun MangaBrowseScreen(
             },
             actions = {
                 IconButton(onClick = { viewModel.toggleSearch() }) {
-                    Icon(Icons.Filled.Search, contentDescription = "Search all sources")
+                    Icon(if (searchActive) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = if (searchActive) "Close search" else "Search all sources")
                 }
-                if (availableLanguages.isNotEmpty()) {
+                if (availableLanguages.isNotEmpty() || viewModel.supportsExtensions) {
                     // The language filter is what keeps one site from filling the list
                     // with a row per language it publishes.
                     Box {
                         IconButton(onClick = { languageMenuOpen = true }) {
-                            Icon(Icons.Filled.Translate, contentDescription = "Source languages")
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Source options")
                         }
                         com.folio.reader.ui.components.FolioMenu(
                             expanded = languageMenuOpen,
                             onDismissRequest = { languageMenuOpen = false },
                         ) {
+                            if (viewModel.supportsExtensions) DropdownMenuItem(
+                                text = { Text(if (refreshing) "Refreshing catalog…" else "Refresh catalog") }, enabled = !refreshing,
+                                onClick = { viewModel.refreshIndex(); languageMenuOpen = false })
                             val allOn = enabledLanguages.containsAll(availableLanguages)
-                            DropdownMenuItem(
+                            if (availableLanguages.isNotEmpty()) DropdownMenuItem(
                                 text = { Text(if (allOn) "Only my languages" else "All languages") },
                                 onClick = {
                                     viewModel.setSourceLanguages(
@@ -396,7 +283,7 @@ fun MangaBrowseScreen(
                                     )
                                 },
                             )
-                            HorizontalDivider()
+                            if (availableLanguages.isNotEmpty()) HorizontalDivider()
                             availableLanguages.forEach { lang ->
                                 val on = lang in enabledLanguages
                                 DropdownMenuItem(
@@ -425,13 +312,11 @@ fun MangaBrowseScreen(
                         }
                     }
                 }
-                if (viewModel.supportsExtensions) {
-                    IconButton(onClick = { viewModel.refreshIndex() }) {
-                        if (refreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh extension index")
-                        }
+            },
+            rail = {
+                Box(Modifier.fillMaxWidth().onSizeChanged { furniturePx = it.height }) {
+                    if (searchActive) Box(Modifier.fillMaxWidth().padding(horizontal = FolioTokens.gutter, vertical = 12.dp)) {
+                        FolioSearchField(queryText, { queryText = it }, "Search all sources", Modifier.fillMaxWidth())
                     }
                 }
             },
@@ -440,43 +325,20 @@ fun MangaBrowseScreen(
 }
 
 @Composable
-private fun SourceRow(source: MangaSourceInfo, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            // Issue 4: the in-flow veil, not `glassPanel`. `glassPanel` is the legacy alias
-            // for `folioPanel`, which paints the *opaque* `atmos.panelFill` — so every source
-            // row was a solid slab laid over the animated field, and none of them answered the
-            // Transparency preference. This is the same material `ExtensionRow` and
-            // `HistoryRow` already use for the same kind of row on sibling screens.
-            .folioVeil(
-                shape = RoundedCornerShape(FolioTokens.radiusControl),
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .clickable(onClick = onClick)
-            .padding(FolioTokens.space3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = if (source.isLocal) Icons.AutoMirrored.Filled.MenuBook else Icons.Filled.Explore,
-            contentDescription = null,
-            tint = FolioTheme.colors.primary,
-        )
-        Spacer(Modifier.width(FolioTokens.space2))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = source.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = FolioTheme.colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (source.isLocal) "CBZ, ZIP and image folders" else languageLabel(source.lang),
-                style = MaterialTheme.typography.bodySmall,
-                color = FolioTheme.colors.onSurfaceVariant,
-            )
-        }
-        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = FolioTheme.colors.onSurfaceVariant)
-    }
+internal fun BrowseGroupHeading(title: String, first: Boolean = false) {
+    FolioHubHeading(title, FolioTheme.colors.tertiary,
+        Modifier.padding(top = if (first) 0.dp else FolioTokens.spaceMovement, bottom = FolioTokens.space2))
+}
+
+@Composable
+internal fun SourceRow(source: MangaSourceInfo, last: Boolean = true, onClick: () -> Unit) {
+    FolioHubRow(
+        icon = if (source.isLocal) Icons.AutoMirrored.Filled.MenuBook else Icons.Filled.Explore,
+        title = source.name,
+        subtitle = when {
+            source.isLocal -> "CBZ, ZIP and image folders"
+            source.supportsLatest -> "Popular titles and latest chapters"
+            else -> "Browse the catalog"
+        },
+        accent = FolioTheme.colors.tertiary, last = last, onClick = onClick)
 }

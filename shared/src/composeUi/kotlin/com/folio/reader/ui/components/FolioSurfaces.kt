@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -1098,7 +1099,25 @@ fun Modifier.folioVeil(
     // plane publish exactly what they paint. A caller that named its own
     // [fillColor]/[fillAlpha] (the nav capsule, the reader's sheets) has already decided
     // and still wins.
-    val fill = folioVeilPlane(fillColor, fillAlpha, accent, glass.blurEnabled)
+    val fill = folioVeilPlane(fillColor, fillAlpha, accent, blurred)
+    // Minimal and Off are finished materials in their own right: a quiet plane and
+    // one etched edge. Replaying the optical bevel without diffusion made these
+    // modes look like glossy plastic. Keep their geometry and opacity unchanged.
+    if (!blurred) {
+        val ink = FolioTheme.colors.onSurface
+        val paintedFill = if (fillColor != null) fill else folioReferenceColor().copy(alpha = fill.alpha)
+        val foot = lerp(paintedFill, folioFieldBottom(atmos), .06f).copy(alpha = fill.alpha)
+        val edgeInk = ink.copy(alpha = if (embedded) .035f else .10f)
+        return this.clip(shape).drawWithCache {
+            val outline = shape.createOutline(size, layoutDirection, this)
+            val plane = Brush.verticalGradient(listOf(paintedFill, foot))
+            val rim = Brush.verticalGradient(listOf(edgeInk, edgeInk.copy(alpha = edgeInk.alpha * .4f)))
+            onDrawBehind {
+                drawOutline(outline, plane)
+                drawOutline(outline, rim, style = Stroke(.75.dp.toPx()))
+            }
+        }
+    }
     // §18 the edge. One rung of one ladder, derived from what the surface already knows
     // about itself so no call site has to be told twice (see [FolioEdgeRole]). This is
     // the surface that carried the defect at every scale the user named — section cards,

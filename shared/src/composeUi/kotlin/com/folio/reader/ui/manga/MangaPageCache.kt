@@ -61,7 +61,7 @@ private fun pageCachePut(key: String, bitmap: ImageBitmap) = synchronized(pageBi
     pageBitmapCache[key]?.let { bitmapCacheBytes -= bitmapByteSize(it) }
     pageBitmapCache[key] = bitmap
     bitmapCacheBytes += bitmapByteSize(bitmap)
-    while (bitmapCacheBytes > BITMAP_CACHE_MAX_BYTES && pageBitmapCache.isNotEmpty()) {
+    while (bitmapCacheBytes > com.folio.reader.util.ReaderMemoryBudget.pageBytes && pageBitmapCache.isNotEmpty()) {
         val eldest = pageBitmapCache.entries.firstOrNull() ?: break
         pageBitmapCache.remove(eldest.key)
         bitmapCacheBytes -= bitmapByteSize(eldest.value)
@@ -72,7 +72,7 @@ private fun pageCachePut(key: String, bitmap: ImageBitmap) = synchronized(pageBi
  * Drops every decoded page so the ~96 MB budget is not held resident while no manga is being
  * read. Called from [MangaReaderViewModel.close]; the next reader session decodes on demand.
  */
-internal fun clearPageBitmapCache() = synchronized(pageBitmapCache) {
+fun clearPageBitmapCache() = synchronized(pageBitmapCache) {
     pageBitmapCache.clear()
     bitmapCacheBytes = 0L
 }

@@ -274,9 +274,7 @@ internal fun DocumentThumbnail(
     fallbackWithFilename: Boolean = false,
     suppressFallbackCaption: Boolean = false
 ) {
-    val path = document.thumbnailPath.takeIf {
-        document.format == DocumentFormat.PDF && !it.isNullOrBlank()
-    }
+    val path = document.thumbnailPath?.takeIf { it.isNotBlank() }
     var bitmap by remember(path) {
         mutableStateOf(path?.let { documentThumbnailGet(it) })
     }

@@ -18,6 +18,9 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -45,7 +48,9 @@ class NarrationPlaybackService : MediaSessionService() {
             }
         }).build()
         addSession(session!!)
-        changes = controller.scope.launch { controller.state.collectLatest { state ->
+        changes = controller.scope.launch { combine(controller.state,
+            controller.pack.map { it.phase == VoicePackPhase.Installed }.distinctUntilChanged(),
+            controller.configuration.map { it.changing || !it.narratorReady }.distinctUntilChanged()) { state, _, _ -> state }.collectLatest { state ->
             player.refresh()
             val intent = Intent(this@NarrationPlaybackService,MainActivity::class.java)
                 .setAction(Intent.ACTION_VIEW).setData(Uri.parse("folio://reader/${Uri.encode(state.bookId.orEmpty())}"))
@@ -56,6 +61,12 @@ class NarrationPlaybackService : MediaSessionService() {
     }
     override fun onGetSession(info: MediaSession.ControllerInfo): MediaSession? = session
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val widgetAction = intent?.action?.takeIf { it.startsWith("widget-") }?.removePrefix("widget-")
+        if (widgetAction in setOf("play", "pause", "next", "previous")) {
+            val bookId = intent?.getStringExtra("widgetBookId")
+            if (!bookId.isNullOrBlank()) command(widgetAction!!, expectedBookId = bookId)
+            return START_NOT_STICKY
+        }
         if (intent?.action == "dismiss") {
             command("stop")
             return START_NOT_STICKY
@@ -70,23 +81,50 @@ class NarrationPlaybackService : MediaSessionService() {
         }
         return super.onStartCommand(intent,flags,startId)
     }
-    internal fun command(action: String, position: ReadingPosition? = null) {
-        if (action in setOf("play","start") && !controller.state.value.wantsPlayback) showPreparingNotification()
+    internal fun command(action: String, position: ReadingPosition? = null, expectedBookId: String? = null) {
+        if (action in setOf("play","start") && !controller.state.value.wantsPlayback ||
+            expectedBookId != null && action in setOf("play", "next", "previous")) showPreparingNotification()
         commandScope.launch {
             controller.cleanup?.join()
-            actions.withLock { try { when (action) {
+            actions.withLock { try {
+                if (expectedBookId != null) {
+                    // An old launcher view must never skip or pause a different book.
+                    val matches = controller.state.value.bookId == expectedBookId
+                    if (!matches && (action == "pause" || action != "play" && controller.state.value.bookId != null)) return@withLock
+                    if (!matches) {
+                        val saved = withContext(Dispatchers.IO) { controller.persistence.load(expectedBookId) }
+                            ?: error("This listening position is no longer available. Open a book in Folio.")
+                        coordinator.start(saved.position, restore = true, playImmediately = action == "play")
+                        if (action == "play") return@withLock
+                    }
+                }
+                when (action) {
                 "start" -> position?.let { coordinator.start(it) }
                 "play" -> coordinator.play()
                 "pause" -> coordinator.pause()
                 "next" -> coordinator.skip(true)
                 "previous" -> coordinator.skip(false)
                 "stop" -> {
+                    controller.setPlayerDismissed(true)
                     coordinator.halt()
                     controller.mutable.value = NarrationState(speed = controller.state.value.speed, position = controller.state.value.position)
                     stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
                 }
-            } } catch (error: Exception) { coordinator.fail(error) } }
+            } } catch (error: Exception) { coordinator.fail(error) }
+                finally {
+                    if (expectedBookId != null) {
+                        com.folio.reader.surfaces.WidgetRefreshWorker.enqueue(this@NarrationPlaybackService)
+                        if (!controller.state.value.wantsPlayback) stopForeground(STOP_FOREGROUND_REMOVE)
+                        if (!controller.state.value.hasBook) stopSelf()
+                    }
+                }
+            }
         }
+    }
+    /** Serialize a model/voice change with media-button commands and persist before unloading. */
+    internal suspend fun reconfigure(change: suspend () -> Unit) = actions.withLock {
+        coordinator.halt()
+        change()
     }
     private fun showPreparingNotification() {
         val id = "folio_narration"
@@ -105,6 +143,11 @@ class NarrationPlaybackService : MediaSessionService() {
     }
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (!controller.state.value.wantsPlayback) stopSelf()
+    }
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && !controller.state.value.wantsPlayback)
+            controller.scope.launch { coordinator.releasePausedResources() }
     }
     override fun onDestroy() {
         commandScope.cancel()
@@ -135,10 +178,14 @@ private class NarrationPlayer(private val controller: AndroidNarrationController
     }
     override fun getState(): State {
         val snapshot = controller.state.value
-        val builder = State.Builder().setAvailableCommands(Player.Commands.Builder().addAll(
-            Player.COMMAND_PLAY_PAUSE,Player.COMMAND_PREPARE,Player.COMMAND_STOP,Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+        val ready = controller.pack.value.phase == VoicePackPhase.Installed && !controller.configuration.value.changing && controller.configuration.value.narratorReady
+        val commands = Player.Commands.Builder().addAll(
+            Player.COMMAND_STOP,Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
             Player.COMMAND_GET_METADATA,Player.COMMAND_GET_TIMELINE,Player.COMMAND_SET_SPEED_AND_PITCH,
-            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM).build())
+        )
+        if (ready) commands.addAll(Player.COMMAND_PLAY_PAUSE,Player.COMMAND_PREPARE,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        val builder = State.Builder().setAvailableCommands(commands.build())
             .setPlaybackParameters(PlaybackParameters(snapshot.speed))
             .setPlayWhenReady(snapshot.wantsPlayback,Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setPlaybackState(when (snapshot.phase) {

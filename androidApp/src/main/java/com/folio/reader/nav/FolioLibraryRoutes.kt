@@ -292,6 +292,7 @@ fun LibraryRoute(
         onDeleteBooks = { ids ->
             activity.appScope.launch(Dispatchers.IO) {
                 ids.forEach { id ->
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { graph.narration.forgetBook(id) }
                     runCatching { graph.bookRepository.deleteBook(id) }
                     runCatching { graph.platform.fileSystem.deleteBookFiles(id) }
                 }

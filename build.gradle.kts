@@ -1,4 +1,8 @@
 plugins {
+    id("com.android.test") version "9.2.1" apply false
+    // 1.5's new source-directory adapter produces literal provider(?) paths with
+    // this project's legacy AGP/Kotlin DSL on Windows. Keep the compatible adapter.
+    id("androidx.baselineprofile") version "1.4.1" apply false
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.jvm) apply false

@@ -208,7 +208,7 @@ fun ChapterContent(
         }
     ) {
         when {
-            isLoading -> com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
+            isLoading -> ReaderLoadingPage(settings, Modifier.fillMaxSize())
             // Real error from the loader (missing file, parse failure) — not a
             // transient blank, so opening a book no longer flashes this state.
             loadError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -232,7 +232,7 @@ fun ChapterContent(
             // end in that window is what flashed "This page is empty." on every
             // EPUB open; the spinner is the honest state until the loader reports.
             html.isBlank() && !windowed && !contentArrived ->
-                com.folio.reader.ui.components.LoadingPlaceholder(modifier = Modifier.fillMaxSize())
+                ReaderLoadingPage(settings, Modifier.fillMaxSize())
             html.isBlank() && !windowed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 val next = onNextChapter
                 com.folio.reader.ui.components.EmptyState(

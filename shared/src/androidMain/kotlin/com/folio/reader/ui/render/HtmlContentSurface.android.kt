@@ -193,6 +193,11 @@ actual fun HtmlContentSurface(
     val narration = narrationController?.state?.collectAsState()?.value
     val currentNarration = rememberUpdatedState(narrationController)
     val latestNarrationPosition = rememberUpdatedState(position)
+    val narrationWindowVisible = com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+    LaunchedEffect(webViewRef,narrationWindowVisible) {
+        // Pause this reader's processing; never pauseTimers(), which affects every WebView.
+        webViewRef?.let { if (narrationWindowVisible) it.onResume() else it.onPause() }
+    }
     LaunchedEffect(pageReadyTick) {
         val saved = position
         if (pageReadyTick > 0 && saved?.contentLocator?.startsWith("n:") == true) {
@@ -201,7 +206,8 @@ actual fun HtmlContentSurface(
         }
     }
 
-    LaunchedEffect(narration?.blockId, narration?.position?.spineIndex, narration?.followText, narration?.phase, pageReadyTick) {
+    LaunchedEffect(narration?.blockId, narration?.position?.spineIndex, narration?.followText, narration?.phase, pageReadyTick,narrationWindowVisible) {
+        if (!narrationWindowVisible) return@LaunchedEffect
         val speaking = narration?.takeIf { it.bookId == position?.bookId && it.hasBook }
         webViewRef?.evaluateJavascript(com.folio.reader.narration.NarrationDom.script(
             speaking?.position?.spineIndex, speaking?.position?.chapterId, speaking?.blockId,
@@ -701,6 +707,10 @@ actual fun HtmlContentSurface(
                 android.webkit.WebView.setWebContentsDebuggingEnabled(true)
             }
             ReaderWebView(context).apply {
+                // The chapter window grows during reading. Its native scrollbar describes the
+                // loaded buffer, so the reader supplies a stable whole-content rail instead.
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
                 getSettings().javaScriptEnabled = true
                 getSettings().domStorageEnabled = true
                 getSettings().allowFileAccess = true

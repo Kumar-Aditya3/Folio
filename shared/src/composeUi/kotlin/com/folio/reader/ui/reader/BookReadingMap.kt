@@ -17,6 +17,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -99,7 +105,7 @@ internal fun BookReadingMap(
     val activeRow = entries.activeTocIndex(currentChapter, initial.chapterFraction)
     var target by remember(bookId) { mutableStateOf(MapTarget(initial.chapterIndex, initial.chapterFraction)) }
     var expandedRow by remember(bookId) { mutableStateOf<Int?>(null) }
-    // Position once on open; drawer disclosure must not take the list away from the user.
+    // Row taps preserve manual browsing; only the map explicitly requests a new list position.
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (activeRow - 1).coerceAtLeast(0))
     var passage by remember(bookId, target, expandedRow) { mutableStateOf<ReaderPassagePreview?>(null) }
     var loading by remember(bookId, target, expandedRow) { mutableStateOf(expandedRow != null) }
@@ -128,13 +134,33 @@ internal fun BookReadingMap(
         val landing = pageBlockSeekTarget(stops, fraction)
         target = MapTarget(landing.chapterIndex, landing.chapterFraction)
         expandedRow = entries.activeTocIndex(landing.chapterIndex, landing.chapterFraction).takeIf { it >= 0 }
+        // Apply the jump with the next measure, together with the new preview drawer.
+        expandedRow?.let { listState.requestScrollToItem(it) }
     }
     com.folio.reader.ui.components.FolioBackHandler(expandedRow != null) { expandedRow = null }
     com.folio.reader.ui.components.FolioBackHandler(expandedRow == null && !LocalReaderWorkspace.current, onBack = onDismiss)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val short = maxHeight < 300.dp
         val showMap = maxHeight >= 200.dp
-        Column(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        var headerHeight by remember { mutableStateOf(0f) }
+        var headerOffset by remember(bookId) { mutableStateOf(0f) }
+        val headerScroll = remember(bookId) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    // Programmatic TOC following must never move the map or its legend.
+                    if (source != NestedScrollSource.UserInput) return Offset.Zero
+                    val before = headerOffset
+                    headerOffset = (before + available.y).coerceIn(-headerHeight, 0f)
+                    return Offset(0f, headerOffset - before)
+                }
+            }
+        }
+        Column(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+            Box(Modifier.fillMaxWidth().height(with(density) { (headerHeight + headerOffset).coerceAtLeast(0f).toDp() }).clipToBounds()) {
+            Column(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true, align = Alignment.Top)
+                .offset(y = with(density) { headerOffset.toDp() })
+                .onSizeChanged { headerHeight = it.height.toFloat() }) {
             if (showMap) Canvas(Modifier.fillMaxWidth().height(if (short) 48.dp else 64.dp).padding(horizontal = 20.dp)
                 .folioSeekGesture(true, rtl, onPreview = { it?.let(selectFraction) }, onCommit = selectFraction)
                 .semantics {
@@ -167,6 +193,8 @@ internal fun BookReadingMap(
             }
             if (!short) ReaderLocationLabel(if (returnFraction == null) "HERE / PREVIEW / SAVED" else "HERE / PREVIEW / SAVED / RETURN",
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            }
             LazyColumn(Modifier.weight(1f), state = listState, contentPadding = PaddingValues(vertical = 4.dp)) {
                 itemsIndexed(entries, key = { index, row -> "$index:${row.chapterIndex}:${row.paragraph}" }) { index, row ->
                     val chapter = chapters.getOrNull(row.chapterIndex)

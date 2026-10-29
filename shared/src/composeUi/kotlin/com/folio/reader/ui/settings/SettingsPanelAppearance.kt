@@ -1,5 +1,7 @@
 package com.folio.reader.ui.settings
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.settings.CustomAppTheme
 import com.folio.reader.settings.FOLIO_METALLIC_SHEEN_FULL
 import com.folio.reader.settings.FOLIO_VIBRANCY_NEUTRAL
+import com.folio.reader.settings.FOLIO_WIDGET_GLASS
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.components.FOLIO_CHROME_GLASS
@@ -469,7 +472,7 @@ private fun Modifier.focusRing(
 // ── Transparency ─────────────────────────────────────────────────────────────
 
 /**
- * The three glass surfaces, each with its own knob.
+ * Independent controls for each glass surface, including home-screen widgets on Android.
  *
  * Split this way because they answer different questions: the app's chrome and its cards sit
  * over the app's own page (taste), while reader chrome sits over a page being read
@@ -484,6 +487,7 @@ private fun Modifier.focusRing(
 fun TransparencySettingsPanel(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
+    showWidgetControls: Boolean = false,
 ) {
     val colors = FolioTheme.colors
     var focus by remember { mutableStateOf(MockupFocus.NONE) }
@@ -496,6 +500,7 @@ fun TransparencySettingsPanel(
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceBeat)) {
+        GlassTreatmentPicker(settings, onSettingsChange)
         AppearanceMockup(
             colors = appColors.first,
             isDark = appColors.second,
@@ -553,6 +558,22 @@ fun TransparencySettingsPanel(
             color = colors.onSurfaceVariant,
         )
 
+        if (showWidgetControls) {
+            OpacityRow(
+                label = "Home-screen widgets",
+                value = settings.widgetOpacity,
+                accent = colors.accentProgress,
+                onFocus = { focus = MockupFocus.NONE },
+                onChange = { onSettingsChange(settings.copy(widgetOpacity = it)) },
+            )
+            Text(
+                text = "Continue Reading, Daily Rhythm and Audiobook widgets. Lower opacity reveals " +
+                    "more of your wallpaper; 100% makes the widgets solid.",
+                style = FolioTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+
         TextButton(
             onClick = {
                 onSettingsChange(
@@ -564,71 +585,12 @@ fun TransparencySettingsPanel(
                         navBarOpacity = FOLIO_CHROME_GLASS,
                         panelOpacity = FolioSurfaceOpacity.PANEL_GLASS,
                         readerChromeOpacity = 1f,
+                        widgetOpacity = if (showWidgetControls) FOLIO_WIDGET_GLASS else settings.widgetOpacity,
                     )
                 )
             }
         ) { Text("Reset to designed values") }
 
-        // §16: the liquid glass switch. It is a flag, not a fifth slider: the
-        // fill alphas below govern the fills either way, and the effect stack
-        // (blur, specular, grain) is one yes/no the device either can carry or
-        // cannot. Off restores the pre-glass look on every device.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "Liquid glass effects",
-                    style = FolioTheme.typography.bodyLarge,
-                    color = colors.onSurface,
-                )
-                Text(
-                    text = "Optical glass on reading controls and soft diffusion on panels, " +
-                        "on supported devices. Opacity controls work with effects on or off.",
-                    style = FolioTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = settings.liquidGlassEffects,
-                onCheckedChange = { on ->
-                    onSettingsChange(settings.copy(liquidGlassEffects = on))
-                },
-            )
-        }
-        // §20 reach: the opt-out that keeps liquid glass minimal. On, the glass reaches
-        // every in-flow panel (section cards, stats blocks, shelves) so they frost the room
-        // like real slabs; off restricts it to the true overlays — bars, the capsule, sheets
-        // and modals — so the effect still shows but stays off the many in-flow panels. Only
-        // meaningful while liquid glass is on, so it is offered only then.
-        if (settings.liquidGlassEffects) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Minimal liquid glass",
-                        style = FolioTheme.typography.bodyLarge,
-                        color = colors.onSurface,
-                    )
-                    Text(
-                        text = "Keep the glass on the bars, the capsule, sheets and " +
-                            "menus only. Panels and cards in the page stay painted, so " +
-                            "the effect is still there but far lighter.",
-                        style = FolioTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.minimalLiquidGlass,
-                    onCheckedChange = { on ->
-                        onSettingsChange(settings.copy(minimalLiquidGlass = on))
-                    },
-                )
-            }
-        }
         // The metallic-sheen slider. One scalar for the whole light response — every
         // specular rim, corner sheen, travelling glint, mirror band and the room's
         // lamp bloom — because the report was about the *effect*, not one surface:
@@ -771,6 +733,40 @@ private fun OpacityRow(
         onValueChangeFinished = { onFocus(false) },
         accent = accent,
     )
+}
+
+/** One choice expresses the treatment; stored flags retain compatibility with existing installs. */
+@Composable
+internal fun GlassTreatmentPicker(settings: ReaderSettings, onSettingsChange: (ReaderSettings) -> Unit) {
+    val selected = when {
+        !settings.liquidGlassEffects -> 2
+        settings.minimalLiquidGlass -> 1
+        else -> 0
+    }
+    val labels = listOf("Full", "Minimal", "Off")
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        FolioEyebrow("Glass treatment", accent = FolioTheme.colors.primary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            labels.forEachIndexed { index, label ->
+                Row(Modifier.weight(1f).clip(FolioShapes.inset)
+                    .folioSettingsChoice(index == selected, FolioShapes.inset)
+                    .selectable(selected = index == selected, role = androidx.compose.ui.semantics.Role.RadioButton,
+                        onClick = { onSettingsChange(settings.copy(liquidGlassEffects = index != 2,
+                            minimalLiquidGlass = index == 1)) })
+                    .heightIn(min = 48.dp).padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center) {
+                    Text(label, style = FolioTheme.typography.labelLarge,
+                        color = if (index == selected) FolioTheme.colors.primary else FolioTheme.colors.onSurfaceVariant)
+                }
+            }
+        }
+        Text(when (selected) {
+            0 -> "Softly frosted panels, with optical glass on floating controls."
+            1 -> "Quiet paper panels. Glass stays on floating bars, menus and sheets."
+            else -> "Painted surfaces with soft edges. No blur or refraction."
+        }, style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
+    }
 }
 
 // ── Custom theme ─────────────────────────────────────────────────────────────

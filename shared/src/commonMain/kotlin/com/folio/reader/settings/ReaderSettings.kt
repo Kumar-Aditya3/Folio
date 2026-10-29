@@ -27,6 +27,9 @@ const val FOLIO_VIBRANCY_DEFAULT = 0.78f
  */
 const val FOLIO_METALLIC_SHEEN_FULL = 1f
 
+/** Default fill opacity for Android home-screen widgets. */
+const val FOLIO_WIDGET_GLASS = 0.70f
+
 @Serializable
 data class ReaderSettings(
     val soundscape: com.folio.reader.experience.SoundscapePreferences = com.folio.reader.experience.SoundscapePreferences(),
@@ -136,6 +139,8 @@ data class ReaderSettings(
      * mirrors `FolioSurfaceOpacity.PANEL_GLASS` rather than sitting solid.
      */
     val readerChromeOpacity: Float = 0.9f,
+    /** Home-screen widget fill opacity, independent of the app's chrome. */
+    val widgetOpacity: Float = FOLIO_WIDGET_GLASS,
     /**
      * §16 liquid glass: blur, directional specular and grain on the overlay
      * layer, on devices that can carry them. Off restores the pre-glass look on

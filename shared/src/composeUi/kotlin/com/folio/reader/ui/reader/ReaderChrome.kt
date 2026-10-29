@@ -160,7 +160,7 @@ internal fun ReaderTopBar(
                 }
                 // A single stable entry opens the shared workspace. All five tools are one tap away.
                 Box {
-                    IconButton(onClick = onOpenToc) {
+                    IconButton(onClick = { if (occludes) menuOpen = true else onOpenToc() }) {
                         Icon(Icons.Filled.MoreVert, "Reader tools", Modifier.size(20.dp), FolioTheme.colors.onSurface)
                     }
                     if (occludes) FolioMenu(menuOpen, { menuOpen = false },
@@ -435,33 +435,24 @@ fun BottomPageBlock(
         }
         }
         if (chapterTitle.isNotBlank() || pagesLeftLabel != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = chapterTitle,
-                    style = FolioTheme.typography.labelMedium,
-                    color = FolioTheme.colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (pagesLeftLabel != null) {
-                    // A soft pill rather than bare text: it reads as a distinct chip from the
-                    // chapter title beside it. Calm by default — a neutral ground with
-                    // onSurfaceVariant numerals, so it never competes with the page's ink — and
-                    // only wears the "forward motion" accent (Rule 14) in the editorial look.
-                    Text(
-                        text = pagesLeftLabel,
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
+                val stacked = maxWidth < 330.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
+                val title: @Composable (Modifier) -> Unit = { textModifier ->
+                    if (chapterTitle.isNotBlank()) Text(chapterTitle, textModifier,
+                        style = FolioTheme.typography.labelMedium, color = FolioTheme.colors.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                val detail: @Composable (Modifier) -> Unit = { textModifier ->
+                    pagesLeftLabel?.let { Text(it, textModifier,
                         style = FolioTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                         color = if (editorial) FolioTheme.colors.accentProgress else FolioTheme.colors.onSurfaceVariant,
-                        maxLines = 1,
-                        modifier = Modifier
-                            .padding(start = 12.dp),
-                    )
+                        maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                if (stacked) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    title(Modifier.fillMaxWidth()); detail(Modifier.fillMaxWidth())
+                } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    title(Modifier.weight(1f))
+                    detail(Modifier.padding(start = if (chapterTitle.isNotBlank()) 12.dp else 0.dp))
                 }
             }
         }

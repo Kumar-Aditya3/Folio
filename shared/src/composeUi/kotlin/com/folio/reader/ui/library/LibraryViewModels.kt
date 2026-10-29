@@ -48,6 +48,9 @@ class LibraryViewModel(
     private val settingsRepository: SettingsRepository? = null
 ) {
     /** Backing scope for the shelf selection and the bulk-collection picker. */
+    private val visibility = com.folio.reader.util.ScreenWorkGate()
+    fun keepVisible(): AutoCloseable = visibility.acquire()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Books bulk-selection; hoisted so system back can clear it instead of exiting. */
@@ -86,7 +89,7 @@ class LibraryViewModel(
      * holds its last value: emitting a substitute here would hand the gate a fake "loaded and
      * empty" answer and reopen the bleed.
      */
-    private val collectionSnapshot: StateFlow<List<Collection>?> = collectionRepository.getAllCollections()
+    private val collectionSnapshot: StateFlow<List<Collection>?> = visibility.warmThenVisible(collectionRepository.getAllCollections())
         .map<List<Collection>, List<Collection>?> { list ->
             list.sortedWith(compareBy({ it.sortOrder != -1 }, { it.sortOrder }, { it.name }))
         }
@@ -317,7 +320,7 @@ class LibraryViewModel(
         val isSelectionMode: Boolean = false
     )
 
-    fun allBooks(): Flow<List<Book>> = bookRepository.getAllBooks()
+    fun allBooks(): Flow<List<Book>> = visibility.warmThenVisible(bookRepository.getAllBooks())
 
     fun currentlyReading(): Flow<List<Book>> = bookRepository.getCurrentlyReading()
 

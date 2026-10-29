@@ -10,6 +10,8 @@ import androidx.compose.ui.semantics.getAllSemanticsNodes
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventType
 import com.folio.reader.model.BookTocRow
 import com.folio.reader.model.Chapter
 import com.folio.reader.model.ReadingTrace
@@ -145,7 +147,7 @@ class ReaderMapTest {
         }
     }
 
-    @Test fun tocOpensAtCurrentRowAndPreviewChangesPreserveManualScrolling() = SwingUtilities.invokeAndWait {
+    @Test fun tocOpensAtCurrentRowAndMapSelectionFollowsWithoutMovingHeader() = SwingUtilities.invokeAndWait {
         val manyChapters = (0 until 80).map { Chapter("chapter-$it", "book", "Chapter $it", "$it.xhtml", it, wordCount = 100) }
         val stops = (0..80).map { it / 80f }
         val cases = listOf(
@@ -183,10 +185,24 @@ class ReaderMapTest {
                 assertNotNull(row.config.getOrNull(SemanticsActions.OnClick)?.action).invoke()
                 render()
                 assertEquals(before, scrollPosition(), .001f, "Selecting a chapter must not reset TOC scrolling")
+                val mapBounds = nodes().first { it.config.contains(SemanticsActions.SetProgress) }.boundsInRoot
+                val selection = if (entries.first().chapterIndex == 40) 40.32f / 80f else .2f
                 assertNotNull(nodes().first { it.config.contains(SemanticsActions.SetProgress) }
-                    .config.getOrNull(SemanticsActions.SetProgress)?.action).invoke(.2f)
+                    .config.getOrNull(SemanticsActions.SetProgress)?.action).invoke(selection)
                 render()
-                assertEquals(before, scrollPosition(), .001f, "Scrub previews must not reset TOC scrolling")
+                val landing = com.folio.reader.ui.components.pageBlockSeekTarget(stops, selection)
+                val selectedRow = entries.activeTocIndex(landing.chapterIndex, landing.chapterFraction)
+                assertTrue(scrollPosition() < before, "Map selection must follow the earlier selected row")
+                assertEquals(mapBounds, nodes().first { it.config.contains(SemanticsActions.SetProgress) }.boundsInRoot,
+                    "Following the map must leave the header fixed")
+                assertTrue(nodes().any { it.config.getOrNull(SemanticsProperties.Text)?.any { text ->
+                    text.text == entries[selectedRow].title } == true && it.boundsInRoot.top >= mapBounds.bottom &&
+                    it.boundsInRoot.bottom <= 640 })
+                scene.sendPointerEvent(PointerEventType.Scroll, Offset(200f, 400f), scrollDelta = Offset(0f, 4f))
+                render()
+                val scrolledMap = nodes().firstOrNull { it.config.contains(SemanticsActions.SetProgress) }
+                assertTrue(scrolledMap == null || scrolledMap.boundsInRoot.height < mapBounds.height,
+                    "Manual scrolling should move the map header out of the way")
             } finally { scene.close() }
         }
     }

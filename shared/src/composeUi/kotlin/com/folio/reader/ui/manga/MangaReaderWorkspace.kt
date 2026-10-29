@@ -62,18 +62,28 @@ internal fun MangaReaderWorkspace(
 @Composable
 internal fun MangaCachedPage(viewModel: MangaReaderViewModel, chapterId: String, local: Int,
     modifier: Modifier = Modifier) {
-    // No network work in a preview. Reuse compressed reader bytes; bound thumbnail decode off UI.
-    val revision by viewModel.pageCacheRevision.collectAsState()
-    val bytes = remember(chapterId, local, revision) { synchronized(viewModel.pageBytes) { viewModel.pageBytes["$chapterId:$local"] } }
-    val bitmap by produceState<ImageBitmap?>(null, bytes) {
-        value = bytes?.let { withContext(Dispatchers.Default) { decodeCoverImage(it, 144) } }
+    var attempt by remember(viewModel, chapterId, local) { mutableIntStateOf(0) }
+    var loading by remember(viewModel, chapterId, local) { mutableStateOf(true) }
+    // Lazy grid cells and slider previews request their own artwork, sharing the reader's
+    // encoded cache, in-flight requests and bounded fetch gate. Never move reading progress.
+    val bitmap by produceState<ImageBitmap?>(null, viewModel, chapterId, local, attempt) {
+        value = null
+        loading = true
+        try {
+            val bytes = viewModel.resolvePreviewImage(chapterId, local)
+            value = bytes?.let { withContext(Dispatchers.Default) { decodeCoverImage(it, 288) } }
+        } finally {
+            loading = false
+        }
     }
     Box(modifier.background(FolioTheme.colors.onSurface.copy(alpha = .035f)), contentAlignment = Alignment.Center) {
         val image = bitmap
         if (image != null) Image(image, "Page ${local + 1} preview", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        else if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp,
+            color = FolioTheme.colors.accentProgress)
         else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             ReaderLocationLabel("${local + 1}".padStart(2, '0'))
-            Text("Not loaded", style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant)
+            TextButton(onClick = { attempt++ }) { Text("Retry") }
         }
     }
 }
@@ -104,7 +114,7 @@ private fun MangaPageMap(viewModel: MangaReaderViewModel, onSeek: (Int) -> Unit,
                 }
             }
         } else {
-            Text("Cached artwork stays here. Tap any page to read it.", style = FolioTheme.typography.bodySmall,
+            Text("Browse the artwork. Tap any page to read it.", style = FolioTheme.typography.bodySmall,
                 color = FolioTheme.colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState(
                 initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))

@@ -4,5 +4,7 @@
     <string name="widget_continue_name">Continue Reading</string>
     <string name="widget_continue_description">Your latest book, manga or document, with one tap to return.</string>
     <string name="widget_goal_name">Daily Rhythm</string>
-    <string name="widget_goal_description">Today’s reading goal and your last seven days, in Folio glass.</string>
+    <string name="widget_goal_description">Today’s reading goal and your last seven days, in your Folio palette.</string>
+    <string name="widget_audiobook_name">Audiobook</string>
+    <string name="widget_audiobook_description">Your narrated book, saved listening position and playback controls.</string>
 </resources>

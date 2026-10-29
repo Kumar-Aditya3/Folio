@@ -58,6 +58,8 @@ class StatsLiveContentTest {
             }
             val vm = StatisticsViewModel(books, sessions, statsExclusionRepository = exclusions,
                 mangaRepository = mangas, mangaCategoryRepository = categories)
+            val visibleLease = vm.keepVisible()
+            try {
             suspend fun awaitRanking(expected: List<String>): StatisticsUiState = withTimeout(5_000) {
                 vm.sharedState.first { it.hasData && it.mostReadManga.map { m -> m.mangaId } == expected }
             }
@@ -67,6 +69,7 @@ class StatsLiveContentTest {
             awaitRanking(listOf("kept-3", "kept-2", "kept-1", "kept-0"))
             categories.assign("kept-3", setOf(hidden.id), false)
             awaitRanking(listOf("kept-2", "kept-1", "kept-0"))
+            } finally { visibleLease.close() }
         }
     }
 

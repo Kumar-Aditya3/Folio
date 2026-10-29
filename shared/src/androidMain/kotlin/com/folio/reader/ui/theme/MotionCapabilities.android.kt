@@ -7,6 +7,13 @@ import android.os.VibratorManager
 import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -17,6 +24,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
  */
 @Composable
 actual fun rememberMotionEnabled(): Boolean {
+    LocalFolioMotionAllowed.current?.let { return it }
     val context = LocalContext.current
     return remember(context) {
         runCatching {
@@ -27,6 +35,29 @@ actual fun rememberMotionEnabled(): Boolean {
             ) > 0f
         }.getOrDefault(true)
     }
+}
+
+/** One observer for the whole window; offscreen ambient effects stop their clocks. */
+@Composable
+fun FolioAndroidMotionEnvironment(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var visible by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+    fun animations() = runCatching { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE,1f) > 0 }.getOrDefault(true)
+    var allowed by remember(context) { mutableStateOf(animations()) }
+    DisposableEffect(context,lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (visible) allowed = animations()
+        }
+        val settings = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { allowed = animations() }
+        }
+        lifecycle.addObserver(observer)
+        context.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),false,settings)
+        onDispose { lifecycle.removeObserver(observer); context.contentResolver.unregisterContentObserver(settings) }
+    }
+    CompositionLocalProvider(LocalFolioWindowVisible provides visible, LocalFolioMotionAllowed provides (visible && allowed),content = content)
 }
 
 @Composable

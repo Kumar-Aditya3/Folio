@@ -124,8 +124,8 @@ fun FolioThemeBackground(modifier: Modifier = Modifier) {
         // under-paint where the opaque shader covers it.
         Box(
             Modifier.fillMaxSize().folioSilkBackground(
-                forceStatic = fieldWillPaint,
-                blooms = !fieldOpaque,
+                forceStatic = fieldWillPaint || !fieldVisible,
+                blooms = !fieldOpaque && fieldVisible,
             )
         )
         // Top layer: this theme's Mirage field. Skipped entirely on Plain, while the ground plane

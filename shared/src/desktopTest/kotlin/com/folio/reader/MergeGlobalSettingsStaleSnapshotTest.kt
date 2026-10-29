@@ -76,6 +76,26 @@ class MergeGlobalSettingsStaleSnapshotTest {
     }
 
     @Test
+    fun widgetOpacityLoadsLegacySettingsAndPersistsIndependentlyOfAppBars() = runBlocking {
+        repo.setRaw("global_reader_settings", """{"navBarOpacity":0.45,"fontSize":21.0}""")
+        val legacy = repo.getGlobalSettings()
+        assertEquals(com.folio.reader.settings.FOLIO_WIDGET_GLASS, legacy.widgetOpacity)
+        assertEquals(21f, legacy.fontSize)
+
+        repo.mergeGlobalSettings { it.copy(widgetOpacity = .25f) }
+        val reopened = JdbcSettingsRepository(database).getGlobalSettings()
+        assertEquals(.25f, reopened.widgetOpacity)
+        assertEquals(.45f, reopened.navBarOpacity)
+
+        val updatedBars = legacy.copy(navBarOpacity = 1f)
+        val changed = updatedBars.diffFields(legacy)
+        repo.mergeGlobalSettings { it.withFieldsFrom(changed, updatedBars) }
+        val merged = repo.getGlobalSettings()
+        assertEquals(.25f, merged.widgetOpacity, "App-bar changes must preserve widget opacity")
+        assertEquals(1f, merged.navBarOpacity)
+    }
+
+    @Test
     fun mergeWithoutChangeWritesNothing() = runBlocking {
         repo.saveGlobalSettings(ReaderSettings(themeId = "sepia"), emitSyncEvent = false)
         events.clear()

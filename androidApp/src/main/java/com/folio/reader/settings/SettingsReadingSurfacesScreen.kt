@@ -58,13 +58,18 @@ fun SettingsReadingSurfacesScreen(navModel: FolioNavModelImpl, onBack: () -> Uni
         runCatching { withContext(Dispatchers.IO) { navModel.graph.readingSurfaceSnapshot() } }
             .onSuccess { snapshot = it }.onFailure { message = "Your library preview is taking a moment. Reopen this page to try again." }
     }
-    fun pin(goal: Boolean) {
+    fun pin(kind: FolioWidgetKind) {
         val manager = AppWidgetManager.getInstance(context)
         if (Build.VERSION.SDK_INT >= 26 && manager.isRequestPinAppWidgetSupported) {
             val extras = android.os.Bundle().apply {
-                snapshot?.let { putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW, WidgetRefreshWorker.views(context, it, goal)) }
+                snapshot?.let { putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW, WidgetRefreshWorker.views(context, it, kind)) }
             }
-            manager.requestPinAppWidget(ComponentName(context, if (goal) ReadingGoalWidget::class.java else ContinueReadingWidget::class.java), extras, null)
+            val provider = when (kind) {
+                FolioWidgetKind.Reading -> ContinueReadingWidget::class.java
+                FolioWidgetKind.Goal -> ReadingGoalWidget::class.java
+                FolioWidgetKind.Audiobook -> AudiobookWidget::class.java
+            }
+            manager.requestPinAppWidget(ComponentName(context, provider), extras, null)
         } else message = "Touch and hold your home screen, choose Widgets, then Folio."
     }
     SettingsCategoryScaffold(title = "Widgets & notifications", onBack = onBack, scrollBody = {
@@ -74,12 +79,16 @@ fun SettingsReadingSurfacesScreen(navModel: FolioNavModelImpl, onBack: () -> Uni
             modifier = Modifier.padding(top = 6.dp, bottom = 18.dp))
         snapshot?.let { data ->
             Text("CONTINUE READING", style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.accentProgress)
-            NativeWidgetPreview(data, false)
-            TextButton(onClick = { pin(false) }) { Text("Add Continue Reading widget") }
+            NativeWidgetPreview(data, FolioWidgetKind.Reading)
+            TextButton(onClick = { pin(FolioWidgetKind.Reading) }) { Text("Add Continue Reading widget") }
             Spacer(Modifier.height(14.dp))
             Text("DAILY RHYTHM", style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.accentProgress)
-            NativeWidgetPreview(data, true)
-            TextButton(onClick = { pin(true) }) { Text("Add Daily Rhythm widget") }
+            NativeWidgetPreview(data, FolioWidgetKind.Goal)
+            TextButton(onClick = { pin(FolioWidgetKind.Goal) }) { Text("Add Daily Rhythm widget") }
+            Spacer(Modifier.height(14.dp))
+            Text("AUDIOBOOK", style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.accentProgress)
+            NativeWidgetPreview(data, FolioWidgetKind.Audiobook)
+            TextButton(onClick = { pin(FolioWidgetKind.Audiobook) }) { Text("Add Audiobook widget") }
         }
         Text("Widgets follow your Folio palette. Resize them on your home screen; tap to return to your reader or statistics.",
             style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
@@ -143,12 +152,20 @@ fun SettingsReadingSurfacesScreen(navModel: FolioNavModelImpl, onBack: () -> Uni
 }
 
 @Composable
-private fun NativeWidgetPreview(snapshot: ReadingSurfaceSnapshot, goal: Boolean) {
+private fun NativeWidgetPreview(snapshot: ReadingSurfaceSnapshot, kind: FolioWidgetKind) {
     // Preview the actual RemoteViews tree used by the launcher.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val width = maxWidth.value.toInt()
+    val height = WidgetRefreshWorker.defaultHeight(kind)
     AndroidView(factory = { FrameLayout(it) }, update = { host ->
         host.removeAllViews()
-        val view = WidgetRefreshWorker.views(host.context, snapshot, goal).apply(host.context, host)
-        view.isClickable = false
+        val view = WidgetRefreshWorker.views(host.context, snapshot, kind, width, height).apply(host.context, host)
+        fun disableClicks(node: android.view.View) {
+            node.isClickable = false
+            if (node is android.view.ViewGroup) for (i in 0 until node.childCount) disableClicks(node.getChildAt(i))
+        }
+        disableClicks(view)
         host.addView(view)
-    }, modifier = Modifier.fillMaxWidth().height(184.dp).padding(top = 8.dp))
+    }, modifier = Modifier.fillMaxWidth().height((height + 8).dp).padding(top = 8.dp))
+    }
 }

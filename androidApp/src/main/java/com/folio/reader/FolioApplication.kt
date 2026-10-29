@@ -776,6 +776,9 @@ class AppGraph(private val app: Application) {
     fun runStartupTasks(uiScope: CoroutineScope) {
         if (!startupTasksStarted.compareAndSet(false, true)) return
         startSync(uiScope)
+        graphScope.launch {
+            documentRepository.repairThumbnails(documentImporter, platform.fileSystem::getDocumentGeneratedIndexPath)
+        }
         applyStoredMangaDownloadsLocation(graphScope)
         backfillAnnotationsOnce(graphScope)
         backfillMangaAnnotationsOnce(graphScope)
@@ -809,12 +812,24 @@ class AppGraph(private val app: Application) {
 }
 
 class FolioApplication : Application() {
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            com.folio.reader.ui.components.clearCoverCache()
+            com.folio.reader.ui.manga.clearMangaCoverCache()
+            com.folio.reader.ui.manga.clearPageBitmapCache()
+        }
+    }
+
 
     lateinit var graph: AppGraph
         private set
 
     override fun onCreate() {
         super.onCreate()
+        val memory = getSystemService(android.app.ActivityManager::class.java)
+        com.folio.reader.util.ReaderMemoryBudget.heapMegabytes = memory.memoryClass
+        com.folio.reader.util.ReaderMemoryBudget.lowRam = memory.isLowRamDevice
         // ── TLS PROVIDER ───────────────────────────────────────────────────────
         // Install Conscrypt as the top security provider before any networking
         // (AppGraph builds NetworkHelper below). Conscrypt is a modern BoringSSL-

@@ -43,6 +43,8 @@ import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.lampColor
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -57,6 +59,10 @@ private const val MANGA_COVER_CACHE_MAX_BYTES = 48L * 1024L * 1024L
 // pressure while browsing. Six in flight keeps the visible grid filling quickly while
 // bounding peak memory.
 private val coverLoadGate = Semaphore(6)
+private val constrainedCoverGate = Semaphore(2)
+private suspend fun <T> withCoverBudget(block: suspend () -> T): T = coverLoadGate.withPermit {
+    if (com.folio.reader.util.ReaderMemoryBudget.constrained) constrainedCoverGate.withPermit { block() } else block()
+}
 
 // Access-order LRU bounded by decoded-bitmap bytes (not entry count), guarded by its own monitor.
 // The old structure never cached local (coverPath) covers and evicted FIFO by count, so scrolling a
@@ -64,6 +70,13 @@ private val coverLoadGate = Semaphore(6)
 // of MB of full-size bitmaps resident.
 private val mangaCoverCache = LinkedHashMap<String, ImageBitmap>(64, 0.75f, true)
 private var mangaCoverBytes = 0L
+private val coverChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)
+private val coverLocks = Array(16) { kotlinx.coroutines.sync.Mutex() }
+
+fun clearMangaCoverCache() = synchronized(mangaCoverCache) {
+    mangaCoverCache.clear(); mangaCoverBytes = 0
+}
+
 
 private fun coverBytesOf(bmp: ImageBitmap): Long = bmp.width.toLong() * bmp.height.toLong() * 4L
 
@@ -75,11 +88,10 @@ internal suspend fun awaitMangaCoverBitmap(
 ): ImageBitmap? = withContext(Dispatchers.IO) {
     val local = coverPath?.let { java.io.File(it) }?.takeIf { it.isFile }
     val key = if (local != null) "local:$coverPath:${local.lastModified()}" else "$sourceId:$thumbnailUrl"
-    repeat(60) {
-        cachedCover(key)?.let { return@withContext it }
-        kotlinx.coroutines.delay(100)
+    cachedCover(key) ?: kotlinx.coroutines.withTimeoutOrNull(6_000) {
+        coverChanges.first { cachedCover(key) != null }
+        cachedCover(key)
     }
-    cachedCover(key)
 }
 
 private fun cacheCover(key: String, bmp: ImageBitmap) {
@@ -89,12 +101,13 @@ private fun cacheCover(key: String, bmp: ImageBitmap) {
         mangaCoverBytes += coverBytesOf(bmp)
         val it = mangaCoverCache.entries.iterator()
         // accessOrder=true iterates least-recently-used first, so this drops the coldest covers.
-        while (mangaCoverBytes > MANGA_COVER_CACHE_MAX_BYTES && mangaCoverCache.size > 1 && it.hasNext()) {
+        while (mangaCoverBytes > com.folio.reader.util.ReaderMemoryBudget.coverBytes && mangaCoverCache.isNotEmpty() && it.hasNext()) {
             val e = it.next()
             mangaCoverBytes -= coverBytesOf(e.value)
             it.remove()
         }
     }
+    coverChanges.update { it + 1 }
 }
 
 /** Samples the plate's already-loaded bitmap; this observer never fetches or decodes a cover. */
@@ -127,6 +140,9 @@ private suspend fun loadMangaCover(
     thumbnailUrl: String?,
     coverPath: String?,
 ): ImageBitmap? {
+    val gate = coverLocks[((coverPath ?: "$sourceId:$thumbnailUrl").hashCode() and Int.MAX_VALUE) % coverLocks.size]
+    gate.lock()
+    try {
     coverPath?.let { path ->
         val file = java.io.File(path)
         if (file.isFile) {
@@ -134,7 +150,7 @@ private suspend fun loadMangaCover(
             // re-decode every locally-imported (CBZ) cover.
             val key = "local:$path:${file.lastModified()}"
             cachedCover(key)?.let { return it }
-            val bmp = coverLoadGate.withPermit {
+            val bmp = withCoverBudget {
                 // Re-check under the permit: another cell may have loaded it while we waited.
                 cachedCover(key)
                     ?: withContext(Dispatchers.IO) { decodeCoverImage(file.readBytes(), COVER_TARGET_WIDTH_PX) }
@@ -147,8 +163,8 @@ private suspend fun loadMangaCover(
     cachedCover(key)?.let { return it }
     if (thumbnailUrl.isNullOrBlank()) return null
     // Gate fetch+decode so a large multi-source grid can't spike memory (see coverLoadGate).
-    return coverLoadGate.withPermit {
-        cachedCover(key)?.let { return@withPermit it }
+    return withCoverBudget {
+        cachedCover(key)?.let { return@withCoverBudget it }
         // Disk before network: a cover seen in any previous session is a plain file
         // read, which is what keeps library thumbnails loaded across cold starts.
         // Only a genuine miss goes to the source, and its bytes are written through
@@ -157,17 +173,19 @@ private suspend fun loadMangaCover(
         if (bytes == null) {
             bytes = try {
                 backend.fetchCover(sourceId, thumbnailUrl)
-            } catch (_: Throwable) {
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error
+            } catch (_: Exception) {
                 null
             }
             if (bytes != null) MangaCoverDiskCache.write(key, bytes)
         }
-        val raw = bytes ?: return@withPermit null
+        val raw = bytes ?: return@withCoverBudget null
         val bitmap = withContext(Dispatchers.IO) { decodeCoverImage(raw, COVER_TARGET_WIDTH_PX) }
-            ?: return@withPermit null
+            ?: return@withCoverBudget null
         cacheCover(key, bitmap)
         bitmap
     }
+    } finally { gate.unlock() }
 }
 
 @Composable

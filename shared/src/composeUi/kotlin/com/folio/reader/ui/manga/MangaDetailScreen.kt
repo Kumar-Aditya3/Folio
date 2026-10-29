@@ -450,7 +450,9 @@ fun MangaDetailScreen(
                                 MangaCoverPlate(backend, m.sourceId, m.thumbnailUrl, m.coverPath,
                                     width = coverWidth, haloStrength = .08f,
                                     modifier = Modifier.sharedElementOrNoop(FolioSharedKeys.mangaCover(m.id),
-                                        placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize))
+                                        placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize)
+                                        .clickable(enabled = chapters.isNotEmpty(),
+                                            onClickLabel = "$continueLabel reading", onClick = launchContinue))
                             }
                             val identity: @Composable () -> Unit = {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

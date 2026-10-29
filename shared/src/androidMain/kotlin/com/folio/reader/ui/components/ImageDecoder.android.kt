@@ -58,7 +58,7 @@ actual fun decodePageImage(bytes: ByteArray, targetWidthPx: Int): ImageBitmap? {
             // the width further than the height cap forces.
             while (srcH / sample > MAX_DECODE_HEIGHT) sample *= 2
             while (srcW / sample > MAX_DECODE_WIDTH) sample *= 2
-            while ((srcW.toLong() / sample) * (srcH.toLong() / sample) > MAX_DECODE_PIXELS) sample *= 2
+            while ((srcW.toLong() / sample) * (srcH.toLong() / sample) > com.folio.reader.util.ReaderMemoryBudget.pagePixels) sample *= 2
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()

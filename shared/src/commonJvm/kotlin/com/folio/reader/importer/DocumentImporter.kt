@@ -84,28 +84,9 @@ class DocumentImporter(
                         processed.assets.forEach { (name, bytes) -> File(assetsDir, name).writeBytes(bytes) }
                     }
                     val localPath = platform.fileSystem.commitStagedDocument(importToken, documentId!!, format.canonicalExtension)
-                    val thumbnailPath: String? = if (format == IncomingFormat.PDF) {
-                        try {
-                            val bytes: ByteArray? =
-                                thumbnailRenderer(
-                                    localPath,
-                                    360,
-                                    480
-                                )
-                            bytes?.let { thumbnailBytes ->
-                                platform.fileSystem.getDocumentThumbnailsDir(documentId!!)
-                                    .resolve("first-page.png")
-                                    .apply { writeBytes(thumbnailBytes) }
-                                    .absolutePath
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Throwable) {
-                            null
-                        }
-                    } else {
-                        null
-                    }
+                    val thumbnailPath = generateThumbnail(documentId!!,
+                        if (format == IncomingFormat.PDF) localPath
+                        else platform.fileSystem.getDocumentGeneratedIndexPath(documentId!!))
                     val now = Clock.System.now()
                     val document = Document(
                         id = documentId!!,
@@ -139,6 +120,18 @@ class DocumentImporter(
             runCatching { platform.fileSystem.deleteDocumentFiles(importToken) }
             throw e
         }
+    }
+
+    /** First-page PDFs or a paper preview of the converted text; shared by import and repair. */
+    suspend fun generateThumbnail(documentId: String, sourcePath: String,
+        fileName: String = "first-page.png"): String? = withContext(Dispatchers.IO) {
+        try {
+            val bytes = thumbnailRenderer(sourcePath, 360, 480) ?: return@withContext null
+            if (bytes.isEmpty()) return@withContext null
+            platform.fileSystem.getDocumentThumbnailsDir(documentId).resolve(fileName)
+                .apply { parentFile.mkdirs(); writeBytes(bytes) }.absolutePath
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) { null }
     }
 
     private fun process(file: File, format: IncomingFormat, title: String, sourceDir: File?): ProcessedDocument = when (format) {

@@ -176,4 +176,6 @@ outputs/
 
 # Pinned Phonon CPU engine; model assets remain opt-in.
 !androidApp/src/main/jniLibs/arm64-v8a/libptts_ffi.so
+!androidApp/src/main/jniLibs/arm64-v8a/libptts_ffi_optimized.so
 !androidApp/src/main/jniLibs/x86_64/libptts_ffi.so
+!androidApp/libs/sherpa-onnx-1.12.30-shared-ort.aar

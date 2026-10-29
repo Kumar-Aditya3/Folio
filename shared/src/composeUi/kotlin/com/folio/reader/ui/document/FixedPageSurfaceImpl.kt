@@ -79,6 +79,7 @@ private const val MAX_RENDER_PIXELS = 16_777_216L
  * case the app `surfaceVariant` is used as before.
  */
 internal val LocalReaderPaper = staticCompositionLocalOf<Color?> { null }
+internal val LocalFixedPagePaintReady = staticCompositionLocalOf<(Int) -> Unit> { {} }
 
 @Composable
 internal fun FixedPageSurfaceImpl(
@@ -511,6 +512,10 @@ private fun RenderedPdfPage(
         contentAlignment = Alignment.Center
     ) {
         val rendered = image
+        val paintReady = LocalFixedPagePaintReady.current
+        LaunchedEffect(rendered) {
+            if (rendered != null) { withFrameNanos { }; paintReady(pageIndex) }
+        }
         if (rendered == null) {
             CircularProgressIndicator(color = FolioTheme.colors.primary)
         } else {
@@ -647,6 +652,10 @@ private fun ContinuousPdfPage(
             }
         }
         val rendered = image
+        val paintReady = LocalFixedPagePaintReady.current
+        LaunchedEffect(rendered) {
+            if (rendered != null) { withFrameNanos { }; paintReady(pageIndex) }
+        }
         if (rendered == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = FolioTheme.colors.primary)

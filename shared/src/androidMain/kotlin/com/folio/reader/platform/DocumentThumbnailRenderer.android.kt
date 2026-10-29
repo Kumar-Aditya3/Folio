@@ -17,6 +17,36 @@ suspend fun renderAndroidDocumentThumbnail(
     targetWidthPx: Int,
     targetHeightPx: Int
 ): ByteArray? = withContext(Dispatchers.IO) {
+    if (!path.endsWith(".pdf", ignoreCase = true)) {
+        val preview = com.folio.reader.importer.documentPreviewText(path)
+        val bitmap = Bitmap.createBitmap(targetWidthPx, targetHeightPx, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.drawColor(Color.rgb(249, 246, 239))
+            val margin = targetWidthPx * .085f
+            val paint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(47, 44, 39)
+                textSize = targetWidthPx * .056f
+                typeface = android.graphics.Typeface.create("serif", android.graphics.Typeface.BOLD)
+            }
+            val width = (targetWidthPx - margin * 2).roundToInt()
+            canvas.save()
+            canvas.clipRect(margin, margin, targetWidthPx - margin, targetHeightPx - margin)
+            canvas.translate(margin, margin)
+            val title = android.text.StaticLayout.Builder.obtain(preview.title, 0, preview.title.length, paint, width)
+                .setMaxLines(3).setIncludePad(false).build()
+            title.draw(canvas)
+            canvas.translate(0f, title.height + margin * .7f)
+            paint.textSize = targetWidthPx * .034f
+            paint.typeface = android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
+            android.text.StaticLayout.Builder.obtain(preview.body, 0, preview.body.length, paint, width)
+                .setLineSpacing(0f, 1.35f).setIncludePad(false).build().draw(canvas)
+            canvas.restore()
+            return@withContext ByteArrayOutputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it); it.toByteArray()
+            }
+        } finally { bitmap.recycle() }
+    }
     ParcelFileDescriptor.open(
         File(path),
         ParcelFileDescriptor.MODE_READ_ONLY

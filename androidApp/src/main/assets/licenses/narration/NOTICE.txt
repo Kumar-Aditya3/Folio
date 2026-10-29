@@ -1,0 +1,32 @@
+Folio narration runtime and optional voice packs
+
+Sherpa-ONNX 1.12.30, Copyright Xiaomi Corporation and contributors, Apache-2.0.
+Source and Android build scripts:
+https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.30
+https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.12.30.tar.gz
+The vendored AAR removes its duplicate ONNX Runtime. See scripts/fetch_sherpa.py.
+
+ONNX Runtime 1.23.2, Copyright Microsoft Corporation, MIT.
+https://github.com/microsoft/onnxruntime/tree/v1.23.2
+
+The Sherpa pronunciation runtime includes eSpeak NG, GPL-3.0-or-later.
+Corresponding source and build configuration:
+https://github.com/csukuangfj/espeak-ng/tree/f6fed6c58b5e0998b8e68c6610125e2d07d595a7
+https://github.com/csukuangfj/espeak-ng/archive/f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip
+https://github.com/k2-fsa/sherpa-onnx/blob/v1.12.30/cmake/espeak-ng-for-piper.cmake
+GPL terms for the combined distributed binary apply; Folio's original source
+files retain their existing Apache-2.0 notices. Full license texts accompany
+this notice. No additional restrictions are imposed on GPL-covered components.
+
+Optional models, downloaded only after an explicit action:
+Phonon 31M, Gradium, Apache-2.0:
+https://huggingface.co/gradium/phonon-31m-en
+Optional Phonon narrator embeddings, Gradium, Apache-2.0:
+https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7
+Phonon 40M, Gradium, CC BY-NC 4.0 (non-commercial use; gated access):
+https://huggingface.co/gradium/phonon-40m-en
+https://creativecommons.org/licenses/by-nc/4.0/
+Kokoro 82M v1.0, Hexgrad, Apache-2.0 (INT8 Sherpa conversion):
+https://huggingface.co/hexgrad/Kokoro-82M
+https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.30/scripts/kokoro/v1.0
+eSpeak pronunciation data in the Kokoro pack: GPL-3.0-or-later.

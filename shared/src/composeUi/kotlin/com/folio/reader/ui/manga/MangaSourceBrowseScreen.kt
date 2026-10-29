@@ -34,14 +34,13 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LibraryAddCheck
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
+import com.folio.reader.ui.components.FolioActionButton as Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem as DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import com.folio.reader.ui.components.FolioActionButton as OutlinedButton
+import com.folio.reader.ui.components.FolioInputField as OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TriStateCheckbox
@@ -358,7 +357,7 @@ private fun BrowseGridItem(
         ) {
             Text(
                 text = item.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = FolioTheme.typography.titleSmall,
                 color = FolioTheme.colors.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -434,7 +433,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
     when (filter) {
         is MangaFilter.Header -> Text(
             filter.name,
-            style = MaterialTheme.typography.titleSmall,
+            style = FolioTheme.typography.titleSmall,
             // §12.3: filter header label uses the manga discovery hue, not primary.
             color = colors.accentDiscovery,
             modifier = Modifier.padding(top = 6.dp),
@@ -452,7 +451,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(checked = filter.state, onCheckedChange = { onChange(filter.copy(state = it)) })
-            Text(filter.name, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+            Text(filter.name, style = FolioTheme.typography.bodyMedium, color = colors.onSurface)
         }
         is MangaFilter.TriState -> Row(
             modifier = Modifier.fillMaxWidth().clickable { onChange(filter.copy(state = (filter.state + 1) % 3)) },
@@ -466,10 +465,10 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
                 },
                 onClick = { onChange(filter.copy(state = (filter.state + 1) % 3)) },
             )
-            Text(filter.name, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+            Text(filter.name, style = FolioTheme.typography.bodyMedium, color = colors.onSurface)
         }
         is MangaFilter.Select -> Column(Modifier.fillMaxWidth()) {
-            Text(filter.name, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            Text(filter.name, style = FolioTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 var expanded by remember { mutableStateOf(false) }
                 Box {
@@ -491,7 +490,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
             }
         }
         is MangaFilter.Sort -> Column(Modifier.fillMaxWidth()) {
-            Text(filter.name, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            Text(filter.name, style = FolioTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             filter.values.forEachIndexed { index, value ->
                 val selected = filter.selection?.index == index
                 val ascending = filter.selection?.ascending ?: true
@@ -522,7 +521,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
                     Spacer(Modifier.width(6.dp))
                     Text(
                         value,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = FolioTheme.typography.bodyMedium,
                         color = if (selected) colors.primary else colors.onSurface,
                     )
                 }
@@ -531,7 +530,7 @@ private fun FilterControl(filter: MangaFilter, onChange: (MangaFilter) -> Unit) 
         is MangaFilter.Group -> Column(Modifier.fillMaxWidth()) {
             // §12.3: a filter-group heading is a section label, not a selection —
             // it uses the manga discovery hue instead of the generic primary.
-            Text(filter.name, style = MaterialTheme.typography.titleSmall, color = colors.accentDiscovery)
+            Text(filter.name, style = FolioTheme.typography.titleSmall, color = colors.accentDiscovery)
             filter.filters.forEachIndexed { index, child ->
                 FilterControl(child) { updated ->
                     onChange(filter.copy(filters = filter.filters.toMutableList().also { it[index] = updated }))

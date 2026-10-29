@@ -14,6 +14,16 @@ private const val IMAGE_PREFETCH_NEXT_PAGES = 4
 
 suspend fun MangaReaderViewModel.resolvePageImage(index: Int): ByteArray? = resolvePageBytes(index)
 
+/** Resolve previews by chapter identity: prepending chapters can shift combined indices. */
+internal suspend fun MangaReaderViewModel.resolvePreviewImage(chapterId: String, local: Int): ByteArray? {
+    val key = "$chapterId:$local"
+    synchronized(pageBytes) { pageBytes[key] }?.let { return it }
+    return imageGate.withPermit {
+        val index = indexForPageKey(key) ?: return@withPermit null
+        resolvePageImage(index)
+    }
+}
+
     /** Downloaded page, prefetched bytes, or a live source fetch — deduped per page key. */
 internal suspend fun MangaReaderViewModel.resolvePageBytes(index: Int): ByteArray? {
         val slot = slotForIndex(index) ?: return null
@@ -60,7 +70,7 @@ internal fun MangaReaderViewModel.pageBytesPut(key: String, bytes: ByteArray) {
             pageBytes[key] = bytes
             pageCacheRevision.value++
             pageBytesTotal += bytes.size
-            while (pageBytesTotal > PAGE_BYTES_CACHE_MAX && pageBytes.isNotEmpty()) {
+            while (pageBytesTotal > com.folio.reader.util.ReaderMemoryBudget.encodedBytes && pageBytes.isNotEmpty()) {
                 val eldest = pageBytes.entries.firstOrNull() ?: break
                 pageBytes.remove(eldest.key)
                 pageBytesTotal -= eldest.value.size
@@ -81,7 +91,7 @@ internal fun MangaReaderViewModel.scheduleImagePrefetch() {
             val targets = mutableListOf<Int>()
             var i = from + 1
             var ahead = 0
-            while (ahead < IMAGE_PREFETCH_AHEAD && slotForIndex(i) == slot) {
+            while (ahead < com.folio.reader.util.ReaderMemoryBudget.prefetchAhead && slotForIndex(i) == slot) {
                 targets += i
                 i++
                 ahead++
@@ -90,7 +100,7 @@ internal fun MangaReaderViewModel.scheduleImagePrefetch() {
             val slotIdx = snapshot.indexOf(slot)
             for (nextIdx in slotIdx + 1..minOf(slotIdx + 2, snapshot.lastIndex)) {
                 val next = snapshot[nextIdx]
-                for (j in 0 until minOf(IMAGE_PREFETCH_NEXT_PAGES, next.pages.size)) {
+                for (j in 0 until minOf(com.folio.reader.util.ReaderMemoryBudget.prefetchNext, next.pages.size)) {
                     targets += next.startIndex + j
                 }
             }

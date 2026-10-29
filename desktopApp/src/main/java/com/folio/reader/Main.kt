@@ -288,6 +288,9 @@ class FolioDesktopAppDependencies(rootOverride: String? = null) {
 
     init {
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        appScope.launch {
+            documentRepository.repairThumbnails(documentImporter, platform.fileSystem::getDocumentGeneratedIndexPath)
+        }
         // Resolve the reader's stored embedding model off the UI thread, matching Android:
         // reading the settings row is a database round trip and desktop's window is built
         // from this graph, so it must not block on it.

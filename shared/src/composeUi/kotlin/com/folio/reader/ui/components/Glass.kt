@@ -271,7 +271,7 @@ internal fun folioDataGlassPlane(fillAlpha: Float? = null, blurEnabled: Boolean 
 
 @Composable
 internal fun Modifier.folioDataGlass(shape: Shape = FolioMaterialShapes.reference, fillAlpha: Float? = null,
-    overlay: Boolean = false, blurEnabled: Boolean = true, clipEnabled: Boolean = true): Modifier {
+    overlay: Boolean = false, blurEnabled: Boolean = true, clipEnabled: Boolean = true, drawRim: Boolean = true): Modifier {
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
     val plane = folioDataGlassPlane(fillAlpha, blurEnabled)
@@ -291,7 +291,7 @@ internal fun Modifier.folioDataGlass(shape: Shape = FolioMaterialShapes.referenc
         val edge = Brush.verticalGradient(listOf(ink.copy(alpha = .13f * rim), ink.copy(alpha = .035f * rim)))
         onDrawBehind {
             drawOutline(outline, plane)
-            drawOutline(outline, edge, style = Stroke(.75.dp.toPx()))
+            if (drawRim) drawOutline(outline, edge, style = Stroke(.75.dp.toPx()))
         }
     }.folioMaterialFinish(shape)
 }

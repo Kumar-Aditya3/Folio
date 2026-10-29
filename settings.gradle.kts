@@ -21,3 +21,4 @@ rootProject.name = "Folio"
 include(":shared")
 include(":androidApp")
 include(":desktopApp")
+include(":baselineprofile")

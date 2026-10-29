@@ -1165,6 +1165,10 @@ class Database(private val dbPath: String, private val dispatcher: CoroutineDisp
                 stmt.setString(1, bookSettingsKey(bookId))
                 stmt.executeUpdate()
             }
+            conn.prepareStatement("DELETE FROM settings WHERE key = ?").use { stmt ->
+                stmt.setString(1, "narration.pronunciations:$bookId")
+                stmt.executeUpdate()
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -66,7 +67,6 @@ import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
-import com.folio.reader.narration.narrationSwipeToDismiss
 
 /**
  * Words per estimated page in continuous mode, which has no real page turns.
@@ -422,12 +422,15 @@ fun ReaderScreen(
     // put a "halfway through chapter 5" reading at the midpoint of the 3..7 band instead — the
     // skewed continuous progress. In paged mode the rendered span *is* the current chapter, so this
     // is identical there; only continuous is corrected.
+    val liveChapterFrac = position?.takeIf { it.chapterId == currentChapter?.id }
+        ?.chapterProgress?.coerceIn(0.0, 1.0) ?: 0.0
+    val chapterFrac = jumpSeed?.takeIf { it.first == currentChapterIndex && liveChapterFrac == 0.0 }
+        ?.second ?: liveChapterFrac
     val bookFraction = pageBlockBandFraction(
         stops = chapterStops,
         bandFirst = currentChapterIndex,
         bandLast = currentChapterIndex,
-        bandFraction = position?.chapterProgress?.toFloat()
-            ?: if (totalPages > 0) (currentPage.toFloat() / totalPages).coerceIn(0f, 1f) else 0f,
+        bandFraction = chapterFrac.toFloat(),
     )
     val tracePassages = remember(highlights, notes, chapters) {
         val liveNotes = notes.filterNot { it.isDeleted }.mapTo(HashSet()) { it.id }
@@ -436,40 +439,17 @@ fun ReaderScreen(
             emptyList(), marked, chapters).passages
     }
     val showChapterLine = settings.showChapterTitle && !currentChapter?.title.isNullOrBlank()
-    // The "how much is left" readout, mode-aware. The leaf block is a shape, not a number, so
-    // this is the numeral the reader asked for — and it is what was missing in continuous mode:
-    // that layout has no page turns, so `currentPage`/`totalPages` stay 1/1 and a pages-left
-    // count is meaningless there. `chapterProgress` is reported section-local in *both* modes,
-    // so the in-chapter percentage is the honest, always-available figure for continuous reading;
-    // paged reading keeps the concrete "N pages left" it can actually count.
-    val liveChapterFrac = (position?.chapterProgress ?: 0.0).coerceIn(0.0, 1.0)
-    // Until the page reports for THIS chapter, answer from the row the jump aimed at (see jumpSeed).
-    val chapterFrac = jumpSeed
-        ?.takeIf { it.first == currentChapterIndex && liveChapterFrac == 0.0 }
-        ?.second ?: liveChapterFrac
-    // Pages left in the current chapter, in both layouts.
-    //
-    // Paged mode counts real pages (`currentPage`/`totalPages`). Continuous mode has no page
-    // turns, so a page is *estimated* from the chapter's word count at ~[WORDS_PER_PAGE] words a
-    // page — the same figure a paginated e-reader lands near — and the reader's scroll fraction
-    // picks the current one. It is an estimate, but it is the pages readout the reader asked for
-    // rather than a bare percentage, and it stays honest: it never shows more pages left than the
-    // chapter has, and it reads "Last page" as the chapter end approaches.
-    val pagesLeftLabel: String? = run {
-        val (cur, total) = if (windowed) {
-            val words = (currentChapter?.wordCount ?: 0L).toInt()
-            val est = ((words + WORDS_PER_PAGE - 1) / WORDS_PER_PAGE).coerceAtLeast(1)
-            (((chapterFrac * est).toInt() + 1).coerceIn(1, est)) to est
-        } else {
-            currentPage to totalPages
-        }
-        if (total <= 1) null else {
-            val left = (total - cur).coerceAtLeast(0)
-            when (left) {
-                0 -> "Last page"
-                1 -> "1 page left"
-                else -> "$left pages left"
-            }
+    // Show the whole-book percentage alongside a measure the current layout knows:
+    // concrete pages after pagination settles, estimated reading time for continuous text.
+    val pagesLeftLabel: String = buildString {
+        append("${(bookFraction * 100).roundToInt()}%")
+        if (windowed) {
+            val wordsLeft = ((currentChapter?.wordCount ?: 0L) * (1.0 - chapterFrac)).toLong().coerceAtLeast(0)
+            if (wordsLeft > 0) append(" · ~${(wordsLeft + 219) / 220} min in chapter")
+            else if ((currentChapter?.wordCount ?: 0L) > 0L) append(" · Chapter end")
+        } else if (pageReported) {
+            val left = (totalPages - currentPage).coerceAtLeast(0)
+            append(if (left == 0) " · Last page" else " · $left ${if (left == 1) "page" else "pages"} left")
         }
     }
     // The block carries no numerals, so the position the "3 / 12" used to print is
@@ -540,8 +520,9 @@ fun ReaderScreen(
         }
     }
 
-    LaunchedEffect(narrationState.position?.spineIndex, narrationState.blockId, narrationState.followText) {
-        if (narratingHere && narrationState.followText) {
+    val narrationWindowVisible = com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+    LaunchedEffect(narrationState.position?.spineIndex, narrationState.blockId, narrationState.followText, narrationWindowVisible) {
+        if (narrationWindowVisible && narratingHere && narrationState.followText) {
             val index = chapters.indexOfFirst { it.spineIndex == narrationState.position?.spineIndex }
             if (index >= 0 && index != currentChapterIndex) jumpToChapter(index)
         }
@@ -971,7 +952,7 @@ fun ReaderScreen(
         // position carried by the material of the page itself. Same explicit spec
         // and Rule 19 skip as the top bar above.
         androidx.compose.animation.AnimatedVisibility(
-            visible = (settings.showProgress || narrationState.hasBook) && showControls && !workspaceOpen,
+            visible = settings.showProgress && showControls && !workspaceOpen,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = if (chromeMotion) {
                 androidx.compose.animation.fadeIn(chromeSpec) +
@@ -986,12 +967,7 @@ fun ReaderScreen(
                 androidx.compose.animation.ExitTransition.None
             }
         ) {
-            if (narrationState.hasBook && narration != null) {
-                Box(Modifier.navigationBarsPadding().padding(8.dp)
-                    .narrationSwipeToDismiss(narrationState.bookId, narration::stop).readerIsland()) {
-                    com.folio.reader.narration.NarrationTransport(narration, { showListen = true })
-                }
-            } else BottomPageBlock(
+            BottomPageBlock(
                 chapterTitle = if (showChapterLine) currentChapter?.title ?: "" else "",
                 fraction = bookFraction,
                 paper = Color(readerThemePreset.background),
@@ -1010,6 +986,13 @@ fun ReaderScreen(
                 onSeek = seekToBookFraction,
                 onOpenMap = openToc,
             )
+        }
+
+        if (!occludes && settings.showProgress && contentPainted && !workspaceOpen) {
+            ReaderProgressRail(bookFraction, chapterStops,
+                Modifier.align(Alignment.CenterEnd).fillMaxHeight().statusBarsPadding()
+                    .padding(top = 68.dp, bottom = 110.dp),
+                ink = Color(readerThemePreset.primaryText))
         }
 
         if (!occludes) {

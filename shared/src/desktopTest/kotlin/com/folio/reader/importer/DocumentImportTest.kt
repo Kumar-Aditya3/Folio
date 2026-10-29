@@ -63,6 +63,7 @@ class DocumentImportTest {
             "word/document.xml" to """<w:document xmlns:w="w"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Heading</w:t></w:r></w:p><w:p><w:pPr><w:numPr/></w:pPr><w:r><w:t>List item</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"""
         ))
         val docxDocument = importer.importDocument(docx, detector.detect(docx), docx.name)
+        assertTrue(File(assertNotNull(docxDocument.thumbnailPath)).isFile)
         val docxHtml = File(platform.fileSystem.getDocumentGeneratedIndexPath(docxDocument.id)).readText()
         assertTrue(docxHtml.contains("<h1>Heading</h1>"))
         assertTrue(docxHtml.contains("<ul><li>List item</li></ul>"))
@@ -74,6 +75,7 @@ class DocumentImportTest {
             "content.xml" to """<!DOCTYPE office:document-content><office:document-content xmlns:office="office" xmlns:text="text" xmlns:table="table"><office:body><text:h text:outline-level="2">ODT heading</text:h><text:list><text:list-item><text:p>ODT item</text:p></text:list-item></text:list><table:table><table:table-row><table:table-cell><text:p>ODT cell</text:p></table:table-cell></table:table-row></table:table></office:body></office:document-content>"""
         ))
         val odtDocument = importer.importDocument(odt, detector.detect(odt), odt.name)
+        assertTrue(File(assertNotNull(odtDocument.thumbnailPath)).isFile)
         val odtHtml = File(platform.fileSystem.getDocumentGeneratedIndexPath(odtDocument.id)).readText()
         assertTrue(odtHtml.contains("<h2>ODT heading</h2>"))
         assertTrue(odtHtml.contains("<li><p>ODT item</p></li>"))
@@ -128,11 +130,36 @@ class DocumentImportTest {
     }
 
     @Test
-    fun `non pdf import keeps thumbnail fallback path empty`() = runBlocking {
+    fun `text import persists a readable paper thumbnail`() = runBlocking {
         val source = File(root, "plain.txt").apply { writeText("plain document") }
         val document = importer.importDocument(source, detector.detect(source), source.name)
-        assertNull(document.thumbnailPath)
-        assertNull(repository.getDocument(document.id)?.thumbnailPath)
+        val thumbnail = File(assertNotNull(document.thumbnailPath))
+        File("build/visual-review/interface-polish/document-preview.png").apply {
+            parentFile.mkdirs(); writeBytes(thumbnail.readBytes())
+        }
+        val image = javax.imageio.ImageIO.read(thumbnail)
+        assertEquals(360, image.width)
+        assertEquals(480, image.height)
+        assertTrue((0 until image.width).any { x ->
+            (0 until image.height).any { y -> image.getRGB(x, y) != image.getRGB(0, 0) }
+        }, "A document thumbnail must contain the document's text")
+        assertEquals(thumbnail.absolutePath, repository.getDocument(document.id)?.thumbnailPath)
+    }
+
+    @Test
+    fun `repair creates missing previews without overwriting concurrent reading progress`() = runBlocking {
+        val source = File(root, "old.txt").apply { writeText("An older document with a missing preview.") }
+        val document = importer.importDocument(source, detector.detect(source), source.name)
+        File(assertNotNull(document.thumbnailPath)).delete()
+        val repair = DocumentImporter(platform, repository, categoryRepository) { path, width, height ->
+            repository.upsertDocument(repository.getDocument(document.id)!!.copy(normalizedProgress = .73))
+            renderDesktopDocumentThumbnail(path, width, height)
+        }
+        (repository as ThumbnailDocumentRepository).repairThumbnails(repair, platform.fileSystem::getDocumentGeneratedIndexPath)
+        val restored = assertNotNull(repository.getDocument(document.id))
+        assertEquals(.73, restored.normalizedProgress)
+        assertTrue(restored.thumbnailPath != document.thumbnailPath, "Repair must invalidate a previously failed image load")
+        assertTrue(File(assertNotNull(restored.thumbnailPath)).isFile)
     }
 
     @Test

@@ -6,9 +6,7 @@ import com.folio.reader.nav.FolioNavModelImpl
 import com.folio.reader.ui.settings.TransparencySettingsPanel
 
 /**
- * Appearance destination: how solid the app's glass surfaces are. Four knobs
- * rather than one, because the top bar and nav sit over the app's own page while
- * reader chrome sits over a page being read.
+ * Appearance destination for app chrome, reader controls and home-screen widgets.
  */
 @Composable
 fun SettingsTransparencyScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) {
@@ -18,7 +16,8 @@ fun SettingsTransparencyScreen(navModel: FolioNavModelImpl, onBack: () -> Unit) 
     SettingsCategoryScaffold(title = "Transparency", onBack = onBack) {
         TransparencySettingsPanel(
             settings = navModel.globalSettings,
-            onSettingsChange = { navModel.updateSettings(it) }
+            onSettingsChange = { navModel.updateSettings(it) },
+            showWidgetControls = true,
         )
     }
 }

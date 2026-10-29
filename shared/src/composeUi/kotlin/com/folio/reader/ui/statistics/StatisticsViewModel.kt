@@ -351,17 +351,20 @@ class StatisticsViewModel(
      * `Eagerly` so the work starts when the view model is built — at app open, for
      * a host that hoists it — rather than on first access, which is exactly the
      * visit that would otherwise show the skeleton. The underlying queries stay
-     * live: the database pushes invalidations through the `combine`, so a hot flow
-     * still corrects itself while the tab is on screen. Sharing changes *when* the
-     * query runs, never whether it can go stale.
+     * live while the tab has a visibility lease. Hidden tabs retain their last result
+     * without recomputing on every narration checkpoint. Acquiring a lease refreshes
+     * from current database values without clearing the cached StateFlow.
      *
      * Held here rather than in each host so Android and desktop get the same
      * behaviour without either reimplementing it.
      */
     private val sharedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    private val visibility = com.folio.reader.util.ScreenWorkGate()
+    fun keepVisible(): AutoCloseable = visibility.acquire()
+
     val sharedState: StateFlow<StatisticsUiState> =
-        state.stateIn(sharedScope, SharingStarted.Eagerly, StatisticsUiState())
+        visibility.warmThenVisible(state).stateIn(sharedScope, SharingStarted.Eagerly, StatisticsUiState())
 
     /**
      * Derived from [sharedState], **not** from a second `stateIn` of the cold
@@ -379,7 +382,7 @@ class StatisticsViewModel(
             .stateIn(sharedScope, SharingStarted.Eagerly, false)
 
     val sharedExclusions: StateFlow<Set<Pair<Scope, String>>> =
-        exclusions.stateIn(sharedScope, SharingStarted.Eagerly, emptySet())
+        visibility.warmThenVisible(exclusions).stateIn(sharedScope, SharingStarted.Eagerly, emptySet())
 
     /**
      * §11.2 one-way resolution, evaluated once per emission: a book is excluded
@@ -436,7 +439,7 @@ class StatisticsViewModel(
      * to the tab. Null when no repository was wired, matching [recentQuotes].
      */
     val sharedRecentQuotes: StateFlow<List<RecentQuote>> =
-        (recentQuotes ?: flowOf(emptyList()))
+        visibility.warmThenVisible(recentQuotes ?: flowOf(emptyList()))
             .stateIn(sharedScope, SharingStarted.Eagerly, emptyList())
 
     private fun buildRecentFeed(): Flow<List<RecentQuote>>? {

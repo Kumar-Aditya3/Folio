@@ -29,11 +29,10 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.HourglassEmpty
-import androidx.compose.material3.DropdownMenuItem
+import com.folio.reader.ui.components.FolioMenuItem as DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -107,7 +106,7 @@ internal fun ChapterRow(
             val readDim = if (chapter.read) 0.62f else 1f
             Text(
                 chapter.name,
-                style = MaterialTheme.typography.titleSmall,
+                style = FolioTheme.typography.titleSmall,
                 fontWeight = if (chapter.read) FontWeight.Normal else FontWeight.SemiBold,
                 color = (if (chapter.read) colors.onSurfaceVariant else colors.onSurface)
                     .copy(alpha = readDim),
@@ -132,7 +131,7 @@ internal fun ChapterRow(
             if (sub.isNotBlank()) {
                 Text(
                     sub,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = FolioTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant.copy(alpha = readDim),
                 )
             }
@@ -274,7 +273,7 @@ fun DownloadsScreen(
             ) {
                 Text(
                     "No downloads in the queue.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = FolioTheme.typography.bodyMedium,
                     color = FolioTheme.colors.onSurfaceVariant,
                 )
             }
@@ -306,7 +305,7 @@ fun DownloadsScreen(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 titles[download.mangaId] ?: download.mangaId,
-                                style = MaterialTheme.typography.titleSmall,
+                                style = FolioTheme.typography.titleSmall,
                                 color = FolioTheme.colors.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -314,7 +313,7 @@ fun DownloadsScreen(
                             chapterNames[download.chapterId]?.takeIf { it.isNotBlank() }?.let { name ->
                                 Text(
                                     name,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = FolioTheme.typography.bodySmall,
                                     color = FolioTheme.colors.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -329,7 +328,7 @@ fun DownloadsScreen(
                                     com.folio.reader.manga.MangaDownloadStatus.ERROR ->
                                         download.error?.takeIf { it.isNotBlank() }?.let { "Failed · $it" } ?: "Failed"
                                 },
-                                style = MaterialTheme.typography.bodySmall,
+                                style = FolioTheme.typography.bodySmall,
                                 color = if (download.status == com.folio.reader.manga.MangaDownloadStatus.ERROR) {
                                     FolioTheme.colors.error
                                 } else {
@@ -347,7 +346,7 @@ fun DownloadsScreen(
                         }
                         if (download.status == com.folio.reader.manga.MangaDownloadStatus.ERROR) {
                             TextButton(onClick = { viewModel.retry(download.id) }) {
-                                Text("Retry", style = MaterialTheme.typography.labelMedium)
+                                Text("Retry", style = FolioTheme.typography.labelMedium)
                             }
                         }
                         if (download.status != com.folio.reader.manga.MangaDownloadStatus.DOWNLOADED) {
@@ -391,19 +390,19 @@ fun DownloadsScreen(
                 Column(Modifier.weight(1f)) {
                     Text(
                         "Download location",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = FolioTheme.typography.labelSmall,
                         color = FolioTheme.colors.onSurfaceVariant,
                     )
                     Text(
                         storageDescription,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = FolioTheme.typography.bodySmall,
                         color = FolioTheme.colors.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 TextButton(onClick = onPickLocation) {
-                    Text("Change", style = MaterialTheme.typography.labelMedium)
+                    Text("Change", style = FolioTheme.typography.labelMedium)
                 }
             }
         }

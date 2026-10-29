@@ -104,6 +104,7 @@ class SettingsMergeTest {
         navBarOpacity = 0.8f,
         panelOpacity = 0.9f,
         readerChromeOpacity = 0.85f,
+        widgetOpacity = 0.55f,
         liquidGlassEffects = false,
         // minimalLiquidGlass defaults to false, so the non-default fixture value is true —
         // every field must be non-default or the field-count guard in

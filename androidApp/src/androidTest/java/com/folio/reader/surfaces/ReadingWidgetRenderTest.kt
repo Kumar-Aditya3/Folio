@@ -22,6 +22,7 @@ class ReadingWidgetRenderTest {
         val graph = (context.applicationContext as com.folio.reader.FolioApplication).graph
         val snapshot = kotlinx.coroutines.withTimeout(30_000) { graph.readingSurfaceSnapshot() }
         assertEquals(graph.settingsRepository.getGlobalSettings().dailyGoalMinutes, snapshot.goal)
+        assertEquals(graph.settingsRepository.getGlobalSettings().widgetOpacity.coerceIn(.1f, 1f), snapshot.glassOpacity, .001f)
         assertEquals(7, snapshot.week.size)
         assertTrue(snapshot.minutes >= 0)
         snapshot.entry?.let { entry ->
@@ -31,6 +32,10 @@ class ReadingWidgetRenderTest {
                 "manga" -> assertNotNull(graph.mangaRepository.get(entry.id))
                 else -> fail("Unknown reading destination")
             }
+        }
+        snapshot.listening?.let {
+            assertNotNull(graph.bookRepository.getBook(it.id))
+            assertTrue(it.progress in 0..100)
         }
     }
 
@@ -71,7 +76,7 @@ class ReadingWidgetRenderTest {
     @Test fun realLauncherLayoutsInflateAndRenderInLightDarkAndCompactSizes() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val folder = File(context.getExternalFilesDir(null) ?: context.filesDir, "widget-review").apply { mkdirs() }
+        val folder = File(context.getExternalFilesDir(null) ?: context.filesDir, "widget-modern-review").apply { mkdirs() }
         val coverFile = File(folder, "specimen-cover.png")
         val cover = Bitmap.createBitmap(144, 208, Bitmap.Config.ARGB_8888)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -84,30 +89,81 @@ class ReadingWidgetRenderTest {
         }
         coverFile.outputStream().use { cover.compress(Bitmap.CompressFormat.PNG, 100, it) }; cover.recycle()
         instrumentation.runOnMainSync {
-            for (light in listOf(false, true)) for (goal in listOf(false, true)) for (width in listOf(180, 340)) for (height in listOf(156, 184)) {
+            for (light in listOf(false, true)) for (scale in listOf(1f, 1.35f)) for (kind in FolioWidgetKind.entries) for (width in listOf(180, 340)) for (height in if (kind == FolioWidgetKind.Audiobook) listOf(112, 132, 184, 220) else listOf(156, 184)) {
+                val themed = context.createConfigurationContext(android.content.res.Configuration(context.resources.configuration).apply { fontScale = scale })
                 val data = ReadingSurfaceSnapshot(ResumeEntry("book", "fixture", "The Shape of Quiet Things", "A place to return to", coverFile.absolutePath, 42, 1),
                     24, 60, listOf(12, 25, 0, 18, 40, 9, 24), if (light) 0xFF48645D.toInt() else 0xFFB3C6D5.toInt(),
-                    if (light) 0xFFF3EFE7.toInt() else 0xFF1B2029.toInt(), if (light) 0xFF202B28.toInt() else 0xFFF1EFE8.toInt())
-                val parent = FrameLayout(context)
-                val view = WidgetRefreshWorker.views(context, data, goal, width, height).apply(context, parent)
+                    if (light) 0xFFF3EFE7.toInt() else 0xFF1B2029.toInt(), if (light) 0xFF202B28.toInt() else 0xFFF1EFE8.toInt(),
+                    ListeningEntry("fixture", "The Shape of Quiet Things", "A place to return to", coverFile.absolutePath,
+                        "Chapter 7 · A quieter place", 42, 1.25f, com.folio.reader.narration.NarrationPhase.Paused, true))
+                val parent = FrameLayout(themed)
+                val view = WidgetRefreshWorker.views(themed, data, kind, width, height).apply(themed, parent)
                 parent.addView(view)
                 val density = context.resources.displayMetrics.density
                 val w = (width * density).toInt(); val h = (height * density).toInt()
                 parent.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
                 parent.layout(0, 0, w, h)
-                assertEquals(if (goal) "24" else data.entry!!.title, view.findViewById<TextView>(R.id.widget_title).text.toString())
-                val title = view.findViewById<TextView>(R.id.widget_title)
-                val subtitle = view.findViewById<TextView>(R.id.widget_subtitle)
-                assertTrue(title.height >= title.lineHeight)
-                assertTrue(subtitle.height >= subtitle.lineHeight)
                 val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 parent.draw(Canvas(bitmap))
-                File(folder, "${if (goal) "goal" else "continue"}-${if (light) "light" else "dark"}-$width-$height.png").outputStream().use {
+                File(folder, "${kind.name.lowercase()}-${if (light) "light" else "dark"}-$width-$height-$scale.png").outputStream().use {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
                 }
                 bitmap.recycle()
+                assertEquals(scale, view.resources.configuration.fontScale, .01f)
+                assertEquals(if (kind == FolioWidgetKind.Goal) "24" else data.entry!!.title, view.findViewById<TextView>(R.id.widget_title).text.toString())
+                val title = view.findViewById<TextView>(R.id.widget_title)
+                val subtitle = view.findViewById<TextView>(R.id.widget_subtitle)
+                assertTrue("$kind $width × $height, text $scale: title height ${title.height}, line ${title.lineHeight}", title.height >= title.lineHeight)
+                assertTrue("$kind $width × $height, text $scale: subtitle height ${subtitle.height}, line ${subtitle.lineHeight}", subtitle.height >= subtitle.lineHeight)
+                for (child in listOf(title, subtitle)) {
+                    val rect = android.graphics.Rect(0, 0, child.width, child.height)
+                    parent.offsetDescendantRectToMyCoords(child, rect)
+                    assertTrue("$kind $width × $height, text $scale: text must fit the widget", rect.top >= 0 && rect.bottom <= h && child.width > 0)
+                }
+                if (kind == FolioWidgetKind.Reading) {
+                    assertEquals("FOLIO", view.findViewById<TextView>(R.id.widget_eyebrow).text.toString())
+                    assertEquals("Continue reading", view.findViewById<TextView>(R.id.widget_action).text.toString())
+                    assertTrue(view.contentDescription.toString().contains("42%"))
+                    val action = view.findViewById<TextView>(R.id.widget_action)
+                    val actionRect = android.graphics.Rect(0, 0, action.width, action.height)
+                    parent.offsetDescendantRectToMyCoords(action, actionRect)
+                    assertTrue("The reading action must fit the widget", actionRect.bottom <= h && action.width > 0)
+                    val coverId = if (width < 240 || height < 176) R.id.widget_cover_compact else R.id.widget_cover
+                    assertEquals("Covers remain visible in the default compact widget", View.VISIBLE, view.findViewById<View>(coverId).visibility)
+                }
+                if (kind == FolioWidgetKind.Audiobook) {
+                    assertEquals("Resume narration", view.findViewById<View>(R.id.widget_audio_toggle).contentDescription.toString())
+                    for (id in listOf(R.id.widget_audio_previous, R.id.widget_audio_toggle, R.id.widget_audio_next)) {
+                        val button = view.findViewById<View>(id)
+                        assertTrue(button.isEnabled && button.hasOnClickListeners())
+                        assertTrue(button.width >= (48 * density).toInt() && button.height >= (48 * density).toInt())
+                        assertTrue("Playback targets must fit without clipping", button.left >= 0 && button.right <= (button.parent as View).width)
+                        val buttonRect = android.graphics.Rect(0, 0, button.width, button.height)
+                        parent.offsetDescendantRectToMyCoords(button, buttonRect)
+                        assertTrue("$width × $height, text $scale: playback targets must fit vertically", buttonRect.top >= 0 && buttonRect.bottom <= h)
+                    }
+                }
             }
         }
         assertNotEquals(ReadingSurfaceIntents.pending(context, "book", "same-id"), ReadingSurfaceIntents.pending(context, "document", "same-id"))
+        assertNotEquals(WidgetRefreshWorker.audioPending(context, "play", "first"), WidgetRefreshWorker.audioPending(context, "pause", "first"))
+        assertNotEquals(WidgetRefreshWorker.audioPending(context, "play", "first"), WidgetRefreshWorker.audioPending(context, "play", "second"))
+    }
+
+    @Test fun launcherGlassKeepsTheWallpaperVisibleAndHonorsSolidOpacity() {
+        for (surface in listOf(0xFF1B2029.toInt(), 0xFFF3EFE7.toInt())) {
+            val glass = WidgetArtwork.glass(0xFF799E98.toInt(), surface, 340, 124)
+            val solid = WidgetArtwork.glass(0xFF799E98.toInt(), surface, 340, 124, opacity = 1f)
+            try {
+                assertEquals("Rounded corners must stay clear", 0, android.graphics.Color.alpha(glass.getPixel(0, 0)))
+                val centerAlpha = android.graphics.Color.alpha(glass.getPixel(glass.width / 2, glass.height / 2))
+                assertTrue("The glass body must transmit wallpaper", centerAlpha in 170..200)
+                assertEquals("Maximum opacity must remain solid", 255,
+                    android.graphics.Color.alpha(solid.getPixel(solid.width / 2, solid.height / 2)))
+            } finally {
+                glass.recycle()
+                solid.recycle()
+            }
+        }
     }
 }

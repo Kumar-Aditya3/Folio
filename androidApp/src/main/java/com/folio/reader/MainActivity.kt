@@ -148,6 +148,7 @@ class MainActivity : ComponentActivity() {
         graph.runStartupTasks(appScope)
 
         setContent {
+            com.folio.reader.ui.theme.FolioAndroidMotionEnvironment {
             val navController = rememberNavController()
             // The nav model survives configuration changes inside a ViewModel
             // holder: rebuilding it per relaunch reset every tab view model and
@@ -158,10 +159,16 @@ class MainActivity : ComponentActivity() {
             val holder: NavModelHolder = viewModel()
             val model = holder.model ?: FolioNavModelImpl(this@MainActivity).also { holder.model = it }
             model.rebind(this@MainActivity)
+            val firstRun = remember(model) { com.folio.reader.settings.FirstRunState(this@MainActivity) }
+            LaunchedEffect(model) { model.warmGlobalSettings() }
+            // Start the room with the saved palette and motion family. Drawing the
+            // defaults while settings load made the opening animation change underneath
+            // the arriving screen. No destination or permission pane mounts before this.
+            if (!model.globalSettingsReady) return@FolioAndroidMotionEnvironment
             SideEffect {
                 navModel = model
-                model.navController = navController
-                pendingOpenRoute?.let { route ->
+                model.navController = navController.takeUnless { firstRun.pending }
+                pendingOpenRoute?.takeUnless { firstRun.pending }?.let { route ->
                     pendingOpenRoute = null
                     if (pendingSurfaceManga) {
                         model.libraryModeLoaded = true
@@ -666,7 +673,9 @@ com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository,
                             // had two grounds and neither changed what a reader could see.
                             Box(Modifier.matchParentSize().folioRoomScrim())
                         }
-                        FolioNavShell(
+                        if (firstRun.pending) {
+                            com.folio.reader.settings.FirstRunSetup(model, firstRun)
+                        } else FolioNavShell(
                             navController = navController,
                             showBottomBar = showBottomBar,
                             backProgress = backProgress,
@@ -706,7 +715,7 @@ com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository,
                         // Post-import shelf prompt: file the batch into collections
                         // (Main pre-checked — that is where the imports already are),
                         // then open the first imported item.
-                        pendingImportBooks?.let { books ->
+                        pendingImportBooks?.takeUnless { firstRun.pending }?.let { books ->
                             val graph = (application as FolioApplication).graph
                             val shelfCollections by remember(graph) {
                                 graph.collectionRepository.getAllCollections()
@@ -780,6 +789,8 @@ com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository,
 }
                 }
             }
+        }
+
         }
 
         // Avoid importing the same launch intent again after an activity recreation.
@@ -1134,6 +1145,7 @@ com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository,
                             next?.let { FolioDestination.mangaReader(manga.id, it.id) } ?: FolioDestination.mangaDetail(manga.id)
                         } else FolioRoutes.LIBRARY
                         "stats" -> FolioRoutes.STATS
+                        "narration" -> FolioDestination.settings(com.folio.reader.settings.FolioSettingsCategory.NARRATION)
                         "downloads" -> FolioRoutes.MANGA_DOWNLOADS
                         "library" -> FolioRoutes.LIBRARY
                         else -> FolioRoutes.HOME

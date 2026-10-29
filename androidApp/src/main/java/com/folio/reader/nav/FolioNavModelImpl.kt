@@ -55,7 +55,7 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
     override val graph: AppGraph get() = (activity.application as FolioApplication).graph
 
     /** Controller is set by setContent before any destination can use it. */
-    var navController: NavHostController? = null
+    var navController by mutableStateOf<NavHostController?>(null)
 
     /** Activity-level pickers/dialogs; defaults to no-ops until wired. */
     var callbacks: FolioNavCallbacks = object : FolioNavCallbacks {}
@@ -97,6 +97,8 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
      * row does.
      */
     private var globalSettingsWarmed = false
+    var globalSettingsReady by mutableStateOf(false)
+        private set
 
     /**
      * Starts the global settings read now and drops the result into
@@ -123,9 +125,11 @@ class FolioNavModelImpl(internal var activity: MainActivity) : FolioNavModel {
         if (globalSettingsWarmed) return
         globalSettingsWarmed = true
         activity.appScope.launch(Dispatchers.IO) {
-            val loaded = runCatching { graph.settingsRepository.getGlobalSettings() }.getOrNull()
-                ?: return@launch
-            withContext(Dispatchers.Main) { globalSettings = loaded }
+            val loaded = runCatching { graph.settingsRepository.getGlobalSettings() }.getOrDefault(ReaderSettings())
+            withContext(Dispatchers.Main) {
+                globalSettings = loaded
+                globalSettingsReady = true
+            }
         }
     }
 

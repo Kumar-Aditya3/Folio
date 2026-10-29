@@ -2,6 +2,7 @@ package com.folio.reader.database
 
 import com.folio.reader.model.Document
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 
 class ThumbnailDocumentRepository(
     private val database: Database,
@@ -54,6 +55,26 @@ class ThumbnailDocumentRepository(
             }
         }
         delegate.deleteDocument(documentId)
+    }
+
+    /** Change artwork without overwriting live reading progress or metadata. */
+    suspend fun repairThumbnails(importer: com.folio.reader.importer.DocumentImporter,
+        generatedPath: (String) -> String) {
+        val documents = observeDocuments().first()
+        for (document in documents) {
+            if (document.thumbnailPath?.let { java.io.File(it).let { file -> file.isFile && file.length() > 0 } } == true) continue
+            val source = if (document.format == com.folio.reader.model.DocumentFormat.PDF)
+                document.localPath ?: continue else generatedPath(document.id)
+            // A fresh path also invalidates a view that already tried the missing file.
+            val path = importer.generateThumbnail(document.id, source, "preview-${java.util.UUID.randomUUID()}.png") ?: continue
+            database.withConnection { connection ->
+                connection.prepareStatement("UPDATE documents SET thumbnail_path = ? WHERE id = ?").use {
+                    it.setString(1, path); it.setString(2, document.id); it.executeUpdate()
+                }
+            }
+            database.bumpDocumentData()
+            kotlinx.coroutines.yield()
+        }
     }
 
     private suspend fun Document.withPersistedThumbnail(): Document =

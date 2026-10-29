@@ -149,8 +149,9 @@ private fun ReaderRouteContent(
 
     val chapters by viewModel.chapters.collectAsState(initial = emptyList())
     val narrationState by graph.narration.state.collectAsState()
-    LaunchedEffect(narrationState.phase, narrationState.bookId) {
-        viewModel.narrationOwnershipChanged(com.folio.reader.narration.NarrationActivity.ownerBookId == book.id,
+    val narrationOwner by com.folio.reader.narration.NarrationActivity.ownerBook.collectAsState()
+    LaunchedEffect(narrationOwner, narrationState.bookId) {
+        viewModel.narrationOwnershipChanged(narrationOwner == book.id,
             narrationState.position)
     }
     val bookToc by viewModel.bookToc.collectAsState()
@@ -517,7 +518,8 @@ fun BookDetailRoute(
         onStartReading = onStartReading,
         onDeleteClick = {
             activity.appScope.launch(Dispatchers.IO) {
-                runCatching { graph.bookRepository.deleteBook(bookId) }
+                kotlinx.coroutines.withContext(Dispatchers.Main) { graph.narration.forgetBook(bookId) }
+                    runCatching { graph.bookRepository.deleteBook(bookId) }
                 runCatching { graph.platform.fileSystem.deleteBookFiles(bookId) }
             }
             onBack()

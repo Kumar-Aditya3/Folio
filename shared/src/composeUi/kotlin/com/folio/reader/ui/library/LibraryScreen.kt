@@ -209,6 +209,11 @@ fun LibraryScreen(
     mangaSourcesAvailable: Boolean = false,
     onOpenMangaDownloads: () -> Unit = {},
 ) {
+    val windowVisible = com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+    androidx.compose.runtime.DisposableEffect(viewModel, windowVisible) {
+        val lease = if (windowVisible) viewModel.keepVisible() else null
+        onDispose { lease?.close() }
+    }
     var sortBy by remember { mutableStateOf(LibraryViewModel.SortBy.LAST_OPENED) }
     var sortAscending by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(LibraryViewModel.FilterState()) }

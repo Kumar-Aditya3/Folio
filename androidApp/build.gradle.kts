@@ -2,10 +2,16 @@ import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
+    id("androidx.baselineprofile")
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
+}
+
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
 }
 
 androidComponents.onVariants { variant ->
@@ -26,8 +32,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 172
-        versionName = "1.2.118"
+        versionCode = 175
+        versionName = "1.2.121"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -185,6 +191,9 @@ kotlin {
 }
 
 dependencies {
+    baselineProfile(project(":baselineprofile"))
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    implementation(files("libs/sherpa-onnx-1.12.30-shared-ort.aar"))
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation(libs.kotlinx.serialization.json)

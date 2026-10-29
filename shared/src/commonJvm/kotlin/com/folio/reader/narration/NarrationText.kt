@@ -8,7 +8,7 @@ import java.text.BreakIterator
 import java.util.Locale
 
 data class NarrationPassage(val blockId: String, val paragraph: Int, val text: String,
-    val start: Int, val end: Int, val chapterLength: Int) {
+    val start: Int, val end: Int, val chapterLength: Int, val pauseAfterMs: Int = 0) {
     val hash: String get() = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
         .joinToString("") { "%02x".format(it) }
     val words: Long get() = Regex("\\S+").findAll(text).count().toLong()
@@ -45,7 +45,8 @@ object NarrationText {
         walk(body)
         // Parent text surrounding nested blocks cannot be narrated in correct order as one block.
         // Give each text run its own inline anchor instead of moving publisher content.
-        if (owners.keys.any { owner -> owners.keys.any { it !== owner && it.parents().contains(owner) } }) {
+        val ownerSet = owners.keys.toHashSet()
+        if (owners.keys.any { owner -> owner.parents().any { it in ownerSet } }) {
             val runs = mutableListOf<Pair<Element, StringBuilder>>()
             var runOwner: Element? = null
             fun mark(el: Element, hidden: Boolean = false) {
@@ -81,6 +82,11 @@ object NarrationText {
             val (el, raw) = pair
             val text = raw.replace('\u00a0', ' ').replace(Regex("\\s+"), " ").trim()
             if (text.isEmpty()) continue
+            if (text.matches(Regex("[\\s*•·—_.-]{3,}|⁂"))) {
+                if (pieces.isNotEmpty()) pieces[pieces.lastIndex] = pieces.last().copy(pauseAfterMs = 700)
+                offset += text.length + 1
+                continue
+            }
             val id = "b$index"
             el.attr("data-folio-narration", id)
             val paragraph = (sequenceOf(el) + el.parents().asSequence()).firstNotNullOfOrNull { paragraphIndices[it] } ?: -1
@@ -93,13 +99,27 @@ object NarrationText {
                 var local = 0
                 while (local < sentence.length) {
                     var cut = minOf(local + 360, sentence.length)
-                    if (cut < sentence.length) cut = sentence.lastIndexOf(' ', cut).takeIf { it > local } ?: cut
+                    if (cut < sentence.length) {
+                        val clause = (local + 100 until cut).lastOrNull { sentence[it] in ",;:—" && sentence.getOrNull(it + 1)?.isWhitespace() == true }
+                        cut = clause?.plus(1) ?: sentence.lastIndexOf(' ', cut).takeIf { it > local } ?: cut
+                    }
                     val spoken = sentence.substring(local, cut).trim()
                     if (spoken.isNotEmpty()) pieces += NarrationPassage(id, paragraph, spoken,
                         offset + start + local, offset + start + cut, 0)
                     local = cut
                 }
                 start = end; end = boundaries.next()
+            }
+            if (pieces.lastOrNull()?.blockId == id) {
+                val owner = (sequenceOf(el) + el.parents().asSequence()).firstOrNull { it.normalName() in blocks } ?: el
+                val scene = owner.nextElementSibling()?.normalName() == "hr" || text.matches(Regex("[\\s*•·—_-]{3,}"))
+                val pause = when {
+                    scene -> 700
+                    owner.normalName().matches(Regex("h[1-6]")) -> 500
+                    text.startsWith('“') || text.startsWith('"') -> 180
+                    else -> 240
+                }
+                pieces[pieces.lastIndex] = pieces.last().copy(pauseAfterMs = pause)
             }
             offset += text.length + 1
         }

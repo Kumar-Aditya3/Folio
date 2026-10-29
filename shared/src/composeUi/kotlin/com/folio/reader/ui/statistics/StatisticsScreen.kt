@@ -156,6 +156,11 @@ fun StatisticsTabContent(
     mangaBackend: com.folio.reader.manga.MangaBackend? = null,
     onMangaClick: (String) -> Unit = {},
 ) {
+    val windowVisible = com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+    androidx.compose.runtime.DisposableEffect(viewModel, windowVisible) {
+        val lease = if (windowVisible) viewModel.keepVisible() else null
+        onDispose { lease?.close() }
+    }
     val stats by state.collectAsState()
     // Gate the first frames on the real emission. `state` is a combine of four
     // suspense queries (plus a roundtrip per book when exclusions resolve tags and
