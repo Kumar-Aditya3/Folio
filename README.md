@@ -1,9 +1,55 @@
-# Folio
+<p align="center">
+  <img src="icon/Folio.png" width="88" height="88" alt="Folio leaf mark">
+</p>
 
-Folio is a local-first reader for Android and Windows, built with Kotlin Multiplatform
-and Compose Multiplatform. Library data, reading progress, highlights, and statistics are
-stored locally. Online manga sources, model downloads, and optional cloud sync require
-a connection.
+<h1 align="center">Folio</h1>
+
+<p align="center"><strong>A little room to get lost in a book.</strong></p>
+
+<p align="center">
+  An open-source, local-first book and manga reader for Android and Windows.<br>
+  Bring your own books. Keep your place, your passages, and your reading life together.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Kumar-Aditya3/Folio/releases/tag/v1.2.131"><strong>Download for Android</strong></a>
+  · <a href="docs/install.md">Installation & FAQ</a>
+  · <a href="#getting-started">Build for Windows</a>
+  · <a href="https://github.com/Kumar-Aditya3/Folio/issues/new/choose">Send feedback</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-137b90" alt="License: Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/Android-7.0%2B-137b90" alt="Android 7.0 and later">
+  <img src="https://img.shields.io/badge/Windows-10%20x64%2B-137b90" alt="Windows 10 x64 and later">
+  <img src="https://img.shields.io/badge/status-early%20development-c7aa71" alt="Early development">
+</p>
+
+## Your library, with room to breathe
+
+- **Read your way.** EPUBs, documents, and local manga, with adjustable type, themes,
+  highlights, notes, and bookmarks.
+- **Find the passage you remember.** Search indexed book text, or download the optional
+  on-device model for semantic search.
+- **Keep a reading rhythm.** Daily goals, reading activity, Android widgets, and optional
+  offline narration help you return to a book.
+- **Start locally.** Read your imported books without an account. Library data, progress,
+  highlights, and statistics are stored on your device. Cloud sync is optional and uses
+  your own Firebase project.
+
+<p align="center">
+  <img src="docs/assets/home-light.png" width="260" alt="Folio home interface preview with a revolving book shelf and Continue reading">
+  &nbsp;&nbsp;
+  <img src="docs/assets/library-light.png" width="260" alt="Folio library interface preview with a reading progress card and book grid">
+</p>
+
+<p align="center"><em>Interface previews rendered from Folio's Compose UI with fictional demo books and sample activity.</em></p>
+
+![Reader tools: saved passages, typography settings, manga page map, and reading flow](docs/assets/reader-tools.png)
+
+The Android download is an **early preview**. Windows currently builds from source.
+Online manga sources, model downloads, and optional cloud sync require a connection.
+See the [installation guide](docs/install.md) for download choices and known limits.
 
 ## Features
 
@@ -38,9 +84,9 @@ a connection.
 | Minimum | Android 7.0 (API 24) | Windows 10 x64 |
 | Built against | compileSdk 37 | JDK 17, JVM target 17 |
 
-Desktop is Windows-only in practice, not by preference: the reader's HTML surface uses JCEF and
+Desktop is Windows-only in practice: the reader's HTML surface uses JCEF and
 the build declares only `jcef-natives-windows-amd64`, while packaging targets MSI and EXE. The
-desktop code *compiles* on Linux and macOS — CI does exactly that — but it will not run there
+desktop compilation is checked on Linux in CI, but the app will not run on Linux or macOS
 without adding the matching JCEF natives.
 
 
@@ -88,6 +134,13 @@ sdk.dir=C:/Users/you/AppData/Local/Android/Sdk
 Android Studio writes this file for you when you open the project.
 
 ### Build and run
+
+Clone the project first (a shallow clone skips the large historical working set):
+
+```bash
+git clone --depth 1 https://github.com/Kumar-Aditya3/Folio.git
+cd Folio
+```
 
 ```bash
 # Android debug APK -> androidApp/build/outputs/apk/debug/
@@ -196,10 +249,13 @@ from Mihon's fork. See [`NOTICE`](NOTICE) for full details.
 
 ## Status
 
-A personal hobby project, developed in the open. It is usable day to day — that is what it was
-built for — but there is no release cadence, no support commitment, and APIs and schemas change
-whenever it suits the author. Issues and pull requests are welcome; slow or absent responses are
-likely.
+An independent project in active, early development. Releases may change behavior and data
+schemas; keep a backup of a library you care about. There is no fixed release cadence or
+guaranteed response time. Bug reports, platform testing, and focused pull requests are welcome.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for ways to help. If Folio is useful to you, a GitHub
+star or a link shared with another reader helps people discover it. You can watch releases
+on GitHub to hear about new builds.
 
 ## License
 

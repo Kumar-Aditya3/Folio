@@ -5,6 +5,8 @@ build commands, and optional sync configuration.
 
 ## Feature and maintenance guides
 
+- [Installation, downloads, and common questions](install.md)
+- [How to contribute](../CONTRIBUTING.md)
 - [Between chapters, the bookmark companion, and games](between-chapters.md)
 - [Android offline narration, voice packs, and installation](NARRATION.md)
 - [Android widgets, reading reminders, and notification behavior](widgets-and-notifications.md)

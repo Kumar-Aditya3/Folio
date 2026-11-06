@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible problem with Folio.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Please use a small public-domain or self-authored sample. Do not upload private library databases, credentials, or copyrighted books."
+  - type: input
+    id: version
+    attributes:
+      label: Folio version
+      placeholder: "For example: Android 1.2.131, or the source commit for a local build"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and device
+      placeholder: "Android version and device model, or Windows version"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the file format and reader mode if relevant.
+      placeholder: "1. Import a DRM-free EPUB…"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or a shareable sample
+      description: Optional. Remove personal information before attaching anything.
