@@ -14,8 +14,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -26,7 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,11 +69,9 @@ import com.folio.reader.ui.components.FigureScale
 import com.folio.reader.ui.components.FolioFigure
 import com.folio.reader.ui.components.FolioSectionCard
 import com.folio.reader.ui.components.FolioSlider
-import com.folio.reader.ui.components.folioBackdropSource
 import com.folio.reader.ui.components.folioRaised
 import com.folio.reader.ui.components.folioSunken
 import com.folio.reader.ui.components.rememberLegibleAccent
-import com.folio.reader.ui.components.folioPageWash
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
@@ -222,13 +217,7 @@ fun StatisticsTabContent(
         enter = EnterTransition.None,
         exit = fadeOut(handoffSpec),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = com.folio.reader.ui.theme.LocalFolioTopInset.current),
-        ) {
-            StatsSkeleton()
-        }
+        StatsSkeleton(onOpenExclusions = onOpenExclusions.takeIf { exclusions.isNotEmpty() })
     }
 
     AnimatedVisibility(
@@ -276,38 +265,11 @@ internal fun StatisticsContent(
     mangaBackend: com.folio.reader.manga.MangaBackend?,
     onMangaClick: (String) -> Unit,
 ) {
-    LazyColumn(
-        state = listState,
-        // §16: the backdrop the capsule and masthead blur, as on every other tab.
-        // Stats was the second screen that never registered one.
-        modifier = Modifier.fillMaxSize().folioBackdropSource().folioPageWash(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            top = com.folio.reader.ui.theme.LocalFolioTopInset.current,
-            bottom = FolioTokens.spaceMovement + LocalFolioBarInset.current
-        ),
-    ) {
+    StatsPage(state = listState) {
         // ── Rule 8 — an exclusion the user cannot see is invisible behavior ──
         if (exclusions.isNotEmpty() && onOpenExclusions != null) {
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onOpenExclusions)
-                        .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Some titles are excluded — review",
-                        style = FolioTheme.typography.bodySmall,
-                        color = FolioTheme.colors.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = FolioTheme.colors.onSurfaceVariant
-                    )
-                }
+                StatsExclusionsNotice(onOpenExclusions)
             }
         }
 
@@ -322,7 +284,7 @@ internal fun StatisticsContent(
                     StatsOpenSection { MangaStatsSection(mangaStats!!, stats.mostReadManga) }
                 }
             }
-            return@LazyColumn
+            return@StatsPage
         }
 
         // Open charts and ledgers carry the page; glass is reserved for two instruments.
@@ -394,6 +356,30 @@ internal fun StatisticsContent(
 // The overture — Stats' opening statement
 // ---------------------------------------------------------------------------
 
+/** Keep the known exclusion notice in place while the measurements load. */
+@Composable
+internal fun StatsExclusionsNotice(onOpenExclusions: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenExclusions)
+            .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space2),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Some titles are excluded — review",
+            style = FolioTheme.typography.bodySmall,
+            color = FolioTheme.colors.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = FolioTheme.colors.onSurfaceVariant
+        )
+    }
+}
+
 /** Shared page margins, without manufacturing a card for each statistic. */
 @Composable
 internal fun StatsOpenSection(content: @Composable ColumnScope.() -> Unit) {
@@ -456,26 +442,12 @@ private fun StatsOverture(
     settingsRepository: SettingsRepository?,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
-    BoxWithConstraints(Modifier.fillMaxWidth()
-        .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3)) {
-        val stacked = maxWidth < 330.dp || LocalDensity.current.fontScale > 1.2f
-        val edit: (() -> Unit)? = if (settingsRepository != null) ({ showEditDialog = true }) else null
-        if (stacked) Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
-            StatsWeekFigure(stats)
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
-                StatsReadingRhythm(stats, Modifier.weight(1f))
-                GoalDial(stats.todayMinutes, goalMinutes, edit)
-            }
-        } else Row(verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
-                StatsWeekFigure(stats)
-                StatsReadingRhythm(stats)
-            }
-            GoalDial(stats.todayMinutes, goalMinutes, edit)
-        }
-    }
+    val edit: (() -> Unit)? = if (settingsRepository != null) ({ showEditDialog = true }) else null
+    StatsOvertureLayout(
+        figure = { StatsWeekFigure(stats) },
+        rhythm = { StatsReadingRhythm(stats, it) },
+        goal = { GoalDial(stats.todayMinutes, goalMinutes, edit) },
+    )
 
     if (showEditDialog) {
         GoalEditDialog(

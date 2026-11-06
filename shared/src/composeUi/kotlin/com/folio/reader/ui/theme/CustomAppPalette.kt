@@ -43,6 +43,11 @@ fun CustomAppTheme.toFolioColors(): FolioColors {
         onBackground = ink,
         surface = sf,
         onSurface = ink,
+        // copy() retains explicit material fields from the fallback. Derive them
+        // from the user's planes so custom themes never inherit Classic's furniture.
+        paperSurface = lerp(sf, if (dark) bg else Color.White, .06f),
+        referenceSurface = lerp(sf, bg, .28f),
+        chromeSurface = lerp(sf, extreme, if (dark) .06f else .05f),
         // Planes separate by lightness, one step at a time — the same ladder the
         // built-in palettes use (§15 Rule 22).
         surfaceVariant = lerp(sf, extreme, if (dark) 0.06f else 0.05f),

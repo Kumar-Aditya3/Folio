@@ -28,6 +28,7 @@ import com.folio.reader.ui.theme.FolioAtmosphere
 import com.folio.reader.ui.theme.FolioAmbientTint
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.elements
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioAmbientTint
 import com.folio.reader.ui.theme.atmosphere
@@ -288,30 +289,15 @@ fun FolioCallout(
     }
 }
 
-/**
- * A place's own colour, keyed by the strings the app already uses to name it.
- *
- * Chrome is byte-identical across screens — one `primary` at one alpha on every
- * masthead and every capsule — which is most of why four different rooms read as
- * one room. The palette already carries four *semantic* accents, and the app uses
- * them consistently (§12.3): progress for what is being read, discovery for what
- * may be found, streak for what was done, annotation for what was marked. This is
- * the single table that spends them on destinations, keyed on a route id
- * ("library", "stats") or a segmented label ("Books", "Manga") so the nav capsule
- * and the masthead's own segment switch agree by construction rather than by two
- * hardcoded lists drifting.
- *
- * [fallback] is the theme's signature `primary`, so any key not in the table — the
- * reader's font-size switch, a theme card row's layout choice — keeps exactly the
- * colour it wore before, and only real destinations change.
+/** Navigation selection is one interaction role in a theme, independent of destination.
+ * Legacy arguments remain source-compatible; supporting accents belong to content cues.
  */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun folioDestinationAccent(
     key: String,
     fallback: Color = FolioTheme.colors.primary,
-): Color {
-    return fallback
-}
+): Color = FolioTheme.elements.action
 
 /**
  * The glass a bar is made of *in the room the reader is standing in*.

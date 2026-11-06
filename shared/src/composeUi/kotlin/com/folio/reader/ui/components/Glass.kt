@@ -43,6 +43,7 @@ import com.folio.reader.ui.theme.panelKnobScale
 import com.folio.reader.ui.theme.panelFill
 import com.folio.reader.ui.theme.LocalFolioSurfaceDepth
 import com.folio.reader.ui.theme.LocalFolioSurfaceFill
+import com.folio.reader.ui.theme.elements
 import dev.chrisbanes.haze.hazeSource
 
 /**
@@ -230,6 +231,7 @@ internal fun Modifier.folioReadingDockGlass(shape: RoundedCornerShape, accent: C
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
     val colors = com.folio.reader.ui.theme.FolioTheme.colors
+    val elements = com.folio.reader.ui.theme.FolioTheme.elements
     val canBlur = caps.blur && LocalGlassInFlowGlass.current && backdrop != null
     val fill = com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelKnobScale(if (canBlur) .38f else .94f)
     val sheen = com.folio.reader.ui.theme.folioSheenGain()
@@ -237,7 +239,7 @@ internal fun Modifier.folioReadingDockGlass(shape: RoundedCornerShape, accent: C
         clip(shape).folioGlassEffect(
             backdrop = requireNotNull(backdrop),
             backgroundColor = Color.Transparent,
-            planeTint = colors.surface.copy(alpha = fill),
+            planeTint = elements.selection.copy(alpha = fill),
             shape = shape,
             optical = true,
             backdropAlpha = .84f,
@@ -245,7 +247,7 @@ internal fun Modifier.folioReadingDockGlass(shape: RoundedCornerShape, accent: C
             lightGain = .7f * sheen,
         )
     } else clip(shape).drawWithCache {
-        onDrawBehind { drawRect(colors.surface.copy(alpha = fill)) }
+        onDrawBehind { drawRect(elements.selection.copy(alpha = fill)) }
     }
     return base.folioMaterialFinish(shape).drawWithCache {
         val outline = shape.createOutline(size, layoutDirection, this)
@@ -258,23 +260,24 @@ internal fun Modifier.folioReadingDockGlass(shape: RoundedCornerShape, accent: C
 
 /** A quiet data sheet: real backdrop diffusion, a defined edge, no ornamental bevel or shadow. */
 @Composable
-internal fun folioDataGlassPlane(fillAlpha: Float? = null, blurEnabled: Boolean = true): Color {
+internal fun folioDataGlassPlane(fillAlpha: Float? = null, blurEnabled: Boolean = true, fillColor: Color? = null): Color {
     val canBlur = blurEnabled && LocalGlassCapabilities.current.blur && LocalGlassInFlowGlass.current && LocalGlassBackdrop.current != null
-    if (fillAlpha == null && LocalFolioSurfaceDepth.current > 0) {
+    if (fillAlpha == null && fillColor == null && LocalFolioSurfaceDepth.current > 0) {
         val parent = LocalFolioSurfaceFill.current
             ?: folioReferenceColor().copy(alpha = com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelFill(canBlur))
         return parent.copy(alpha = parent.alpha * .25f)
     }
-    return folioReferenceColor().copy(alpha = fillAlpha?.coerceIn(0f, 1f)
+    return (fillColor ?: folioReferenceColor()).copy(alpha = fillAlpha?.coerceIn(0f, 1f)
         ?: com.folio.reader.ui.theme.FolioTheme.surfaceOpacity.panelFill(canBlur))
 }
 
 @Composable
 internal fun Modifier.folioDataGlass(shape: Shape = FolioMaterialShapes.reference, fillAlpha: Float? = null,
-    overlay: Boolean = false, blurEnabled: Boolean = true, clipEnabled: Boolean = true, drawRim: Boolean = true): Modifier {
+    overlay: Boolean = false, blurEnabled: Boolean = true, clipEnabled: Boolean = true, drawRim: Boolean = true,
+    fillColor: Color? = null): Modifier {
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
-    val plane = folioDataGlassPlane(fillAlpha, blurEnabled)
+    val plane = folioDataGlassPlane(fillAlpha, blurEnabled, fillColor)
     val ink = com.folio.reader.ui.theme.FolioTheme.colors.onSurface
     val embedded = LocalFolioSurfaceDepth.current > 0
     val clipped = if (clipEnabled) Modifier.clip(shape) else Modifier
@@ -304,7 +307,7 @@ internal fun Modifier.folioDataGlass(shape: Shape = FolioMaterialShapes.referenc
 internal fun Modifier.folioReaderGlass(shape: Shape, fillAlpha: Float, blurEnabled: Boolean = true): Modifier {
     val backdrop = LocalGlassBackdrop.current
     val caps = LocalGlassCapabilities.current
-    val plane = folioReferenceColor().copy(alpha = fillAlpha.coerceIn(0f, 1f))
+    val plane = com.folio.reader.ui.theme.FolioTheme.elements.chrome.copy(alpha = fillAlpha.coerceIn(0f, 1f))
     val ink = com.folio.reader.ui.theme.FolioTheme.colors.onSurface
     val sheen = folioSheenGain().coerceIn(0f, 1f)
     val base = if (blurEnabled && caps.blur && backdrop != null && plane.alpha < .999f) {

@@ -1,4 +1,4 @@
-﻿@file:OptIn(ExperimentalSharedTransitionApi::class)
+@file:OptIn(ExperimentalSharedTransitionApi::class)
 
 package com.folio.reader.ui.home
 
@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -58,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -195,12 +198,14 @@ fun HomeScreen(
     when {
         !loaded -> HomeSkeleton(Modifier.padding(top = topInset))
         !state.hasBooks && !state.hasManga ->
-            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
+            Column(Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInset).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 EmptyState(
                     icon = Icons.AutoMirrored.Outlined.MenuBook,
                     headline = "Your library is empty — import an EPUB to start.",
                     action = { Button(onClick = onImportClick) { Text("Import a book") } }
                 )
+                Spacer(Modifier.height(24.dp))
+                com.folio.reader.tumble.TumbleHomeEntry(state, Modifier.padding(horizontal = FolioTokens.gutter))
             }
         else -> {
             val listState = key(state.readingDesk) { rememberLazyListState() }
@@ -293,7 +298,7 @@ fun HomeScreen(
                 }
             )
             // §13.9: the collapse is reported *continuously*, not as a flip at the
-            // end. The bar cross-fades "Folio" out and the book's title in over the
+            // end. The bar brings the book's title in beside the mark over the
             // same 160dp the hero recedes across, so the two halves of the effect
             // move together instead of the title snapping in after the fact.
             LaunchedEffect(anchorItem?.id, heroTint, fallbackTint, collapse) {
@@ -406,7 +411,7 @@ fun HomeScreen(
                 val hasNewChapters = state.newChapters.isNotEmpty() && mangaBackend != null
                 val hasDiscover = state.discover.isNotEmpty() && mangaBackend != null
                 val finishedTitle = state.becauseFinishedTitle
-                val hasBecauseFinished = finishedTitle != null && state.candidates.size >= 2
+                val hasBecauseFinished = finishedTitle != null && state.candidates.isNotEmpty()
                 if (shelf.isNotEmpty()) {
                     item(key = "home-continue") {
                         ReadingDeskSection(listState, "home-continue", state.readingDesk, bottomInset) {
@@ -453,7 +458,7 @@ fun HomeScreen(
                         }
                     }
                 }
-                if (finishedTitle != null && state.candidates.size >= 2) {
+                if (finishedTitle != null && state.candidates.isNotEmpty()) {
                     item(key = "home-finished") {
                         ReadingDeskSection(listState, "home-finished", state.readingDesk, bottomInset) {
                         HomeContentSection(state.readingDesk, accent = FolioTheme.colors.accentAnnotation) {
@@ -588,6 +593,7 @@ private fun ReadingNowAnchor(
                 color = colors.onSurfaceVariant
             )
             OutlinedButton(onClick = onOpenLibrary) { Text("Open library") }
+            com.folio.reader.tumble.SableBookPresence("", "")
         }
         return
     }
@@ -775,12 +781,13 @@ private fun ReadingNowAnchor(
             // not as one hue.
             FolioEyebrow("Reading now", accent = colors.accentDiscovery)
             Spacer(Modifier.height(FolioTokens.space2))
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val anchorCoverWidth=(maxWidth*.5f-14.dp).coerceIn(112.dp,FolioTokens.coverAnchor)
             Row(verticalAlignment = Alignment.Top) {
-                // The plate overhangs the plane's leading edge — a negative offset,
-                // so the artwork sits in front of the surface holding it.
+                // Keep the cover within its reserved column, leaving the leading gutter
+                // for the bookmark at its left edge.
                 Box(
-                    modifier = Modifier
-                        .offset(x = -(FolioTokens.gutter - FolioTokens.space1))
+                    modifier = Modifier.width(anchorCoverWidth + 20.dp)
                         // The room is lit from this artwork: the lamp's centre is the
                         // cover's own, so the light reads as coming off the book.
                         .folioLampSource()
@@ -793,15 +800,16 @@ private fun ReadingNowAnchor(
                             sourceId = item.sourceId,
                             thumbnailUrl = item.thumbnailUrl,
                             coverPath = item.coverPath,
-                            width = FolioTokens.coverAnchor,
+                            width = anchorCoverWidth,
                             elevation = FolioTokens.elevationRaised,
+                            modifier = Modifier.align(Alignment.TopEnd).testTag("home-reading-cover"),
                         )
                     } else {
                         FolioCoverPlate(
                             coverPath = item.coverPath,
                             title = item.title,
                             author = item.subtitle,
-                            width = FolioTokens.coverAnchor,
+                            width = anchorCoverWidth,
                             halo = tint,
                             // Named, not defaulted: this is the only plate whose halo
                             // lands on a card face instead of in the room, and leaving
@@ -819,7 +827,7 @@ private fun ReadingNowAnchor(
                             // the cover keeps its own size inside shrinking bounds and
                             // snaps into place at the end — `contentSize` keeps the
                             // artwork the size of the box around it.
-                            modifier = Modifier.sharedElementOrNoop(
+                            modifier = Modifier.align(Alignment.TopEnd).testTag("home-reading-cover").sharedElementOrNoop(
                                 FolioSharedKeys.bookCover(item.id),
                                 placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                             ),
@@ -828,6 +836,8 @@ private fun ReadingNowAnchor(
                             suppressFallbackText = true,
                         )
                     }
+                    com.folio.reader.tumble.SableBookPresence(item.shelfKey(),item.title,
+                        Modifier.align(Alignment.TopStart).offset(x=(-14).dp,y=(-8).dp).size(width=68.dp,height=94.dp),characterOnly=true,cover=item.coverPath,author=item.subtitle)
                 }
                 Spacer(Modifier.width(FolioTokens.space2))
                 // Matched to the plate's height and distributed, so the title sits at
@@ -836,7 +846,7 @@ private fun ReadingNowAnchor(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .height(FolioTokens.coverAnchor * FolioTokens.coverAspect),
+                        .height(anchorCoverWidth * FolioTokens.coverAspect),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.spaceHair)) {
@@ -922,7 +932,9 @@ private fun ReadingNowAnchor(
                     )
                 }
             }
-            Spacer(Modifier.height(FolioTokens.space3))
+            }
+            com.folio.reader.tumble.SableNookLink(bookKey=item.shelfKey(),title=item.title,cover=item.coverPath,author=item.subtitle)
+            Spacer(Modifier.height(FolioTokens.space2))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Continue",

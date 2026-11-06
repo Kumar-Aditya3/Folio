@@ -111,6 +111,7 @@ internal fun ReadingDeskHero(
                     Text("Your next story is waiting", style = FolioTheme.typography.headlineMedium,
                         textAlign = TextAlign.Center, color = colors.onSurface)
                     Button(onClick = onOpenLibrary) { Text("Browse your library") }
+                    com.folio.reader.tumble.SableBookPresence("", "")
                 } else {
                     AnimatedContent(
                         targetState = item,
@@ -151,9 +152,12 @@ internal fun ReadingDeskHero(
                         accent = accent, progress = item.progress,
                         accessibilityLabel = "Continue reading ${item.title}")
                 }
-                TextButton(onClick = onExplore, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("Scroll to your library", style = FolioTheme.typography.labelMedium)
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                    TextButton(onClick = onExplore, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Your library", style = FolioTheme.typography.labelMedium)
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                    }
+                    if(item!=null) com.folio.reader.tumble.SableNookLink(bookKey=item.shelfKey(),title=item.title,cover=item.coverPath,author=item.subtitle)
                 }
             }
         }

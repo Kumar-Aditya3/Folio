@@ -91,7 +91,7 @@ internal fun BoxScope.ReaderSidePanels(
         showToc -> ReaderTool.Contents
         else -> null
     }
-    fun close() {
+    val close: () -> Unit = {
         onCloseListen()
         if (showToc) onToggleToc()
         if (showAnnotations) onToggleAnnotations()
@@ -105,22 +105,22 @@ internal fun BoxScope.ReaderSidePanels(
             ReaderTool.Echoes.takeIf { echoesEnabled }, ReaderTool.Listen.takeIf { listenContent != null }, ReaderTool.Settings),
         location = chapterLabel(currentChapterIndex, null),
         onSelect = onSelectTool,
-        onDismiss = ::close,
+        onDismiss = close,
         layout = layout,
     ) { tool ->
         when (tool) {
             ReaderTool.Listen -> listenContent?.invoke()
             ReaderTool.Contents -> if (contents != null) contents() else
-                TOCSidebar(tocEntries, currentChapterIndex, currentFraction, onChapterClick = onTocRowClick, onDismiss = ::close)
+                TOCSidebar(tocEntries, currentChapterIndex, currentFraction, onChapterClick = onTocRowClick, onDismiss = close)
             ReaderTool.Saved -> if (noteEditor != null) noteEditor() else
-                AnnotationsSidebar(bookmarks, highlights, notes, onDismiss = ::close,
+                AnnotationsSidebar(bookmarks, highlights, notes, onDismiss = close,
                     onRemoveBookmark = onRemoveBookmark, onRemoveHighlight = onRemoveHighlight,
                     onRemoveNote = onRemoveNote, onSetHighlightNote = onSetHighlightNote,
                     chapterLabel = chapterLabel, onJump = onJumpToAnnotation)
             ReaderTool.Search -> ReaderSearchPanel(searchQuery, onSearchQueryChange, searchResults,
-                searching, currentChapterIndex, onSearchResultClick, ::close)
-            ReaderTool.Echoes -> EchoesPanel(echoesState, ::close, onOpenEcho)
-            ReaderTool.Settings -> ReaderSettingsPanel(settings, onSettingsChange, ::close,
+                searching, currentChapterIndex, onSearchResultClick, close)
+            ReaderTool.Echoes -> EchoesPanel(echoesState, close, onOpenEcho)
+            ReaderTool.Settings -> ReaderSettingsPanel(settings, onSettingsChange, close,
                 onOpenFullSettings, scopeControlEnabled, overriddenFields, onWriteGlobal, onResetBook)
             ReaderTool.Pages -> Unit
         }

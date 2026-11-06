@@ -55,6 +55,12 @@ internal enum class ReaderTool(val label: String, val icon: ImageVector, val des
 }
 
 internal val LocalReaderWorkspace = compositionLocalOf { false }
+internal val LocalReaderWorkspaceFloating = compositionLocalOf { false }
+internal val LocalReaderWorkspaceOverlay = compositionLocalOf<ReaderWorkspaceOverlay?> { null }
+
+internal interface ReaderWorkspaceOverlay {
+    @Composable fun Show(visible: Boolean, onDismiss: () -> Unit, content: @Composable (ReaderWorkspaceLayout) -> Unit)
+}
 
 internal data class ReaderWorkspaceLayout(val dockWidth: Dp, val sheetHeight: Dp) {
     val docked: Boolean get() = dockWidth > 0.dp
@@ -88,10 +94,29 @@ internal fun ReaderWorkspace(
     layout: ReaderWorkspaceLayout? = null,
     content: @Composable (ReaderTool) -> Unit,
 ) {
+    val overlay = LocalReaderWorkspaceOverlay.current
+    if (overlay != null) {
+        var retained by remember { mutableStateOf(active) }
+        SideEffect { if (active != null) retained = active }
+        overlay.Show(active != null, onDismiss) { floatingLayout ->
+            CompositionLocalProvider(LocalReaderWorkspaceOverlay provides null) {
+                ReaderWorkspace(active ?: retained, tools, location, onSelect, onDismiss, floatingLayout, content)
+            }
+        }
+        return
+    }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val floating = LocalReaderWorkspaceFloating.current
     val close = { focus.clearFocus(); keyboard?.hide(); onDismiss() }
     FolioBackHandler(enabled = active != null, onBack = close)
+    val desktopChrome = LocalDesktopReaderChrome.current
+    if (floating && desktopChrome != null) {
+        if (active != null) CompositionLocalProvider(LocalReaderWorkspace provides true) {
+            desktopChrome.Workspace(active, tools, location, onSelect, close, content)
+        }
+        return
+    }
     val fade = rememberMotionAnimation<Float>(MotionKey.ReaderSidePanels)
     val slide = rememberMotionAnimation<IntOffset>(MotionKey.ReaderSidePanels)
     // Retain the outgoing content through dismissal, without keeping a dismissed pane interactive.
@@ -113,10 +138,10 @@ internal fun ReaderWorkspace(
         AnimatedVisibility(active != null,
             modifier = Modifier.align(if (geometry.docked) Alignment.CenterEnd else Alignment.BottomCenter)
                 .statusBarsPadding().navigationBarsPadding().padding(8.dp),
-            enter = (if (geometry.docked) slideInHorizontally(slide) { it / 3 }
+            enter = if (floating) EnterTransition.None else (if (geometry.docked) slideInHorizontally(slide) { it / 3 }
                 else if (active == ReaderTool.Contents || active == ReaderTool.Pages) slideInVertically(slide) { it / 4 }
                 else EnterTransition.None) + fadeIn(fade),
-            exit = (if (geometry.docked) slideOutHorizontally(slide) { it / 3 }
+            exit = if (floating) ExitTransition.None else (if (geometry.docked) slideOutHorizontally(slide) { it / 3 }
                 else if (last == ReaderTool.Contents || last == ReaderTool.Pages) slideOutVertically(slide) { it / 4 }
                 else ExitTransition.None) + fadeOut(fade)) {
             val selected = active ?: last
@@ -128,7 +153,7 @@ internal fun ReaderWorkspace(
                         while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
                     }
                 }
-                .folioSheetDragToDismiss(close)
+                .then(if (floating) Modifier else Modifier.folioSheetDragToDismiss(close))
                 .folioReaderGlass(FolioSoftShape(24.dp), readerWorkspaceFill(FolioTheme.readerPanelVeilAlpha))) {
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {

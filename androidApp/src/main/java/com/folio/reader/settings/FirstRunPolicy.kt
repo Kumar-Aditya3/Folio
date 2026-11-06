@@ -1,7 +1,7 @@
 package com.folio.reader.settings
 
 enum class FirstRunStep(val title: String, val introduction: String) {
-    Welcome("Welcome to Folio", "Make a little room for reading. A few choices will shape your library, your page and the features you use."),
+    Welcome("Welcome", "Make a little room for reading. A few choices will shape your library, your page and the features you use."),
     Appearance("Make yourself at home", "Choose the light you like to read in. Your app and reading page will use the same theme family."),
     Echoes("Find echoes between books", "Discover related passages and search by meaning, privately on your device. This optional feature uses a downloadable model."),
     Narration("Give your books a voice", "Choose an in-reader text-to-speech model and voice. Download a pack now, or add one later in Settings → Narration."),

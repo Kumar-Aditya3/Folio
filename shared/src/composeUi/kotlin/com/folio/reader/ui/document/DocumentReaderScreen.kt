@@ -122,6 +122,7 @@ fun DocumentReaderScreen(
     morphDocumentId: String? = null
 ) {
     val state by viewModel.state.collectAsState()
+    com.folio.reader.tumble.PicaReadingContext(state.document?.title.orEmpty())
     var resetZoomKey by remember { mutableIntStateOf(0) }
     var seekRequest by remember { mutableStateOf<Pair<Float, Long>?>(null) }
     var activeTool by remember(state.document?.id) { mutableStateOf<ReaderTool?>(null) }

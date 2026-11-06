@@ -79,7 +79,7 @@ class WidgetRefreshWorker(context: Context, params: WorkerParameters) : Coroutin
             val compact = width < 240 || height < 176
             val largeText = context.resources.configuration.fontScale > 1.15f
             views.setTextViewText(R.id.widget_eyebrow, when(kind) {
-                FolioWidgetKind.Reading -> "FOLIO"
+                FolioWidgetKind.Reading -> ""
                 FolioWidgetKind.Goal -> "DAILY RHYTHM"
                 FolioWidgetKind.Audiobook -> "AUDIOBOOK"
             })
@@ -100,6 +100,7 @@ class WidgetRefreshWorker(context: Context, params: WorkerParameters) : Coroutin
                     views.setOnClickPendingIntent(R.id.widget_root, ReadingSurfaceIntents.pending(context, "stats"))
                 }
                 FolioWidgetKind.Reading -> {
+                    views.setInt(R.id.widget_brand, "setColorFilter", snapshot.accent)
                     val entry = snapshot.entry
                     views.setTextViewText(R.id.widget_title, entry?.title ?: "Your next page awaits")
                     views.setTextViewText(R.id.widget_subtitle, entry?.subtitle ?: "A little time, a good story.")

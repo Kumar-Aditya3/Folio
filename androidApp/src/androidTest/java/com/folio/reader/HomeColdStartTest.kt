@@ -13,10 +13,10 @@ class HomeColdStartTest {
         fun assertHome() {
             compose.waitUntil(30_000) {
                 runCatching {
-                    compose.onAllNodesWithText("Folio", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithContentDescription("Folio", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
                 }.getOrDefault(false)
             }
-            compose.onNodeWithText("Folio", useUnmergedTree = true).assertIsDisplayed()
+            compose.onAllNodesWithContentDescription("Folio", useUnmergedTree = true).onFirst().assertIsDisplayed()
         }
         assertHome()
         compose.activityRule.scenario.recreate()

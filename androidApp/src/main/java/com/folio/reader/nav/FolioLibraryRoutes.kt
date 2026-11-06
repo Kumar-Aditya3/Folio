@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -36,6 +37,7 @@ import androidx.compose.material3.TextButton
 import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.mangaId
 import com.folio.reader.ui.components.FolioTopBar
+import com.folio.reader.ui.components.FolioLogoMark
 import com.folio.reader.ui.components.rememberCoverAccent
 import com.folio.reader.ui.components.rememberCoverLight
 import com.folio.reader.ui.components.rememberFolioHeaderState
@@ -66,7 +68,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // §13.9 hero collapse: Home reports the fraction continuously, plus the hero title.
-    // The masthead cross-fades the wordmark out and the book's title in across the same
+    // The masthead brings the book's title in beside the mark across the same
     // scroll — so the card does not dissolve into a bar that is still saying something
     // else. The fraction stays offset-derived, as §13.9 requires, but it is *stored* in
     // the same state the other mastheads use: that is what lets Home's bar come back
@@ -81,25 +83,14 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
         Box(modifier = Modifier.align(Alignment.TopCenter).zIndex(1f)) {
             val fraction = heroHeader.collapse
             FolioTopBar(
-                title = "Folio",
+                title = "Home",
                 collapse = fraction,
-                // No hairline rule under the masthead on Home — it read as a stray bar
-                // directly below the "Folio" wordmark.
                 bottomRule = false,
+                navigationIcon = {
+                    FolioLogoMark(Modifier.size(32.dp))
+                },
                 titleContent = {
                     Box {
-                        // The masthead carries the product name on Home and the screen's
-                        // name everywhere else. It used to be inverted — "Home" here and
-                        // "Folio" over the library — which read as two different apps.
-                        Text(
-                            text = "Folio",
-                            style = FolioTheme.typography.headlineMedium,
-                            color = FolioTheme.colors.onSurface,
-                            maxLines = 1,
-                            modifier = Modifier.graphicsLayer {
-                                alpha = (1f - fraction * 1.7f).coerceIn(0f, 1f)
-                            },
-                        )
                         val migrated = heroTitle
                         if (migrated != null) {
                             Text(
@@ -164,6 +155,7 @@ fun HomeRoute(navModel: FolioNavModelImpl) {
                                         url = item.url,
                                         title = item.title,
                                         thumbnailUrl = item.thumbnailUrl,
+                                        sourceMemo = item.sourceMemo,
                                         inLibrary = false
                                     )
                                 )

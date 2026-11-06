@@ -47,7 +47,8 @@ internal fun DiscoverCard(items: List<MangaDiscoverItem>, backend: MangaBackend,
         lead.sourceId, lead.thumbnailUrl), Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
             FolioEyebrow("Discover", accent = FolioTheme.colors.accentDiscovery)
-            Text("New from your sources", style = FolioTheme.typography.titleMedium,
+            Text(if (items.any { it.personalized })
+                "Based on your reading" else "From your selected sources", style = FolioTheme.typography.titleMedium,
                 color = FolioTheme.colors.onSurface)
             LazyRow(state = scroll, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 itemsIndexed(items, key = { _, item -> "${item.sourceId}:${item.url}" }) { index, item ->
@@ -62,6 +63,8 @@ internal fun DiscoverCard(items: List<MangaDiscoverItem>, backend: MangaBackend,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(item.sourceName, style = FolioTheme.typography.labelSmall,
                             color = FolioTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (item.reason.isNotBlank()) Text(item.reason, style = FolioTheme.typography.labelSmall,
+                            color = FolioTheme.colors.accentDiscovery, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

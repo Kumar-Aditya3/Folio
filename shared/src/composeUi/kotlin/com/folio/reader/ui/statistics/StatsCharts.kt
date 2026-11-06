@@ -545,27 +545,12 @@ private const val HEATMAP_EMPTY_ALPHA = 0.28f
  */
 private const val HEATMAP_TOP_BAND_MIN_CONTRAST = 1.5
 
-/**
- * The year's heat scale: four accent colours, one per [intensityFor] band.
- *
- * It used to be one hue at four alphas, which stops working as soon as the hue is
- * not the palette's own: alpha alone cannot carry intensity over a dark base,
- * because a 0.4 copy of a near-black umber *is* the well it sits in. The bands now
- * travel in hue too, from the quiet `accentProgress` role toward the light of
- * whatever is being read — `accentStreak` in an unlit tree, which is desktop, every
- * preview and every test — so the book sits at the top of the reader's own year
- * instead of in the background of it.
- *
- * [container] is the raised fill the grid is painted on. Only the opaque top band
- * needs a guard, because only its colour is not the palette's own: [legibleOn]
- * nudges a hue that fails the floor toward `accentStreak` in tenths, hue preserved,
- * and returns it untouched once it clears.
- */
+/** One quantity uses a sequential progress-hue ramp, independent of artwork and streaks. */
 @Composable
 private fun heatmapAccentRamp(container: Color): List<Color> {
     val colors = FolioTheme.colors
-    val from = colors.accentProgress
-    val to = legibleOn(colors.accentStreak, container, colors.accentProgress, HEATMAP_TOP_BAND_MIN_CONTRAST)
+    val to = legibleOn(colors.progress, container, colors.onSurface, HEATMAP_TOP_BAND_MIN_CONTRAST)
+    val from = lerp(container, to, .55f)
     return remember(from, to) { HEATMAP_BAND_STOPS.map { lerp(from, to, it) } }
 }
 

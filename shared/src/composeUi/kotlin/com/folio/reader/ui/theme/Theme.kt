@@ -149,38 +149,13 @@ data class FolioColors(
     val navAccent: Color = accentProgress,
     val mastheadAccent: Color = tertiaryAccent,
     val readerOverlayAccent: Color = primary,
-    // Navigation capsule selected-item accent.
-    //
-    // **Authored on all 18 art-directed faces, and deliberately NOT read by the
-    // nav capsule — do not "fix" this by wiring it into the selected pill.**
-    //
-    // `folioDestinationAccent` (`FolioEditorial.kt`) is the single table that maps
-    // a route or segment label to one of the four semantic accents — progress for
-    // Home, discovery for Library, streak for Stats, annotation for More — and both
-    // the capsule (`FolioNavShell`) and the masthead segment switch (`FolioChrome`)
-    // read it, so a tab and the control inside it cannot disagree. The *selected
-    // colour is therefore a function of the destination, not a palette role*, which
-    // is exactly the fix for the old "one `primary` on every screen" chrome.
-    //
-    // Measured before leaving it alone (`.workbuddy-ai/tmp/nav_role_audit.py`,
-    // `nav_marker_read.py`, `nav_fallback_read.py`):
-    //  - this role sits **0.0-4.8 degrees** from an already-consumed accent on
-    //    16/18 faces (an exact duplicate of `primaryAccent` on mintcoral-L), i.e.
-    //    it is the palette's signature hue at *display* lightness — same hue,
-    //    brighter — while the four accents are AA-fitted for *ink*.
-    //  - as a 20% pill tint it does read stronger than the *dimmest* destination
-    //    accent on 18/18 faces, but that is by construction (one fixed colour vs
-    //    the min of four), and it would flatten the per-room differentiation the
-    //    capsule deliberately builds. The marker already clears ~10-16 dE over the
-    //    plate *and* carries two non-colour signals (the label appears, the glyph
-    //    goes filled), so there is no defect to repair.
-    //  - as the `folioDestinationAccent` fallback (the Light/Dark toggle, the
-    //    reader's setting rows) it is a **wash**: stronger on 9/18 faces, weaker on
-    //    9/18, mostly within 1-3 dE — churn, not an improvement.
-    //
-    // It is kept because the §26 role set is a contract the palettes must satisfy,
-    // not because anything spends it. A real consumer would be a navigation surface
-    // that is *not* one of the four destinations.
+    // Material identity is independent of the route/section accent. Custom palettes
+    // inherit their existing planes; built-in faces author these three explicitly.
+    val paperSurface: Color = surface,
+    val referenceSurface: Color = surfaceVariant,
+    val chromeSurface: Color = navigationSurface,
+    // Retained palette role for existing consumers. Navigation selection itself
+    // uses the theme-wide action-derived FolioTheme.elements.navigationSelection.
     val navigationSelected: Color = accentProgress,
 )
 
@@ -219,32 +194,31 @@ data class FolioColors(
 // The AppPalette ids below are unchanged, so a persisted `appThemeId` still lands on its
 // own theme; only the colours behind them are new.
 
-// Gallery / Dark -- the Classic pack: white-cube plaster, strictly monochrome. The art
-// supplies the only colour, so the room never does.
+// Classic / Charcoal -- neutral plaster and steel, with oxblood/amber interaction accents.
 val LightFolioColors = folioArtDirection("gallery", light = true)
 val DarkFolioColors = folioArtDirection("gallery", light = false)
 
-// Manuscript / Espresso -- the Paper pack: vellum, rubric sienna, iron-gall indigo, gold leaf.
+// Paper / Ember -- vellum/indigo and espresso/ice blue, with rubric and amber support.
 private val WarmFolioColors = folioArtDirection("manuscript", light = true)
 private val EspressoFolioColors = folioArtDirection("manuscript", light = false)
 
-// Forest / Midnight -- sage ground and conifer ink; at night teal-black with mint frost.
+// Forest / Midnight -- moss and pine grounds with opposing rust/apricot interaction.
 val CoolFolioColors = folioArtDirection("forest", light = true)
 val TealFolioColors = folioArtDirection("forest", light = false)
 
-// Ocean / Abyss -- pale aqua over navy ink; at depth, bioluminescent cyan only.
+// Ocean / Abyss -- cyan sea glass with opposing raspberry/coral-pink interaction.
 val CyanFolioColors = folioArtDirection("ocean", light = true)
 val DeepSeaFolioColors = folioArtDirection("ocean", light = false)
 
-// Editorial / Crimson -- bone white with warm brown-black ink; at night burgundy and rose-gold.
+// Editorial / Crimson -- chalk/oxblood foundations with petrol/mint interaction.
 val BoneFolioColors = folioArtDirection("editorial", light = true)
 val BrownFolioColors = folioArtDirection("editorial", light = false)
 
-// Blush / Vaporwave -- baby pink with rose ink; at night hot magenta and electric lavender.
+// Blush / Vaporwave -- rose and orchid grounds with opposing teal/aqua interaction.
 val PinkFolioColors = folioArtDirection("blush", light = true)
 val MagentaFolioColors = folioArtDirection("blush", light = false)
 
-// Acid Rave / Synthwave -- lime chartreuse with acid green; at night a black canvas, multi-neon.
+// Acid Rave / Synthwave -- chartreuse and lime-black grounds with magenta/neon-pink interaction.
 val LimeFolioColors = folioArtDirection("acid", light = true)
 val NeonFolioColors = folioArtDirection("acid", light = false)
 
@@ -252,6 +226,12 @@ val PorcelainFolioColors = folioArtDirection("ceramic", light = true)
 val CobaltFolioColors = folioArtDirection("ceramic", light = false)
 val LinenFolioColors = folioArtDirection("copper", light = true)
 val CopperFolioColors = folioArtDirection("copper", light = false)
+val RisographFolioColors = folioArtDirection("risograph", light = true)
+val AfterprintFolioColors = folioArtDirection("risograph", light = false)
+val CeladonFolioColors = folioArtDirection("celadon", light = true)
+val AmethystFolioColors = folioArtDirection("celadon", light = false)
+val CitrineFolioColors = folioArtDirection("mineral", light = true)
+val BlacklightFolioColors = folioArtDirection("mineral", light = false)
 
 
 enum class AppPalette(
@@ -277,7 +257,13 @@ enum class AppPalette(
     PORCELAIN("porcelain", "Porcelain", false, PorcelainFolioColors),
     COBALT("cobalt", "Cobalt", true, CobaltFolioColors),
     LINEN("linen", "Linen", false, LinenFolioColors),
-    COPPER("copper", "Copper", true, CopperFolioColors);
+    COPPER("copper", "Copper", true, CopperFolioColors),
+    RISOGRAPH("risograph", "Risograph", false, RisographFolioColors),
+    AFTERPRINT("afterprint", "Afterprint", true, AfterprintFolioColors),
+    CELADON("celadon", "Celadon", false, CeladonFolioColors),
+    AMETHYST("amethyst", "Amethyst", true, AmethystFolioColors),
+    CITRINE("citrineglass", "Citrine", false, CitrineFolioColors),
+    BLACKLIGHT("blacklight", "Blacklight", true, BlacklightFolioColors);
 
 
     companion object {
@@ -383,15 +369,18 @@ data class ThemePack(
     fun readerThemeId(dark: Boolean): String = if (dark) darkReaderThemeId else lightReaderThemeId
 
     val material: String get() = when (id) {
-        "classic" -> "Silver · etched glass"
-        "paper" -> "Vellum · amber light"
-        "forest" -> "Mineral · smoked glass"
-        "ocean" -> "Sea glass · blue enamel"
-        "editorial" -> "Garnet · verdigris"
-        "blush" -> "Opal · rose light"
-        "acid" -> "Graphite · electric lime"
-        "ceramic" -> "Porcelain · cobalt glaze"
-        "copper" -> "Linen · brushed copper"
+        "classic" -> "Steel · oxblood · amber"
+        "paper" -> "Vellum · indigo · ice blue"
+        "forest" -> "Pine · rust · cornflower"
+        "ocean" -> "Sea glass · raspberry"
+        "editorial" -> "Oxblood · petrol · chalk"
+        "blush" -> "Rose · teal · orchid"
+        "acid" -> "Chartreuse · magenta · blue"
+        "ceramic" -> "Cobalt · saffron · mint"
+        "copper" -> "Verdigris · copper · flax"
+        "risograph" -> "Prussian blue · vermilion"
+        "celadon" -> "Jade · plum · rose"
+        "mineral" -> "Citrine · ultraviolet"
         else -> "Custom material"
     }
 
@@ -419,6 +408,10 @@ data class ThemePack(
             ThemePack("acid", "Acid Rave", "Synthwave", "lime", "neon", "acid", "synthwave"),
             ThemePack("ceramic", "Porcelain", "Cobalt", "porcelain", "cobalt", "porcelain", "cobalt"),
             ThemePack("copper", "Linen", "Copper", "linen", "copper", "linen", "copper"),
+            ThemePack("risograph", "Risograph", "Afterprint", "risograph", "afterprint", "risograph", "afterprint"),
+            ThemePack("celadon", "Celadon", "Amethyst", "celadon", "amethyst", "celadon", "amethyst"),
+            // Keep the retired "citrine" palette alias pointing at Paper.
+            ThemePack("mineral", "Citrine", "Blacklight", "citrineglass", "blacklight", "citrineglass", "blacklight"),
         )
     }
 }
@@ -851,17 +844,7 @@ object FolioTheme {
         // root, the reader's re-themed chrome and the Appearance previews all
         // inherit the same derivation. The raw palettes stay exactly as
         // authored and as tested; only what the eye sees moves.
-        val ink = remember(colors) { deepenInkRoles(colors).withLegibleAccents() }
-        // The vibrancy lever (Muted ↔ Vivid) decides the planes here as well, so the Material
-        // bridge agrees with the atmosphere the screens read. See LocalFolioVibrancy.
-        val vibe = vibrancy.level
-        // The atmosphere is derived here as well as by `FolioTheme.atmosphere`, because the
-        // Material bridge below needs the app's *planes* and cannot wait for a local that is
-        // provided downstream of it. Pure and remembered, and the plane roles do not depend on
-        // the pack's light (which only sets the field's gradient axis — see atmosphereFor), so
-        // the default light is the right one to derive with: what comes out is the same
-        // veilFill/panelFill the screens read.
-        val planes = remember(ink, vibe) { atmosphereFor(ink, vibrancy = vibe) }
+        val ink = remember(colors) { folioRenderedColors(colors) }
         CompositionLocalProvider(
             LocalFolioColors provides ink,
             LocalFolioTypography provides typography,
@@ -882,7 +865,7 @@ object FolioTheme {
             // Remembered so the app-root theme (which recomposes every minute on the daylight tick)
             // doesn't re-allocate the full ColorScheme (30+ colors), Typography (15 styles) and
             // Shapes each pass.
-            val materialColorScheme = remember(ink, planes) { ink.toColorScheme(planes) }
+            val materialColorScheme = remember(ink) { ink.toColorScheme() }
             val materialTypography = remember(typography) { typography.toTypography() }
             val materialShapes = remember { folioMaterialShapes() }
             androidx.compose.material3.MaterialTheme(
@@ -970,12 +953,13 @@ object FolioTheme {
  * particular is dual-use, so accent-tinted text drawn from primary stays the
  * call site's job via [rememberLegibleAccent], not this guard's.
  */
-private fun FolioColors.withLegibleAccents(): FolioColors = copy(
-    accentProgress = legibleOn(accentProgress, surface, onSurface),
-    accentStreak = legibleOn(accentStreak, surface, onSurface),
-    accentDiscovery = legibleOn(accentDiscovery, surface, onSurface),
-    accentAnnotation = legibleOn(accentAnnotation, surface, onSurface),
-)
+private fun FolioColors.withLegibleAccents(): FolioColors {
+    fun fit(color: Color): Color = listOf(surface, paperSurface, referenceSurface).fold(color) { ink, fill ->
+        legibleOn(ink, fill, onSurface)
+    }
+    return copy(accentProgress = fit(accentProgress), accentStreak = fit(accentStreak),
+        accentDiscovery = fit(accentDiscovery), accentAnnotation = fit(accentAnnotation))
+}
 
 /**
  * The colours a palette **actually renders as** — the authored palette after the same
@@ -983,8 +967,11 @@ private fun FolioColors.withLegibleAccents(): FolioColors = copy(
  * preview that wants to match what the app will show (the Appearance theme cards) must read this,
  * not the raw [AppPalette.colors], or the swatch and the running app disagree.
  */
-fun folioRenderedColors(colors: FolioColors): FolioColors =
-    deepenInkRoles(colors).withLegibleAccents()
+fun folioRenderedColors(colors: FolioColors): FolioColors {
+    val deepened = deepenInkRoles(colors)
+    val elements = elementColorsFor(deepened)
+    return deepened.copy(onSurface = elements.ink, onSurfaceVariant = elements.mutedInk).withLegibleAccents()
+}
 
 /**
  * The Material layer's shape scale, built from Folio's own radii.
@@ -1010,43 +997,11 @@ private fun folioMaterialShapes(): Shapes = Shapes(
     extraLarge = RoundedCornerShape(FolioTokens.radiusHero),
 )
 
-/**
- * Maps the palette into Material's `ColorScheme`, with [planes] supplying the tonal
- * container ladder.
- *
- * The ladder is the whole reason this takes an atmosphere. Material's surface roles are
- * what every un-styled M3 component paints itself with — `DropdownMenu` takes
- * `surfaceContainer`, `AlertDialog` takes `surfaceContainerHigh`, `Card` and
- * `ModalBottomSheet` take `surfaceContainerLow` — and all six of them used to be
- * assigned the single palette `surface` role. On a dark face that is ~0.21 Oklab L at
- * ~0.012 chroma, painted at **alpha 1.0**, inside a `Popup`/`Dialog` window where
- * `LocalGlassBackdrop` is null and no `folioField` sits behind it. The result is a flat
- * black slab: every menu and every dialog in the app read as a different product from
- * the screen that opened it, which is exactly the complaint.
- *
- * [FolioAtmosphere] already solves this problem for Folio's own surfaces, and
- * [FolioAtmosphere.veilFill]'s own doc says what it is for in as many words — "reader
- * controls can sit directly above a page rendered by a native surface… make the veil
- * effectively opaque so page text never competes with menu text". A menu plate *is* a
- * veil. So the ladder is made of the planes the app is made of:
- *
- *  - `surfaceContainer` / `surfaceContainerHigh` → [FolioAtmosphere.veilFill], the glass
- *    the reader's own menus and the app's bars are built from (≈0.30 Oklab L, chroma
- *    0.22, alpha 0.97 on a dark face — a plane with the theme's colour in it, instead of
- *    the near-black with the hue squeezed out);
- *  - `surfaceContainerLow` → [FolioAtmosphere.panelFill], the resting grouping plane,
- *    for the one tier below a floating menu (cards, sheets);
- *  - `surfaceContainerLowest`, `surfaceDim`, `surfaceBright` and
- *    `surfaceContainerHighest` keep the authored palette roles, because those are read
- *    as *inputs* (the filled text field's container, the switch's unchecked track) where
- *    the authored contrast against `onSurface` has been tested and should not move.
- *
- * Everything else is the palette's own, unchanged.
- */
-private fun FolioColors.toColorScheme(planes: FolioAtmosphere): androidx.compose.material3.ColorScheme {
+/** Standard Material components use the same stable element planes as Folio's own controls. */
+private fun FolioColors.toColorScheme(): androidx.compose.material3.ColorScheme {
     return androidx.compose.material3.ColorScheme(
         primary = primary,
-        onPrimary = onPrimary,
+        onPrimary = elementColorsFor(this).onAction,
         primaryContainer = primaryContainer,
         onPrimaryContainer = onPrimaryContainer,
         secondary = secondary,
@@ -1076,21 +1031,11 @@ private fun FolioColors.toColorScheme(planes: FolioAtmosphere): androidx.compose
         surfaceTint = primary,
         surfaceDim = surface,
         surfaceBright = surface,
-        // Floating Material chrome — menus — is made of the app's glass.
-        //
-        // P5: these carry their *own* alpha rather than `veilFill`'s. `veilFill` is 0.97 by design
-        // and the reader-menu guard reads the atmosphere for exactly that, but Material3 renders a
-        // `DropdownMenu` in a **separate window**, where `LocalGlassBackdrop` cannot reach it — so
-        // the 0.97 lid is all the reader ever sees, and a menu reads as an opaque box. Nudging the
-        // ladder down to 0.82/0.86 lets the room's colour through even in a window that cannot
-        // blur. `atmos.veilFill` itself is untouched, so `veilStaysOpaqueEnoughForReaderMenus`
-        // stays green and the *reader's own* menus keep their tested opacity.
-        surfaceContainer = planes.veilFill.copy(alpha = 0.82f),
-        // Dialogs. Same material: a dialog is a menu that took the whole screen.
-        surfaceContainerHigh = planes.veilFill.copy(alpha = 0.86f),
-        // The resting tier under them: Material cards and bottom sheets.
-        surfaceContainerLow = planes.panelFill.copy(alpha = 0.88f),
-        surfaceContainerLowest = surface,
+        // Popups are opaque: they may live above native reading surfaces that cannot be sampled.
+        surfaceContainer = chromeSurface,
+        surfaceContainerHigh = chromeSurface,
+        surfaceContainerLow = referenceSurface,
+        surfaceContainerLowest = paperSurface,
         surfaceContainerHighest = surfaceContainerHighest
     )
 }

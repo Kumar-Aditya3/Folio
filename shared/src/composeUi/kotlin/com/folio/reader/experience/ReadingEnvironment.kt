@@ -7,7 +7,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class ReadingEnvironment(val settings: SettingsRepository, val books: BookRepository, val highlights: HighlightRepository,
-    val notes: NoteRepository, val sessions: ReadingSessionRepository, val scope: kotlinx.coroutines.CoroutineScope) {
+    val notes: NoteRepository, val sessions: ReadingSessionRepository, val scope: kotlinx.coroutines.CoroutineScope,
+    val mangaStats: com.folio.reader.manga.MangaStatisticsRepository? = null) {
+    val tumble = com.folio.reader.tumble.TumbleRepository(settings)
+    val pica = com.folio.reader.tumble.PicaSession()
     val repository = ReadingExperienceRepository(settings)
     private var cachedSound: Pair<String, SoundscapeController>? = null
     fun soundFor(bookId: String, create: () -> SoundscapeController): SoundscapeController {
@@ -38,10 +41,12 @@ val LocalReadingEnvironment = staticCompositionLocalOf<ReadingEnvironment?> { nu
 
 @Composable
 fun ReadingEnvironmentProvider(settings: SettingsRepository, books: BookRepository, highlights: HighlightRepository,
-    notes: NoteRepository, sessions: ReadingSessionRepository, content: @Composable () -> Unit) {
+    notes: NoteRepository, sessions: ReadingSessionRepository,
+    mangaStats: com.folio.reader.manga.MangaStatisticsRepository? = null, content: @Composable () -> Unit) {
     val scope = rememberCoroutineScope()
-    val environment = remember(settings) { ReadingEnvironment(settings, books, highlights, notes, sessions, scope) }
-    DisposableEffect(environment) { onDispose { environment.closeAudio() } }
+    val environment = remember(settings) { ReadingEnvironment(settings, books, highlights, notes, sessions, scope, mangaStats) }
+    DisposableEffect(environment) { onDispose { environment.closeAudio(); com.folio.reader.ui.reader.ReaderActivityInterruption.arcadeVisible(false) } }
+    SideEffect { com.folio.reader.ui.reader.ReaderActivityInterruption.arcadeVisible(environment.pica.open) }
     LaunchedEffect(environment) {
         try { environment.repository.refresh() } catch (e: Exception) { environment.error = "Could not load reading preferences." }
         // Library changes also remove dependent companion data. Existing note/quote rows stay owned by their repositories.
@@ -54,7 +59,14 @@ fun ReadingEnvironmentProvider(settings: SettingsRepository, books: BookReposito
     }
     LaunchedEffect(environment.repository) { environment.repository.observe() }
     CompositionLocalProvider(LocalReadingEnvironment provides environment) {
-        content()
+        val baseMotion=com.folio.reader.ui.theme.LocalFolioMotionAllowed.current
+        val baseVisible=com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+        CompositionLocalProvider(com.folio.reader.tumble.LocalPicaMotionActive provides !environment.pica.open,
+            com.folio.reader.tumble.LocalSableBaseMotion provides baseMotion,
+            com.folio.reader.tumble.LocalSableBaseVisible provides baseVisible,
+            com.folio.reader.ui.theme.LocalFolioMotionAllowed provides if(environment.pica.open) false else baseMotion,
+            com.folio.reader.ui.theme.LocalFolioWindowVisible provides (baseVisible && !environment.pica.open)) { content() }
+        com.folio.reader.tumble.PicaHost(environment)
         ReadingExportHost(environment)
     }
 }

@@ -71,7 +71,7 @@ import com.folio.reader.ui.theme.LocalFolioAmbient
 import com.folio.reader.ui.theme.LocalFolioDaylight
 import com.folio.reader.ui.theme.LocalFolioGuillocheActive
 import com.folio.reader.ui.theme.LocalFolioPackId
-import com.folio.reader.ui.theme.LocalFolioSectionAccent
+import com.folio.reader.ui.theme.elements
 import com.folio.reader.ui.theme.LocalFolioSurfaceDepth
 import com.folio.reader.ui.theme.ambientPoolDrift
 import com.folio.reader.ui.theme.atmosphere
@@ -314,7 +314,7 @@ private const val FOLIO_EMBEDDED_FILL = 0.25f
 fun Modifier.folioRaised(
     shape: Shape = FolioShapes.card,
     elevation: Dp = FolioTokens.elevationRaised,
-    accent: Color? = LocalFolioSectionAccent.current,
+    accent: Color? = null,
     fill: Color? = null,
     daylight: FolioDaylight = LocalFolioDaylight.current,
     weight: com.folio.reader.ui.theme.FolioGlassWeight =
@@ -601,113 +601,15 @@ fun Modifier.folioRaised(
         .clip(shape)
 }
 
-/**
- * The plane a resting surface is painted with — [folioPanel], the shelf plate, and every container
- * that wraps content in a panel.
- *
- * One definition on purpose. A container has to be able to publish *the exact plane it is made of*
- * so the surfaces inside it can inherit it (see [LocalFolioSurfaceFill]), and a container that
- * recomputed it would be a second copy of this arithmetic waiting to drift from the first.
- */
+/** Resting groups share the reference material regardless of their section heading. */
 @Composable
-internal fun folioPanelPlane(accent: Color?): Color {
-    val atmos = FolioTheme.atmosphere
-    // §20: the flat panel family follows the Cards and Sheets knob too — identity at the
-    // knob's rest point, so the resting panel is byte-for-byte and only a moved slider
-    // changes anything. See [com.folio.reader.ui.theme.panelKnobScale].
-    val planeAlpha = FolioTheme.surfaceOpacity.panelKnobScale(atmos.panelFill.alpha)
-    return if (accent != null) {
-        lerp(atmos.panelFill.copy(alpha = 1f), accent, FOLIO_PANEL_PLANE_TINT)
-            .copy(alpha = planeAlpha)
-    } else {
-        atmos.panelFill.copy(alpha = planeAlpha)
-    }
-}
+internal fun folioPanelPlane(@Suppress("UNUSED_PARAMETER") accent: Color?): Color = folioDataGlassPlane()
 
-/**
- * Resting surface: grouped content that should read as *on* the page, not above
- * it. Deliberately quieter than [folioRaised] — a thin rim, a whisper of shadow,
- * no sheen. This is the material most cards should have had all along.
- *
- * The fill is [FolioAtmosphere.panelFill] — a role, not a call-site decision. It used to be
- * `colors.surface` on paper and a dark mix on a dark face, which meant the app's largest
- * grouping surface was painted from whichever palette plane happened to have had its hue
- * removed, and the panel was the one tier that carried no theme at all. Reading the role
- * here is what keeps this material and the ladder in agreement: there is exactly one place
- * that decides what a panel is made of, and this is not it.
- */
 @Composable
 fun Modifier.folioPanel(
     shape: Shape = FolioShapes.card,
-    accent: Color? = LocalFolioSectionAccent.current,
-): Modifier {
-    val atmos = FolioTheme.atmosphere
-    // Whether this panel is resting on the page or sitting inside another surface.
-    // Settings is the case that forced the question: the category shell is one large
-    // folioVeil, so every panel below it was an opaque slab with a 2dp shadow falling
-    // on the glass's own fill and a full-strength hairline ringing a second rounded
-    // rect inside the glass's. See LocalFolioSurfaceDepth.
-    val embedded = LocalFolioSurfaceDepth.current > 0
-    // The accent dyes the *plane*, not only the rim. Panels used to carry the section hue on
-    // their 1dp hairline alone, so every panel in the app read as the same near-neutral room
-    // shade — the "everything is one colour" bug. The fill is lerped toward the accent at a
-    // modest fraction, preserving the panel's lightness/alpha so its text keeps the authored
-    // contrast; only the hue moves. Null accent (unwrapped trees: reader, previews) stays
-    // byte-for-byte the shipped `panelFill`.
-    // §19: inside another surface, the division is a rim over a whisper of the parent's
-    // plane — one hairline, one material (see FOLIO_EMBEDDED_FILL /
-    // LocalFolioSurfaceFill). P7 wore the parent's plane at full strength and the pair
-    // still read as two objects; the floor is what makes them read as one surface with
-    // structure in it.
-    val inherited = LocalFolioSurfaceFill.current
-    val fill = if (embedded) {
-        val plane = inherited ?: folioPanelPlane(accent)
-        plane.copy(alpha = plane.alpha * FOLIO_EMBEDDED_FILL)
-    } else {
-        folioPanelPlane(accent)
-    }
-    val rimBase = if (accent != null) {
-        lerp(atmos.hairline, accent, 0.30f).copy(alpha = atmos.hairline.alpha + 0.14f)
-    } else {
-        atmos.hairline
-    }
-    // The plane survives nesting — it is what tells the eye these rows are one group,
-    // and that is true at any depth. The *depth cues* do not: the drop shadow and the
-    // full hairline are both claims about a page that is not there.
-    val rim = if (embedded) rimBase.copy(alpha = rimBase.alpha * FOLIO_EMBEDDED_RIM) else rimBase
-    // §18 — one rung of the one ladder, same as every other material. A panel is the
-    // app's largest grouping surface, so it is also the biggest single box in the
-    // screenshots; nested inside a section card it takes the shorter `Inset` ramp because
-    // a long feather inside a parent plane reads as a smudge rather than as a division.
-    val edgeProfile = (if (embedded) FolioEdgeRole.Inset else FolioEdgeRole.Card).profile
-    val planeFoot = lerp(fill, folioFieldBottom(atmos), FOLIO_PLANE_ROOM_SHARE)
-        .copy(alpha = fill.alpha * FOLIO_PLANE_RAMP_FOOT)
-    return this
-        .then(
-            // §21 light-mode shadows: the panel is translucent (`folioPanelPlane` tiers
-            // with the Cards and Sheets knob), so its 2dp shadow passed through its own
-            // fill as a dark band hugging the silhouette — the same nested-box artifact
-            // the veil carried, at resting-surface scale. Same rule as every other
-            // material now: only a near-lid casts (see FOLIO_CAST_SHADOW_MIN_ALPHA).
-            if (embedded || fill.alpha < FOLIO_CAST_SHADOW_MIN_ALPHA) {
-                Modifier
-            } else {
-                Modifier.shadow(
-                    elevation = atmos.scaled(FolioTokens.elevationPanel),
-                    shape = shape,
-                    ambientColor = atmos.shadowAmbient,
-                    spotColor = atmos.shadowSpot,
-                )
-            },
-        )
-        // §18: the plane was `drawPath(shapePath(shape), verticalGradient)` — the ramp ran
-        // down the surface's height and stopped dead across its boundary. Now it ramps
-        // along the boundary's own normal as well. See [folioSurfacePlane].
-        .folioSurfacePlane(shape, fill, edgeProfile, planeFoot)
-        // §18: `border(1.dp, rim, shape)` became a five-band inward ramp. See [folioSurfaceRim].
-        .folioSurfaceRim(shape, rim, edgeProfile)
-        .clip(shape)
-}
+    @Suppress("UNUSED_PARAMETER") accent: Color? = null,
+): Modifier = folioDataGlass(shape)
 
 /**
  * Embedded surface: a well cut into the page. Inverted lighting — the lip occludes
@@ -720,7 +622,7 @@ fun Modifier.folioPanel(
 @Composable
 fun Modifier.folioSunken(
     shape: Shape = FolioShapes.inset,
-    accent: Color? = LocalFolioSectionAccent.current,
+    accent: Color? = null,
     daylight: FolioDaylight = LocalFolioDaylight.current,
     /**
      * Opt out of the §19 embedded rule. The reader's wells sit in glass directly over a
@@ -734,16 +636,10 @@ fun Modifier.folioSunken(
     // The metallic-sheen knob, read once like every material reads it: the lip's
     // light catch dims, the occluding shade does not.
     val sheenGain = folioSheenGain()
-    // The well wears the section hue on its plane too (see [folioPanel]): a sunken field used to
-    // tint only 0.07 toward the accent, so a chart well read as one more neutral tier. It pulls a
-    // touch harder than a panel ([FOLIO_SUNKEN_PLANE_TINT]) to stay distinct from the plane it is
-    // sunk into. Null accent stays byte-for-byte the shipped `sunkenFill`.
-    val tinted = if (accent != null) {
-        lerp(atmos.sunkenFill.copy(alpha = 1f), accent, FOLIO_SUNKEN_PLANE_TINT)
-            .copy(alpha = atmos.sunkenFill.alpha)
-    } else {
-        atmos.sunkenFill
-    }
+    // Embedded controls belong to their parent's material. Reader wells can
+    // explicitly retain the native-page opacity treatment through fullMaterial.
+    val base = if (fullMaterial) atmos.sunkenFill else FolioTheme.elements.inset
+    val tinted = if (accent != null) lerp(base, accent, .035f) else base
     // §19: a well inside another surface is a recess *in that surface*, not a second
     // material cut into a page — the parent's plane at the embedded floor, with the
     // inverted lip below carrying the depth that the fill step used to.
@@ -917,7 +813,7 @@ fun folioVeilPlane(
     blurEnabled: Boolean = true,
 ): Color {
     val atmos = FolioTheme.atmosphere
-    val basePlane = fillColor ?: atmos.veilFill
+    val basePlane = fillColor ?: FolioTheme.elements.chrome
     val tintedPlane = if (accent != null) lerp(basePlane, accent, FOLIO_VEIL_ACCENT_TINT) else basePlane
     val embedded = LocalFolioSurfaceDepth.current > 0
     val inherited = LocalFolioSurfaceFill.current
@@ -1023,6 +919,11 @@ fun Modifier.folioVeil(
     /** Small reader strips need shallow light catches rather than a pane's raised bevel. */
     reliefGain: Float = 1f,
 ): Modifier {
+    // Content panels diffuse the backdrop; optical glass belongs to floating controls.
+    if (tier == FolioGlassTier.InFlow) {
+        return folioDataGlass(shape, fillAlpha = fillAlpha, fillColor = fillColor,
+            blurEnabled = glass.blurEnabled)
+    }
     val atmos = FolioTheme.atmosphere
     val caps = LocalGlassCapabilities.current
     val backdrop = LocalGlassBackdrop.current
@@ -1057,19 +958,8 @@ fun Modifier.folioVeil(
     // Everything downstream reads this one boolean, so the blur layer and the fill
     // tier can never disagree about whether the surface is currently glassy.
     val canBlur = caps.blur && backdrop != null && glass.blurEnabled
-    // §20 reach: an in-flow veil upgrades to the full overlay glass treatment (blur, lens,
-    // sheen, bevel, pane edge) when the user has not opted into minimal glass and the device
-    // can actually blur. Gated on a live backdrop so declining the upgrade — or a no-blur
-    // device — leaves the in-flow look exactly as it was: painted glass, no second edge. The
-    // room (silk field, lamp bloom, drifting pools) is real high-frequency structure to bend,
-    // so frosting it here is not the no-op that frosting a smooth page ramp would be.
-    val effectiveTier = if (
-        tier == FolioGlassTier.InFlow && LocalGlassInFlowGlass.current && canBlur && !embedded
-    ) FolioGlassTier.Overlay else tier
-    // An in-flow veil keeps the *material* but not the *refraction*: it is an item in a
-    // scrolling list, so nothing ever passes behind it but the ground plane, and blurring a
-    // smooth ramp is a no-op at full price. See FolioGlassTier.
-    val blurred = canBlur && !embedded && effectiveTier == FolioGlassTier.Overlay
+    val effectiveTier = tier
+    val blurred = canBlur && !embedded
     // A caller that names its own alpha has already accounted for its context
     // (the nav capsule, the reader's sheets); everything else is an app panel and
     // takes the panel preference, which is the alpha itself rather than a factor
@@ -1091,7 +981,7 @@ fun Modifier.folioVeil(
     // monotone room shade. The pull is small (the glass stays glass), but it is
     // enough to break the all-one-colour look the palette's distinct roles are
     // meant to avoid.
-    val basePlane = fillColor ?: atmos.veilFill
+    val basePlane = fillColor ?: FolioTheme.elements.chrome
     val tintedPlane = if (accent != null) lerp(basePlane, accent, FOLIO_VEIL_ACCENT_TINT) else basePlane
     // One definition (see [folioVeilPlane]): the fill — including the §19 embedded floor,
     // where a veil inside another surface wears the *parent's* plane at [FOLIO_EMBEDDED_FILL]
@@ -1105,7 +995,7 @@ fun Modifier.folioVeil(
     // modes look like glossy plastic. Keep their geometry and opacity unchanged.
     if (!blurred) {
         val ink = FolioTheme.colors.onSurface
-        val paintedFill = if (fillColor != null) fill else folioReferenceColor().copy(alpha = fill.alpha)
+        val paintedFill = fill
         val foot = lerp(paintedFill, folioFieldBottom(atmos), .06f).copy(alpha = fill.alpha)
         val edgeInk = ink.copy(alpha = if (embedded) .035f else .10f)
         return this.clip(shape).drawWithCache {

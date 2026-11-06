@@ -122,6 +122,7 @@ kotlin {
         }
 
         getByName("desktopMain") {
+            resources.srcDir("src/composeUi/resources")
             dependsOn(getByName("commonJvm"))
             dependsOn(getByName("composeUi"))
             dependencies {
@@ -176,6 +177,10 @@ kotlin {
             }
         }
     }
+}
+
+androidComponents.onVariants { variant ->
+    variant.sources.assets?.addStaticSourceDirectory("src/composeUi/resources")
 }
 
 android {

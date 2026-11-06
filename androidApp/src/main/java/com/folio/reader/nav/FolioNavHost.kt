@@ -113,6 +113,11 @@ fun FolioNavHost(
     modifier: Modifier = Modifier
 ) {
     val graph = navModel.graph
+    val readingEnvironment=com.folio.reader.experience.LocalReadingEnvironment.current
+    androidx.compose.runtime.DisposableEffect(readingEnvironment,navController) {
+        readingEnvironment?.pica?.onContinue={id->navController.navigate(FolioDestination.reader(id)) {launchSingleTop=true}}
+        onDispose {readingEnvironment?.pica?.onContinue=null}
+    }
 
     // A tab↔tab dissolve is in flight exactly when two top-level bar destinations are visible at
     // once (the outgoing tab stays composed for its exit while the incoming one enters). A push

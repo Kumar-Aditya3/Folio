@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.folio.reader.ui.theme.FolioTheme
 
 /**
@@ -60,6 +62,7 @@ object FolioLogo {
 fun FolioLogoMark(
     modifier: Modifier = Modifier,
     tint: Color? = null,
+    contentDescription: String? = "Folio",
 ) {
     val path = remember { foliologoPath() }
     val onDark = FolioTheme.colors.surface.luminance() < 0.35f
@@ -70,19 +73,21 @@ fun FolioLogoMark(
                 0f to lerp(FolioLogo.InkStart, Color.White, 0.34f),
                 0.52f to lerp(FolioLogo.InkMid, Color.White, 0.22f),
                 1f to lerp(FolioLogo.InkEnd, Color.White, 0.16f),
-                start = Offset(0f, 1f),
-                end = Offset(1f, 0f),
+                start = Offset(0f, 100f),
+                end = Offset(100f, 0f),
             )
             else -> Brush.linearGradient(
                 0f to FolioLogo.InkStart,
                 0.52f to FolioLogo.InkMid,
                 1f to FolioLogo.InkEnd,
-                start = Offset(0f, 1f),
-                end = Offset(1f, 0f),
+                start = Offset(0f, 100f),
+                end = Offset(100f, 0f),
             )
         }
     }
-    Canvas(modifier) {
+    Canvas(modifier.semantics {
+        contentDescription?.let { this.contentDescription = it }
+    }) {
         // Uniform fit: the trace is centred in its own box, so a single scale and
         // one centring translate is the whole layout.
         val factor = size.minDimension / VIEWPORT

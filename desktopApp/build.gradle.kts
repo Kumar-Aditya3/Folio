@@ -43,6 +43,15 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.folio.reader.MainKt"
+        // Direct3D can spin in Skiko's first flush before the window is visible.
+        // OpenGL keeps hardware acceleration and passes the native launcher smoke test.
+        jvmArgs(
+            "--enable-native-access=ALL-UNNAMED",
+            "-Dskiko.renderApi=OPENGL",
+            // Bound retained textures from library/glass screens after entering
+            // the native reader. Chromium owns the book's own rendering budget.
+            "-Dskiko.gpu.resourceCacheLimit=64M",
+        )
         nativeDistributions {
             targetFormats(
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
@@ -51,13 +60,16 @@ compose.desktop {
             // The packaged launcher is a GUI application, not a console wrapper.
             windows {
                 console = false
+                iconFile.set(rootProject.file("icon/Folio.ico"))
+                shortcut = true
+                menu = true
             }
             // SQLite JDBC and Compose load some classes reflectively. Ship the
             // complete runtime to avoid a pruned jlink image failing before the
             // JVM can report its missing dependency on Windows.
             includeAllModules = true
             packageName = "Folio"
-            packageVersion = "1.0.34"
+            packageVersion = "1.0.38"
             windows {
                 fileAssociation("application/epub+zip", "epub", "EPUB eBook")
                 fileAssociation("application/pdf", "pdf", "PDF document")
@@ -81,4 +93,10 @@ compose.desktop {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.processResources {
+    from(rootProject.file("icon/Folio.png")) {
+        rename { "folio-icon.png" }
+    }
 }

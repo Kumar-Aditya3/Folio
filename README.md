@@ -1,37 +1,34 @@
 # Folio
 
-A local-first reading app for EPUB books and manga, built with Kotlin Multiplatform and
-Compose Multiplatform. One shared codebase drives an Android app and a Windows desktop app.
-
-Folio works entirely offline. Your library, reading progress, highlights, and statistics live
-in a local SQLite database. Cloud sync exists but is opt-in and off by default.
+Folio is a local-first reader for Android and Windows, built with Kotlin Multiplatform
+and Compose Multiplatform. Library data, reading progress, highlights, and statistics are
+stored locally. Online manga sources, model downloads, and optional cloud sync require
+a connection.
 
 ## Features
 
-**Reading**
-- EPUB 2 and 3 parsing with chapter-level HTML rendering
-- Typography control: font family and size, line and paragraph spacing, text width, margins,
-  alignment, hyphenation
-- Highlights, bookmarks, and notes with long-press selection
-- Scroll-position progress tracking that survives reflow after a typography change
-- Theme packs with paired typefaces, plus in-reader brightness and clock
-
-**Manga**
-- Chapter reader with its own page-based chrome, separate from the EPUB reader
-- Installs and runs Mihon/Tachiyomi extensions for online sources, including extension trust
-  verification before load
-- Background update checks for followed series via WorkManager
-
-**Library and insights**
-- Books and Manga tabs with filters for reading state, series, and collections
-- Reading statistics: day streaks, session and binge averages, an activity heatmap filterable by
-  content type, per-title finish predictions, and reading-pattern classification
-- Tags, collections, and a quote browser over saved highlights
-
-**Sync (optional)**
-- Cross-device sync over the Firestore REST API with anonymous Identity Toolkit auth
-- No Firebase SDK and no account system; a Web API key is the only credential
-- Metadata-only by default; EPUB files and covers sync too if you configure a storage bucket
+- **Books and documents.** Read EPUB 2 and 3, and import PDF, TXT, HTML, DOCX, and ODT.
+  Adjust typography and layout, choose a reader theme, and save highlights, notes,
+  and bookmarks. Windows offers paginated and continuous reading.
+- **Manga.** Read local manga, including CBZ and ZIP archives. On Android, install
+  compatible Mihon/Tachiyomi extensions for online sources, review extension trust,
+  and receive background updates for followed series.
+- **Library and discovery.** Organize titles with tags and collections, browse saved
+  quotes, and see recommendations based on reading activity. Search indexed text
+  using keyword search or the optional on-device semantic search.
+- **Listening.** Android can narrate books using optional offline voice packs with
+  saved listening progress. The reader also includes bundled ambient soundscapes.
+- **Reading activity.** Track daily goals, streaks, sessions, and activity by content
+  type. Android offers Continue Reading, Daily Rhythm, and Audiobook widgets, plus
+  optional reading reminders.
+- **Optional sync.** Use your own Firebase configuration to sync via Firestore REST
+  with anonymous authentication. Sync metadata by default and configure a storage
+  bucket if you also want to sync supported files and covers.
+- **Between chapters.** A theme-aware paper bookmark sits at the left edge of the
+  current cover. Open its reading space for saved passages, a reading journal,
+  and three replayable games: Shelf Shift, Lantern Lines, and Book Balance.
+  Games include saved runs, daily boards, practice, and personal score history.
+  Find Between chapters on Home or in More.
 
 ## Platform support
 
@@ -78,7 +75,7 @@ Android and desktop rather than the default hierarchy's `jvmMain`.
 - **JDK 17.** This is what CI uses and what both modules target. Newer JDKs mostly work; note
   that AGP's bundled lint crashes on JDK 25, which is why `checkReleaseBuilds = false` is set in
   `androidApp/build.gradle.kts`.
-- **Android SDK** with platform 34, for Android builds only.
+- **Android SDK** with platform 37, for Android builds only (the app targets API 34).
 - No Gradle install needed — use the committed wrapper.
 
 Point Gradle at your SDK by creating `local.properties` in the repository root (it is gitignored):
@@ -104,9 +101,22 @@ Android Studio writes this file for you when you open the project.
 
 # Build a Windows installer -> desktopApp/build/compose/binaries/main/msi/
 ./gradlew :desktopApp:packageMsi
+
+# Build the Windows EXE installer or the complete portable application folder
+./gradlew :desktopApp:packageExe
+./gradlew :desktopApp:createDistributable
 ```
 
 On Windows use `gradlew.bat` in place of `./gradlew`.
+
+The portable application is the entire `desktopApp/build/compose/binaries/main/app/Folio/`
+folder. Keep `Folio.exe`, `app/` and `runtime/` together; it includes Java and does not
+need a system Java installation. A relocated Gradle build directory also relocates these outputs.
+Validate the packaged EXE (including its embedded icon) with
+`python scripts/verify_windows_distribution.py <path-to-Folio-folder> --launch`.
+Startup failures are recorded in `%LOCALAPPDATA%/Folio/folio.log`.
+The Windows icons are generated from the existing launcher vector with
+`python scripts/generate_brand_icons.py` (requires Pillow).
 
 ### Tests
 
@@ -166,16 +176,7 @@ builds fall back to the standard debug keystore, so `assembleDebug` works on a c
 
 ## Documentation
 
-Design and implementation notes live in [`docs/`](docs/):
-
-| Document | Contents |
-| --- | --- |
-| [`FOLIO_IMPLEMENTATION_SPEC.md`](docs/FOLIO_IMPLEMENTATION_SPEC.md) | Core architecture rules and testing strategy |
-| [`FOLIO_VISUAL_SPEC.md`](docs/FOLIO_VISUAL_SPEC.md) | Design tokens, component rules, surfaces |
-| [`FOLIO_MOTION_SPEC.md`](docs/FOLIO_MOTION_SPEC.md) | Animation and transition rules |
-| [`FOLIO_TYPOGRAPHY_SPEC.md`](docs/FOLIO_TYPOGRAPHY_SPEC.md) | Type scale and typeface pairing |
-| [`FOLIO_DEPENDENCY_PLAN.md`](docs/FOLIO_DEPENDENCY_PLAN.md) | Dependency choices and version policy |
-| [`TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common build and runtime problems |
+See the [documentation index](docs/README.md) for feature guides, platform details, and historical design notes.
 
 ## Attribution
 

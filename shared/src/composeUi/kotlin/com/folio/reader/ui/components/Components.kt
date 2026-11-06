@@ -77,6 +77,8 @@ import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioPackId
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.sectionAccent
+import com.folio.reader.ui.theme.elements
+import androidx.compose.ui.draw.drawWithContent
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.panelFill
 
@@ -110,12 +112,7 @@ fun Modifier.glassPanel(shape: Shape, accent: Color? = null): Modifier =
 fun FolioSectionCard(
     title: String? = null,
     modifier: Modifier = Modifier,
-    // Defaults to the current section's signature hue (falls back to `primary`
-    // when no section wraps the tree), so a section's cards share its identity
-    // while a different section's cards read as a different place. Pass an explicit
-    // colour (incl. a cover accent) to override, or `Color.Unspecified`-via-null is
-    // no longer the default — callers wanting a strictly neutral card pass
-    // `FolioTheme.colors.onSurfaceVariant`.
+    // Section identity accents the heading; the panel keeps its reference material.
     accent: Color? = com.folio.reader.ui.theme.FolioTheme.sectionAccent,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
@@ -250,23 +247,17 @@ fun FolioChip(
     // the nav capsule and segmented control already use.
     val motion = com.folio.reader.ui.theme.rememberMotionEnabled() && !com.folio.reader.ui.theme.LocalMotion.current.reduced
     val colorSpec = if (motion) tween<Color>(FolioTokens.motionFast.toInt()) else snap<Color>()
-    // Chips/tabs are section chrome: a selected chip wears the section's signature
-    // hue, not a universal primary, so the same control reads differently in
-    // Library vs Search vs Quotes. Label legibility is guarded against the accent.
-    val sectionAccent = FolioTheme.sectionAccent
-    val onSectionAccent = com.folio.reader.ui.components.legibleOn(
-        colors.onPrimary, sectionAccent, colors.onSurface,
-    )
+    val elements = FolioTheme.elements
     val fillColor by animateColorAsState(
-        if (selected) sectionAccent else atmos.sunkenFill.copy(alpha = 0.55f),
+        if (selected) elements.selection else elements.inset,
         animationSpec = colorSpec, label = "chipFill",
     )
     val strokeColor by animateColorAsState(
-        if (selected) sectionAccent else atmos.hairline,
+        if (selected) elements.onSelection else elements.border,
         animationSpec = colorSpec, label = "chipStroke",
     )
     val labelColor by animateColorAsState(
-        if (selected) onSectionAccent else colors.onSurfaceVariant,
+        if (selected) elements.onSelection else elements.mutedInk,
         animationSpec = colorSpec, label = "chipLabel",
     )
     Box(
@@ -300,6 +291,13 @@ fun FolioChip(
                 .clip(shape)
                 .background(fillColor, shape)
                 .border(1.dp, strokeColor, shape)
+                .drawWithContent {
+                    drawContent()
+                    if (selected) drawLine(labelColor,
+                        androidx.compose.ui.geometry.Offset(size.width * .3f, size.height - 3.dp.toPx()),
+                        androidx.compose.ui.geometry.Offset(size.width * .7f, size.height - 3.dp.toPx()),
+                        strokeWidth = 1.5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                }
                 .padding(horizontal = 15.dp, vertical = 8.dp)
         ) {
             Text(

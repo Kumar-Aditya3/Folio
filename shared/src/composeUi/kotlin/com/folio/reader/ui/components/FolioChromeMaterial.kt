@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.folio.reader.ui.theme.FolioAtmosphere
 import com.folio.reader.ui.theme.FolioBarFill
 import com.folio.reader.ui.theme.FolioGlassWeight
@@ -11,61 +12,19 @@ import com.folio.reader.ui.theme.FolioSurfaceOpacity
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
 import com.folio.reader.ui.theme.navCapsuleFill
-import com.folio.reader.ui.theme.navGlassFor
+import com.folio.reader.ui.theme.elements
 
-/**
- * The material both pieces of app chrome are made of — one definition, two positions.
- *
- * ## Why this exists
- *
- * The masthead and the floating nav capsule are the same furniture at opposite ends of the
- * window, and the app has said so since §11.1 of the theme curation ("the nav capsule wears
- * the same colour … they are the same furniture at two ends of the screen"). But they were
- * *built* from different substances: the masthead from `barGlass` — a role derived for a bar,
- * bent toward the room — and the capsule from `navigationSurface`, the authored chrome plane.
- * Two derivations of the same idea, so the two ends of the screen could not agree by
- * construction and had to be kept in step by hand. They drifted; that is what this file
- * removes.
- *
- * ## The direction of the unification
- *
- * Both ends are made of the **chrome plane**, which is [FolioAtmosphere.navigationSurface]:
- * a role authored for all twenty faces as a deliberate step between the card plane and the
- * page plane, and the one role in the palette that exists specifically to be *furniture*.
- * The masthead keeps its own geometry entirely — it stays a full-bleed band with a decaying
- * fill, a status-icon scrim and a chrome-band-measured gradient, none of which the capsule
- * has or wants — and changes only what it is *made of*. The user's brief was explicit: keep
- * the top bar's geometry everywhere it is, change its material to the capsule's.
- *
- * ## What is deliberately *not* here
- *
- * The geometry, the insets, the status scrim, the capsule's pill and its
- * guilloche-quiet registration, the travelling selection band, and the lens pass (a
- * refraction of the room, which the full-bleed masthead cannot afford at its area). A
- * material is a colour, a weight, a fill alpha and an edge; everything else stays where it
- * belongs.
+/** One quiet floating-control material for both ends of the window.
+ * Its authored plane is independent of section accents and cover artwork.
+ * Geometry, blur capability, opacity preferences, and interaction remain at the consumers.
  */
 @Immutable
 data class FolioChromeMaterial(
-    /**
-     * The authored chrome plane — [FolioAtmosphere.navigationSurface] itself, never a lit
-     * derivation. It is the unlit reference [glass] is identical to on an unlit tree, which is
-     * what makes the capsule's "is this room lit?" test `glass != plane` rather than a second
-     * derivation of the same thing (see `FolioNavShell`'s hue-wash skip).
-     */
+    /** The theme's authored chrome plane. */
     val plane: Color,
-    /**
-     * What the chrome is made of, in this room: [FolioAtmosphere.navigationSurface] bent by
-     * the ambient tint. Byte-for-byte the authored plane on an unlit tree — desktop, every
-     * preview, every unit test — which is what lets a caller test "is this room lit?" by
-     * comparing against [FolioAtmosphere.navigationSurface].
-     */
+    /** The same plane, unaffected by artwork or route changes. */
     val glass: Color,
-    /**
-     * The accent the chrome's chromatic core and its frost are struck in. One token
-     * ([FolioAtmosphere.chromeAccent]) so the crown's core, its frost and the material its
-     * glass is made of stay one decision rather than three that happen to agree.
-     */
+    /** Restrained frost tint; active controls carry the stronger accent. */
     val accent: Color,
     /** The light catch along the silhouette — the atmosphere's own rim light. */
     val sheen: Color,
@@ -190,25 +149,18 @@ fun FolioSurfaceOpacity.chromeBarFill(blurred: Boolean = false): FolioBarFill {
     )
 }
 
-/**
- * The active chrome material.
- *
- * The masthead and the nav capsule are coloured **per palette and per theme**, from the
- * atmosphere's authored chrome plane — they no longer borrow the featured cover's accent. The
- * ambient tint still lights the room's field and the cover refraction; the two bars are the one
- * surface that stays the theme's own colour so chrome reads the same whatever is on the shelf.
- */
+/** Shared element-role colors, with the user's existing optical/opacity controls. */
 @Composable
 fun rememberFolioChromeMaterial(): FolioChromeMaterial {
     val atmos = FolioTheme.atmosphere
-    return remember(atmos) {
+    val elements = FolioTheme.elements
+    return remember(atmos, elements) {
         FolioChromeMaterial(
-            plane = atmos.navigationSurface,
-            // Null tint: the authored per-theme plane byte-for-byte, never the hero cover's hue.
-            glass = navGlassFor(atmos, null, atmos.fieldTintStrength),
-            accent = atmos.chromeAccent,
-            sheen = atmos.rimLight,
-            hairline = atmos.hairline,
+            plane = elements.chrome,
+            glass = elements.chrome,
+            accent = lerp(elements.chrome, elements.action, .10f),
+            sheen = lerp(elements.chrome, elements.ink, .22f).copy(alpha = .25f),
+            hairline = elements.ink.copy(alpha = .12f),
             weight = chromeGlassWeight,
         )
     }

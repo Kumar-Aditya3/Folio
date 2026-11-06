@@ -40,8 +40,8 @@ fun DiscoverSettingsPanel(
     Column(contentTrace, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("What appears on Home", style = FolioTheme.typography.titleMedium)
         listOf(
-            Triple(DiscoverMode.DEFAULT, "As usual", "Latest releases from your recent reading sources. This is the default."),
-            Triple(DiscoverMode.SELECTED_EXTENSIONS, "Selected extensions", "Discover only uses the extensions you choose below."),
+            Triple(DiscoverMode.DEFAULT, "Based on your reading", "Manga with creators or genres in common with your recent reads."),
+            Triple(DiscoverMode.SELECTED_EXTENSIONS, "Selected extensions", "Match your reading within these extensions, with labeled source picks when there is no match."),
             Triple(DiscoverMode.HIDDEN, "Hide Discover", "Remove the Discover shelf from Home."),
         ).forEach { (mode, title, detail) ->
             Row(Modifier.fillMaxWidth().selectable(settings.discoverMode == mode, role = Role.RadioButton,
@@ -90,8 +90,8 @@ fun DiscoverSettingsPanel(
                     Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(name, style = FolioTheme.typography.bodyLarge)
                         Text(if (!available) "Unavailable · selection retained"
-                            else if (sources.any { it.extensionPkg == pkg && it.supportsLatest }) "Provides latest releases"
-                            else if (loading) pkg else "No latest-release source available",
+                            else if (sources.any { it.extensionPkg == pkg && !it.isLocal }) "Available for Discover"
+                            else if (loading) pkg else "No source currently available",
                             style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant)
                     }
                 }

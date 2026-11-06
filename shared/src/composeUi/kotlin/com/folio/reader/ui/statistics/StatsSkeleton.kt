@@ -1,182 +1,195 @@
 package com.folio.reader.ui.statistics
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import com.folio.reader.ui.components.FolioSkeletonBlock
-import com.folio.reader.ui.components.FolioSkeletonLine
-import com.folio.reader.ui.components.folioRaised
-import com.folio.reader.ui.components.folioSunken
-import com.folio.reader.ui.components.rememberShimmerPhase
-import com.folio.reader.ui.theme.FolioShapes
+import com.folio.reader.ui.components.*
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.FolioTokens
-import com.folio.reader.ui.theme.atmosphere
-import com.folio.reader.ui.theme.paneFill
 
-/**
- * Stats before Stats has arrived.
- *
- * The tab opened on `collectAsState(initial = StatisticsUiState())` — an empty
- * state — because [StatisticsViewModel.state] is a `combine` of four suspense
- * queries plus (when exclusions are wired) two roundtrips *per book* to resolve
- * tags and collections. For the whole of that window the reader looked at zeroed
- * figures, an empty heatmap and the "Nothing measured yet" card, and then every
- * value changed at once under them.
- *
- * This draws the real layout first, in wells, so the page is already the right
- * shape and the numbers land into holes cut for them.
- *
- * Every measure is lifted from [StatisticsScreen] rather than approximated:
- * `heroBleed` with the same asymmetric padding for the overture, the 96dp goal
- * dial, `spaceBeat` around the rule in the headline row, `gutter` for every
- * heading, `weekChartHeight` inside an `edgeStart` well for the curve. A skeleton
- * that approximates is worse than a spinner, because it promises a geometry and
- * then breaks it — the two cover ratios in Home's skeleton carry the same note.
- *
- * Only the blocks above the fold are drawn. On every phone at this height the
- * chart, heatmap and cards below it are off-screen, so drawing them would cost
- * frames to produce something nobody sees.
- */
+/** The current open Stats layout, awaiting values rather than a different set of cards. */
 @Composable
-internal fun StatsSkeleton(modifier: Modifier = Modifier) {
+internal fun StatsSkeleton(modifier: Modifier = Modifier, onOpenExclusions: (() -> Unit)? = null) {
     val phase = rememberShimmerPhase()
-    Column(modifier.fillMaxSize()) {
-        OvertureSkeleton(phase)
-        Spacer(Modifier.height(FolioTokens.spaceMovement))
-        HeadlineSkeleton(phase)
-        Spacer(Modifier.height(FolioTokens.spaceMovement))
-        WeekSkeleton(phase)
+    StatsPage(modifier.semantics { contentDescription = "Loading reading statistics" }) {
+        if (onOpenExclusions != null) item { StatsExclusionsNotice(onOpenExclusions) }
+        item {
+            OvertureSkeleton(phase)
+            Spacer(Modifier.height(FolioTokens.spaceBeat))
+        }
+        item {
+            StatsOpenSection { HeadlineSkeleton(phase) }
+            Spacer(Modifier.height(FolioTokens.spaceMovement))
+        }
+        item {
+            StatsOpenSection { WeekSkeleton(phase) }
+            Spacer(Modifier.height(FolioTokens.spaceBeat))
+        }
+        item { StatsOpenSection { YearSkeleton(phase) } }
     }
 }
 
-/**
- * The overture: hero figure and its supporting sentence on the leading side, the
- * goal dial on the trailing edge, inside the same `heroBleed` raised surface.
- *
- * The dial is a circle, not a block — it is the one element in this layout whose
- * shape the reader already knows, and a rounded rectangle where a ring will land
- * reads as a different component arriving rather than the same one filling in.
- */
 @Composable
 private fun OvertureSkeleton(phase: State<Float>) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = FolioTokens.gutter, top = FolioTokens.space2)
-            .folioRaised(
-                shape = FolioShapes.heroBleed,
-                accent = FolioTheme.colors.accentProgress,
-                // Must track StatsOverture exactly: a pane resolving out of an opaque
-                // skeleton flashes the card's whole weight at the handoff.
-                fill = FolioTheme.atmosphere.paneFill(),
-                // Same tier as StatsOverture, for the reason above: the handoff must not
-                // change the material, only the content.
-                tier = com.folio.reader.ui.theme.FolioGlassTier.InFlow,
-            )
-            .padding(
-                start = FolioTokens.gutter,
-                end = FolioTokens.space3,
-                top = FolioTokens.space3,
-                bottom = FolioTokens.space3,
-            ),
-    ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f)) {
-                // The hero figure: a large value line with its label beneath.
-                FolioSkeletonLine(widthFraction = 0.52f, height = 34.dp, phase = phase)
-                Spacer(Modifier.height(FolioTokens.space2))
-                FolioSkeletonLine(widthFraction = 0.30f, height = 9.dp, phase = phase)
-                Spacer(Modifier.height(FolioTokens.space2))
-                // Chronotype, then the peak-window sentence.
-                FolioSkeletonLine(widthFraction = 0.68f, height = 16.dp, phase = phase)
-                Spacer(Modifier.height(FolioTokens.space1))
-                FolioSkeletonLine(widthFraction = 0.46f, height = 11.dp, phase = phase)
+    StatsOvertureLayout(
+        figure = { FigureSkeleton("Reading this week", phase, hero = true) },
+        rhythm = { modifier ->
+            Column(modifier) {
+                TextSkeleton("The Night Owl", FolioTheme.typography.titleMedium, phase, .72f, maxLines = 2)
+                TextSkeleton("Mostly between 9 PM–midnight", FolioTheme.typography.bodySmall, phase, .88f, maxLines = 3)
             }
-            Spacer(Modifier.width(FolioTokens.space3))
-            FolioSkeletonBlock(
-                modifier = Modifier.size(96.dp),
-                shape = CircleShape,
-                phase = phase,
-            )
-        }
-    }
+        },
+        goal = {
+            val track = FolioTheme.colors.accentProgress.copy(alpha = .16f)
+            Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val stroke = 7.dp.toPx()
+                    drawCircle(track, radius = (size.minDimension - stroke) / 2, style = Stroke(stroke))
+                }
+                Column(Modifier.width(58.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    TextSkeleton("00", FolioTheme.typography.headlineSmall, phase, .65f)
+                    TextSkeleton("/ 60 min", FolioTheme.typography.labelSmall, phase, .85f)
+                }
+            }
+        },
+    )
 }
 
-/**
- * Streak and active-days figures over the rule, this-year and finished beneath —
- * two columns of two, separated by the same `spaceBeat` the real row uses.
- */
 @Composable
 private fun HeadlineSkeleton(phase: State<Float>) {
-    Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            FigureSkeleton(phase, Modifier.weight(1f))
-            FigureSkeleton(phase, Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(FolioTokens.spaceBeat))
-        FolioSkeletonLine(widthFraction = 1f, height = 1.dp, phase = phase)
-        Spacer(Modifier.height(FolioTokens.spaceBeat))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            FigureSkeleton(phase, Modifier.weight(1f))
-            FigureSkeleton(phase, Modifier.weight(1f))
-        }
-    }
+    StatsHeadlineLayout(
+        streak = { FigureSkeleton("Streak", phase, it, standard = true, caption = "best 00") },
+        activeDays = { modifier ->
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                FigureSkeleton("Active days", phase)
+                Row(Modifier.fillMaxWidth().height(7.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(7) {
+                        FolioSkeletonBlock(Modifier.weight(1f).height(7.dp), RoundedCornerShape(3.dp), phase)
+                    }
+                }
+            }
+        },
+        year = { FigureSkeleton("This year", phase, it, caption = "1,240,500 words") },
+        finished = { FigureSkeleton("Finished", phase, it, caption = "books completed") },
+    )
 }
 
-/** One figure cell: value, label, caption — the three lines [FolioFigure] draws. */
+/** Measure with the actual figure typography, including large-text settings. */
 @Composable
-private fun FigureSkeleton(phase: State<Float>, modifier: Modifier = Modifier) {
+private fun FigureSkeleton(
+    label: String,
+    phase: State<Float>,
+    modifier: Modifier = Modifier,
+    hero: Boolean = false,
+    standard: Boolean = false,
+    caption: String? = null,
+) {
+    val type = FolioTheme.typography
+    val style = when {
+        hero -> type.displayMedium
+        standard -> type.displaySmall
+        else -> type.headlineSmall
+    }
     Column(modifier) {
-        FolioSkeletonLine(widthFraction = 0.30f, height = 26.dp, phase = phase)
-        Spacer(Modifier.height(FolioTokens.space1))
-        FolioSkeletonLine(widthFraction = 0.42f, height = 9.dp, phase = phase)
-        Spacer(Modifier.height(FolioTokens.space1))
-        FolioSkeletonLine(widthFraction = 0.34f, height = 9.dp, phase = phase)
+        FolioEyebrow(label)
+        Spacer(Modifier.height(if (hero) 6.dp else 3.dp))
+        TextSkeleton("00", style.copy(fontFamily = FontFamily.Monospace), phase, if (hero) .74f else .44f)
+        if (caption != null) {
+            Spacer(Modifier.height(5.dp))
+            TextSkeleton(caption, type.bodySmall, phase, .70f, maxLines = 2)
+        }
     }
 }
 
-/**
- * The week card: section head, then the curve's well at its shipping height.
- *
- * The well is drawn as one block rather than a set of bars because the real chart
- * is a single smooth curve in a sunken pane — bars here would suggest a different
- * chart is coming.
- */
 @Composable
 private fun WeekSkeleton(phase: State<Float>) {
-    Column {
-        Column(modifier = Modifier.padding(horizontal = FolioTokens.gutter)) {
-            FolioSkeletonLine(widthFraction = 0.34f, height = 10.dp, phase = phase)
+    val type = FolioTheme.typography
+    StatsWeekLayout(
+        heading = {
+            FolioSectionHead(title = "Last 7 days", trailing = {
+                TextSkeleton("00m", type.labelSmall, phase, modifier = Modifier.width(42.dp))
+            })
+        },
+        plot = {
+            Column {
+                FolioSkeletonBlock(Modifier.fillMaxWidth().height(FolioTokens.weekChartHeight), phase = phase)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    repeat(7) {
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            TextSkeleton("M", type.labelSmall, phase, modifier = Modifier.width(12.dp))
+                        }
+                    }
+                }
+            }
+        },
+        readout = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextSkeleton("0000-00-00", type.bodySmall, phase, .56f, Modifier.weight(1f))
+                TextSkeleton("00m", type.titleSmall, phase, modifier = Modifier.width(42.dp))
+            }
+        },
+        hint = { TextSkeleton("Tap or slide across the curve", type.labelSmall, phase, .64f) },
+    )
+}
+
+/** The year starts within view on taller screens; keep its open-field silhouette too. */
+@Composable
+private fun YearSkeleton(phase: State<Float>) {
+    FolioSectionHead(title = "Your year", eyebrow = "Activity")
+    Spacer(Modifier.height(FolioTokens.space3))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (width in listOf(52.dp, 72.dp, 76.dp)) {
+            Box(Modifier.size(width, 48.dp), contentAlignment = Alignment.Center) {
+                FolioSkeletonBlock(Modifier.fillMaxWidth().height(32.dp), RoundedCornerShape(16.dp), phase)
+            }
         }
-        Spacer(Modifier.height(FolioTokens.space3))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .folioSunken(FolioShapes.edgeStart)
-                .padding(horizontal = FolioTokens.gutter, vertical = FolioTokens.space3),
-        ) {
-            FolioSkeletonBlock(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(FolioTokens.weekChartHeight),
-                phase = phase,
-            )
+    }
+    Spacer(Modifier.height(FolioTokens.space3))
+    TextSkeleton("Month", FolioTheme.typography.labelSmall, phase, .35f)
+    Spacer(Modifier.height(4.dp))
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = ((maxWidth + 4.dp) / 17.dp).toInt().coerceAtLeast(1)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(7) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(columns) {
+                        FolioSkeletonBlock(Modifier.size(13.dp), RoundedCornerShape(2.dp), phase)
+                    }
+                }
+            }
         }
+    }
+}
+
+/** Invisible measuring text reserves the real line box; only the shimmer is visible. */
+@Composable
+private fun TextSkeleton(
+    measure: String,
+    style: TextStyle,
+    phase: State<Float>,
+    fraction: Float = 1f,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 1,
+) {
+    val height = with(LocalDensity.current) { style.fontSize.toDp() * .58f }
+    Box(modifier.fillMaxWidth().clearAndSetSemantics {}, contentAlignment = Alignment.CenterStart) {
+        Text(measure, style = style, maxLines = maxLines, modifier = Modifier.alpha(0f))
+        FolioSkeletonLine(widthFraction = fraction, height = height, phase = phase)
     }
 }

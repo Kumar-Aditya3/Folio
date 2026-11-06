@@ -58,6 +58,8 @@ fun rememberReaderExperienceSession(title: String, cover: String?, position: Rea
         if (id != null && env != null) env.soundFor(id) { platform.soundscapeController() } else platform.soundscapeController()
     }
     val session = remember(sound) { ReaderExperienceSession(env, sound) }
+    val arcadeOpen = env?.pica?.open == true
+    var surfaceForeground by remember(session) { mutableStateOf(false) }
     val author = session.author
     val sourceSnapshot = remember(title, cover, author, chapters, highlights, notes, position?.bookId) {
         val id = position?.bookId.orEmpty()
@@ -81,8 +83,17 @@ fun rememberReaderExperienceSession(title: String, cover: String?, position: Rea
     }
     key(session) {
         ReaderForegroundEffect { foreground ->
-            session.eligible = foreground; sound.setEligible(foreground)
-            if (!foreground) session.saveContext()
+            surfaceForeground = foreground
+            val eligible = foreground && !arcadeOpen
+            session.eligible = eligible; sound.setEligible(eligible)
+            if (!eligible) session.saveContext()
+        }
+    }
+    LaunchedEffect(session, arcadeOpen, surfaceForeground) {
+        val eligible = surfaceForeground && !arcadeOpen
+        if (session.eligible != eligible) {
+            session.eligible = eligible; sound.setEligible(eligible)
+            if (!eligible) session.saveContext()
         }
     }
     DisposableEffect(session) { onDispose {

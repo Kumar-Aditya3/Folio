@@ -69,6 +69,7 @@ internal fun FirstRunWizard(step: FirstRunStep, onNext: () -> Unit, onBack: () -
         Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().heightIn(max = maxHeight)
             .folioVeil(FolioShapes.card).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             FolioEyebrow("SETUP · ${step.ordinal + 1} / ${FirstRunStep.entries.size}")
+            if (step == FirstRunStep.Welcome) FolioLogoMark(Modifier.size(56.dp))
             Text(step.title, style = FolioTheme.typography.headlineSmall, color = FolioTheme.colors.onSurface)
             SetupDescription(step.introduction)
             FolioProgressBar((step.ordinal + 1f) / FirstRunStep.entries.size)

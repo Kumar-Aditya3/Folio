@@ -24,14 +24,15 @@ import com.folio.reader.ui.theme.LocalMotion
 import com.folio.reader.ui.theme.MotionKey
 import java.awt.BorderLayout
 import java.awt.EventQueue
-import java.awt.Panel
 import java.io.File
 import java.net.URLDecoder
 import java.util.Timer
 import java.util.TimerTask
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicReference
 import org.cef.CefApp
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
@@ -124,11 +125,21 @@ actual fun HtmlContentSurface(
     var session by remember { mutableStateOf<JcefSession?>(null) }
     LaunchedEffect(session, selectionMotionJs) { session?.execute(selectionMotionJs) }
     var fatalError by remember { mutableStateOf<String?>(null) }
+    callbacks.onLoadError = { fatalError = it }
     var preparing by remember { mutableStateOf(true) }
-    // The title handler resolves sel2 spines against the current window.
-    session?.let {
-        it.sectionsForCallbacks = sections
-        it.anchorChapterIdForCallbacks = anchorChapterId
+    val navigator = LocalReaderPageNavigator.current
+    val windowVisible = com.folio.reader.ui.theme.LocalFolioWindowVisible.current
+    LaunchedEffect(session, enabled, windowVisible) { session?.setActive(enabled && windowVisible) }
+    DisposableEffect(session, navigator) {
+        val current = session
+        val turn: (Int) -> Unit = { current?.turn(it) }
+        val focus: () -> Unit = { current?.focus() }
+        navigator?.onTurn = turn
+        navigator?.onFocus = focus
+        onDispose {
+            if (navigator?.onTurn === turn) navigator.onTurn = null
+            if (navigator?.onFocus === focus) navigator.onFocus = null
+        }
     }
     var resolvedHtml by remember(loadKey) { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(0) }
@@ -147,12 +158,20 @@ actual fun HtmlContentSurface(
     // 1) Start Chromium: install (if needed) on a worker thread, then create the
     //    client/browser on the AWT EDT where Swing components must be built.
     LaunchedEffect(Unit) {
-        val result = withContext(Dispatchers.IO) {
-            runCatching { JcefSession.create(callbacks) }
+        val owned = AtomicReference<JcefSession?>(null)
+        try {
+            val created = withContext(Dispatchers.IO) {
+                JcefSession.create(callbacks).also { owned.set(it) }
+            }
+            session = created
+            owned.set(null)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            fatalError = error.message ?: "Unable to start embedded Chromium"
+        } finally {
+            withContext(NonCancellable) { owned.getAndSet(null)?.dispose() }
         }
-        result
-            .onSuccess { session = it }
-            .onFailure { fatalError = it.message ?: "Unable to start embedded Chromium" }
     }
 
     DisposableEffect(Unit) {
@@ -163,6 +182,9 @@ actual fun HtmlContentSurface(
     //    section, then assemble the window document when one is on screen.
     LaunchedEffect(loadKey, sections, session) {
         val current = session ?: return@LaunchedEffect
+        current.invalidateDocument()
+        loadedChapter = null
+        fatalError = null
         resolvedHtml = null
         if (!hasLoadedOnce) preparing = true
         val result = withContext(Dispatchers.IO) {
@@ -170,68 +192,56 @@ actual fun HtmlContentSurface(
                 val resolved = sections.map { section ->
                     section.copy(html = resolveResources(section.html, section.href) { href, src -> resolver(href, src) })
                 }
-                if (windowed) ReaderWindowAssembler.assemble(resolved) else resolved.firstOrNull()?.html.orEmpty()
+                resolved
             }
         }
         result
-            .onSuccess { resolvedHtml = it }
+            .onSuccess {
+                current.sectionsForCallbacks = it
+                current.anchorChapterIdForCallbacks = anchorChapterId
+                resolvedHtml = if (windowed) ReaderWindowAssembler.assemble(it) else it.firstOrNull()?.html.orEmpty()
+            }
             .onFailure { fatalError = it.message ?: "Unable to prepare chapter" }
     }
 
     // 2b) Grow/trim the window on screen. Each op is consumed once; an append or
     //     prepend re-runs the highlight painter afterwards so the freshly
     //     injected section wears its own marks.
-    LaunchedEffect(windowOp, session) {
+    LaunchedEffect(windowOp, session, loadedChapter) {
         val op = windowOp ?: return@LaunchedEffect
         val current = session ?: return@LaunchedEffect
-        when (op) {
-            is WindowOp.Append -> {
-                val fragment = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val resolved = resolveResources(op.section.html, op.section.href) { href, src -> resolver(href, src) }
-                        ReaderWindowAssembler.sectionFragment(op.section.copy(html = resolved))
-                    }.getOrDefault("")
-                }
-                if (fragment.isNotBlank()) {
-                    current.execute(
-                        "window.__folioAppend&&window.__folioAppend(${op.section.spineIndex}," +
-                            "${ReaderWindowAssembler.jsStringLiteral(op.section.chapterId)}," +
-                            "${ReaderWindowAssembler.jsStringLiteral(fragment)});"
-                    )
-                }
-            }
-
-            is WindowOp.Prepend -> {
-                val fragment = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val resolved = resolveResources(op.section.html, op.section.href) { href, src -> resolver(href, src) }
-                        ReaderWindowAssembler.sectionFragment(op.section.copy(html = resolved))
-                    }.getOrDefault("")
-                }
-                if (fragment.isNotBlank()) {
-                    current.execute(
-                        "window.__folioPrepend&&window.__folioPrepend(${op.section.spineIndex}," +
-                            "${ReaderWindowAssembler.jsStringLiteral(op.section.chapterId)}," +
-                            "${ReaderWindowAssembler.jsStringLiteral(fragment)});"
-                    )
-                }
-            }
-
-            is WindowOp.Trim -> current.execute(
-                "window.__folioTrim&&window.__folioTrim(${op.fromSpine},${op.toSpine});"
-            )
+        if (loadedChapter != loadKey) return@LaunchedEffect
+        val section = when (op) {
+            is WindowOp.Append -> op.section
+            is WindowOp.Prepend -> op.section
+            is WindowOp.Trim -> null
         }
-        // Keep the session's live section list (used to resolve selection spines)
-        // in step with the DOM mutations just applied.
-        when (op) {
-            is WindowOp.Append -> current.sectionsForCallbacks = current.sectionsForCallbacks + op.section
-            is WindowOp.Prepend -> current.sectionsForCallbacks = listOf(op.section) + current.sectionsForCallbacks
-            is WindowOp.Trim -> current.sectionsForCallbacks = current.sectionsForCallbacks.filter {
-                it.spineIndex in op.fromSpine..op.toSpine
+        val resolved = section?.let {
+            withContext(Dispatchers.IO) {
+                it.copy(html = resolveResources(com.folio.reader.epub.ChapterSanitizer.sanitize(it.html), it.href) { href, src -> resolver(href, src) })
             }
         }
-        current.applyHighlights(HighlightPaint.motionJs(if (resolvedMotion.reduced) 0L else resolvedMotion[com.folio.reader.ui.theme.MotionKey.HighlightInkSettle].durationMs) + HighlightPaint.applyJs(highlights, theme))
-        onWindowOpApplied(op.nonce)
+        val mutation = if (resolved != null) {
+            val fragment = ReaderWindowAssembler.sectionFragment(resolved)
+            if (fragment.isBlank()) return@LaunchedEffect
+            val hook = if (op is WindowOp.Append) "__folioAppend" else "__folioPrepend"
+            val fixed = if (resolved.isFixedLayout && resolved.fxlWidth > 0 && resolved.fxlHeight > 0)
+                "${resolved.fxlWidth}:${resolved.fxlHeight}" else ""
+            "window.$hook(${resolved.spineIndex},${ReaderWindowAssembler.jsStringLiteral(resolved.chapterId)}," +
+                "${ReaderWindowAssembler.jsStringLiteral(fragment)},${ReaderWindowAssembler.jsStringLiteral(fixed)});"
+        } else {
+            val trim = op as WindowOp.Trim
+            "window.__folioTrim(${trim.fromSpine},${trim.toSpine});"
+        }
+        current.applyWindowOperation(op.nonce, mutation) {
+            current.sectionsForCallbacks = when (op) {
+                is WindowOp.Append -> (current.sectionsForCallbacks.filterNot { it.spineIndex == op.section.spineIndex } + checkNotNull(resolved))
+                is WindowOp.Prepend -> listOf(checkNotNull(resolved)) + current.sectionsForCallbacks.filterNot { it.spineIndex == op.section.spineIndex }
+                is WindowOp.Trim -> current.sectionsForCallbacks.filter { it.spineIndex in op.fromSpine..op.toSpine }
+            }
+            current.applyHighlights(HighlightPaint.motionJs(if (resolvedMotion.reduced) 0L else resolvedMotion[com.folio.reader.ui.theme.MotionKey.HighlightInkSettle].durationMs) + HighlightPaint.applyJs(highlights, theme))
+            onWindowOpApplied(op.nonce)
+        }
     }
 
     // 3) Write and load the styled document — on content changes and on geometry
@@ -239,13 +249,18 @@ actual fun HtmlContentSurface(
     LaunchedEffect(resolvedHtml, session, reloadTick) {
         val current = session ?: return@LaunchedEffect
         val source = resolvedHtml ?: return@LaunchedEffect
+        loadedChapter = null
+        current.invalidateDocument()
         if (!hasLoadedOnce) preparing = true
         val s = settingsState
         val fraction = (positionState?.scrollOffset ?: 0.0).toFloat().coerceIn(0f, 1f)
+        System.err.println("[FolioPage] load seed=$fraction chapter=$loadKey seek=${seekRequest?.first} target=${seekTargetRequest?.first}")
         val pagedCols = PageEngine.colsFor(s.layoutMode)
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val styled = injectReaderCss(source, s)
+                val liveSource = if (windowed && current.sectionsForCallbacks.isNotEmpty())
+                    ReaderWindowAssembler.assemble(current.sectionsForCallbacks) else source
+                val styled = injectReaderCss(liveSource, s)
                 current.writeDocument(styled).toFileUrl()
             }
         }
@@ -256,12 +271,13 @@ actual fun HtmlContentSurface(
                     seedSpine = sections.firstOrNull { it.chapterId == anchorChapterId }?.spineIndex
                         ?: sections.firstOrNull()?.spineIndex ?: -1,
                     seedFraction = fraction,
-                    desktopEvents = true
+                    desktopEvents = true,
+                    shadowCss = ReaderCss.shadowStyleSheet(s)
                 )
 
                 else -> readerBridgeJs(fraction)
             }
-            current.load(url, selectionMotionJs + "window.__folioNativeSelectionTools=${onHighlightParagraph != null && onSelectionChanged != null};" + js)
+            current.load(url, selectionMotionJs + "window.__folioReduceMotion=${resolvedMotion.reduced};window.__folioNativeSelectionTools=${onHighlightParagraph != null && onSelectionChanged != null};" + js)
             loadedChapter = loadKey
             appliedSettings = s
             hasLoadedOnce = true
@@ -274,14 +290,16 @@ actual fun HtmlContentSurface(
 
     // 4) Style-only settings changes (theme, colors, typography) swap the sheet
     //    in place — no navigation, no layout flash. Geometry changes reload.
-    LaunchedEffect(settings, session) {
+    LaunchedEffect(settings, session, appliedSettings) {
         val current = session ?: return@LaunchedEffect
         val applied = appliedSettings ?: return@LaunchedEffect
         if (applied == settings) return@LaunchedEffect
         if (structuralSig(settings) != structuralSig(applied)) {
             reloadTick++
         } else {
-            current.applyStyle(fontFaceCss(settings), readerStyleCss(settings))
+            if (readerStyleCss(applied) != readerStyleCss(settings) || fontFaceCss(applied) != fontFaceCss(settings)) {
+                current.applyStyle(fontFaceCss(settings), readerStyleCss(settings), ReaderCss.shadowStyleSheet(settings))
+            }
             appliedSettings = settings
         }
     }
@@ -295,9 +313,13 @@ actual fun HtmlContentSurface(
     }
 
     // 6) Bottom-bar seeks: jump to the tapped fraction of the chapter.
-    LaunchedEffect(seekRequest, session) {
+    var appliedFractionSeek by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(seekRequest, session, loadedChapter) {
         val current = session ?: return@LaunchedEffect
         val req = seekRequest ?: return@LaunchedEffect
+        if (loadedChapter != loadKey) return@LaunchedEffect
+        if (appliedFractionSeek == req.second) return@LaunchedEffect
+        appliedFractionSeek = req.second
         current.seek(req.first)
     }
 
@@ -337,7 +359,7 @@ actual fun HtmlContentSurface(
     val error = fatalError
     if (error != null) {
         Box(modifier = modifier.background(backgroundColor), contentAlignment = Alignment.Center) {
-            Text("Embedded Chromium could not be started: $error", color = Color(theme.primaryText))
+            Text("The reading page could not be loaded: $error", color = Color(theme.primaryText))
         }
         return
     }
@@ -405,9 +427,14 @@ private class SurfaceCallbacks {
 private class JcefSession private constructor(
     private val client: CefClient,
     val browser: CefBrowser,
-    val component: Panel,
+    val component: javax.swing.JPanel,
     private val callbacks: SurfaceCallbacks
 ) {
+    private val documentGate = DesktopReaderDocumentGate()
+    private val deferredCommands = mutableListOf<Pair<Long, String>>()
+    private val pendingOperations = mutableMapOf<Long, () -> Unit>()
+    @Volatile private var pendingStyle: String? = null
+    @Volatile private var readyDelivered = false
     @Volatile private var ready = false
     @Volatile private var disposed = false
     @Volatile private var pendingLoad: Runnable? = null
@@ -430,32 +457,63 @@ private class JcefSession private constructor(
     companion object {
         fun create(callbacks: SurfaceCallbacks): JcefSession {
             val app = JcefRuntime.app()
-            lateinit var client: CefClient
-            lateinit var browser: CefBrowser
+            var client: CefClient? = null
+            var browser: CefBrowser? = null
+            var session: JcefSession? = null
             val task = Runnable {
-                client = app.createClient()
-                browser = client.createBrowser("about:blank", false, false)
+                try {
+                    val createdClient = app.createClient().also { client = it }
+                    val createdBrowser = createdClient.createBrowser("about:blank", false, false).also { browser = it }
+                    // An extra heavyweight AWT Panel creates a second native paint owner
+                    // around CEF. Use Swing's lightweight host, as SwingPanel expects.
+                    val component = javax.swing.JPanel(BorderLayout()).apply { add(createdBrowser.uiComponent, BorderLayout.CENTER) }
+                    session = JcefSession(createdClient, createdBrowser, component, callbacks).also {
+                        it.installHandlers()
+                        it.startReadyFallback()
+                    }
+                } catch (error: Throwable) {
+                    runCatching { browser?.close(true) }
+                    runCatching { client?.dispose() }
+                    throw error
+                }
             }
             if (EventQueue.isDispatchThread()) task.run() else EventQueue.invokeAndWait(task)
-            val component = Panel(BorderLayout()).apply {
-                add(browser.uiComponent, BorderLayout.CENTER)
-            }
-            return JcefSession(client, browser, component, callbacks).also {
-                it.installHandlers()
-                it.startReadyFallback()
-            }
+            return checkNotNull(session)
         }
     }
 
     private fun installHandlers() {
         client.addDisplayHandler(object : CefDisplayHandlerAdapter() {
             override fun onTitleChange(browser: CefBrowser, title: String?) {
-                val t = title ?: return
+                val generation = documentGate.generation
+                val receivedUrl = browser.url
+                EventQueue.invokeLater titleDelivery@{
+                if (!documentGate.matches(generation, receivedUrl)) return@titleDelivery
+                var t = documentGate.message(title, receivedUrl) ?: return@titleDelivery
+                if (t.startsWith("folio-ready:$generation|")) {
+                    if (!documentGate.acknowledge(generation, receivedUrl)) return@titleDelivery
+                    pendingStyle?.let { execute(it) }
+                    lastOverlay?.let { execute(overlayJs(it, lastOverlayScrollVal, false)) }
+                    lastHighlightJs?.let { execute(it) }
+                    val queued = synchronized(deferredCommands) { deferredCommands.toList().also { deferredCommands.clear() } }
+                    queued.filter { it.first == generation }.forEach { execute(it.second) }
+                    flushPendingSeek()
+                    flushPendingSeekFraction()
+                    deliverReady()
+                    t = t.substringAfter('|', "")
+                }
+                if (t.startsWith("folio-error:")) { callbacks.onLoadError(t.removePrefix("folio-error:")); return@titleDelivery }
+                if (t.startsWith("folio-op:") && documentGate.ready) {
+                    val nonce = t.removePrefix("folio-op:").substringBefore(':').toLongOrNull()
+                    if (nonce != null) pendingOperations.remove(nonce)?.invoke()
+                    return@titleDelivery
+                }
+                if (!documentGate.ready || !documentGate.active) return@titleDelivery
                 when {
                     t.startsWith("folio-progress:") -> {
                         val parts = t.split(':')
-                        if (parts.size < 5) return
-                        val fraction = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return
+                        if (parts.size < 5) return@titleDelivery
+                        val fraction = parts[1].toFloatOrNull()?.coerceIn(0f, 1f) ?: return@titleDelivery
                         val spine = parts.getOrNull(5)?.toIntOrNull()
                         callbacks.onProgress(fraction)
                         callbacks.onPageChange(
@@ -471,7 +529,7 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-link:") -> {
                         val encoded = t.removePrefix("folio-link:").substringAfter(':', "")
-                        val href = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull() ?: return
+                        val href = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull() ?: return@titleDelivery
                         callbacks.onLinkClick?.invoke(href)
                     }
 
@@ -485,7 +543,7 @@ private class JcefSession private constructor(
                         parseReaderSelectionMessage(t)?.let { message ->
                             val text = runCatching { URLDecoder.decode(message.encodedText, "UTF-8") }.getOrNull()
                             val chapterId = sectionsForCallbacks.firstOrNull { it.spineIndex == message.spine }?.chapterId
-                                ?: sectionsForCallbacks.firstOrNull()?.chapterId.orEmpty()
+                                ?: anchorChapterIdForCallbacks?.takeIf { message.spine < 0 } ?: return@titleDelivery
                             callbacks.onSelectionBounds?.invoke(message.bounds)
                             callbacks.onSelectionChanged?.invoke(chapterId, message.paragraph, text?.takeIf { it.isNotBlank() })
                         }
@@ -506,7 +564,7 @@ private class JcefSession private constructor(
                         // The spine names a section of the window; resolve it to the
                         // chapter the host knows.
                         val chapterId = sectionsForCallbacks.firstOrNull { it.spineIndex == spine }?.chapterId
-                            ?: sectionsForCallbacks.firstOrNull()?.chapterId.orEmpty()
+                            ?: anchorChapterIdForCallbacks?.takeIf { spine < 0 } ?: return@titleDelivery
                         if (text.isNullOrBlank()) callbacks.onSelectionChanged?.invoke(chapterId, idx, null)
                         else callbacks.onSelectionChanged?.invoke(chapterId, idx, text)
                     }
@@ -524,10 +582,7 @@ private class JcefSession private constructor(
                     }
 
                     t.startsWith("folio-ovl:") -> {
-                        val rest = t.removePrefix("folio-ovl:")
-                        val last = rest.substringAfterLast(':', "")
-                        val body = if (last.toIntOrNull() != null) rest.substringBeforeLast(':') else rest
-                        callbacks.onOverlayAction?.invoke(body)
+                        callbacks.onOverlayAction?.invoke(desktopReaderOverlayAction(t))
                     }
 
                     t.startsWith("folio-ovlscroll:") -> {
@@ -537,6 +592,7 @@ private class JcefSession private constructor(
 
                     t.startsWith("folio-engdiag:") ->
                         System.err.println("[FolioPage] ${t.removePrefix("folio-engdiag:").substringBeforeLast(':')}")
+                }
                 }
             }
         })
@@ -556,23 +612,17 @@ private class JcefSession private constructor(
         client.addLoadHandler(object : CefLoadHandlerAdapter() {
             override fun onLoadEnd(browser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
                 // Subresource loads (CSS, images) also trigger this; main frame only.
-                if (!frame.isMain) return
+                if (!frame.isMain || disposed) return
                 markReady()
                 val expected = expectedUrl
                 val js = pendingJs
                 if (expected != null && js != null && sameUrl(frame.getURL(), expected)) {
                     pendingJs = null
-                    browser.executeJavaScript(js, expected, 0)
-                    val overlay = lastOverlay
-                    if (overlay != null) browser.executeJavaScript(overlayJs(overlay, lastOverlayScrollVal, false), expected, 0)
-                    lastHighlightJs?.let { browser.executeJavaScript(it, expected, 0) }
-                    flushPendingSeek()
-                    flushPendingSeekFraction()
-                    // The chapter document has painted: let the reader dissolve the
-                    // morph cover plate on real paint rather than on the HTML string
-                    // being ready. Only for the document we actually issued (URL
-                    // match above), so an about:blank/stale load-end never fires it.
-                    callbacks.onContentReady()
+                    val generation = documentGate.generation
+                    EventQueue.invokeLater {
+                        if (documentGate.matches(generation, browser.url)) browser.executeJavaScript(
+                            desktopReaderBootstrap(generation, documentGate.active, false, js, expected), expected, 0)
+                    }
                 }
             }
 
@@ -589,7 +639,7 @@ private class JcefSession private constructor(
                 if (failedUrl.isNullOrBlank() || failedUrl == "about:blank") return
                 val message = "Folio JCEF load failed: $errorCode $errorText ($failedUrl)"
                 System.err.println(message)
-                callbacks.onLoadError(message)
+                EventQueue.invokeLater { if (!disposed && sameUrl(failedUrl, expectedUrl)) callbacks.onLoadError(message) }
             }
         })
     }
@@ -614,6 +664,8 @@ private class JcefSession private constructor(
                     markReady()
                     cancel()
                 } else if (++attempts > 300) { // ~30s
+                    EventQueue.invokeLater { if (!disposed) callbacks.onLoadError("Embedded Chromium did not start") }
+                    readyTimer?.cancel()
                     cancel()
                 }
             }
@@ -626,6 +678,7 @@ private class JcefSession private constructor(
         synchronized(this) {
             if (ready) return
             ready = true
+            readyTimer?.cancel()
             queued = pendingLoad
             pendingLoad = null
         }
@@ -637,7 +690,7 @@ private class JcefSession private constructor(
         val dir = File(JcefRuntime.dataDir(), "jcef-cache")
         dir.mkdirs()
         val file = File(dir, "html-${UUID.randomUUID()}.html")
-        file.writeText(html)
+        writeDesktopReaderDocument(file, html)
         lastDocument?.takeIf { it != file }?.delete()
         lastDocument = file
         return file
@@ -645,9 +698,16 @@ private class JcefSession private constructor(
 
     /** Loads a document URL once the native browser exists; [js] runs on its load-end. */
     fun load(url: String, js: String) {
+        val generation = documentGate.begin(url)
+        readyDelivered = false
+        pendingStyle = null
+        synchronized(deferredCommands) { deferredCommands.clear() }
+        pendingOperations.clear()
+        pendingSeekFraction = null
+        pendingSeekTarget = null
         expectedUrl = url
         pendingJs = js
-        val action = Runnable { if (!disposed) browser.loadURL(url) }
+        val action = Runnable { if (!disposed && generation == documentGate.generation) browser.loadURL(url) }
         val runNow: Boolean
         synchronized(this) {
             runNow = ready
@@ -658,21 +718,76 @@ private class JcefSession private constructor(
 
     /** Runs JS on the current document immediately (window grow/trim mutations). */
     fun execute(js: String) {
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        val generation = documentGate.generation
+        EventQueue.invokeLater {
+            if (disposed || generation != documentGate.generation || documentGate.url == null) return@invokeLater
+            if (!documentGate.ready) {
+                synchronized(deferredCommands) { deferredCommands.add(generation to js) }
+                return@invokeLater
+            }
+            if (!documentGate.matches(generation, browser.url)) return@invokeLater
+            val guarded = "if(window.__folioGeneration===$generation){\n$js\n}"
+            browser.executeJavaScript(guarded, expectedUrl, 0)
+        }
+    }
+
+    fun invalidateDocument() {
+        val outgoing = documentGate.generation
+        EventQueue.invokeLater {
+            if (!disposed) browser.executeJavaScript(
+                "if(window.__folioGeneration===$outgoing){window.__folioInputEnabled=false;if(window.__folioSetActive)window.__folioSetActive(false);}",
+                browser.url, 0)
+        }
+        documentGate.invalidate()
+    }
+    private fun deliverReady() {
+        if (documentGate.ready && documentGate.active && !readyDelivered) {
+            readyDelivered = true
+            callbacks.onContentReady()
+            focus()
+        }
+    }
+
+    fun setActive(active: Boolean) {
+        documentGate.active = active
+        execute("window.__folioInputEnabled=$active;if(window.__folioSetActive)window.__folioSetActive($active);")
+        if (active) deliverReady()
+    }
+
+    fun focus() {
+        EventQueue.invokeLater {
+            val owner = javax.swing.SwingUtilities.getWindowAncestor(component)
+            if (!disposed && documentGate.active && owner != null && owner.isActive) {
+                component.requestFocusInWindow()
+                browser.setFocus(true)
+            }
+        }
+    }
+
+    fun turn(direction: Int) {
+        if (!documentGate.ready || !documentGate.active || direction !in listOf(-1, 1)) return
+        execute("window.__folioTurn&&window.__folioTurn($direction);")
+        focus()
+    }
+
+    fun applyWindowOperation(nonce: Long, js: String, onApplied: () -> Unit) {
+        pendingOperations[nonce] = onApplied
+        execute("if(document.getElementById('folio-continuous-root')){$js;document.title='folio-op:$nonce:ok';}")
     }
 
     /** Swaps the reader stylesheet in place (theme/typography) without navigating. */
-    fun applyStyle(fontsCss: String, styleCss: String) {
+    fun applyStyle(fontsCss: String, styleCss: String, shadowCss: String) {
         val fontsLit = fontsCss.toJsStringLiteral()
         val styleLit = styleCss.toJsStringLiteral()
         // __folioRestyle (both engines) anchors the viewport to its paragraph/block
         // across the swap — without it the pixel offset survives a reflow and the
         // reader's eye lands on different words ("changing fonts jumps page position").
-        val js = "(function(){if(window.__folioRestyle){window.__folioRestyle($fontsLit,$styleLit);}" +
+        val js = "(function(){if(window.__folioRestyle){window.__folioRestyle($fontsLit,$styleLit,${shadowCss.toJsStringLiteral()});}" +
                 "else{var f=document.getElementById('folio-fonts');if(f)f.textContent=$fontsLit;" +
                 "var s=document.getElementById('folio-reader-style');if(s)s.textContent=$styleLit;" +
                 "if(window.__folioRelayout)window.__folioRelayout();}})();"
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        pendingStyle = js
+        execute(js)
     }
 
     /** Renders (or clears) the glass overlay panel inside the page. */
@@ -689,7 +804,7 @@ private class JcefSession private constructor(
         val centerActive = kind.isNotEmpty() && !overlayCentered
         overlayCentered = overlayCentered || centerActive
         val js = overlayJs(html, lastOverlayScrollVal, centerActive)
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        execute(js)
     }
 
     private fun overlayKind(html: String): String =
@@ -727,33 +842,35 @@ private class JcefSession private constructor(
     /** Re-paints the chapter's highlights; a load in flight defers to onLoadEnd. */
     fun applyHighlights(js: String) {
         lastHighlightJs = js
-        if (pendingJs != null) return
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        if (pendingJs != null || !documentGate.ready) return
+        execute(js)
     }
 
     /** Drops the page selection so the chrome's Highlight button dims again. */
     fun clearSelection() {
         val js = "window.__folioClearSel&&window.__folioClearSel();"
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, browser.url ?: "about:blank", 0) }
+        execute(js)
     }
 
     /** Jumps to an absolute 0..1 fraction of the chapter via the page hook. */
     fun seek(fraction: Float) {
+        System.err.println("[FolioPage] seek fraction=$fraction")
         pendingSeekFraction = fraction.coerceIn(0f, 1f)
         flushPendingSeekFraction()
     }
 
     private fun flushPendingSeekFraction() {
         val target = pendingSeekFraction ?: return
-        if (!ready || pendingJs != null) return
+        if (!ready || pendingJs != null || !documentGate.ready) return
         val url = expectedUrl ?: return
         pendingSeekFraction = null
         val js = "window.__folioSeek&&window.__folioSeek($target);"
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, url, 0) }
+        execute(js)
     }
 
     /** Scrolls to a target ("h:<id>" highlight mark or "p:<index>" paragraph). */
     fun seekTo(target: String) {
+        System.err.println("[FolioPage] seek target=$target")
         pendingSeekTarget = target
         flushPendingSeek()
     }
@@ -765,11 +882,11 @@ private class JcefSession private constructor(
      */
     private fun flushPendingSeek() {
         val target = pendingSeekTarget ?: return
-        if (!ready || pendingJs != null) return
+        if (!ready || pendingJs != null || !documentGate.ready) return
         val url = expectedUrl ?: return
         pendingSeekTarget = null
         val js = "window.__folioSeekTo&&window.__folioSeekTo(${target.toJsStringLiteral()});"
-        EventQueue.invokeLater { if (!disposed) browser.executeJavaScript(js, url, 0) }
+        execute(js)
     }
 
     private fun sameUrl(a: String?, b: String?): Boolean {
@@ -778,16 +895,29 @@ private class JcefSession private constructor(
     }
 
     fun dispose() {
+        if (disposed) return
         disposed = true
+        documentGate.dispose()
         readyTimer?.cancel()
+        pendingLoad = null
+        pendingJs = null
+        synchronized(deferredCommands) { deferredCommands.clear() }
+        pendingOperations.clear()
         val c = client
         val b = browser
         EventQueue.invokeLater {
+            runCatching { b.executeJavaScript("window.__folioDispose&&window.__folioDispose();", b.url, 0) }
             runCatching { b.close(true) }
             runCatching { c.dispose() }
         }
         lastDocument?.delete()
     }
+}
+
+/** Selection tools use millisecond timestamps, which do not fit in a 32-bit Int. */
+internal fun desktopReaderOverlayAction(message: String): String {
+    val body = message.removePrefix("folio-ovl:")
+    return if (body.substringAfterLast(':', "").toLongOrNull() != null) body.substringBeforeLast(':') else body
 }
 
 internal object JcefRuntime {
@@ -805,10 +935,15 @@ internal object JcefRuntime {
             // plus an OpenGL dependency) without solving the overlay problem; the
             // reader chrome reserves its own space instead (see ReaderScreen).
             getCefSettings().windowless_rendering_enabled = false
+            // Opt-in local diagnostics for native rendering/idle profiling.
+            getCefSettings().remote_debugging_port = Integer.getInteger("folio.reader.debugPort", 0)
+                .takeIf { it in 1024..65535 } ?: 0
             // Chapter pages are file:// documents that must reach other file://
             // resources (images, cached CSS, bundled fonts). Scripts are stripped
             // by ChapterSanitizer before load, so web security stays on.
-            addJcefArgs("--disable-gpu", "--allow-file-access-from-files")
+            // Let Chromium select a supported accelerated renderer and apply its
+            // driver fallback. Forcing --disable-gpu made every scroll software-rendered.
+            addJcefArgs("--allow-file-access-from-files")
         }.build().also { instance = it }
     }
 }
@@ -925,15 +1060,36 @@ private fun readerStyleCss(settings: ReaderSettings): String = ReaderCss.styleSh
     PageEngine.colsFor(settings.layoutMode),
     fontStack = ::fontStackFor,
     continuousCss = "body{opacity:0;transition:opacity .15s ease;}"
-)
+) + run {
+    val theme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
+    fun rgb(color: Int) = color.toUInt().toString(16).padStart(8, '0').takeLast(6)
+    // Publisher sheets can leave body transparent. Context actions need their
+    // own opaque paper so the prose underneath cannot show through the buttons.
+    "#folio-selection-tools{background:#${rgb(theme.background)}!important;" +
+        "color:#${rgb(theme.primaryText)}!important;border:1px solid #${rgb(theme.secondaryText)}33;}"
+}
 
-private fun injectReaderCss(html: String, settings: ReaderSettings): String {
+internal fun writeDesktopReaderDocument(file: File, html: String) {
+    // Publisher charset declarations describe the original EPUB bytes, not this
+    // decoded String. A UTF-8 BOM wins Chromium's file:// encoding sniff even if
+    // a legacy declaration survives or the publisher head exceeds the sniff limit.
+    file.writeText("\uFEFF" + html.removePrefix("\uFEFF"), Charsets.UTF_8)
+}
+
+internal fun injectReaderCss(html: String, settings: ReaderSettings): String {
     val safeHtml = com.folio.reader.epub.ChapterSanitizer.sanitize(html)
     val fontFaces = fontFaceCss(settings)
-    val css = "<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
+    val charset = "<meta charset=\"utf-8\"/>"
+    val css = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
             (if (fontFaces.isNotEmpty()) "<style id=\"folio-fonts\">$fontFaces</style>" else "") +
             "<style id=\"folio-reader-style\">" + readerStyleCss(settings) + "</style>"
-    return if (safeHtml.contains("</head>", true)) safeHtml.replaceFirst(Regex("(?i)</head>"), "$css</head>") else "$css$safeHtml"
+    return if (safeHtml.contains("</head>", true)) {
+        val head = Regex("(?i)<head\\b[^>]*>").find(safeHtml)
+        val declared = if (head != null) safeHtml.replaceRange(head.range.last + 1, head.range.last + 1, charset)
+            else "$charset$safeHtml"
+        // Keep reader overrides after publisher styles; only encoding belongs first.
+        declared.replaceFirst(Regex("(?i)</head>"), "$css</head>")
+    } else "$charset$css$safeHtml"
 }
 
 /**
@@ -1007,26 +1163,17 @@ private fun readerBridgeJs(fraction: Float): String = """
   }
   function atTop(){var s=document.scrollingElement||document.documentElement;return (s.scrollTop||0)<=1;}
   function atBottom(){var s=document.scrollingElement||document.documentElement;return s.scrollTop+s.clientHeight>=s.scrollHeight-2;}
+  window.__folioTurn=function(direction){
+    if(window.__folioInputEnabled===false)return false;
+    restorePending=false;
+    if(direction<0&&atTop()){edge('start');return true;}
+    if(direction>0&&atBottom()){edge('end');return true;}
+    scroller.scrollBy({top:scroller.clientHeight*.9*(direction>0?1:-1),behavior:window.__folioReduceMotion?'auto':'smooth'});return true;
+  };
   window.addEventListener('wheel',function(e){if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;var d=e.deltaY||0;if(d<0&&atTop())edge('start');if(d>0&&atBottom())edge('end');restorePending=false;},{passive:true});
   window.addEventListener('scroll',function(){schedule();clearTimeout(window.__folioSettleT);window.__folioSettleT=setTimeout(schedule,180);},{passive:true});
   window.addEventListener('resize',schedule);
-  document.addEventListener('click',function(ev){
-    var el=ev.target;
-    var a=(el&&el.closest)?el.closest('a[href]'):null;
-    if(a){
-      var href=a.getAttribute('href')||'';
-      if(href&&href.charAt(0)!=='#'){ev.preventDefault();document.title='folio-link:'+(++nonce)+':'+encodeURIComponent(href);}
-    }
-  },true);
-  var downX=0,downY=0,downT=0;
-  document.addEventListener('pointerdown',function(e){downX=e.clientX;downY=e.clientY;downT=Date.now();},true);
-  document.addEventListener('pointerup',function(e){
-    if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
-    if(Date.now()-downT<350&&Math.hypot(e.clientX-downX,e.clientY-downY)<24){
-      var w=Math.max(1,window.innerWidth),h=Math.max(1,window.innerHeight);
-      if(e.clientX>w*0.3&&e.clientX<w*0.7&&e.clientY>h*0.25&&e.clientY<h*0.75){document.title='folio-tap:'+(++nonce);}
-    }
-  },true);
+  ${DesktopReaderInput.js()}
   if(window.ResizeObserver){new ResizeObserver(schedule).observe(document.documentElement);if(document.body)new ResizeObserver(schedule).observe(document.body);}
   if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){schedule();setTimeout(schedule,150);});}
   document.querySelectorAll('img').forEach(function(i){i.addEventListener('load',schedule);i.addEventListener('error',schedule);});

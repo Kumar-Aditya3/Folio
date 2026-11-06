@@ -598,12 +598,9 @@ internal fun withHue(c: Color, hueDeg: Float): Color =
  * page -- the navigation's selected pill came out at **0.020-0.036 Oklab chroma** against a
  * 0.030 (light) / 0.040 (dark) floor, i.e. the tint was there in the token and not on screen.
  *
- * This is the same hue at the same gamma luminance carrying a fill's worth of chroma. It
- * deliberately keeps [folioDestinationAccent]'s per-destination hue, so a tab still says *which
- * room it is* and the capsule cannot disagree with the masthead's segment switch; only the
- * role's *fitting* changes, from ink to fill. The distinction is the one already recorded
- * against `navigationSelected` in `Theme.kt`: that role is "the palette's signature hue at
- * *display* lightness ... while the four accents are AA-fitted for *ink*".
+ * This is the same hue at the same gamma luminance carrying a fill's worth of chroma.
+ * Navigation derives this from the theme's single interaction accent; monochrome
+ * signatures bypass this transform so they remain achromatic.
  *
  * `FILL_ACCENT_CHROMA` is measured, not chosen: swept against the rendered floors, the pill
  * clears every face from **0.45 alpha** onward and fails 2 of 18 at 0.40.
@@ -1647,16 +1644,18 @@ fun atmosphereFor(
 
     return FolioAtmosphere(
         isDark = dark,
-        fieldTop = fieldTop,
+        // The foundation carries temperature; content and controls own the stronger
+        // chroma. Preserve the user's vibrancy range and the field's authored hues.
+        fieldTop = enrichChroma(fieldTop, .72f),
         // §Vibrancy change E: the field's foot is the deepest, least text-bearing region, so it
         // carries the widest chroma span. Identity at neutral (bottomChromaGain == 1f).
-        fieldBottom = enrichChroma(fieldBottom, bottomChromaGain),
+        fieldBottom = enrichChroma(fieldBottom, bottomChromaGain * .72f),
         fieldSourceX = light.sourceX,
         fieldSourceY = light.sourceY,
         // §Vibrancy change A/B: enrich the authored pools once, here, so both the Canvas
         // SilkField base and the Android Mirage shader consume identical already-vivid colours
         // (no path-specific vivid()/sink). Hue- and luminance-preserving; identity at neutral.
-        pools = pools.map { enrichChroma(it, poolChromaGain) },
+        pools = pools.map { enrichChroma(it, poolChromaGain * .82f) },
         // The pools are the theme's colour, so they have to carry. Raised from a whisper
         // (0.16 / 0.085) so the four authored hues read as a living aurora rather than a
         // rumour under the wash — this is the main dial that turns a mono room multi-hue.

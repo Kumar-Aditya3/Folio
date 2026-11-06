@@ -11,6 +11,7 @@ import com.folio.reader.database.StatsExclusionRepository
 import com.folio.reader.database.TagRepository
 import com.folio.reader.manga.BrowseMode
 import com.folio.reader.manga.MangaBackend
+import com.folio.reader.manga.MangaEntry
 import com.folio.reader.manga.MangaCategoryRepository
 import com.folio.reader.manga.MangaChapterRepository
 import com.folio.reader.manga.MangaHistoryRepository
@@ -35,6 +36,11 @@ import com.folio.reader.ui.statistics.StatDay
 import com.folio.reader.ui.statistics.StatisticsViewModel
 import com.folio.reader.ui.statistics.localSessions
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onStart
@@ -57,7 +63,7 @@ import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.todayIn
-import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
 /** Everything the Home surface renders, computed in one pass. */
@@ -96,7 +102,7 @@ data class HomeUiState(
      * exactly as they do on the manga cards.
      */
     val readingNow: List<ReadingNowItem> = emptyList(),
-    /** §11.4: LATEST browse hits from the most recently read manga's source, cap 6. */
+    /** Ranked matches to recent manga reads, cap 6. */
     val discover: List<MangaDiscoverItem> = emptyList(),
     /** True when the manga library is non-empty — Home renders for manga-only users. */
     val hasManga: Boolean = false,
@@ -174,13 +180,16 @@ data class ReadingNowItem(
     val lastActivity: Instant = Instant.DISTANT_PAST
 )
 
-/** One Discover row (§11.4): a LATEST browse hit not already in the library. */
+/** A manga match, or an explicitly labeled source pick when extensions were chosen manually. */
 data class MangaDiscoverItem(
     val sourceId: Long,
     val sourceName: String,
     val url: String,
     val title: String,
-    val thumbnailUrl: String?
+    val thumbnailUrl: String?,
+    val reason: String = "",
+    val personalized: Boolean = false,
+    val sourceMemo: String = "{}",
 )
 
 /**
@@ -445,25 +454,21 @@ class HomeViewModel(
         Inputs(books, sessions, inProgress, finished, settings)
     }
 
-    /**
-     * §11.4 Discover, off Home's critical path: the first emission is whatever
-     * the cache holds (stale rows beat a blank shelf) or empty, and arrives
-     * instantly; the live browse fetch — bounded at
-     * [DISCOVER_FETCH_TIMEOUT_MS] but still seconds on a cold cache — runs
-     * afterward and updates the surface in place. `loaded=true` is never held
-     * hostage by the network again. The flow never completes while collected,
-     * because `combine` tears the whole state down when any source finishes.
-     *
-     * The source list is awaited **after** the first emission, never before.
-     * Resolving the extension expansion up front put `observeSources()` — on
-     * Android, a flow that emits nothing until the extension runtime has finished
-     * loading — on the path of the very first value, so this flow could not
-     * produce one and `combine` therefore could not produce Home's state at all.
-     * The first emission only needs the *raw* exclusion rows as its cache
-     * signature, and a raw row is a local read.
-     */
+    /** Discover starts empty so neither local profile reads nor extension loading gates Home.
+     * Cache reuse requires the same library, recent reads, exclusions and preferences. Progress
+     * within the same title does not change taste or trigger another network refresh. */
     private data class DiscoverPreferences(val mode: DiscoverMode, val packages: Set<String>)
-    private data class DiscoverSignature(val exclusions: Set<Pair<Scope, String>>, val preferences: DiscoverPreferences)
+    private data class DiscoverLibraryKey(val id: String, val sourceId: Long, val url: String,
+        val title: String, val author: String?, val artist: String?, val genres: List<String>)
+    private data class DiscoverContext(val library: List<MangaEntry>, val recentIds: List<String>,
+        val excludedCategoryMembers: Set<String>) {
+        val libraryKey get() = library.sortedBy { it.id }.map {
+            DiscoverLibraryKey(it.id, it.sourceId, it.url, it.title, it.author, it.artist, it.genres)
+        }
+    }
+    private data class DiscoverSignature(val exclusions: Set<Pair<Scope, String>>, val preferences: DiscoverPreferences,
+        val owner: MangaRepository?, val library: List<DiscoverLibraryKey>, val recentIds: List<String>,
+        val excludedCategoryMembers: Set<String>)
 
     private val discoverPreferences = (settingsStore?.state ?: flowOf(ReaderSettings())).map {
         DiscoverPreferences(it.discoverMode,
@@ -483,18 +488,29 @@ class HomeViewModel(
                 emit(emptyList())
                 awaitCancellation()
             }
-            val signature = DiscoverSignature(raw.toSet(), preferences)
-            val now = Clock.System.now()
-            val cached = discoverCache?.takeIf { it.signature == signature }
-            emit(cached?.items.orEmpty())
-            if (cached != null) {
-                val ttl = if (cached.items.isEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
-                if (now - cached.at < ttl) awaitCancellation()
-            }
-            emit(fetchDiscover(raw, preferences, signature))
-            awaitCancellation()
+            val context = combine(
+                mangaRepository?.observeLibrary() ?: flowOf(emptyList()),
+                mangaHistoryRepository?.observeRecent(DISCOVER_CANDIDATE_POOL) ?: flowOf(emptyList())
+            ) { library, history ->
+                val excludedCategoryMembers = raw.filter { it.first == Scope.MANGA_CATEGORY }.flatMap { (_, id) ->
+                    mangaCategoryRepository?.mangaIdsInCategory(id).orEmpty()
+                }.toSet()
+                DiscoverContext(library, history.distinctBy { it.mangaId }.map { it.mangaId }, excludedCategoryMembers)
+            }.distinctUntilChanged { old, new -> old.libraryKey == new.libraryKey && old.recentIds == new.recentIds &&
+                old.excludedCategoryMembers == new.excludedCategoryMembers }
+            emitAll(context.flatMapLatest { current -> flow {
+                val signature = DiscoverSignature(raw.toSet(), preferences, mangaRepository, current.libraryKey,
+                    current.recentIds, current.excludedCategoryMembers)
+                val cached = discoverCache?.takeIf { it.signature == signature }
+                emit(cached?.items.orEmpty())
+                val ttl = if (cached?.items.isNullOrEmpty()) DISCOVER_NEGATIVE_TTL else DISCOVER_TTL
+                if (cached == null || Clock.System.now() - cached.at >= ttl) {
+                    emit(fetchDiscover(raw, preferences, signature, current))
+                }
+                awaitCancellation()
+            } })
         }
-    }
+    }.onStart { emit(emptyList()) }
 
     /**
      * The exclusion snapshot Discover fetches under, extension rows expanded to
@@ -607,11 +623,7 @@ class HomeViewModel(
         }
     }
 
-    /**
-     * Discover's cached rows when they were fetched under the same exclusion
-     * signature — stale beats blank, but rows from a now-excluded extension
-     * must not linger. 0 is the null-exclusions signature.
-     */
+    /** Compute the local Home state independently of network discovery. */
     private suspend fun Inputs.build(
         exclusions: Set<Pair<Scope, String>>?,
         discover: List<MangaDiscoverItem>,
@@ -675,14 +687,7 @@ class HomeViewModel(
         // Suggestions come from the most recently finished passing book: same
         // series first, then shared authors — the anchor itself is never suggested.
         val anchor = gatedFinished.maxByOrNull { it.lastOpenedAt ?: it.updatedAt }
-        val candidatePool = if (anchor == null) emptyList() else books
-            .filter { it.id != anchor.id && it.status != BookStatus.FINISHED }
-            .filter { candidate ->
-                (anchor.seriesId != null && candidate.seriesId == anchor.seriesId) ||
-                    candidate.authors.intersect(anchor.authors.toSet()).isNotEmpty()
-            }
-            .filter { passes(it) }
-            .take(CANDIDATE_CAP)
+        val candidatePool = rankBookRecommendations(anchor, books.filter { passes(it) }, CANDIDATE_CAP)
 
         val startedThisWeek = gatedSessions
             .groupBy { it.bookId }
@@ -848,27 +853,11 @@ class HomeViewModel(
         return rows
     }
 
-    /**
-     * §11.4 Discover fetch: LATEST from the sources of the reader's recent
-     * history, minus titles already in the library, cap 6. One browse request
-     * per cache window, silently absent on failure, without a backend,
-     * without history, or when no candidate source can serve LATEST.
-     *
-     * Exclusions decide which sources may feed the shelf: the source of every
-     * library manga excluded from the statistics — directly, through its
-     * category, its source, or its extension — is banned, and the walk
-     * continues down the history until a clean source is found. Excluding a
-     * title therefore takes its whole extension off Discover, the same way it
-     * takes the title off every other recommendation surface.
-     *
-     * The live network half only — the cache is read by [discoverFlow] and
-     * [cachedDiscover], so this runs *off* Home's first-emission path and its
-     * result lands as an in-place update.
-     */
+    /** Browse supplies candidates; creator/genre affinity decides which ones deserve a place.
+     * All source and detail work is bounded and stays off Home's first-emission path. */
     private suspend fun fetchDiscover(rawExclusions: Set<Pair<Scope, String>>?, preferences: DiscoverPreferences,
-        signature: DiscoverSignature): List<MangaDiscoverItem> {
+        signature: DiscoverSignature, context: DiscoverContext): List<MangaDiscoverItem> {
         val backend = mangaBackend ?: return emptyList()
-        val history = mangaHistoryRepository
         val mangaRepo = mangaRepository ?: return emptyList()
         val now = Clock.System.now()
         // The source list is awaited here, after Discover's first emission has
@@ -882,7 +871,7 @@ class HomeViewModel(
             }
         val fetched: List<MangaDiscoverItem> = runCatching {
             val scope = exclusions?.let(::StatsScope)
-            val library = mangaRepo.observeLibrary().first()
+            val library = context.library
             val sources = backend.observeSources().first()
             // A source is banned when any of its library manga fails StatsScope
             // — direct, category, source and (expanded) extension rules all
@@ -912,48 +901,74 @@ class HomeViewModel(
                     }
                 }
             }
-            // Walk the reading history, newest first, until a library manga
-            // from a clean, LATEST-capable source is found. (A plain loop, not
-            // a sequence chain: the entry lookup is a suspend call.)
             val allowed = sources.filter { source ->
-                !source.isLocal && source.supportsLatest && source.id !in bannedSources &&
+                !source.isLocal && source.id !in bannedSources &&
                     (scope?.includesManga("", emptySet(), source.id) != false) &&
                     (preferences.mode != DiscoverMode.SELECTED_EXTENSIONS || source.extensionPkg in preferences.packages)
             }
-            var anchor: com.folio.reader.manga.MangaEntry? = null
-            for (item in history?.observeRecent(DISCOVER_CANDIDATE_POOL)?.first().orEmpty().distinctBy { it.mangaId }) {
-                val entry = mangaRepo.get(item.mangaId) ?: continue
-                if (!entry.inLibrary || entry.isLocal) continue
-                if (entry.sourceId in bannedSources) continue
-                if (allowed.none { it.id == entry.sourceId }) continue
-                anchor = entry
-                break
+            // An unselected source may still inform taste, but excluded titles never do.
+            val recentReads = context.recentIds.mapNotNull { id -> library.find { it.id == id } }
+                .filter { !it.isLocal && it.sourceId !in bannedSources }
+                .take(5)
+            val readSources = recentReads.mapNotNull { entry -> allowed.find { it.id == entry.sourceId } }.distinctBy { it.id }
+            val preferredLanguages = backend.getSourceLanguages().ifEmpty {
+                sources.filter { source -> recentReads.any { it.sourceId == source.id } }.map { it.lang }.toSet()
             }
-            // An explicit extension choice can discover from an unread source too. The default
-            // retains its original recent-reading anchor and never invents one.
-            val source = anchor?.let { entry -> allowed.firstOrNull { it.id == entry.sourceId } }
-                ?: (if (preferences.mode == DiscoverMode.SELECTED_EXTENSIONS) allowed.firstOrNull() else null)
-                ?: return@runCatching emptyList()
-            val inLibraryTitles = library
-                .map { it.title.trim().lowercase() }
-                .toSet()
-            val browsePage = withTimeoutOrNull(DISCOVER_FETCH_TIMEOUT_MS) {
-                backend.fetchBrowse(source.id, page = 1, mode = BrowseMode.LATEST)
-            }
-            // Slowness, unlike failure, is not handled by runCatching: without a
-            // timeout this await can hold Home's loaded=true for OkHttp's full
-            // two-minute call timeout. On timeout fall back to the last cached rows
-            // (even if stale) so Discover degrades gracefully instead of stalling;
-            // the labeled return still writes the fallback to the cache below.
-            if (browsePage == null) {
-                return@runCatching discoverCache?.takeIf { it.signature == signature }?.items.orEmpty()
-            }
-            browsePage.items
-                .filter { it.title.trim().lowercase() !in inLibraryTitles }
-                .take(DISCOVER_CAP)
-                .map {
-                    MangaDiscoverItem(source.id, source.name, it.url, it.title, it.thumbnailUrl)
+            val selectedSources = if (preferences.mode == DiscoverMode.SELECTED_EXTENSIONS) allowed
+                .filter { preferredLanguages.isEmpty() || it.lang in preferredLanguages }
+                .sortedWith(compareBy({ it.name.lowercase() }, { it.id })) else emptyList()
+            val candidateSources = (readSources + selectedSources).distinctBy { it.id }.take(3)
+            if (candidateSources.isEmpty()) return@runCatching emptyList()
+            val ownedTitles = library.map { recommendationKey(it.title) }.toSet()
+            val ownedUrls = library.map { it.sourceId to it.url.trimEnd('/') }.toSet()
+            data class Pick(val item: MangaDiscoverItem, val score: Double)
+            val matches = java.util.concurrent.ConcurrentLinkedQueue<Pick>()
+            withTimeoutOrNull(DISCOVER_FETCH_TIMEOUT_MS) {
+                coroutineScope {
+                    val pages = candidateSources.map { source -> async {
+                        val page = discoverRequest(2_000) {
+                            backend.fetchBrowse(source.id, 1, if (source.supportsLatest) BrowseMode.LATEST else BrowseMode.POPULAR)
+                        }
+                        source to page?.items.orEmpty().filter {
+                            it.url.isNotBlank() && recommendationKey(it.title).isNotBlank() &&
+                                recommendationKey(it.title) !in ownedTitles &&
+                                com.folio.reader.manga.mangaId(source.id, it.url) !in context.recentIds &&
+                                (source.id to it.url.trimEnd('/')) !in ownedUrls
+                        }.distinctBy { recommendationKey(it.title) }.take(12)
+                    } }.awaitAll()
+                    // Interleave sources so a slow catalogue cannot consume the whole detail budget.
+                    val candidates = (0 until 12).flatMap { index -> pages.mapNotNull { (source, items) ->
+                        items.getOrNull(index)?.let { source to it }
+                    } }.take(24)
+                    val permits = Semaphore(4)
+                    candidates.map { (source, candidate) -> async {
+                        permits.withPermit {
+                            val detail = discoverRequest(1_500) {
+                                backend.restoreMangaMetadata(MangaEntry(
+                                    id = com.folio.reader.manga.mangaId(source.id, candidate.url),
+                                    sourceId = source.id, sourceName = source.name, url = candidate.url,
+                                    title = candidate.title, sourceMemo = candidate.sourceMemo))
+                                backend.fetchMangaDetail(source.id, candidate.url)
+                            }
+                            val affinity = detail?.let { mangaAffinity(it, recentReads) }
+                            val reason = affinity?.reason ?: if (preferences.mode == DiscoverMode.SELECTED_EXTENSIONS) {
+                                if (source.supportsLatest) "Latest from ${source.name}" else "Popular on ${source.name}"
+                            } else return@withPermit null
+                            // Detail can expose a canonical title or URL that the browse listing omitted.
+                            if (detail != null && (recommendationKey(detail.title) in ownedTitles ||
+                                    (source.id to detail.url.trimEnd('/')) in ownedUrls)) return@withPermit null
+                            matches.add(Pick(MangaDiscoverItem(source.id, source.name, candidate.url, candidate.title,
+                                candidate.thumbnailUrl ?: detail?.thumbnailUrl, reason, personalized = affinity != null,
+                                sourceMemo = detail?.sourceMemo?.takeUnless { it.isBlank() || it == "{}" } ?: candidate.sourceMemo),
+                                affinity?.score ?: 0.0))
+                        }
+                    } }.awaitAll()
                 }
+            }
+            if (matches.isEmpty()) return@runCatching discoverCache?.takeIf { it.signature == signature }?.items.orEmpty()
+            matches.sortedWith(compareByDescending<Pick> { it.score }
+                .thenBy { recommendationKey(it.item.title) }.thenBy { it.item.sourceId }.thenBy { it.item.url })
+                .distinctBy { recommendationKey(it.item.title) }.take(DISCOVER_CAP).map { it.item }
         }.getOrElse { error ->
             // runCatching absorbs CancellationException, which would mis-cache a
             // cancelled Home emission as an empty Discover result; rethrow it.
@@ -963,6 +978,15 @@ class HomeViewModel(
         discoverCache = DiscoverCacheEntry(now, signature, fetched)
         return fetched
     }
+
+    /** Failure is local to one source/title. Parent cancellation must still cancel the refresh. */
+    private suspend fun <T> discoverRequest(timeoutMs: Long, request: suspend () -> T): T? =
+        withTimeoutOrNull(timeoutMs) {
+            try { request() } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                null
+            }
+        }
 
     private fun Book.toReadingInProgress(sessions: List<ReadingSession>) = ReadingInProgress(
         id,
@@ -1032,7 +1056,7 @@ class HomeViewModel(
          */
         private const val DISCOVER_FETCH_TIMEOUT_MS = 6_000L
         /** Successful Discover results are reused for six hours (§11.4). */
-        private val DISCOVER_TTL = 6.days
+        private val DISCOVER_TTL = 6.hours
         /**
          * Failed/empty/timed-out Discover fetches retry after thirty minutes, not
          * five, so an offline reader does not re-pay the stall on every Home visit.
@@ -1059,14 +1083,6 @@ class HomeViewModel(
             discoverCache = null
         }
     }
-}
-
-/** Reasons reflect the actual eligibility rule, rather than inferred semantic similarity. */
-internal fun recommendationReason(anchor: Book?, candidate: Book): String? = when {
-    anchor == null || anchor.id == candidate.id -> null
-    anchor.seriesId != null && anchor.seriesId == candidate.seriesId -> "Same series"
-    anchor.authors.intersect(candidate.authors.toSet()).isNotEmpty() -> "By the same author"
-    else -> null
 }
 
 /** Keep the fresh identity/progress, without discarding a resolved projection of the same read. */

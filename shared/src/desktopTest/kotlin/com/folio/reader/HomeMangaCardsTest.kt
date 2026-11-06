@@ -109,20 +109,24 @@ class HomeMangaCardsTest {
 
     private class FakeMangaRepo : MangaRepository {
         val entries = LinkedHashMap<String, MangaEntry>()
-        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) { entries[manga.id] = manga }
+        private val library = MutableStateFlow<List<MangaEntry>>(emptyList())
+        override suspend fun upsert(manga: MangaEntry, emitSyncEvent: Boolean, preserveLibraryState: Boolean) {
+            entries[manga.id] = manga
+            library.value = entries.values.filter { it.inLibrary }
+        }
         override suspend fun delete(mangaId: String, emitSyncEvent: Boolean) { entries.remove(mangaId) }
         override suspend fun get(mangaId: String): MangaEntry? = entries[mangaId]
         override suspend fun findBySourceUrl(sourceId: Long, url: String): MangaEntry? =
             entries.values.firstOrNull { it.sourceId == sourceId && it.url == url }
-        override fun observeLibrary(): Flow<List<MangaEntry>> =
-            flowOf(entries.values.filter { it.inLibrary })
+        override fun observeLibrary(): Flow<List<MangaEntry>> = library
         override fun observeAll(): Flow<List<MangaEntry>> = flowOf(entries.values.toList())
         override suspend fun setInLibrary(mangaId: String, inLibrary: Boolean) {}
         override suspend fun setCoverPath(mangaId: String, coverPath: String?) {}
         override suspend fun touchLastRead(mangaId: String) {}
     }
 
-    private class FakeHistoryRepo(var recent: List<MangaHistoryItem>) : MangaHistoryRepository {
+    private class FakeHistoryRepo(recent: List<MangaHistoryItem>) : MangaHistoryRepository {
+        val rows = MutableStateFlow(recent)
         override suspend fun record(
             mangaId: String,
             chapterId: String?,
@@ -134,7 +138,7 @@ class HomeMangaCardsTest {
         ) {}
 
         override fun observeRecent(limit: Int): Flow<List<MangaHistoryItem>> =
-            flowOf(recent.take(limit))
+            rows.map { it.take(limit) }
         override fun observeHistory(): Flow<List<MangaHistoryEntry>> = flowOf(emptyList())
         override suspend fun clear() {}
         override suspend fun clearHistory() {}
@@ -192,11 +196,16 @@ class HomeMangaCardsTest {
     private class DiscoverBackend(
         private val sources: List<MangaSourceInfo>,
         private val latest: MangaBrowsePage? = null,
-        private val fail: Boolean = false
+        private val fail: Boolean = false,
+        val details: Map<String, MangaDetail> = emptyMap(),
+        val failedDetails: Set<String> = emptySet(),
+        val detailDelayMs: Long = 0,
+        val browseDelayMs: Long = 0,
     ) : MangaBackend {
         var browseCount = 0
         var lastMode: BrowseMode? = null
         var lastSource: Long? = null
+        var detailCount = 0
         override val supportsExtensions: Boolean = false
         override fun observeSources(): Flow<List<MangaSourceInfo>> = flowOf(sources)
         override suspend fun getFilterTemplate(sourceId: Long): List<MangaFilter> = emptyList()
@@ -210,12 +219,17 @@ class HomeMangaCardsTest {
             browseCount++
             lastMode = mode
             lastSource = sourceId
+            delay(browseDelayMs)
             if (fail) throw IllegalStateException("network down")
             return latest ?: MangaBrowsePage(emptyList(), false)
         }
 
-        override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): MangaDetail =
-            MangaDetail(url = mangaUrl, title = "Stub")
+        override suspend fun fetchMangaDetail(sourceId: Long, mangaUrl: String): MangaDetail {
+            detailCount++
+            delay(detailDelayMs)
+            if (mangaUrl in failedDetails) error("Detail unavailable")
+            return details[mangaUrl] ?: MangaDetail(url = mangaUrl, title = "Stub", genres = listOf("Action", "Fantasy"))
+        }
         override suspend fun fetchChapterList(sourceId: Long, mangaUrl: String): List<MangaChapterRef> = emptyList()
         override suspend fun fetchPageList(sourceId: Long, chapter: MangaChapterRef): List<MangaPageRef> = emptyList()
         override suspend fun fetchPageImage(
@@ -266,6 +280,7 @@ class HomeMangaCardsTest {
             sourceName = "Src $sourceId",
             url = "/manga/$id",
             title = id.uppercase(),
+            genres = listOf("Action", "Fantasy"),
             thumbnailUrl = "thumb-$id",
             inLibrary = inLibrary
         )
@@ -395,6 +410,96 @@ class HomeMangaCardsTest {
 
     // ── §11.4 acceptance ─────────────────────────────────────────────────────
 
+    @Test fun discoverRanksMetadataMatchesBeyondTheFirstSixAndSkipsFailedDetails() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply { upsert(entry("anchor").copy(author = "Creator")) }
+        val page = MangaBrowsePage((1..10).map { MangaBrowseItem("/$it", "Title $it") }, false)
+        val details = (1..10).associate { index -> "/$index" to MangaDetail("/$index", "Title $index",
+            author = if (index == 10) "Creator" else null,
+            genres = if (index == 8) listOf("Action", "Fantasy") else listOf("Romance")) }
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Source", "en", supportsLatest = true)),
+            page, details = details, failedDetails = setOf("/9"))
+        val state = withTimeout(5_000) { homeViewModel(mangaRepo = repo,
+            history = FakeHistoryRepo(listOf(historyRow("anchor"))), backend = backend)
+            .state.first { it.discover.isNotEmpty() } }
+        assertEquals(listOf("Title 10", "Title 8"), state.discover.map { it.title })
+        assertTrue(state.discover.all { it.reason.contains("ANCHOR") })
+        assertEquals(10, backend.detailCount)
+    }
+
+    @Test fun selectedSourceFallbackIsLabeledAndDoesNotClaimATasteMatch() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val settings = AppSettingsStore().apply { publish(ReaderSettings(
+            discoverMode = DiscoverMode.SELECTED_EXTENSIONS, discoverExtensionPackages = setOf("chosen"))) }
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Source", "en", extensionPkg = "chosen")),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New")), false),
+            details = mapOf("/new" to MangaDetail("/new", "New")))
+        val state = withTimeout(5_000) { homeViewModel(mangaRepo = FakeMangaRepo(), settings = settings,
+            backend = backend).state.first { it.discover.isNotEmpty() } }
+        assertEquals("Popular on Source", state.discover.single().reason)
+        assertEquals(BrowseMode.POPULAR, backend.lastMode)
+    }
+
+    @Test fun hidingDiscoverCancelsAnInFlightDetailRefresh() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val settings = AppSettingsStore()
+        val repo = FakeMangaRepo().apply { upsert(entry("anchor")) }
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Source", "en", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New")), false), detailDelayMs = 300)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val state = homeViewModel(mangaRepo = repo, history = FakeHistoryRepo(listOf(historyRow("anchor"))),
+                backend = backend, settings = settings)
+                .state.stateIn(scope, SharingStarted.Eagerly, com.folio.reader.ui.home.HomeUiState())
+            withTimeout(5_000) { while (backend.detailCount == 0) delay(10) }
+            settings.publish(settings.current.copy(discoverMode = DiscoverMode.HIDDEN))
+            delay(400)
+            assertTrue(state.value.discover.isEmpty(), "An in-flight result resurrected hidden Discover")
+            assertTrue(state.value.loaded)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun libraryAndHistoryChangesInvalidateWarmDiscoverWhileUnchangedProfilesReuseIt() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply {
+            upsert(entry("anchor")); upsert(entry("second").copy(genres = listOf("Sports")))
+        }
+        val history = FakeHistoryRepo(listOf(historyRow("anchor")))
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Source", "en", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/new", "New"), MangaBrowseItem("/sport", "Sport")), false),
+            details = mapOf("/sport" to MangaDetail("/sport", "Sport", genres = listOf("Sports"))))
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val state = homeViewModel(mangaRepo = repo, history = history, backend = backend)
+                .state.stateIn(scope, SharingStarted.Eagerly, com.folio.reader.ui.home.HomeUiState())
+            withTimeout(5_000) { state.first { it.discover.map { item -> item.title } == listOf("New") } }
+            // A newly owned title must disappear immediately, even within the cache window.
+            repo.upsert(entry("new").copy(url = "/new", title = "New"))
+            withTimeout(5_000) { state.first { it.discover.isEmpty() } }
+            history.rows.value = listOf(historyRow("second"))
+            withTimeout(5_000) { state.first { it.discover.map { item -> item.title } == listOf("Sport") } }
+            assertTrue(state.value.discover.single().reason.contains("SECOND"))
+            val count = backend.browseCount
+            history.rows.value = listOf(historyRow("second", readAt = Clock.System.now() + 1.hours))
+            delay(100)
+            assertEquals(count, backend.browseCount, "Progress within the same taste profile should reuse the cache")
+        } finally { scope.cancel() }
+    }
+
+    @Test fun defaultDiscoverDoesNotPadWithUnrelatedTitlesAndDeduplicatesAcrossSources() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val repo = FakeMangaRepo().apply { upsert(entry("one", 10)); upsert(entry("two", 20)) }
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "First", "en", supportsLatest = true),
+            MangaSourceInfo(20, "Second", "en", supportsLatest = true)),
+            MangaBrowsePage(listOf(MangaBrowseItem("/match", "Match!"), MangaBrowseItem("/unrelated", "Unrelated")), false),
+            details = mapOf("/unrelated" to MangaDetail("/unrelated", "Unrelated", genres = listOf("Romance"))))
+        val state = withTimeout(5_000) { homeViewModel(mangaRepo = repo,
+            history = FakeHistoryRepo(listOf(historyRow("one"), historyRow("two"))), backend = backend)
+            .state.first { it.discover.isNotEmpty() } }
+        assertEquals(listOf("Match!"), state.discover.map { it.title })
+        assertEquals(2, backend.browseCount)
+    }
+
     @Test
     fun `manga continue skips removed or out-of-library manga and retains metadata`() = runBlocking {
         val repo = FakeMangaRepo().apply {
@@ -505,39 +610,43 @@ class HomeMangaCardsTest {
     }
 
     @Test
-    fun `discover is silently absent without history, without latest support, or on failure`() = runBlocking {
+    fun `discover is silently absent without history or on network failure`() = runBlocking {
         HomeViewModel.resetDiscoverCache()
         val sources = listOf(MangaSourceInfo(id = 10L, name = "Src 10", lang = "en", supportsLatest = false))
 
         // No history at all.
-        val noHistory = homeViewModel(
+        val noHistoryBackend = DiscoverBackend(sources)
+        val noHistory = withTimeoutOrNull(200) { homeViewModel(
             mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
             history = FakeHistoryRepo(emptyList()),
-            backend = DiscoverBackend(sources)
-        ).state.first()
-        assertTrue(noHistory.discover.isEmpty())
-
-        // The anchor's source cannot serve LATEST.
-        HomeViewModel.resetDiscoverCache()
-        val noLatest = homeViewModel(
-            mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
-            history = FakeHistoryRepo(listOf(historyRow("m1"))),
-            backend = DiscoverBackend(sources)
-        ).state.first()
-        assertTrue(noLatest.discover.isEmpty())
+            backend = noHistoryBackend
+        ).state.first { it.discover.isNotEmpty() } }
+        assertEquals(null, noHistory)
+        assertEquals(0, noHistoryBackend.browseCount)
 
         // The browse request fails — empty, never a crash.
         HomeViewModel.resetDiscoverCache()
-        val failing = homeViewModel(
+        val failingBackend = DiscoverBackend(sources, fail = true)
+        val failing = withTimeoutOrNull(300) { homeViewModel(
             mangaRepo = FakeMangaRepo().apply { upsert(entry("m1")) },
             history = FakeHistoryRepo(listOf(historyRow("m1"))),
-            backend = DiscoverBackend(
-                sources = listOf(MangaSourceInfo(id = 10L, name = "Src 10", lang = "en", supportsLatest = true)),
-                fail = true
-            )
-        ).state.first()
-        assertTrue(failing.discover.isEmpty())
+            backend = failingBackend
+        ).state.first { it.discover.isNotEmpty() } }
+        assertEquals(null, failing)
+        assertEquals(1, failingBackend.browseCount)
         Unit
+    }
+
+    @Test fun defaultDiscoveryCanMatchFromASourceWithoutALatestFeed() = runBlocking<Unit> {
+        HomeViewModel.resetDiscoverCache()
+        val backend = DiscoverBackend(listOf(MangaSourceInfo(10, "Source", "en")),
+            MangaBrowsePage(listOf(MangaBrowseItem("/match", "Match")), false))
+        val state = withTimeout(5_000) { homeViewModel(
+            mangaRepo = FakeMangaRepo().apply { upsert(entry("anchor")) },
+            history = FakeHistoryRepo(listOf(historyRow("anchor"))), backend = backend)
+            .state.first { it.discover.isNotEmpty() } }
+        assertTrue(state.discover.single().personalized)
+        assertEquals(BrowseMode.POPULAR, backend.lastMode)
     }
 
     @Test

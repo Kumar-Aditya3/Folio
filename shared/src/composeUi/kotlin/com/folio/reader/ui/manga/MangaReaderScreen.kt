@@ -28,6 +28,7 @@ fun MangaReaderScreen(
     onOpenChapter: (MangaChapter) -> Unit,
     onBack: () -> Unit,
 ) {
+    com.folio.reader.tumble.PicaReadingContext(manga.title)
     val pages by viewModel.pages.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val error by viewModel.error.collectAsState()

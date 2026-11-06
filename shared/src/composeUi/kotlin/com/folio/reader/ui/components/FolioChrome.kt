@@ -63,6 +63,7 @@ import androidx.compose.ui.util.lerp
 import com.folio.reader.ui.theme.FolioGlassWeight
 import com.folio.reader.ui.theme.FolioShapes
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.elements
 import com.folio.reader.ui.theme.FolioTokens
 import com.folio.reader.ui.theme.LocalFolioAmbient
 import com.folio.reader.ui.theme.LocalFolioDaylight
@@ -876,11 +877,8 @@ fun FolioSegmented(
         }
     }
     val clamped = selectedIndex.coerceIn(0, options.lastIndex)
-    // The lit segment wears *its* option's destination colour, not the theme's one
-    // signature; labels the table does not know fall back to `primary`, so every other
-    // segmented control is unchanged. The ink takes the capsule's contrast guard.
-    val accent = folioDestinationAccent(options[clamped])
-    val accentInk = rememberLegibleAccent(accent)
+    val elements = FolioTheme.elements
+    val accentInk = elements.onSelection
     val targetLeft = remember(slotWidths, clamped) {
         val (left, _) = segmentedSlotBounds(slotWidths.map { it.value }, clamped, SEGMENT_GAP.value)
         left.dp
@@ -896,7 +894,7 @@ fun FolioSegmented(
     Box(
         modifier = modifier
             .clip(FolioShapes.pill)
-            .background(atmos.sunkenFill.copy(alpha = 0.5f), FolioShapes.pill)
+            .background(elements.inset, FolioShapes.pill)
             // §18 — the last hard outline in the chrome. A 1dp `border` is a step function
             // on the silhouette, which is exactly the "you can make out boxes" edge the
             // ladder replaces; the track is a small control, so it takes the `Tile` rung's
@@ -909,7 +907,7 @@ fun FolioSegmented(
                 val radius = CornerRadius(size.height / 2f)
                 onDrawBehind {
                     drawRoundRect(
-                        color = accent.copy(alpha = 0.20f),
+                        color = elements.selection,
                         topLeft = Offset(indicatorLeft.toPx(), 0f),
                         size = Size(indicatorWidth.toPx(), size.height),
                         cornerRadius = radius,

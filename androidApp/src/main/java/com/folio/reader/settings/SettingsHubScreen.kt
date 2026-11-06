@@ -118,6 +118,7 @@ fun SettingsHubScreen(
     onOpenDownloads: () -> Unit,
     onOpenHistory: () -> Unit
 ) {
+    val sable=com.folio.reader.experience.LocalReadingEnvironment.current?.pica
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var searchRailHeight by remember { mutableIntStateOf(0) }
@@ -156,6 +157,7 @@ fun SettingsHubScreen(
     fun openSearchResult(entry: SettingsSearchEntry) {
         focus.clearFocus(); keyboard?.hide()
         when (entry.route) {
+            "@sable" -> {sable?.selectedGame=null;sable?.open=true}
             "@tags" -> onOpenTags()
             "@quotes" -> onOpenQuotes()
             "@revisit" -> onOpenRevisit()
@@ -204,6 +206,8 @@ fun SettingsHubScreen(
             } else {
             item {
                 HubSection("Reading", colors.accentProgress) {
+                    if(sable!=null) HubRow(icon=Icons.AutoMirrored.Filled.MenuBook,title="Between chapters",subtitle="Quick games, saved passages & journal",accent=colors.accentProgress,
+                        onClick={sable.selectedGame=null;sable.open=true})
                     HubRow(icon = Icons.Filled.Headphones, title = "Narration",
                         subtitle = "Offline voice, listening and sleep timer", accent = colors.accentProgress,
                         onClick = { onOpenSettings(FolioSettingsCategory.NARRATION) })

@@ -30,7 +30,8 @@ class FirstRunFlowTest {
                     else Text("Home mounted after setup")
                 }
             }
-            compose.onNodeWithText("Welcome to Folio").assertIsDisplayed()
+            compose.onNodeWithText("Welcome").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Folio").assertIsDisplayed()
             compose.onNodeWithText("Choose my setup").performClick()
             compose.onNodeWithText(FirstRunStep.Appearance.title).assertIsDisplayed()
             compose.onNodeWithText("Continue").performClick()

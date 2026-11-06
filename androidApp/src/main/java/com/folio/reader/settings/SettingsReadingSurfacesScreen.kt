@@ -74,7 +74,7 @@ fun SettingsReadingSurfacesScreen(navModel: FolioNavModelImpl, onBack: () -> Uni
     }
     SettingsCategoryScaffold(title = "Widgets & notifications", onBack = onBack, scrollBody = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("A little Folio, wherever you are.", style = FolioTheme.typography.titleLarge, color = FolioTheme.colors.onSurface)
+        Text("Your reading, wherever you are.", style = FolioTheme.typography.titleLarge, color = FolioTheme.colors.onSurface)
         Text("Your place in the story. Your own reading rhythm.", style = FolioTheme.typography.bodySmall, color = FolioTheme.colors.onSurfaceVariant,
             modifier = Modifier.padding(top = 6.dp, bottom = 18.dp))
         snapshot?.let { data ->

@@ -170,8 +170,8 @@ docs/FOLIO_*_PLAN.md
 docs/FOLIO_*_SPEC.md
 
 # Generated artifacts: rendered shader simulations, artwork captures and local build output.
-# Regenerable from source; kept out of history (225 MB of media + 30 MB build dir).
-outputs/
+# Local design studies and build output.
+/outputs/
 .build-out/
 
 # Pinned Phonon CPU engine; model assets remain opt-in.
@@ -179,3 +179,13 @@ outputs/
 !androidApp/src/main/jniLibs/arm64-v8a/libptts_ffi_optimized.so
 !androidApp/src/main/jniLibs/x86_64/libptts_ffi.so
 !androidApp/libs/sherpa-onnx-1.12.30-shared-ort.aar
+
+# Root-level scratch captures and diagnostics from earlier review sessions.
+/WhatsApp Image *.jpeg
+/emu-render.png
+/plate-compare.png
+/theme-gradients.png
+/out.json
+/test_gel*.txt
+/test_lift.txt
+/test_plate_fix.txt

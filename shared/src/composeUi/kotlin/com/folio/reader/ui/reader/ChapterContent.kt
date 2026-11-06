@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,14 @@ import com.folio.reader.model.Chapter
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
+
+private data class LoadedReaderDocument(
+    val sections: List<com.folio.reader.ui.render.ReaderSection>,
+    val windowed: Boolean,
+    val chapterId: String,
+    val settings: ReaderSettings,
+    val position: ReadingPosition?,
+)
 
 @Composable
 fun ChapterContent(
@@ -84,6 +93,31 @@ fun ChapterContent(
     val readerTheme = settings.customTheme ?: com.folio.reader.settings.Theme.getPreset(settings.themeId)
     val bgColor = Color(readerTheme.background)
     val textColor = Color(readerTheme.primaryText)
+    val nativeDesktop = com.folio.reader.ui.render.htmlSurfaceOccludesOverlays()
+    val preparedSections = remember(windowed, documentSections, chapter.id, chapter.href, html) {
+        if (windowed) documentSections else listOf(
+            com.folio.reader.ui.render.FixedLayoutDetector.detect(html).let { fxl ->
+                com.folio.reader.ui.render.ReaderSection(
+                    spineIndex = -1,
+                    chapterId = chapter.id,
+                    href = chapter.href,
+                    html = html,
+                    isFixedLayout = fxl.isFixedLayout,
+                    fxlWidth = fxl.width,
+                    fxlHeight = fxl.height,
+                )
+            }
+        )
+    }
+    var loadedDocument by remember { mutableStateOf<LoadedReaderDocument?>(null) }
+    val incomingDocument = LoadedReaderDocument(preparedSections, windowed, chapter.id, settings, position)
+    if (nativeDesktop && !isLoading && loadError == null && (html.isNotBlank() || windowed && preparedSections.isNotEmpty())) {
+        SideEffect { loadedDocument = incomingDocument }
+    }
+    // Keep Chromium's peer, document and resume position intact during the loader handoff.
+    // The native surface gates its own events until the incoming document is ready.
+    val retainBrowser = nativeDesktop && isLoading && loadedDocument != null
+    val surfaceDocument = if (retainBrowser) loadedDocument!! else incomingDocument
     // Only the cover chapter scrolls via Compose; browser chapters own their
     // scroll position and progress reporting through the page-side bridge.
     val isCoverChapter = coverPath != null && chapter.spineIndex == 0
@@ -208,7 +242,7 @@ fun ChapterContent(
         }
     ) {
         when {
-            isLoading -> ReaderLoadingPage(settings, Modifier.fillMaxSize())
+            isLoading && !retainBrowser -> ReaderLoadingPage(settings, Modifier.fillMaxSize())
             // Real error from the loader (missing file, parse failure) — not a
             // transient blank, so opening a book no longer flashes this state.
             loadError != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -231,9 +265,9 @@ fun ChapterContent(
             // a chapter still on its way — see [contentArrived]. Rendering the dead
             // end in that window is what flashed "This page is empty." on every
             // EPUB open; the spinner is the honest state until the loader reports.
-            html.isBlank() && !windowed && !contentArrived ->
+            html.isBlank() && !windowed && !contentArrived && !retainBrowser ->
                 ReaderLoadingPage(settings, Modifier.fillMaxSize())
-            html.isBlank() && !windowed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            html.isBlank() && !windowed && !retainBrowser -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 val next = onNextChapter
                 com.folio.reader.ui.components.EmptyState(
                     icon = Icons.AutoMirrored.Filled.MenuBook,
@@ -247,42 +281,31 @@ fun ChapterContent(
             }
             else -> {
                 // Browser owns all rendering — no Compose fallback (it broke scroll/pagination flow).
-                val sectionIds = remember(sections) { sections.map { it.chapterId }.toSet() }
-                val visibleHighlights = remember(highlights, chapter.id, sections) {
-                    if (windowed) highlights.filter { it.chapterId in sectionIds && !it.isDeleted }
-                    else highlights.filter { it.chapterId == chapter.id && !it.isDeleted }
+                val liveSections = if (retainBrowser) surfaceDocument.sections else sections
+                val sectionIds = remember(liveSections) { liveSections.map { it.chapterId }.toSet() }
+                val visibleHighlights = remember(highlights, surfaceDocument.chapterId, liveSections, surfaceDocument.windowed) {
+                    if (surfaceDocument.windowed) highlights.filter { it.chapterId in sectionIds && !it.isDeleted }
+                    else highlights.filter { it.chapterId == surfaceDocument.chapterId && !it.isDeleted }
                 }
                 com.folio.reader.ui.render.HtmlContentSurface(
-                    sections = if (windowed) documentSections else listOf(
-                        com.folio.reader.ui.render.FixedLayoutDetector.detect(html).let { fxl ->
-                            com.folio.reader.ui.render.ReaderSection(
-                                spineIndex = -1,
-                                chapterId = chapter.id,
-                                href = chapter.href,
-                                html = html,
-                                isFixedLayout = fxl.isFixedLayout,
-                                fxlWidth = fxl.width,
-                                fxlHeight = fxl.height,
-                            )
-                        }
-                    ),
-                    windowed = windowed,
-                    anchorChapterId = chapter.id,
-                    settings = settings,
-                    position = position,
+                    sections = surfaceDocument.sections,
+                    windowed = surfaceDocument.windowed,
+                    anchorChapterId = surfaceDocument.chapterId,
+                    settings = surfaceDocument.settings,
+                    position = surfaceDocument.position,
                     highlights = visibleHighlights,
-                    enabled = enabled,
+                    enabled = enabled && !retainBrowser,
                     modifier = Modifier.fillMaxSize(),
-                    onProgress = onScrollFraction,
-                    onPageChange = onPageChange,
-                    onVisibleSection = onVisibleSection,
-                    onExtendForward = onExtendForward,
-                    onExtendBackward = onExtendBackward,
-                    windowOp = windowOp,
+                    onProgress = { if (!retainBrowser) onScrollFraction(it) },
+                    onPageChange = { page, total -> if (!retainBrowser) onPageChange(page, total) },
+                    onVisibleSection = { if (!retainBrowser) onVisibleSection(it) },
+                    onExtendForward = { if (!retainBrowser) onExtendForward() },
+                    onExtendBackward = { if (!retainBrowser) onExtendBackward() },
+                    windowOp = if (retainBrowser) null else windowOp,
                     onWindowOpApplied = onWindowOpApplied,
-                    onChapterEnd = onChapterEnd,
-                    onChapterStart = onChapterStart,
-                    onTap = onTap,
+                    onChapterEnd = { if (!retainBrowser) onChapterEnd() },
+                    onChapterStart = { if (!retainBrowser) onChapterStart() },
+                    onTap = { if (!retainBrowser) onTap() },
                     onLinkClick = onLinkClick,
                     onResolveResource = onResolveResource,
                     onHighlightParagraph = onLongPress?.let { cb -> { chapterId, idx, text -> cb(chapterId, idx, text) } },

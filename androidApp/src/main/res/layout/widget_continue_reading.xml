@@ -7,9 +7,13 @@
         android:padding="14dp" android:orientation="vertical">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical">
-            <TextView android:id="@+id/widget_eyebrow" android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:text="FOLIO" android:textSize="10sp" android:letterSpacing="0.24"
-                android:textColor="#D4C4A9" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageView android:id="@+id/widget_brand" android:layout_width="24dp" android:layout_height="24dp"
+                    android:src="@drawable/ic_folio_mark" android:contentDescription="Folio" />
+                <TextView android:id="@+id/widget_eyebrow" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:visibility="gone" />
+            </LinearLayout>
             <TextView android:id="@+id/widget_format" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="YOUR READING ROOM" android:textSize="8sp" android:letterSpacing="0.1"
                 android:textColor="#B8C1CE" android:fontFamily="sans-serif-medium" android:maxLines="1" />

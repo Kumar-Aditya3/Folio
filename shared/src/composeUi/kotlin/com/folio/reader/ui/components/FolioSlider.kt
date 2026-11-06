@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.folio.reader.ui.theme.FolioHaptic
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.atmosphere
-import com.folio.reader.ui.theme.sectionAccent
+import com.folio.reader.ui.theme.elements
 import com.folio.reader.ui.theme.rememberFolioHaptics
 import kotlin.math.roundToInt
 import com.folio.reader.ui.theme.MotionKey
@@ -75,7 +75,7 @@ fun FolioSlider(
     steps: Int = 0,
     enabled: Boolean = true,
     onValueChangeFinished: (() -> Unit)? = null,
-    accent: Color = FolioTheme.sectionAccent,
+    accent: Color = FolioTheme.elements.action,
     background: Color = FolioTheme.colors.surface,
     inactive: Color? = null,
 ) {
@@ -218,7 +218,7 @@ fun FolioSliderRow(
     steps: Int = 0,
     enabled: Boolean = true,
     onValueChangeFinished: (() -> Unit)? = null,
-    accent: Color = FolioTheme.sectionAccent,
+    accent: Color = FolioTheme.elements.action,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {

@@ -80,46 +80,54 @@ internal fun WeekChart(week: List<StatDay>) {
     val labels = remember(dates) { dates.map { it.dayOfWeek.name.take(1) } }
     var selected by remember(dates) { mutableIntStateOf(week.lastIndex) }
     val day = week[selected.coerceIn(week.indices)]
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        FolioSectionHead(title = "Last 7 days", trailing = {
-            Text(shortMinutes(week.sumOf { it.minutes }), style = FolioTheme.typography.labelSmall,
-                color = colors.onSurfaceVariant)
-        })
-        // Only the plot accepts a scrub. The readout has its own fixed place below it;
-        // no moving overlay, animated layout, or blur/shader work follows the finger.
-        Box(Modifier.fillMaxWidth().onKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                Key.DirectionLeft -> { selected = (selected - 1).coerceAtLeast(0); true }
-                Key.DirectionRight -> { selected = (selected + 1).coerceAtMost(week.lastIndex); true }
-                else -> false
-            }
-        }.focusable()
-            .pointerInput(dates) {
-                detectTapGestures { selected = weekIndexAt(it.x, size.width.toFloat(), week.size) }
-            }.pointerInput(dates) {
-                detectHorizontalDragGestures { change, _ ->
-                    change.consume()
-                    selected = weekIndexAt(change.position.x, size.width.toFloat(), week.size)
+    StatsWeekLayout(
+        heading = {
+            FolioSectionHead(title = "Last 7 days", trailing = {
+                Text(shortMinutes(week.sumOf { it.minutes }), style = FolioTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant)
+            })
+        },
+        plot = {
+            // Only the plot accepts a scrub. The readout has its own fixed place below it;
+            // no moving overlay, animated layout, or blur/shader work follows the finger.
+            Box(Modifier.fillMaxWidth().onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                    Key.DirectionLeft -> { selected = (selected - 1).coerceAtLeast(0); true }
+                    Key.DirectionRight -> { selected = (selected + 1).coerceAtMost(week.lastIndex); true }
+                    else -> false
                 }
-            }.semantics {
-                contentDescription = "Weekly reading timeline"
-                stateDescription = "${day.date}: ${day.minutes} minutes"
-                customActions = listOf(
-                    CustomAccessibilityAction("Previous day") { selected = (selected - 1).coerceAtLeast(0); true },
-                    CustomAccessibilityAction("Next day") { selected = (selected + 1).coerceAtMost(week.lastIndex); true })
-            }) {
-            SmoothWeekCurve(values, labels, FolioTokens.weekChartHeight, selectedIndex = selected)
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(day.date.toString(), Modifier.weight(1f), style = FolioTheme.typography.bodySmall,
+            }.focusable()
+                .pointerInput(dates) {
+                    detectTapGestures { selected = weekIndexAt(it.x, size.width.toFloat(), week.size) }
+                }.pointerInput(dates) {
+                    detectHorizontalDragGestures { change, _ ->
+                        change.consume()
+                        selected = weekIndexAt(change.position.x, size.width.toFloat(), week.size)
+                    }
+                }.semantics {
+                    contentDescription = "Weekly reading timeline"
+                    stateDescription = "${day.date}: ${day.minutes} minutes"
+                    customActions = listOf(
+                        CustomAccessibilityAction("Previous day") { selected = (selected - 1).coerceAtLeast(0); true },
+                        CustomAccessibilityAction("Next day") { selected = (selected + 1).coerceAtMost(week.lastIndex); true })
+                }) {
+                SmoothWeekCurve(values, labels, FolioTokens.weekChartHeight, selectedIndex = selected)
+            }
+        },
+        readout = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(day.date.toString(), Modifier.weight(1f), style = FolioTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant)
+                Text(shortMinutes(day.minutes), style = FolioTheme.typography.titleSmall,
+                    color = colors.accentProgress)
+            }
+        },
+        hint = {
+            Text("Tap or slide across the curve", style = FolioTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant)
-            Text(shortMinutes(day.minutes), style = FolioTheme.typography.titleSmall,
-                color = colors.accentProgress)
-        }
-        Text("Tap or slide across the curve", style = FolioTheme.typography.labelSmall,
-            color = colors.onSurfaceVariant)
-    }
+        },
+    )
 }
 
 private const val WEEK_AREA_TOP_ALPHA = 0.42f
@@ -165,11 +173,10 @@ internal fun SmoothWeekCurve(
             }
             Spacer(Modifier.height(4.dp))
         }
-        // Stats' week is a record of what was read, so it is washed in the colour
-        // of what is being read. The fallback is the palette's own progress role,
-        // which is what every unlit tree — desktop, a preview, a test — draws.
-        val accent = rememberFolioAmbientColor(colors.accentProgress)
-        val peakAccent = colors.accentStreak
+        // One measure uses one stable hue; changing the featured cover must not
+        // change the meaning or appearance of the weekly reading series.
+        val accent = colors.progress
+        val peakAccent = accent
         // Keyed on the window's shape: live value updates must not replay the
         // sweep mid-scroll.
         val entry: State<Float> = rememberEntryState(values.size)

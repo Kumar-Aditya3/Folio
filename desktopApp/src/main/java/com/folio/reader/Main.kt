@@ -15,7 +15,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -584,7 +587,7 @@ private fun IncomingContentResult.failureReason(): String? = when (this) {
     else -> null
 }
 
-private fun isComposeSceneClosedException(t: Throwable?): Boolean {
+internal fun isComposeSceneClosedException(t: Throwable?): Boolean {
     var curr = t
     while (curr != null) {
         val msg = curr.message
@@ -602,16 +605,10 @@ private fun isComposeSceneClosedException(t: Throwable?): Boolean {
 }
 
 fun main(args: Array<String>) {
+    installDesktopDiagnostics()
     val startupFiles = args
         .map(::File)
         .filter { it.isFile && it.extension.lowercase() in supportedIncomingExtensions }
-    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-        if (isComposeSceneClosedException(throwable)) {
-            return@setDefaultUncaughtExceptionHandler
-        }
-        defaultHandler?.uncaughtException(thread, throwable) ?: throwable.printStackTrace()
-    }
 
     // Verify exact JAR loaded — helps diagnose stale installed package vs. latest build.
     try {
@@ -621,12 +618,7 @@ fun main(args: Array<String>) {
         if (cfg != null && cfg.isFile) {
             println("Folio.cfg first lines: ${cfg.readLines().take(5).joinToString(" | ")}")
         }
-        // Also log shared-desktop JAR hash for verification
-        val sharedJar = codeSource?.toString() ?: "unknown"
-        (System.getenv("LOCALAPPDATA")?.let { File(it, "Folio/folio.log") } ?: File(System.getProperty("user.home"), ".folio/folio.log")).apply {
-            parentFile?.mkdirs()
-            appendText("${java.time.Instant.now()} Folio startup codeSource=$sharedJar\n")
-        }
+        println("${java.time.Instant.now()} Folio startup Java=${System.getProperty("java.version")}")
     } catch (e: Exception) {
         println("Folio startup verification failed: ${e.message}")
     }
@@ -1174,8 +1166,18 @@ fun main(args: Array<String>) {
                 } else false
             },
             title = "Folio",
+            icon = remember {
+                BitmapPainter(javax.imageio.ImageIO.read(
+                    requireNotNull(object {}.javaClass.getResourceAsStream("/folio-icon.png"))
+                ).toComposeImageBitmap())
+            },
             state = windowState
         ) {
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                logDesktopRenderer(window)
+                println("${java.time.Instant.now()} Folio window ready")
+            }
             // The app chrome follows the app's own light/dark choice. A reading theme
             // describes the page and nothing else — feeding themeId in here is what
             // made the two bleed into each other.
@@ -1198,7 +1200,8 @@ fun main(args: Array<String>) {
                 // foreground animation is shared code and must resolve identically.
                 motion = globalSettings.motion,
             ) {
-com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, deps.bookRepository, deps.highlightRepository, deps.noteRepository, deps.sessionRepository) {
+com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, deps.bookRepository, deps.highlightRepository, deps.noteRepository, deps.sessionRepository,
+    mangaStats = remember(deps.database) { com.folio.reader.database.JdbcMangaStatisticsRepository(deps.database) }) {
 
                 com.folio.reader.ui.components.FolioGlassRoot(
                     capabilities = com.folio.reader.ui.components.glassCapabilitiesFor(
@@ -1208,6 +1211,12 @@ com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, 
                     ),
                     inFlowGlass = !globalSettings.minimalLiquidGlass,
                 ) {
+                val sableEnvironment=com.folio.reader.experience.LocalReadingEnvironment.current
+                DisposableEffect(sableEnvironment) {
+                    sableEnvironment?.pica?.onContinue={id->appScope.launch {deps.bookRepository.getBook(id)?.let {pushScreen(Screen.Reader(it))}}}
+                    onDispose {sableEnvironment?.pica?.onContinue=null}
+                }
+                com.folio.reader.tumble.PicaOverlayHost()
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = FolioTheme.colors.background
@@ -1390,6 +1399,7 @@ com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, 
                                 }
 
                                 is Screen.Reader -> ReaderRoute(
+                                    ownerWindow = window,
                                     deps = deps,
                                     book = current.book,
                                     targetSpineIndex = current.targetSpineIndex,
@@ -1398,13 +1408,6 @@ com.folio.reader.experience.ReadingEnvironmentProvider(deps.settingsRepository, 
                                     targetLocator = current.targetLocator,
                                     initialSettings = globalSettings,
                                     onBackPress = { popScreen() },
-                                    // Seed the scope before pushing, the same way the Android
-                                    // reader does: search opened from a book should start on
-                                    // that book's content, not the whole library.
-                                    onSearchClick = {
-                                        searchUiState.openInBook(current.book.id)
-                                        pushScreen(Screen.Search)
-                                    },
                                     onSettingsClick = { pushScreen(Screen.Settings) },
                                     onSettingsChanged = { globalSettings = it }
                                 )
@@ -1985,6 +1988,7 @@ private fun DocumentReaderRoute(
 
 @Composable
 private fun ReaderRoute(
+    ownerWindow: java.awt.Window,
     deps: FolioDesktopAppDependencies,
     book: Book,
     targetSpineIndex: Int? = null,
@@ -1993,7 +1997,6 @@ private fun ReaderRoute(
     targetLocator: String? = null,
     initialSettings: com.folio.reader.settings.ReaderSettings,
     onBackPress: () -> Unit,
-    onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSettingsChanged: (com.folio.reader.settings.ReaderSettings) -> Unit = {}
 ) {
@@ -2010,7 +2013,8 @@ private fun ReaderRoute(
             bookTocProvider = { bookId, chs ->
                 deps.epubParser.parseBookToc(deps.platform.fileSystem.getBookEpubPath(bookId), chs)
             },
-            syncEngine = deps.syncEngine
+            syncEngine = deps.syncEngine,
+            searchRepository = deps.searchRepository
         )
     }
 
@@ -2027,6 +2031,10 @@ private fun ReaderRoute(
     val showControls by viewModel.showControls.collectAsState(initial = true)
     val showToc by viewModel.showToc.collectAsState(initial = false)
     val showAnnotations by viewModel.showAnnotations.collectAsState(initial = false)
+    val showSearch by viewModel.showSearch.collectAsState(initial = false)
+    val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
+    val searchResults by viewModel.searchResults.collectAsState(initial = emptyList())
+    val searching by viewModel.isSearching.collectAsState(initial = false)
     val linkResult by viewModel.linkClickResult.collectAsState(initial = null)
     val loadError by viewModel.loadError.collectAsState(initial = null)
     val reflectionInvitation by viewModel.reflectionInvitation.collectAsState()
@@ -2084,6 +2092,7 @@ private fun ReaderRoute(
         }
     }
 
+    com.folio.reader.ui.reader.DesktopReaderWorkspaceOwner(ownerWindow) {
     ReaderScreen(
         reflectionInvitation = reflectionInvitation,
         onSaveReflection = viewModel::saveReflection,
@@ -2104,17 +2113,17 @@ private fun ReaderRoute(
         showControls = showControls,
         showToc = showToc,
         showAnnotations = showAnnotations,
+        showSearch = showSearch,
+        searchQuery = searchQuery,
+        searchResults = searchResults,
+        searching = searching,
+        onSearchQueryChange = viewModel::updateSearchQuery,
+        onCloseSearch = viewModel::closeSearch,
         onChapterChange = { viewModel.goToChapter(it) },
         onBackPress = {
             viewModel.closeBook { onBackPress() }
         },
-        // Desktop keeps the full-screen search destination: this platform's embedded browser
-        // occludes Compose overlays, so the reader draws its panels as page-side HTML instead
-        // (`readerOverlayHtml`), and there is no search panel there yet. Android, where the
-        // WebView is a Compose child, opens the in-reader search sheet instead.
-        onSearchClick = {
-            onSearchClick()
-        },
+        onSearchClick = viewModel::toggleSearch,
         onBookmarkClick = { viewModel.toggleBookmark() },
         onSettingsClick = {
             viewModel.closeBook { onSettingsClick() }
@@ -2181,6 +2190,7 @@ private fun ReaderRoute(
         targetHighlightId = targetHighlightId,
         initialLocator = targetLocator,
     )
+    }
 }
 
 @Composable

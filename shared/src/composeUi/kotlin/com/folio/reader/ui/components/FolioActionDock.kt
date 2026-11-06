@@ -50,6 +50,7 @@ import kotlin.math.sin
 import kotlin.math.PI
 import com.folio.reader.ui.theme.rememberMotionAnimation
 import com.folio.reader.ui.theme.FolioTheme
+import com.folio.reader.ui.theme.elements
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionEnabled
 import com.folio.reader.ui.theme.rememberMotionSpec
@@ -60,7 +61,10 @@ fun FolioActionDock(title: String, subtitle: String, onClick: () -> Unit,
     modifier: Modifier = Modifier, accent: Color = FolioTheme.colors.primary,
     progress: Float? = null, accessibilityLabel: String = title, enabled: Boolean = true) {
     val colors = FolioTheme.colors
-    val signal = folioSignalAccent(accent)
+    val elements = FolioTheme.elements
+    val signal = elements.action
+    // Artwork may color the finite light sweep; it cannot recolor the Read action.
+    val highlight = com.folio.reader.ui.theme.tameCover(accent, signal)
     val shape = FolioMaterialShapes.dock
     val interactions = remember { MutableInteractionSource() }
     val pressed by interactions.collectIsPressedAsState()
@@ -82,7 +86,7 @@ fun FolioActionDock(title: String, subtitle: String, onClick: () -> Unit,
     } }
     val response = animateFloatAsState(if (pressed && motion) 1f else 0f,
         animationSpec = rememberMotionAnimation(MotionKey.PressFocal), label = "actionDockPress")
-    Column(modifier.fillMaxWidth().heightIn(min = if (progress == null) 64.dp else 80.dp)
+    Column(modifier.fillMaxWidth().heightIn(min = if (progress == null) 64.dp else 96.dp)
         .graphicsLayer { scaleX = 1f - response.value * .018f; scaleY = scaleX; alpha = if (enabled) 1f else .5f }
         .folioReadingDockGlass(shape, signal).clip(shape).folioSignalEdge().drawWithCache {
             onDrawWithContent {
@@ -92,7 +96,7 @@ fun FolioActionDock(title: String, subtitle: String, onClick: () -> Unit,
                     val x = size.width * (if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) 1f - phase else phase)
                     val strength = sin(phase * PI).toFloat() * .16f * sheen
                     drawRect(Brush.horizontalGradient(listOf(Color.Transparent,
-                        signal.copy(alpha = strength), Color.Transparent),
+                        highlight.copy(alpha = strength), Color.Transparent),
                         startX = x - size.width * .18f, endX = x + size.width * .18f))
                 }
                 point?.let { at -> if (response.value > .001f) drawCircle(
@@ -105,7 +109,7 @@ fun FolioActionDock(title: String, subtitle: String, onClick: () -> Unit,
         .padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = FolioTheme.typography.titleMedium, color = colors.onSurface)
+                Text(title, style = FolioTheme.typography.titleMedium, color = elements.onSelection)
                 if (subtitle.isNotBlank()) AnimatedContent(subtitle, transitionSpec = {
                     fadeIn(tween(duration)) togetherWith fadeOut(tween(duration / 2))
                 }, label = "actionDockCaption") {
@@ -113,12 +117,12 @@ fun FolioActionDock(title: String, subtitle: String, onClick: () -> Unit,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Box(Modifier.size(40.dp).background(signal.copy(alpha = .17f), RoundedCornerShape(13.dp)),
+            Box(Modifier.size(40.dp).background(signal, RoundedCornerShape(13.dp)),
                 contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = colors.onSurface,
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = elements.onAction,
                     modifier = Modifier.size(22.dp).graphicsLayer { translationX = response.value * 3.dp.toPx() })
             }
         }
-        progress?.let { FolioProgressBar(it, color = colors.accentProgress, track = colors.progressTrack) }
+        progress?.let { FolioProgressBar(it) }
     }
 }

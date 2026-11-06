@@ -1096,8 +1096,7 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
         db.bumpMangaData()
     }
 
-    override fun observeRecent(limit: Int): Flow<List<MangaHistoryItem>> = flow {
-        emit(
+    override fun observeRecent(limit: Int): Flow<List<MangaHistoryItem>> = db.mangaDataRevision.map {
             db.withConnection { conn ->
                 conn.prepareStatement(
                     """
@@ -1106,7 +1105,7 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
                     FROM manga_history h
                     LEFT JOIN manga_library m ON m.id = h.manga_id
                     LEFT JOIN manga_chapters c ON c.id = h.chapter_id
-                    ORDER BY h.updated_at DESC
+                    ORDER BY h.updated_at DESC, h.manga_id ASC
                     LIMIT ?
                     """.trimIndent()
                 ).use { stmt ->
@@ -1125,8 +1124,7 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
                     }
                 }
             }
-        )
-    }
+    }.distinctUntilChanged()
 
     override fun observeHistory(): Flow<List<com.folio.reader.manga.MangaHistoryEntry>> =
         db.mangaDataRevision.map {
@@ -1171,11 +1169,11 @@ class JdbcMangaHistoryRepository(private val db: Database) : com.folio.reader.ma
         db.withConnection { conn ->
             conn.createStatement().use { it.executeUpdate("DELETE FROM manga_history") }
         }
+        db.bumpMangaData()
     }
 
     override suspend fun clearHistory() {
         clear()
-        db.bumpMangaData()
     }
 
     internal suspend fun upsertFromReadMark(conn: Connection, mangaId: String, chapterName: String) {

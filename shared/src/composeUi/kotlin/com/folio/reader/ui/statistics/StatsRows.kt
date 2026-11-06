@@ -452,42 +452,19 @@ internal fun MangaStatsSection(
     }
 }
 
-/**
- * The ledger: figures on the page, no tiles, ranked by how much they matter.
- *
- * **Positionally this is a composition, not a table.** It used to be a 2×2 grid —
- * two `weight(1f)` figures, a rule, two more `weight(1f)` figures — which is the
- * one arrangement guaranteed to read as a spreadsheet no matter how good the
- * typography inside the cells is: four equal cells on a regular lattice, so the
- * eye finds no entry point and ranks nothing.
- *
- * The four numbers were never equal in importance, so they no longer occupy equal
- * cells. The streak is the one figure worth a pause, so it *is* the composition's
- * subject: it sits alone on the leading side at `FigureScale.Standard`, roughly
- * 1.3× the width of everything else. Active days, the year's time and the finished
- * count are supporting context, so they stack in a narrower trailing column at
- * `Quiet`, ruled apart from each other.
- *
- * That gives the block the two properties the grid version could not have: a
- * **dominant** (one big thing, not four medium things) and an **asymmetric split**
- * (≈57/43, not 50/50). The 36sp-against-24sp gap is a hierarchy the eye can read
- * at a glance, where four figures at similar sizes read as inert — but it stays
- * one step under the overture's `Hero`, so this block supports the screen's
- * opening statement instead of arguing with it.
- *
- * The session count still lives here nowhere: sessions are an implementation
- * detail, not a reading habit.
- */
+/** The open ledger: a larger streak and active-day strip above two quiet totals. */
 @Composable
 internal fun HeadlineRow(stats: StatisticsUiState) {
     val colors = FolioTheme.colors
-    Column(verticalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+    StatsHeadlineLayout(
+        streak = { modifier ->
             FolioFigure(stats.streakDays.toString(),
                 unit = if (stats.streakDays == 1) "day" else "days", label = "Streak",
                 caption = "best ${stats.longestStreakDays}", accent = colors.accentStreak,
-                emphasis = FigureScale.Standard, modifier = Modifier.weight(1f))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
+                emphasis = FigureScale.Standard, modifier = modifier)
+        },
+        activeDays = { modifier ->
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(FolioTokens.space2)) {
                 FolioFigure("${stats.activeDaysThisWeek}", unit = "of 7", label = "Active days",
                     emphasis = FigureScale.Quiet, accent = colors.accentProgress)
                 Row(Modifier.fillMaxWidth().height(7.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -498,16 +475,17 @@ internal fun HeadlineRow(stats: StatisticsUiState) {
                     }
                 }
             }
-        }
-        FolioRule()
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(FolioTokens.space3)) {
+        },
+        year = { modifier ->
             FolioFigure(formatHours(stats.timeThisYearMs), label = "This year",
                 caption = "${formatCount(stats.wordsReadThisYear)} words", emphasis = FigureScale.Quiet,
-                modifier = Modifier.weight(1f))
+                modifier = modifier)
+        },
+        finished = { modifier ->
             FolioFigure(stats.booksFinished.toString(), label = "Finished", caption = "books completed",
-                emphasis = FigureScale.Quiet, modifier = Modifier.weight(1f))
-        }
-    }
+                emphasis = FigureScale.Quiet, modifier = modifier)
+        },
+    )
 }
 
 /**

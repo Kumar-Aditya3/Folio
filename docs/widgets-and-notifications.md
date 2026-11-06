@@ -46,33 +46,13 @@ summary for the queue. Notification channels can be managed independently in
 Android settings; reminders and download results default to low importance.
 Notification content is marked private for lock-screen presentation.
 
-Verification: `ReadingSurfacePolicyTest` covers timing, deduplication, late-night
-boundaries, goal arithmetic and manga order. `ReadingWidgetRenderTest` inflates
-the actual launcher layouts in dark/light and compact/wide variants and writes
-PNG review artifacts to the app's external `widget-modern-review` directory.
+## Verification
 
-28 October 2026 glass/size verification: Android debug and instrumentation APKs
-built successfully. Three focused native tests passed on the isolated Android 15
-emulator, covering 64 layout combinations (including 112dp and 132dp audiobook
-heights), seven playback/setup states, transparent corners and body, and solid
-maximum opacity. Inspected PNGs are in `outputs/widget-glass-review/widget-modern-review`;
-all three widget-picker images were regenerated from those actual RemoteViews.
-
-The modern widget matrix covers three layouts at two widths, two heights, light
-and dark palettes, and normal/enlarged text. `AudiobookWidgetStateTest` also checks
-empty, missing-model, paused, playing, preparing, error and finished states and
-dispatches a stale pause through the actual service without playing audio.
-
-For 1.2.121, the five reading-surface policy tests, tab render check and four
-native widget checks passed. The native matrix produced 48 layout previews and
-seven audiobook state previews in `outputs/modern-widgets-review/widget-modern-review`.
-All current native checks ran on an isolated stock Android 15 emulator, with no
-phone interaction. A reusable test image and AVD are cached under
-`C:/Users/kumar/.codex/tmp/folio-modern-widgets` (AVD home: its `avd` folder,
-emulator name: `FolioModernWidgets`). Always target its explicit emulator serial.
-
-Verified on an isolated Android 16 emulator: seven unit tests and three native
-tests passed, including actual library/statistics loading, notification delivery
-on separate channels, and sixteen light/dark, compact/wide, short/tall widget
-renders. Review PNGs and the universal debug APK are in `outputs/widget-final/`
-and `outputs/Folio-widgets-debug.apk`.
+- `ReadingSurfacePolicyTest` covers reminder timing, deduplication, late-night
+  boundaries, goal totals, and manga chapter order.
+- `ReadingWidgetRenderTest` inflates the actual launcher layouts across palette,
+  size, text scale, and opacity settings. Preview images are generated under
+  the app's external `widget-modern-review` directory.
+- `AudiobookWidgetStateTest` covers empty, missing-model, paused, playing,
+  preparing, error, and finished states. It also verifies that a stale pause
+  action cannot affect another book.

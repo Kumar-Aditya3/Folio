@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -38,6 +39,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.CollectionInfo
@@ -52,6 +54,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -148,12 +151,13 @@ internal fun RevolvingReadingShelf(
                                     val shared = if (!isFront) Modifier else Modifier.sharedElementOrNoop(
                                         if (item.kind == HomeItemKind.MANGA) FolioSharedKeys.mangaCover(item.id)
                                         else FolioSharedKeys.bookCover(item.id))
+                                    val coverModifier=shared.then(if(isFront) Modifier.testTag("home-reading-cover") else Modifier)
                                     if (item.kind == HomeItemKind.MANGA && backend != null) {
                                         MangaPlate(backend, item.sourceId, item.thumbnailUrl, item.coverPath,
-                                            width = coverWidth, elevation = FolioTokens.elevationRaised, modifier = shared)
+                                            width = coverWidth, elevation = FolioTokens.elevationRaised, modifier = coverModifier)
                                     } else {
                                         FolioCoverPlate(item.coverPath, item.title, item.subtitle,
-                                            width = coverWidth, elevation = FolioTokens.elevationRaised, modifier = shared,
+                                            width = coverWidth, elevation = FolioTokens.elevationRaised, modifier = coverModifier,
                                             overlay = {
                                                 com.folio.reader.ui.components.FolioTraceSpine(item.id, item.progress,
                                                     Modifier.align(Alignment.CenterEnd))
@@ -195,6 +199,14 @@ internal fun RevolvingReadingShelf(
                             }
                         }
                     }
+                    val companionBook=items[selectedIndex]
+                    com.folio.reader.tumble.SableBookPresence(companionBook.shelfKey(),companionBook.title,
+                        Modifier.align(Alignment.TopCenter).offset {
+                            val companionPose=shelfPose(selectedIndex,controller.position,items.size,widthPx,animated)
+                            val focus=((companionPose.depth+.5f)/1.5f).coerceIn(0f,1f)
+                            IntOffset((companionPose.x*direction-coverWidth.toPx()*companionPose.scale/2).roundToInt(),
+                                (-(1f-focus)*55.dp.toPx()).roundToInt())
+                        }.width(68.dp).height(94.dp),characterOnly=true,cover=companionBook.coverPath,author=companionBook.subtitle)
                     Column(Modifier.align(Alignment.BottomEnd).width(contextWidth),
                         horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(3.dp)) {

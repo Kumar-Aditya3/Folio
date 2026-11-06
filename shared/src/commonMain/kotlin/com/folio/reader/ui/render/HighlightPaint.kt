@@ -223,6 +223,10 @@ object HighlightPaint {
                 "        if(!done)done=paintIn(sroot,needle,it);\n" +
                 "      }\n" +
                 "    }else{\n" +
+                "      if(!hasSecs&&window.__folioParagraphAt&&it.p!=null&&it.p>=0){\n" +
+                "        var copies=document.querySelectorAll('[data-folio-paragraph=\"'+it.p+'\"]');\n" +
+                "        for(var ci=0;ci<copies.length;ci++)done=paintIn(copies[ci],needle,it)||done;\n" +
+                "      }\n" +
                 "      for(ri=0;ri<roots.length&&!done;ri++){\n" +
                 "        done=paintIn(roots[ri],needle,it);\n" +
                 "      }\n" +

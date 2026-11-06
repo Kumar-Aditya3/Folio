@@ -31,6 +31,7 @@ import com.folio.reader.ui.theme.FolioSoftShape
 import com.folio.reader.ui.theme.tintFill
 import com.folio.reader.ui.theme.surfaceOpacity
 import com.folio.reader.ui.theme.panelKnobScale
+import com.folio.reader.ui.theme.elements
 
 /** Material silhouettes are stable across peer items, independent of their identity. */
 object FolioMaterialShapes {
@@ -45,7 +46,8 @@ object FolioMaterialShapes {
 fun Modifier.folioShelfHero(accent: Color): Modifier {
     val colors = FolioTheme.colors
     val shape = FolioMaterialShapes.shelfHero
-    return clip(shape).folioDataGlass(shape).drawWithCache {
+    val feature = FolioTheme.elements.feature
+    return clip(shape).folioDataGlass(shape, fillColor = feature).drawWithCache {
         val outline = shape.createOutline(size, layoutDirection, this)
         val lightOrigin = Offset(if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl)
             size.width else 0f, size.height * .3f)
@@ -62,12 +64,10 @@ fun Modifier.folioShelfHero(accent: Color): Modifier {
 }
 
 @Composable
-internal fun folioPaperColor(): Color = tintFill(
-    lerp(lerp(FolioTheme.colors.surface, FolioTheme.colors.background, .20f), FolioTheme.colors.onSurface, .012f), FolioTheme.colors.primary, .06f)
+internal fun folioPaperColor(): Color = FolioTheme.elements.paper
 
 @Composable
-internal fun folioReferenceColor(): Color = tintFill(
-    lerp(lerp(FolioTheme.colors.surface, FolioTheme.colors.background, .12f), FolioTheme.colors.onSurface, .022f), FolioTheme.colors.primary, .09f)
+internal fun folioReferenceColor(): Color = FolioTheme.elements.reference
 
 /** Matte, palette-relative paper. This deliberately never passes through the optical ladder. */
 @Composable
@@ -111,19 +111,20 @@ fun Modifier.folioReference(shape: Shape = FolioMaterialShapes.reference): Modif
 @Composable
 internal fun Modifier.folioSettingsChoice(selected: Boolean, shape: Shape): Modifier {
     val colors = FolioTheme.colors
+    val elements = FolioTheme.elements
+    val accent = elements.actionInk
     val response = animateFloatAsState(if (selected) 1f else 0f,
         rememberMotionAnimation(MotionKey.SegmentedIndicator), label = "settingsSignal")
     return clip(shape).drawWithCache {
         val outline = shape.createOutline(size, layoutDirection, this)
         onDrawBehind {
             val level = response.value.coerceIn(0f, 1f)
-            drawOutline(outline, colors.primary.copy(alpha = .11f * level))
-            drawOutline(outline, colors.onSurface.copy(alpha = .025f * (1f - level)))
+            drawOutline(outline, lerp(elements.inset, elements.selection, level))
             drawOutline(outline, androidx.compose.ui.graphics.lerp(colors.onSurface.copy(alpha = .12f),
-                colors.primary.copy(alpha = .70f), level), style = Stroke(.8.dp.toPx()))
+                accent.copy(alpha = .70f), level), style = Stroke(.8.dp.toPx()))
             if (level > .01f) {
                 val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width - 4.dp.toPx() else 4.dp.toPx()
-                drawLine(colors.primary.copy(alpha = level), Offset(x, size.height * .30f),
+                drawLine(accent.copy(alpha = level), Offset(x, size.height * .30f),
                     Offset(x, size.height * .70f), 1.5.dp.toPx(), StrokeCap.Round)
             }
         }

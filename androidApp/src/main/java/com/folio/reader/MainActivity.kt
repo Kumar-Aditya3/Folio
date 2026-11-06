@@ -472,7 +472,8 @@ class MainActivity : ComponentActivity() {
                         // apart. See ui/theme/Motion.kt.
                         motion = model.globalSettings.motion,
                     ) {
-com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository, graph.bookRepository, graph.highlightRepository, graph.noteRepository, graph.sessionRepository) {
+com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository, graph.bookRepository, graph.highlightRepository, graph.noteRepository, graph.sessionRepository,
+    mangaStats = remember(graph.database) { com.folio.reader.database.JdbcMangaStatisticsRepository(graph.database) }) {
 
                     // §17 living glass: the room's slow animated light, provided
                     // once at the Android root. Every material's sheen and the
@@ -610,6 +611,7 @@ com.folio.reader.experience.ReadingEnvironmentProvider(graph.settingsRepository,
                         com.folio.reader.ui.theme.LocalFolioFieldOcclusion provides
                             com.folio.reader.ui.theme.rememberFolioFieldOcclusion(),
                     ) {
+                    com.folio.reader.tumble.PicaOverlayHost()
                     // The app's ground plane — one unified field behind every screen.
                     // [FolioThemeBackground] paints the theme's vertical atmosphere wash
                     // edge to edge and then this theme's own Mirage animation opaquely over

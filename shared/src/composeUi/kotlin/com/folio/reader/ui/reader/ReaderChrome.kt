@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.automirrored.filled.Toc
@@ -49,9 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,8 +61,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.folio.reader.ui.components.FolioMenu
-import com.folio.reader.ui.components.FolioMenuItem
 import com.folio.reader.ui.components.FolioRule
 import com.folio.reader.ui.components.PageBlock
 import com.folio.reader.ui.components.folioReaderGlass
@@ -82,6 +79,53 @@ import com.folio.reader.ui.theme.readerVeilAlpha
 import com.folio.reader.ui.theme.MotionKey
 import com.folio.reader.ui.theme.rememberMotionAnimation
 import com.folio.reader.ui.theme.rememberMotionSpec
+
+internal val LocalDesktopReaderChrome = staticCompositionLocalOf<DesktopReaderChrome?> { null }
+internal val desktopReaderTopBarHeight = 56.dp
+internal val desktopReaderBottomBarHeight = 64.dp
+
+internal data class DesktopReaderChromeState(
+    val bookTitle: String,
+    val chapterTitle: String,
+    val fraction: Float,
+    val locationLabel: String,
+    val progressLabel: String,
+    val paged: Boolean,
+    val ready: Boolean,
+    val canGoBack: Boolean,
+    val canGoForward: Boolean,
+    val bookmarked: Boolean,
+    val controlsVisible: Boolean,
+    val showProgress: Boolean,
+    val showClock: Boolean,
+    val activeTool: ReaderTool?,
+    val returnLabel: String? = null,
+)
+
+internal data class DesktopReaderChromeActions(
+    val back: () -> Unit,
+    val previous: () -> Unit,
+    val next: () -> Unit,
+    val bookmark: () -> Unit,
+    val toggleControls: () -> Unit,
+    val selectTool: (ReaderTool) -> Unit,
+    val seek: (Float) -> Unit,
+    val returnToReading: (() -> Unit)? = null,
+)
+
+/** Desktop supplies its own furniture; the Android reader never enters this seam. */
+internal interface DesktopReaderChrome {
+    @Composable fun TopBar(state: DesktopReaderChromeState, actions: DesktopReaderChromeActions, modifier: Modifier)
+    @Composable fun BottomBar(state: DesktopReaderChromeState, actions: DesktopReaderChromeActions, modifier: Modifier)
+    @Composable fun Workspace(
+        active: ReaderTool,
+        tools: List<ReaderTool>,
+        location: String,
+        onSelect: (ReaderTool) -> Unit,
+        onDismiss: () -> Unit,
+        content: @Composable (ReaderTool) -> Unit,
+    )
+}
 
 /**
  * The glass capsule every floating reader island is cut from — the back button, the title,
@@ -118,7 +162,7 @@ internal fun ReaderChromeGroup(
     }
 }
 
-/** A compact shared reading strip. Android opens the workspace; occluding hosts retain a menu. */
+/** A compact reading strip; every host opens the same workspace beside the page. */
 @Composable
 internal fun ReaderTopBar(
     bookTitle: String,
@@ -138,8 +182,9 @@ internal fun ReaderTopBar(
     echoesEnabled: Boolean = false,
     onOpenEchoes: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onPreviousPage: (() -> Unit)? = null,
+    onNextPage: (() -> Unit)? = null,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         ReaderChromeGroup(Modifier.fillMaxWidth(), verticalInset = 4.dp) {
@@ -153,37 +198,21 @@ internal fun ReaderTopBar(
                 if (showClock) Text(com.folio.reader.ui.components.rememberClockTime(),
                     style = FolioTheme.typography.labelSmall, color = FolioTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp))
+                if (onPreviousPage != null) IconButton(onClick = onPreviousPage) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Previous page", Modifier.size(20.dp), FolioTheme.colors.onSurface)
+                }
+                if (onNextPage != null) IconButton(onClick = onNextPage) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, "Next page", Modifier.size(20.dp), FolioTheme.colors.onSurface)
+                }
                 val haptics = rememberFolioHaptics()
                 IconButton(onClick = { haptics.play(FolioHaptic.Confirm); onBookmarkClick() }) {
                     com.folio.reader.experience.ReadingBookmarkGlyph(isBookmarked,
                         if (isBookmarked) FolioTheme.colors.accentAnnotation else FolioTheme.colors.onSurface)
                 }
                 // A single stable entry opens the shared workspace. All five tools are one tap away.
-                Box {
-                    IconButton(onClick = { if (occludes) menuOpen = true else onOpenToc() }) {
-                        Icon(Icons.Filled.MoreVert, "Reader tools", Modifier.size(20.dp), FolioTheme.colors.onSurface)
-                    }
-                    if (occludes) FolioMenu(menuOpen, { menuOpen = false },
-                        fillAlpha = FolioTheme.readerPanelVeilAlpha, readerMaterial = true) {
-                        FolioMenuItem(text = { Text("Contents") }, onClick = { menuOpen = false; onOpenToc() })
-                        FolioMenuItem(text = { Text("Search") }, onClick = { menuOpen = false; onSearchClick() })
-                        FolioMenuItem(text = { Text("Saved passages") }, onClick = { menuOpen = false; onOpenAnnotations() })
-                        FolioMenuItem(text = { Text("Reading settings") }, onClick = { menuOpen = false; onToggleReaderPanel() })
-                        pageSelection?.let { selected ->
-                            val experience = com.folio.reader.experience.LocalReaderExperience.current
-                            FolioMenuItem(text = { Text("Export selection") }, onClick = {
-                                menuOpen = false; experience?.exportSelection(selected.first, selected.second, selected.third); onSelectionConsumed()
-                            })
-                            FolioMenuItem(text = { Text("Keep selection") }, onClick = {
-                                menuOpen = false
-                                onHighlightParagraph?.invoke(selected.first, selected.second, selected.third)
-                                onSelectionConsumed()
-                            })
-                            if (echoesEnabled) FolioMenuItem(text = { Text("Find echoes") }, onClick = {
-                                menuOpen = false; onOpenEchoes()
-                            })
-                        }
-                    }
+                // Windows hosts the workspace above Chromium in its owned tools window.
+                IconButton(onClick = onOpenToc) {
+                    Icon(Icons.Filled.MoreVert, "Reader tools", Modifier.size(20.dp), FolioTheme.colors.onSurface)
                 }
             }
         }

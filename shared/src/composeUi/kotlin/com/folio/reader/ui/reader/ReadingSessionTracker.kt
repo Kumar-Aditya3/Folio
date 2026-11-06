@@ -8,6 +8,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.datetime.Clock
 import kotlin.time.TimeSource
 
+/** UI-thread gate; a generation also detects an interruption with no intervening page events. */
+internal object ReaderActivityInterruption {
+    var generation = 0L
+        private set
+    var blocked = false
+        private set
+    fun arcadeVisible(visible: Boolean) {
+        if (blocked != visible) { blocked = visible; generation++ }
+    }
+}
+
 /** Small stateful guard shared by browser and Compose scroll surfaces. */
 internal class ChapterEndGuard {
     private var handledChapter: String? = null
@@ -62,6 +73,7 @@ internal class ReadingSessionTracker(
     private var activeSpanMs = 0L
     private var bankedSpanMs = 0L
     private var lastActivityAt: TimeSource.Monotonic.ValueTimeMark? = null
+    private var interruptionGeneration = ReaderActivityInterruption.generation
     private var lastPlaybackMs = com.folio.reader.narration.NarrationActivity.totalPlaybackMs
 
     /** Words credited to this session, advanced a readable pace at a time. */
@@ -79,6 +91,15 @@ internal class ReadingSessionTracker(
      * idle, and banking it is what turned reading time into elapsed time.
      */
     fun markReadingActivity() {
+        if (interruptionGeneration != ReaderActivityInterruption.generation) {
+            lastActivityAt = null
+            interruptionGeneration = ReaderActivityInterruption.generation
+        }
+        if (ReaderActivityInterruption.blocked) {
+            lastActivityAt = null
+            lastPlaybackMs = com.folio.reader.narration.NarrationActivity.totalPlaybackMs
+            return
+        }
         val playbackMs = com.folio.reader.narration.NarrationActivity.totalPlaybackMs
         val overlapMs = (playbackMs - lastPlaybackMs).coerceAtLeast(0)
         lastPlaybackMs = playbackMs

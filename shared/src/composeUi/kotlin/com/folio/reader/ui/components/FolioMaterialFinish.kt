@@ -26,6 +26,9 @@ fun folioMaterialFinishFor(packId: String): FolioMaterialFinish = when (packId) 
     "acid" -> FolioMaterialFinish(.28f, .58f, 12f, .12f)
     "ceramic" -> FolioMaterialFinish(.94f, .62f, 0f, .10f)
     "copper" -> FolioMaterialFinish(.45f, .62f, 5f, .18f)
+    "risograph" -> FolioMaterialFinish(.88f, .18f, 11f, .06f)
+    "celadon" -> FolioMaterialFinish(.92f, .40f, 0f, .26f)
+    "mineral" -> FolioMaterialFinish(.60f, .34f, 0f, .32f)
     else -> FolioMaterialFinish(.55f, .40f, 0f, 0f)
 }
 

@@ -7,7 +7,7 @@ import com.folio.reader.settings.normalized
  * surfaces. Lays the chapter out as discrete viewport pages by absolutely
  * positioning content blocks into page columns — deliberately NOT CSS multicol,
  * whose overflow painting is unreliable in embedded Chromium (JCEF 132). Pages
- * turn by sliding the strip horizontally, the way a manga viewer moves panels.
+ * turn by sliding the strip on Android; Windows animates bounded page surfaces.
  *
  * The engine talks to the app through the same document.title protocol as the
  * continuous bridge: folio-progress:<fraction>:<current>:<total>:<crossed> and
@@ -67,7 +67,7 @@ function folioReportSel(){
   var idx=0,ps=document.querySelectorAll('p'),i;
   if(node){
     var p=null;for(var q=node;q;q=q.parentElement){if(q.tagName==='P'){p=q;break;}}
-    if(p){for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
+    if(p){if(window.__folioParagraphIndex)idx=window.__folioParagraphIndex(p);else for(i=0;i<ps.length;i++){if(ps[i]===p){idx=i;break;}}}
     else{var kids=document.body?document.body.children:[],blk=node;
       while(blk&&blk.parentElement&&blk.parentElement!==document.body)blk=blk.parentElement;
       for(i=0;i<kids.length;i++){if(kids[i]===blk){idx=i;break;}}}
@@ -94,7 +94,7 @@ var body=document.body,docEl=document.documentElement;
 // Hide here, not in CSS: a document whose engine JS never lands must still paint
 // text instead of staying a solid blank page under a CSS opacity:0 gate.
 body.style.opacity='0';
-var page=0,animating=false,userActed=false,nonce=0,posFrac=frac;
+var page=0,animating=false,userActed=false,nonce=0,posFrac=frac,navigationVersion=0;
 var totalCols=1,kids=[],dirty=true,stackReported=false;
 function vw(){return Math.max(1, body.clientWidth || window.innerWidth);}
 function colW(){return vw()/COLS;}
@@ -110,9 +110,17 @@ function pinBox(){
 function maxPage(){return Math.max(0,Math.ceil(totalCols/COLS)-1);}
 var strip=document.getElementById('folio-strip');
 if(!strip){
-  strip=document.createElement('div');strip.id='folio-strip';strip.style.willChange='transform';
+  strip=document.createElement('div');strip.id='folio-strip';if(!DESKTOP)strip.style.willChange='transform';
   while(body.firstChild)strip.appendChild(body.firstChild);
   body.appendChild(strip);
+}
+// Page containers and continuation slices change DOM order. Persist the source index
+// before layout so selection, saved passages and search jumps keep referring to the book.
+if(DESKTOP){
+  var sourceParagraphs=strip.querySelectorAll('p'),sourceParagraphCount=sourceParagraphs.length;
+  for(var pi=0;pi<sourceParagraphCount;pi++)sourceParagraphs[pi].setAttribute('data-folio-paragraph',pi);
+  window.__folioParagraphAt=function(i){var index=Math.min(Math.max(0,i),sourceParagraphCount-1),original=sourceParagraphs[index];return original&&original.isConnected?original:document.querySelector('[data-folio-paragraph="'+index+'"]');};
+  window.__folioParagraphIndex=function(p){return parseInt(p.getAttribute('data-folio-paragraph'),10)||0;};
 }
 function widthize(el,cw){
   el.style.position='absolute';
@@ -171,6 +179,7 @@ var imgTries=0,imagesSettled=false;
 // was already `complete` when we measured fires no load event at all, and a web font that
 // settles after the remeasure budget fires no resize — which is why the overlap stuck.
 var measuredHs=[],growWatch=null,growTries=0,lastGrowFix=0;
+${DesktopPageViewport.js}
 function lineH(el){var v=parseFloat(getComputedStyle(el).lineHeight);return isFinite(v)&&v>4?v:0;}
 // The y of every real line box inside a block, relative to its top. Slicing at multiples of
 // the *computed* line-height cuts through glyphs whenever a line is actually taller than that
@@ -207,6 +216,7 @@ function paintedBottom(el){
 }
 function addSlice(el,off,sh,c,top,cw){
   var w=document.createElement('div');w.className='folio-slice';
+  if(DESKTOP)w.setAttribute('data-folio-block',kids.indexOf(el));
   w.style.position='absolute';
   w.style.left=Math.round(c*cw)+'px';
   w.style.top=Math.round(top)+'px';
@@ -222,6 +232,8 @@ function addSlice(el,off,sh,c,top,cw){
     inner=document.createElement(el.tagName);
     inner.className=el.className;
     inner.innerHTML=el.innerHTML;
+    if(DESKTOP)inner.style.cssText=el.style.cssText;
+    if(DESKTOP)['data-folio-paragraph','data-folio-narration'].forEach(function(name){if(el.hasAttribute(name))inner.setAttribute(name,el.getAttribute(name));});
     inner.style.position='absolute';
     inner.style.boxSizing='border-box';
     inner.style.width=el.style.width;
@@ -242,6 +254,7 @@ function lineCuts(el,rem,H,ch){
   var cuts=[],off=0,guard=0;
   while(off<ch-1&&guard++<80){
     var budget=(cuts.length===0?rem:H),cut=ch,j;
+    if(DESKTOP&&ch-off<=budget+1){cuts.push(ch-off);off=ch;break;}
     for(j=0;j<tops.length;j++){
       if(tops[j]<=off+1)continue;
       if(tops[j]-off>budget)break;
@@ -275,6 +288,9 @@ function legacyCuts(el,rem,H,ch){
 function trySplit(el,col,y,cw,H){
   if(atomicBlock(el))return null;
   var ch=el.offsetHeight,rem=H-y;
+  // A sliver shorter than one line belongs to the page margin. Filling it with
+  // a partial glyph also clips the beginning of the continuation on the next page.
+  if(DESKTOP&&rem<(lineH(el)||24))return null;
   if(ch<=rem)return null;
   var tag=el.tagName+'.'+(el.className||''),cuts=lineCuts(el,rem,H,ch),i;
   if(cuts==null){
@@ -325,16 +341,18 @@ function watchGrowth(){
   if(!window.ResizeObserver||growTries>12)return;
   if(!growWatch){
     growWatch=new ResizeObserver(function(es){
+      if(DESKTOP&&growTries>12){growWatch.disconnect();return;}
       if(dirty||animating)return;
       // Relayout changes these boxes, so without a cooldown the observer feeds itself.
       if(Date.now()-lastGrowFix<400)return;
       for(var i=0;i<es.length;i++){
         var el=es[i].target,idx=kids.indexOf(el);
         if(idx<0)continue;
+        if(DESKTOP&&!el.getClientRects().length)continue;
         var was=measuredHs[idx];
         if(was===undefined)continue;
         if(Math.abs(el.getBoundingClientRect().height-was)>1.5){
-          growTries++;lastGrowFix=Date.now();dirty=true;relayout();return;
+          growTries++;lastGrowFix=Date.now();requestRelayout();return;
         }
       }
     });
@@ -342,6 +360,7 @@ function watchGrowth(){
   for(var i=0;i<kids.length;i++)growWatch.observe(kids[i]);
 }
 function layout(){
+  if(DESKTOP)desktopUnpack();
   pinBox();
   var cw=colW(),H=pageH();
   if(H<50||cw<50){
@@ -403,6 +422,10 @@ function layout(){
   }
   var col=0,y=0;
   for(i=0;i<kids.length;i++){
+    if(DESKTOP&&y===0&&hs[i]>H&&!atomicBlock(kids[i])){
+      var firstSplit=trySplit(kids[i],col,0,cw,H);
+      if(firstSplit){col=firstSplit[0];y=firstSplit[1];continue;}
+    }
     if(y>0&&y+hs[i]>H){
       var after=trySplit(kids[i],col,y,cw,H);
       if(after){col=after[0];y=after[1];continue;}
@@ -414,21 +437,29 @@ function layout(){
   }
   totalCols=col+1;
   strip.style.width=Math.round(totalCols*cw)+'px';
-  measuredHs=hs;
+  measuredHs=DESKTOP?kids.map(function(el){return el.getBoundingClientRect().height;}):hs;
+  if(DESKTOP)desktopPack();
   watchGrowth();
   dirty=false;
 }
 function report(){
+  if(DESKTOP)window.__folioLayoutReady=!dirty&&imagesSettled;
+  // A zero-page measurement is provisional while fonts/images or the native
+  // viewport settle. Publishing it overwrites the saved resume position.
+  if(dirty)return;
   var total=maxPage()+1;
-  var p=maxPage()>0?page/maxPage():0;
+  var p=maxPage()>0?page/maxPage():posFrac;
   document.title='folio-progress:'+p.toFixed(4)+':'+(page+1)+':'+total+':false';
 }
 function setScroll(animate){
+  if(DESKTOP){desktopPresent(animate);return;}
   strip.style.transition=animate?'transform .3s cubic-bezier(.3,.1,.2,1)':'none';
   strip.style.transform='translateX('+(-(page*vw()))+'px)';
 }
 var settleT=null;
-function settle(){if(settleT)clearTimeout(settleT);settleT=setTimeout(function(){animating=false;settleT=null;report();},380);}
+function finishTurn(){if(settleT)clearTimeout(settleT);animating=false;settleT=null;if(DESKTOP)desktopFinish();report();if(DESKTOP&&dirty)requestRelayout();}
+function settle(){if(settleT)clearTimeout(settleT);settleT=setTimeout(finishTurn,DESKTOP?(window.__folioReduceMotion?40:240):380);}
+if(DESKTOP)strip.addEventListener('transitionend',function(e){if(e.target===strip&&e.propertyName==='transform'&&animating)finishTurn();});
 // Both edges work identically: pushing past the page you are on emits a token from
 // the gesture itself. The forward hop used to ride on the progress report, which only
 // reached the host if a scroll event happened to follow — and scrolling past the last
@@ -441,35 +472,56 @@ function edge(which){
   document.title='folio-edge:'+which+':'+(++nonce);
 }
 function goTo(p,instant){
-  if(p<0&&page<=0){edge('start');return;}
-  if(p>maxPage()&&page>=maxPage()){edge('end');return;}
+  if(DESKTOP&&(animating||dirty||window.__folioInputEnabled===false))return false;
+  if(p<0&&page<=0){edge('start');return true;}
+  if(p>maxPage()&&page>=maxPage()){edge('end');return true;}
   p=Math.max(0,Math.min(maxPage(),p));
-  if(p===page){setScroll(false);report();return;}
-  if(animating)return;
+  if(p===page){setScroll(false);report();return false;}
+  if(animating)return false;
   // Raise the re-entrancy guard before the reduced-motion branch: that path has no
   // animation, so without settling `animating` here a second near-simultaneous call
   // (the synthetic mouseup after a touchend) would turn a second page. settle()
   // drops the guard after a beat on both paths.
   animating=true;
+  navigationVersion++;
   page=p;
   posFrac=maxPage()>0?page/maxPage():0;
-  if(instant||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);settle();report();return;}
+  if(instant||DESKTOP&&window.__folioReduceMotion||window.matchMedia('(prefers-reduced-motion: reduce)').matches){setScroll(false);settle();report();return true;}
   setScroll(true);
   settle();
   report();
+  return true;
 }
 function relayout(){
+  if(DESKTOP&&(animating||document.hidden||window.__folioInputEnabled===false))return;
   if(dirty)layout();
   // Still waiting on image sizes: layout() bailed and scheduled the retry, so keep
   // the page hidden rather than revealing it unpaginated.
-  if(!imagesSettled)return;
+  if(dirty||!imagesSettled)return;
   page=Math.round(posFrac*maxPage());
   setScroll(false);
   body.style.opacity='1';
   report();
 }
-window.__folioRelayout=function(){dirty=true;relayout();};
-window.__folioSeek=function(f){var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll(false);body.style.opacity='1';report();};
+var reflowTimer=0,reflowAnchor=null;
+function requestRelayout(anchor,version){
+  if(!DESKTOP){dirty=true;relayout();return;}
+  if(anchor)reflowAnchor={anchor:anchor,version:version};
+  dirty=true;window.__folioLayoutReady=false;clearTimeout(reflowTimer);
+  reflowTimer=setTimeout(function(){
+    reflowTimer=0;if(document.hidden||window.__folioInputEnabled===false)return;
+    if(animating){requestRelayout();return;}
+    var held=reflowAnchor;reflowAnchor=null;
+    if(held&&held.version===navigationVersion)window.__folioAnchorRestore(held.anchor);else relayout();
+  },40);
+}
+window.__folioRelayout=function(){requestRelayout();};
+if(DESKTOP){
+  window.__folioTurn=function(direction){if(window.__folioInputEnabled===false)return false;userActed=true;return goTo(page+(direction>0?1:-1));};
+  window.__folioSetActive=function(active){window.__folioInputEnabled=active;if(active&&dirty)requestRelayout();};
+  window.__folioDispose=function(){clearTimeout(reflowTimer);clearTimeout(settleT);desktopStopAnimation();if(growWatch)growWatch.disconnect();};
+}
+window.__folioSeek=function(f){navigationVersion++;userActed=true;var v=Math.min(1,Math.max(0,f||0));posFrac=v;page=Math.round(v*maxPage());setScroll(false);body.style.opacity='1';report();};
 // Target grammar: "h:<markId>[:<paragraph>[:<fraction>]]" lands on a painted
 // highlight, "p:<paragraph>" on the Nth paragraph. A missing mark must never
 // degrade to paragraph 0 — that reads as "the jump took me to the chapter top".
@@ -477,11 +529,12 @@ function folioTargetEl(t){
   if(String(t).indexOf('n:')===0)return document.querySelector('[data-folio-narration="'+String(t).substring(2)+'"]');
   var parts=String(t).split(':'),isH=parts[0]==='h',el=null;
   var id=isH?(parts[1]||''):'';
-  if(id){try{el=document.querySelector('[data-folio-hl="'+id+'"]');}catch(e){el=null;}}
+  if(id){try{var marks=document.querySelectorAll('[data-folio-hl="'+id+'"]');el=DESKTOP?desktopTargetCopy(marks):(marks[0]||null);}catch(e){el=null;}}
   if(!el){
     var pi=isH?parts[2]:parts[1];
     if(pi===undefined||pi==='')return null;
     var i=parseInt(pi,10);if(isNaN(i))return null;
+    if(DESKTOP&&window.__folioParagraphAt)return window.__folioParagraphAt(i);
     var ps=document.querySelectorAll('p');if(!ps.length)return null;
     el=ps[Math.min(Math.max(0,i),ps.length-1)];
   }
@@ -489,6 +542,7 @@ function folioTargetEl(t){
 }
 function folioLandEl(el){
   if(dirty)layout();
+  if(DESKTOP){var targetPage=desktopPageOf(el);if(targetPage>=0){page=Math.min(maxPage(),targetPage);posFrac=maxPage()>0?page/maxPage():0;setScroll(false);body.style.opacity='1';report();return;}}
   var x=el.getBoundingClientRect().left+page*vw();
   var col=Math.floor((x+8)/colW());
   var y=el.getBoundingClientRect().top;
@@ -497,6 +551,7 @@ function folioLandEl(el){
   posFrac=maxPage()>0?tt/maxPage():0;page=tt;setScroll(false);body.style.opacity='1';report();
 }
 window.__folioSeekTo=function(t){
+  navigationVersion++;userActed=true;
   // A paged document holds exactly one chapter, so the host's "c:<chapterId>|" scope carries
   // no information here — and left on the string it parses as the paragraph number.
   var str=String(t);if(str.indexOf('c:')===0){var bar=str.indexOf('|');if(bar>0)str=str.substring(bar+1);}
@@ -512,6 +567,7 @@ window.__folioSeekPara=function(i){window.__folioSeekTo('p:'+i);};
 // same block keeps the same words in view.
 window.__folioAnchorSave=function(){
   if(!kids.length)return '';
+  if(DESKTOP)return desktopAnchor();
   var cw=colW(),first=Math.floor(page*COLS),last=first+COLS;
   for(var i=0;i<kids.length;i++){
     var col=Math.floor((parseFloat(kids[i].style.left)||0)/cw);
@@ -521,11 +577,12 @@ window.__folioAnchorSave=function(){
 };
 window.__folioAnchorRestore=function(a){
   var p=String(a||'').split(':');
-  if(p.length!==2||p[0]!=='b')return;
+  if(p.length<2||p[0]!=='b')return;
   var idx=parseInt(p[1],10);if(isNaN(idx))return;
   if(dirty)layout();
   if(!kids.length)return;
   var el=kids[Math.min(Math.max(0,idx),kids.length-1)];
+  if(DESKTOP){desktopRestoreBlock(idx,parseFloat(p[2])||0);return;}
   var x=el.getBoundingClientRect().left+page*vw();
   var col=Math.floor((x+8)/colW());
   var tt=Math.min(maxPage(),Math.floor(col/COLS));
@@ -534,18 +591,26 @@ window.__folioAnchorRestore=function(a){
 // In-place stylesheet swap for typography/theme changes: anchor, swap, repaginate,
 // then land back on the same block. Repeated at 400ms for late font metrics.
 window.__folioRestyle=function(fc,sc){
-  var a=window.__folioAnchorSave();
-  var f=document.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
+  // Before any navigation, the resume fraction is authoritative. An early
+  // first-page block anchor must not replace it while fonts settle.
+  var a=dirty||!userActed?'':window.__folioAnchorSave(),version=navigationVersion;
+  var f=document.getElementById('folio-fonts');if(!f&&fc&&DESKTOP){f=document.createElement('style');f.id='folio-fonts';document.head.appendChild(f);}if(f&&fc)f.textContent=fc;
   var st=document.getElementById('folio-reader-style');if(st)st.textContent=sc;
+  if(DESKTOP){requestRelayout(a,version);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){if(version===navigationVersion)requestRelayout(a,version);});return;}
   dirty=true;relayout();
-  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},80);
-  setTimeout(function(){dirty=true;window.__folioAnchorRestore(a);},400);
+  function settleStyle(){
+    // A queued font correction must never undo a newer page turn or seek.
+    if(version!==navigationVersion)return;
+    dirty=true;if(a)window.__folioAnchorRestore(a);else relayout();
+  }
+  setTimeout(settleStyle,80);
+  setTimeout(settleStyle,400);
 };
 
-window.addEventListener('resize',function(){dirty=true;relayout();});
-window.addEventListener('load',function(){dirty=true;relayout();});
-document.addEventListener('visibilitychange',function(){dirty=true;relayout();});
-if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dirty=true;relayout();});
+window.addEventListener('resize',function(){requestRelayout();});
+window.addEventListener('load',function(){requestRelayout();});
+document.addEventListener('visibilitychange',function(){if(!DESKTOP||!document.hidden)requestRelayout();});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){requestRelayout();});
 // Block heights come from the page, and an image that decodes after a layout leaves
 // the packer working from the near-zero height it measured while the art was pending
 // — which is how a full-page title plate ends up underneath the following text.
@@ -553,14 +618,17 @@ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){dir
 // engine is injected after the WebView's own load event may already have fired, so
 // watch every image load in the capture phase and re-measure once nothing is pending.
 function pendingImages(){var im=document.images,n=0,q;for(q=0;q<im.length;q++){if(!im[q].complete)n++;}return n;}
-document.addEventListener('load',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
-document.addEventListener('error',function(e){var t=e.target;if(t&&t.tagName==='IMG'){dirty=true;relayout();}},true);
+document.addEventListener('load',function(e){var t=e.target;if(t&&t.tagName==='IMG'){requestRelayout();}},true);
+document.addEventListener('error',function(e){var t=e.target;if(t&&t.tagName==='IMG'){requestRelayout();}},true);
 (function remeasure(tries,sawPending){
   var p=pendingImages(),seen=sawPending||p>0;
   if(!p){if(seen){dirty=true;relayout();}return;}
   if(tries>20)return;
   setTimeout(function(){remeasure(tries+1,seen);},250);
 })(0,false);
+if(DESKTOP){
+${DesktopReaderInput.js(paged = true)}
+}else{
 window.addEventListener('wheel',function(e){
   if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
   e.preventDefault();userActed=true;
@@ -573,7 +641,9 @@ document.addEventListener('keydown',function(e){
   if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='ArrowDown'){e.preventDefault();userActed=true;goTo(page+1);}
   else if(k==='ArrowLeft'||k==='PageUp'||k==='ArrowUp'){e.preventDefault();userActed=true;goTo(page-1);}
 },true);
+}
 var tX=0,tY=0,tT=0,lastTouchEnd=0;
+if(!DESKTOP){
 document.addEventListener('touchstart',function(e){var t=e.touches[0];tX=t.clientX;tY=t.clientY;tT=Date.now();},{passive:true});
 document.addEventListener('touchend',function(e){
   lastTouchEnd=Date.now();
@@ -583,6 +653,7 @@ document.addEventListener('touchend',function(e){
   if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4){userActed=true;goTo(page+(dx<0?1:-1));return;}
   handleTap(t.clientX,t.clientY,Math.hypot(dx,dy),Date.now()-tT);
 },{passive:true});
+}
 function handleTap(x,y,moved,ms){
   var el=document.elementFromPoint(x,y);
   var a=el&&el.closest?el.closest('a[href]'):null;
@@ -601,7 +672,7 @@ document.addEventListener('click',function(ev){
   if(a){var h=a.getAttribute('href')||'';if(h&&h.charAt(0)!=='#')ev.preventDefault();}
 },true);
 document.addEventListener('mouseup',function(e){
-  if(e.button!==0)return;
+  if(DESKTOP||e.button!==0)return;
   // Suppress the compatibility mouse event a touch synthesizes right after
   // touchend: without this one physical tap ran handleTap twice (touchend+mouseup).
   if(Date.now()-lastTouchEnd<700)return;
@@ -617,14 +688,16 @@ console.log('folio-geom:H='+pageH()+' vw='+vw()+' cols='+totalCols+' kids='+kids
 $selectionWatchJs
 page=Math.round(posFrac*maxPage());
 setScroll(false);
-if(imagesSettled)body.style.opacity='1';
+if(imagesSettled&&!dirty)body.style.opacity='1';
 document.title='folio-engdiag:ok:'+pageH()+':'+vw()+':'+totalCols+':'+kids.length+':'+(++nonce);
+if(!DESKTOP||DIAG){
 setTimeout(function(){dirty=true;relayout();},250);
 setTimeout(function(){dirty=true;relayout();},700);
 setTimeout(function(){dirty=true;relayout();var r=strip.getBoundingClientRect();var k=kids&&kids.length?kids[0].getBoundingClientRect():null;var k2=kids&&kids.length>1?kids[1].getBoundingClientRect():null;console.log('folio-geom2:page='+page+' tx='+strip.style.transform+' strip='+Math.round(r.left)+','+Math.round(r.top)+','+Math.round(r.width)+','+Math.round(r.height)+' kid0='+(k?Math.round(k.left)+','+Math.round(k.top)+','+Math.round(k.width)+','+Math.round(k.height):'none')+' kid1='+(k2?Math.round(k2.left)+','+Math.round(k2.top)+','+Math.round(k2.width)+','+Math.round(k2.height):'none')+' vv='+(window.visualViewport?window.visualViewport.scale.toFixed(2)+'/'+window.visualViewport.offsetTop:'na'));
 if(String(navigator.userAgent).indexOf('Android')>=0){
   console.log('folio-exp:android');
 }},1500);
+}
 report();
 }catch(e){
 body.style.opacity='1';

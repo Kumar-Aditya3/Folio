@@ -7,7 +7,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Navigation bar items (bottom app bar) – exactly 4 items (§3.4 FOLIO_IMPLEMENTATION_SPEC).
@@ -18,14 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * percent apart, which is what made the capsule read as four equal marks with
  * a highlight rather than one chosen destination.
  */
-data class FolioNavBarItem(
-    val route: String,
-    val icon: ImageVector,
-    val label: String,
-    val badgeCount: Int? = null,
-    /** The resting glyph; defaults to the filled one for callers that don't care. */
-    val outlinedIcon: ImageVector = icon
-)
+typealias FolioNavBarItem = com.folio.reader.ui.components.FolioNavigationItem
 
 /**
  * The 4 bottom bar items: Home, Library, Stats, More (§3.3).

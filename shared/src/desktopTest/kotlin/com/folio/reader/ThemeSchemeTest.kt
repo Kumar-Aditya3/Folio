@@ -4,6 +4,8 @@ import com.folio.reader.settings.CustomAppTheme
 import com.folio.reader.settings.ReaderSettings
 import com.folio.reader.settings.Theme
 import com.folio.reader.ui.theme.AppPalette
+import com.folio.reader.ui.theme.FolioColors
+import com.folio.reader.ui.theme.folioRenderedColors
 import com.folio.reader.ui.theme.FolioTypography
 import com.folio.reader.ui.theme.ThemePack
 import com.folio.reader.ui.theme.flipThemeMode
@@ -185,7 +187,7 @@ class ThemeSchemeTest {
     // accents are AA-fitted from the same six swatches the other roles draw on, and the
     // fit can land an accent exactly on `primary`. Rather than weaken the rule for every
     // palette, the collisions are listed here — the same visible, reviewable decision the
-    // `achromaticByDesign` list makes above. Adding an entry means someone looked at the
+    // neutral-foundation check makes above. Adding an entry means someone looked at the
     // palette and confirmed the collision is authored, not a forgotten assignment.
     private val accentsAuthoredEqualToDefault = setOf(
         "espresso:accentProgress", "midnight:accentStreak", "peacock:accentStreak",
@@ -274,43 +276,22 @@ class ThemeSchemeTest {
 
     // ── §15 Rules 22–24: neutral hue variance, text split, weight ladder ───
 
-    // §15.5: palettes that are achromatic by design satisfy Rule 22 through the
-    // luminance clause instead of hue rotation. The list lives here, not in
-    // Theme.kt, so adding a palette to it is a visible, reviewable decision.
-    //
-    // Only these two faces are genuinely hue-free, and both are the System pair.
-    // Their planes are authored outright in `curated.SYSTEM_PLANES` rather than
-    // read off the nine-family sheet, because `background` used to be #000000 /
-    // #FFFFFF — the two values that cannot be re-placed by hue, black having no
-    // lightness to carry a colour. They are now #FAF8F4 over #FFFFFF (ΔL* 2.37)
-    // and #131418 over #191B21 (ΔL* 3.44).
-    //
-    // **The floor is 2.0, and it is measured rather than chosen.** It sits below
-    // the authored minimum (2.37) so the check still catches the failure it exists
-    // for — a room whose card and page collapse onto each other — without
-    // second-guessing an authored pair that is deliberately subtle. A graphite room
-    // is *meant* to lift its card by two or three L*, not five.
-    //
-    // Silver/Graphite and Blossom USED to live here, because the old builders gave
-    // them near-neutral planes. They are now Moonstone and Mint & Coral — art
-    // directions with deliberately tinted planes (background/surface hue Δ ≈ 20°)
-    // — so they ride the hue clause like every other room. Leaving them on this
-    // list would silently downgrade them to the weaker ΔL* check.
-    private val achromaticByDesign =
-        setOf("light", "dark")
+    // Classic and Charcoal keep quiet near-neutral grounds with colored interaction.
+    // Check their plane separation by lightness; colored families also carry a hue spread.
+    private val neutralFoundationsByDesign = setOf("light", "dark")
 
     @Test
     fun neutralsVaryInHueNotOnlyLightness() {
         for (palette in AppPalette.entries) {
             val c = palette.colors
-            if (palette.id in achromaticByDesign) {
+            if (palette.id in neutralFoundationsByDesign) {
                 // L* is derived from relative luminance but perceptually even from
                 // true black to white, where a raw ΔY is not. The authored pairs are
                 // 2.37 (light) and 3.44 (dark); the floor is set below the lower of
                 // them so a collapse to zero is still caught.
                 val dl = abs(lab(c.surface.toArgb()).first - lab(c.background.toArgb()).first)
                 assertTrue(dl >= 2.0,
-                    "${palette.id}: achromatic background/surface ΔL*=$dl — the planes are indistinguishable")
+                    "${palette.id}: neutral background/surface ΔL*=$dl — the planes are indistinguishable")
             } else {
                 // **§15 Finding A, measured on the whole face rather than on two planes.**
                 // The old clause asserted a background-vs-surface hue distance of ≥8°, and
@@ -465,6 +446,41 @@ class ThemeSchemeTest {
     }
 
     // ── colour math ─────────────────────────────────────────────────────────
+
+    @Test
+    fun themeFacesDifferAcrossMaterialsAsWellAsTheirSignature() {
+        // A changed button color cannot make two otherwise identical rooms distinct.
+        // Compare the large visible planes separately, then include the signature.
+        fun distance(a: FolioColors, b: FolioColors, includeSignature: Boolean): Double {
+            val roles = listOf(
+                Triple(a.background, b.background, .20),
+                Triple(a.paperSurface, b.paperSurface, .25),
+                Triple(a.referenceSurface, b.referenceSurface, .30),
+                Triple(a.chromeSurface, b.chromeSurface, .25),
+            ) + if (includeSignature) listOf(Triple(a.primary, b.primary, 1.0 / 3.0)) else emptyList()
+            return kotlin.math.sqrt(roles.sumOf { (x, y, weight) ->
+                val difference = deltaE(x, y)
+                weight * difference * difference
+            } / roles.sumOf { it.third })
+        }
+        for (dark in listOf(false, true)) {
+            val faces = AppPalette.entries.filter { it.isDark == dark }
+            for (i in faces.indices) for (j in i + 1 until faces.size) {
+                val a = faces[i]
+                val b = faces[j]
+                val ca = folioRenderedColors(a.colors)
+                val cb = folioRenderedColors(b.colors)
+                assertTrue(distance(ca, cb, true) >= 10.0,
+                    "${a.label} / ${b.label}: the full color combinations are too similar")
+                // Classic intentionally offers neutral grounds rather than a colored room.
+                if (a !in listOf(AppPalette.LIGHT, AppPalette.DARK) &&
+                    b !in listOf(AppPalette.LIGHT, AppPalette.DARK)) {
+                    assertTrue(distance(ca, cb, false) >= 7.0,
+                        "${a.label} / ${b.label}: their paper, panels and chrome still look alike")
+                }
+            }
+        }
+    }
 
     private fun deltaE(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Double {
         val (l1, a1, b1) = lab(a.toArgb())

@@ -97,6 +97,9 @@ internal val FOLIO_LIGHTS: Map<String, FolioLight> = mapOf(
     //    exactly the failure this table exists to prevent ("they would get the quiet
     //    default and nobody would notice on a device").
     "acid" to FolioLight(0.18f, 0.12f, 0.60f, 0.095f, 0.085f, 0.70f),
+    "risograph" to FolioLight(0.68f, 0.20f, 0.35f, 0.075f, 0.065f, 0.30f),
+    "celadon" to FolioLight(0.22f, 0.18f, 0.40f, 0.08f, 0.07f, 0.40f),
+    "mineral" to FolioLight(0.62f, 0.14f, 0.45f, 0.085f, 0.075f, 0.45f),
 )
 
 /**

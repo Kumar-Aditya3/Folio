@@ -12,9 +12,9 @@ algorithms.
 
 ## How it differs from exact search
 
-The app already had FTS5 full-text search. The two are complementary, and the search screen
-lets you switch between them, so you can compare them on your own library rather than take this
-document's word for it.
+The search screen lets you switch between FTS5 keyword search and semantic search.
+Keyword search matches terms. Semantic search requires a downloaded model and an index of
+your library text. The architecture and phase notes below record the original implementation.
 
 | | Exact | Meaning | Best |
 |---|---|---|---|

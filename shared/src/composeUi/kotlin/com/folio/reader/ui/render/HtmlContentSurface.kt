@@ -1,10 +1,21 @@
 package com.folio.reader.ui.render
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import com.folio.reader.model.Highlight
 import com.folio.reader.model.ReadingPosition
 import com.folio.reader.settings.ReaderSettings
+
+/** Desktop chrome and native input share the browser's page-turn implementation. */
+internal class ReaderPageNavigator {
+    var onTurn: ((Int) -> Unit)? = null
+    var onFocus: (() -> Unit)? = null
+    fun turn(direction: Int) { onTurn?.invoke(direction) }
+    fun focus() { onFocus?.invoke() }
+}
+
+internal val LocalReaderPageNavigator = staticCompositionLocalOf<ReaderPageNavigator?> { null }
 
 /**
  * Platform HTML surface. Android uses WebView so EPUB CSS and resources are

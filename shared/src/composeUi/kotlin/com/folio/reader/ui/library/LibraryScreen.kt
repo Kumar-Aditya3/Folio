@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
@@ -1761,6 +1762,7 @@ private fun LibraryContent(
     onImportClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
+        com.folio.reader.tumble.SableArrivalNotice()
         // The filter chips ride the masthead's rail (LibraryScreen's `railContent`)
         // where they fold away with it as the shelf scrolls, so the shelf itself
         // starts straight at the content.
@@ -1780,10 +1782,12 @@ private fun LibraryContent(
                 // the page then appears all at once when the read lands.
                 LibrarySkeleton(modifier = Modifier.fillMaxSize())
             } else if (books == null || books.isEmpty()) {
-                Box(
+                Column(
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
+                    if(libraryEmpty) com.folio.reader.tumble.SableBookPresence("", "",Modifier.widthIn(max=480.dp).padding(horizontal=24.dp))
                     com.folio.reader.ui.components.EmptyState(
                         icon = Icons.AutoMirrored.Outlined.MenuBook,
                         headline = if (libraryEmpty) "No books in library" else "No books in this collection",

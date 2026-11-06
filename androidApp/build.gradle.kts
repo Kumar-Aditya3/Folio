@@ -32,8 +32,8 @@ android {
         applicationId = "com.folio.reader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 175
-        versionName = "1.2.121"
+        versionCode = 185
+        versionName = "1.2.131"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -230,6 +230,8 @@ dependencies {
     // ── TEST INFRASTRUCTURE (§8.1 FOLIO_IMPLEMENTATION_SPEC) ────────────────
     // Pin exact versions to match Compose 1.7.6 baseline; no ranges.
     testImplementation(kotlin("test"))
+    androidTestImplementation(libs.injekt)
+    androidTestImplementation(libs.kotlinx.serialization.protobuf)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.7.6")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

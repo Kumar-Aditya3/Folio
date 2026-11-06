@@ -159,9 +159,18 @@ function markSection(sec){
   s.className='folio-chapter';
   s.setAttribute('data-folio-spine',String(sec.spine));
   s.setAttribute('data-folio-chapter',String(sec.chapter));
+  if(DESKTOP&&sec.fxl)s.setAttribute('data-folio-fxl',sec.fxl);
   s.innerHTML=sec.html;
-  shadowify(s);
+  if(!DESKTOP)shadowify(s);
   return s;
+}
+function watchDesktopImages(sec){
+  if(!DESKTOP)return;
+  contentRoot(sec).querySelectorAll('img').forEach(function(img){
+    if(img.hasAttribute('data-folio-desktop-watch'))return;img.setAttribute('data-folio-desktop-watch','1');
+    function changed(){if(!sec.isConnected)return;repairSection(sec);if(sec.shadowRoot&&isFxl(sec,sec.shadowRoot))fxlRender(sec,sec.shadowRoot);stickLayout();schedule();}
+    img.addEventListener('load',changed);img.addEventListener('error',changed);
+  });
 }
 // A publisher cover is built from absolutely positioned layers, which take the artwork and
 // its title text OUT of flow. The section wrapping them then measures nothing, so the next
@@ -232,12 +241,13 @@ function maybeExtend(){
   if(wantStart&&Date.now()-lastBwd>500){lastBwd=lastExtend=Date.now();document.title='folio-extend:bwd:'+(++nonce);}
   else if(wantEnd&&Date.now()-lastFwd>500){lastFwd=lastExtend=Date.now();document.title='folio-extend:fwd:'+(++nonce);}
 }
-window.__folioAppend=function(spine,chapter,html){
+window.__folioAppend=function(spine,chapter,html,fxl){
   var root=document.getElementById('folio-continuous-root');if(!root)return;
   // Idempotent: drop any existing copy (replayed op / raced duplicate) before adding.
   dropSpine(spine);
-  var el=markSection({spine:spine,chapter:chapter,html:html});
+  var el=markSection({spine:spine,chapter:chapter,html:html,fxl:fxl});
   root.appendChild(el);
+  if(DESKTOP){shadowify(el);watchDesktopImages(el);}
   repairSection(el);
   lastFwd=Date.now();schedule();
 };
@@ -249,14 +259,15 @@ window.__folioAppend=function(spine,chapter,html){
 // de-layer pass change its height afterwards. __folioStampImgs re-fires the
 // re-anchor once it has stamped/flattened the injected chapter. A replayed prepend
 // is a plain no-op.
-window.__folioPrepend=function(spine,chapter,html){
+window.__folioPrepend=function(spine,chapter,html,fxl){
   var root=document.getElementById('folio-continuous-root');if(!root)return;
   if(secBySpine(spine))return;
   var aEl=root.firstElementChild;
   window.__folioPendingAnchor=aEl?{el:aEl,top:aEl.getBoundingClientRect().top}:null;
   window.__folioAnchorAt=Date.now();
-  var el=markSection({spine:spine,chapter:chapter,html:html});
+  var el=markSection({spine:spine,chapter:chapter,html:html,fxl:fxl});
   root.insertBefore(el,root.firstChild);
+  if(DESKTOP){shadowify(el);watchDesktopImages(el);}
   repairSection(el);
   window.__folioReanchor();
   requestAnimationFrame(window.__folioReanchor);
@@ -282,7 +293,7 @@ window.__folioSeek=function(f){
   var v=Math.min(1,Math.max(0,f||0)),sec=visibleSection();
   if(!sec){var s0=scroller();s0.scrollTop=Math.max(0,s0.scrollHeight-s0.clientHeight)*v;schedule();return;}
   var s=scroller(),top=topOf(sec),h=Math.max(0,sec.offsetHeight-vh());
-  s.scrollTop=top+h*v;restorePending=false;schedule();
+  s.scrollTop=DESKTOP?Math.max(top,top+sec.offsetHeight*v-vh()*.5):top+h*v;restorePending=false;schedule();
 };
 // A jump's target, held while the layout settles. Right after a landing the document still
 // grows under the reader — an image decodes, the real web font swaps in, repairSection raises
@@ -433,7 +444,7 @@ window.__folioAnchorRestore=function(a){
 // the fonts and reflow to settle, then put the same words back under the eye.
 window.__folioRestyle=function(fc,sc,shadowCss){
   var held=!!stick,a=held?null:window.__folioAnchorSave();
-  var f=document.getElementById('folio-fonts');if(f&&fc)f.textContent=fc;
+  var f=document.getElementById('folio-fonts');if(!f&&fc&&DESKTOP){f=document.createElement('style');f.id='folio-fonts';document.head.appendChild(f);}if(f&&fc)f.textContent=fc;
   var st=document.getElementById('folio-reader-style');if(st)st.textContent=sc;
   if(window.__folioShadowSheet&&shadowCss){try{window.__folioShadowSheet.replaceSync(shadowCss);}catch(e){}}
   else if(shadowCss){var roots=folioRoots(),i;for(i=0;i<roots.length;i++){var st2=roots[i].querySelector&&roots[i].querySelector('style.folio-sd-reader');if(st2)st2.textContent=shadowCss;}}
@@ -462,6 +473,7 @@ function restore(){
 ${PageEngine.emptyHideJs}
 function report(){
   scheduled=false;
+  if(DESKTOP&&(document.hidden||window.__folioInputEnabled===false))return;
   var now=Date.now();
   if(now-last<100){schedule();return;}
   last=now;
@@ -514,8 +526,9 @@ window.addEventListener('load',schedule);
 // — pushing further cannot scroll anything — so one dropped extend request strands them at the
 // boundary for the rest of the session. The paged engine already handled its equivalent by
 // emitting the hop from the gesture rather than the report; this is the window's version of it.
-var edgeCount=0,edgeTries=0;
-setInterval(function(){
+var edgeCount=0,edgeTries=0,edgeTimer=0;
+function checkEdges(){
+  if(DESKTOP&&(document.hidden||window.__folioInputEnabled===false))return;
   // Position-only check first: the interval must not touch the DOM while the reader is mid-page.
   if(!atBottom()&&!atTop()){edgeCount=0;edgeTries=0;return;}
   var n=secs().length;if(!n)return;
@@ -523,25 +536,23 @@ setInterval(function(){
   if(n!==edgeCount){edgeCount=n;edgeTries=0;}
   if(edgeTries++>3)return;
   maybeExtend();
-},400);
+}
+edgeTimer=setInterval(checkEdges,400);
 if(DESKTOP){
-  document.addEventListener('click',function(ev){
-    var el=ev.target;
-    var a=(el&&el.closest)?el.closest('a[href]'):null;
-    if(a){
-      var href=a.getAttribute('href')||'';
-      if(href&&href.charAt(0)!=='#'){ev.preventDefault();document.title='folio-link:'+(++nonce)+':'+encodeURIComponent(href);}
-    }
-  },true);
-  var downX=0,downY=0,downT=0;
-  document.addEventListener('pointerdown',function(e){stickClear();downX=e.clientX;downY=e.clientY;downT=Date.now();},true);
-  document.addEventListener('pointerup',function(e){
-    if(e.target&&e.target.closest&&e.target.closest('#folio-overlay-root,#folio-selbtn'))return;
-    if(Date.now()-downT<350&&Math.hypot(e.clientX-downX,e.clientY-downY)<24){
-      var w=Math.max(1,window.innerWidth),h=Math.max(1,window.innerHeight);
-      if(e.clientX>w*0.3&&e.clientX<w*0.7&&e.clientY>h*0.25&&e.clientY<h*0.75){document.title='folio-tap:'+(++nonce);}
-    }
-  },true);
+window.__folioTurn=function(direction){
+  if(window.__folioInputEnabled===false)return false;
+  stickClear();restorePending=false;
+  if(direction<0&&atTop()){edge('start');return true;}
+  if(direction>0&&atBottom()){maybeExtend();edge('end');return true;}
+  scroller().scrollBy({top:vh()*.9*(direction>0?1:-1),behavior:window.__folioReduceMotion?'auto':'smooth'});return true;
+};
+window.__folioSetActive=function(active){
+  window.__folioInputEnabled=active;clearInterval(edgeTimer);edgeTimer=0;
+  if(active&&!document.hidden){edgeTimer=setInterval(checkEdges,400);schedule();}
+};
+document.addEventListener('visibilitychange',function(){window.__folioSetActive(window.__folioInputEnabled!==false);});
+window.__folioDispose=function(){clearInterval(edgeTimer);clearTimeout(window.__folioSettleT);clearTimeout(window.__folioSelT);stickClear();};
+${DesktopReaderInput.js(beforeInput = "stickClear();")}
 }
 function folioReportSel(){
   // Shadow-aware: window.getSelection() does not reach inside a shadow root, so each
@@ -585,7 +596,7 @@ if(window.ResizeObserver){var _folioRO=function(){try{window.__folioFxlRescale()
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){stickLayout();schedule();setTimeout(function(){stickLayout();schedule();},150);});
 function sectionOf(el){if(!el)return null;var s=el.closest?el.closest('section[data-folio-spine]'):null;if(s)return s;var rn=el.getRootNode&&el.getRootNode(),host=rn&&rn.host;return (host&&host.closest)?host.closest('section[data-folio-spine]'):null;}
 secs().forEach(repairSection);
-(function(){var _r=folioRoots(),_i;for(_i=0;_i<_r.length;_i++){_r[_i].querySelectorAll('img').forEach(function(img){
+(function(){if(DESKTOP)return;var _r=folioRoots(),_i;for(_i=0;_i<_r.length;_i++){_r[_i].querySelectorAll('img').forEach(function(img){
   // The cover's art decodes after this script runs, and the collapsed section it leaves
   // behind is only measurable once the image has a size. Attaching per shadow root
   // reaches images that were moved out of light DOM into a chapter's shadow tree.
@@ -635,6 +646,7 @@ function folioDiag(tag){
 }
 if(DIAG){document.addEventListener('load',function(e){if(e.target&&e.target.tagName==='IMG')folioDiag('imgload');},true);}
 noAnchor();initShadowSheet();shadowifyAll();
+if(DESKTOP)secs().forEach(watchDesktopImages);
 // Post-shadow remediation MUST run after shadowify turns each chapter's publisher
 // CSS on: the earlier repairSection/stamp passes ran while that CSS was still inert,
 // so they saw neither the collapsed cover section nor the overlap. Re-run image

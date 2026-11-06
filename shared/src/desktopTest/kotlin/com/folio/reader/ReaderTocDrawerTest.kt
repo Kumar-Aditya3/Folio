@@ -9,6 +9,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getAllSemanticsNodes
@@ -21,6 +22,7 @@ import com.folio.reader.settings.ReduceMotionMode
 import com.folio.reader.ui.reader.BookReadingMap
 import com.folio.reader.ui.reader.ReaderChapterPreviewDrawer
 import com.folio.reader.ui.reader.ReaderPassagePreview
+import com.folio.reader.ui.reader.ReaderTopBar
 import com.folio.reader.ui.theme.FolioTheme
 import com.folio.reader.ui.theme.LocalMotion
 import com.folio.reader.ui.theme.MotionTier
@@ -30,6 +32,26 @@ import kotlin.test.*
 
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 class ReaderTocDrawerTest {
+    @Test fun nativeBrowserToolsButtonOpensWorkspaceDirectly() = onUi {
+        var opened = 0
+        val scene = ImageComposeScene(1100, 100) {
+            FolioTheme.MaterialTheme(darkTheme = false) {
+                ReaderTopBar(bookTitle = "Book", showClock = false, occludes = true,
+                    pageSelection = null, onHighlightParagraph = null, onSelectionConsumed = {},
+                    isBookmarked = false, bookmarkColor = Color.Black, onBackPress = {},
+                    onSearchClick = {}, onBookmarkClick = {}, onOpenToc = { opened++ },
+                    onOpenAnnotations = {}, onToggleReaderPanel = {})
+            }
+        }
+        try {
+            repeat(3) { Snapshot.sendApplyNotifications(); scene.render(it * 100_000_000L).close() }
+            val tools = scene.semanticsOwners.flatMap { it.getAllSemanticsNodes(mergingEnabled = true) }
+                .single { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Reader tools") == true }
+            assertNotNull(tools.config.getOrNull(SemanticsActions.OnClick)?.action).invoke()
+            assertEquals(1, opened, "The native browser must not hide a popup between the button and workspace")
+        } finally { scene.close() }
+    }
+
     @Test fun chapterTapOpensItsOwnDrawerAndOnlyReadHereCommits() = onUi {
         val reads = mutableListOf<Triple<Int, Float, Int?>>()
         val chapters = listOf(Chapter("chapter", "book", "Chapter", "chapter.xhtml", 0, wordCount = 1000))
