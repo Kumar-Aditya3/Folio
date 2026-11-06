@@ -1,8 +1,9 @@
 # Install Folio
 
 Folio is in early development. Android preview APKs are available on
-[GitHub Releases](https://github.com/Kumar-Aditya3/Folio/releases/tag/v1.2.131).
-Windows currently builds from source. There are no official Play Store or F-Droid listings.
+[GitHub Releases](https://github.com/Kumar-Aditya3/Folio/releases/tag/v1.2.131), alongside a
+[portable Windows preview](https://github.com/Kumar-Aditya3/Folio/releases/tag/windows-v1.0.38).
+There are no official Play Store or F-Droid listings.
 
 ## Android
 
@@ -43,10 +44,16 @@ use optional downloads; download the required voice pack or model before going o
 
 ## Windows
 
-Windows 10 x64 or later is the supported desktop target. Follow the
-[build instructions](../README.md#getting-started) with JDK 17. You can run the app directly
-or build an MSI, EXE installer, or portable application folder. A portable build includes
-its Java runtime; keep the entire generated `Folio` folder together.
+Windows 10 x64 or later is the supported desktop target. Download the ZIP from the
+[Windows preview release](https://github.com/Kumar-Aditya3/Folio/releases/tag/windows-v1.0.38),
+extract it completely, and open `Folio/Folio.exe`. Keep `Folio.exe`, `app/`, and `runtime/`
+together. Java is included; no separate Java installation is needed. The Windows executable
+is an unsigned preview. Check the ZIP against the release's `SHA256SUMS-windows.txt`.
+
+The portable preview does not register file associations or create Start menu shortcuts.
+To run from source or build an MSI/EXE installer, follow the
+[build instructions](../README.md#getting-started) with JDK 17. Windows and Android use
+separate version series; choose the release for your platform.
 
 Linux, macOS, and iOS are not currently supported runtime targets.
 

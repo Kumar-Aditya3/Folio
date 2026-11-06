@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/Kumar-Aditya3/Folio/releases/tag/v1.2.131"><strong>Download for Android</strong></a>
   · <a href="docs/install.md">Installation & FAQ</a>
-  · <a href="#getting-started">Build for Windows</a>
+  · <a href="https://github.com/Kumar-Aditya3/Folio/releases/tag/windows-v1.0.38">Download for Windows</a>
   · <a href="https://github.com/Kumar-Aditya3/Folio/issues/new/choose">Send feedback</a>
 </p>
 
@@ -47,7 +47,7 @@
 
 ![Reader tools: saved passages, typography settings, manga page map, and reading flow](docs/assets/reader-tools.png)
 
-The Android download is an **early preview**. Windows currently builds from source.
+The Android APKs and portable Windows download are **early previews**.
 Online manga sources, model downloads, and optional cloud sync require a connection.
 See the [installation guide](docs/install.md) for download choices and known limits.
 

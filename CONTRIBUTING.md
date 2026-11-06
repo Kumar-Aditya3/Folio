@@ -5,7 +5,7 @@ development, so small, focused contributions are easiest to review.
 
 ## Useful ways to help
 
-- Try the [Android preview](https://github.com/Kumar-Aditya3/Folio/releases/tag/v1.2.131)
+- Try a [preview download](https://github.com/Kumar-Aditya3/Folio/releases)
   with a DRM-free book you can share and report a reproducible import or reader problem.
 - Test keyboard navigation, large text, contrast, and screen-reader behavior.
 - Improve installation instructions or clarify platform differences.
