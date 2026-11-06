@@ -243,7 +243,7 @@ eval "set -- $(
         xargs -n1 |
         sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
         tr '\n' ' '
-    )" '"@"'
+    )" '"$@"'
 
 # Folio repo convention (AGENTS.md): no Gradle daemons are left running after a
 # build. Run the command, then stop the daemon ourselves — preserving the
